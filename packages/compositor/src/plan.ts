@@ -59,11 +59,19 @@ export function planComposition(log: CaptureLog, opts: PlanOpts = {}): TakeCompo
     let scale = rest;
     let reason: string;
     const center = bbox ? { x: bbox.x + bbox.w / 2, y: bbox.y + bbox.h / 2 } : point;
+    const fit = bbox ? bboxFitScale(bbox, oW, oH, fillFrac, maxScale, rest) : maxScale;
+    const intent = c.zoom ?? "auto";
 
-    if (!bbox) {
+    if (intent === "never") {
+      enabled = false;
+      reason = "plan: zoom=never (global/navigation payoff — keep full view)";
+    } else if (intent === "always") {
+      enabled = true;
+      scale = fit;
+      reason = `plan: zoom=always → ${fit.toFixed(2)}x (capped ${maxScale}x)`;
+    } else if (!bbox) {
       reason = "no bbox in event log — cannot bbox-fit, so no zoom (avoids framing dead space)";
     } else {
-      const fit = bboxFitScale(bbox, oW, oH, fillFrac, maxScale, rest);
       scale = fit;
       const meaningful = fit > rest * zoomRatio;
       if (isFirst && !zoomFirst) {

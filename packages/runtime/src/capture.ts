@@ -181,6 +181,7 @@ export async function captureTake(plan: TakePlan, opts: CaptureOpts): Promise<Ca
         tMs,
         sel: label,
         note: step.note,
+        ...(step.zoom ? { zoom: step.zoom } : {}),
       });
     } else {
       // a silently-dropped target would lose a demo beat — surface it
@@ -202,4 +203,79 @@ export async function captureTake(plan: TakePlan, opts: CaptureOpts): Promise<Ca
     clicks,
     tEndMs,
   };
+}
+
+// --- inspectPage: planning aid -----------------------------------------
+
+export type InspectElement = {
+  name: string;
+  tag: string;
+  role: string | null;
+  href: string | null;
+  inView: boolean;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+};
+
+export type InspectResult = {
+  url: string;
+  viewport: { w: number; h: number };
+  elements: InspectElement[];
+};
+
+function listInteractiveJs(): string {
+  return (
+    `(function(){` +
+    `function nm(e){return (e.getAttribute('aria-label')||e.textContent||'').replace(/\\s+/g,' ').trim();}` +
+    `var sel='button,a,[role=button],[role=link],[role=menuitem],[role=tab],[role=switch],[role=checkbox],input,select,textarea';` +
+    `var els=Array.prototype.slice.call(document.querySelectorAll(sel));var vw=window.innerWidth,vh=window.innerHeight;var out=[];var seen={};` +
+    `for(var i=0;i<els.length;i++){var e=els[i];var n=nm(e);var ph=e.getAttribute('placeholder');var r=e.getBoundingClientRect();` +
+    `if(r.width<6||r.height<6)continue;if(!n&&!ph)continue;` +
+    `var label=n||('['+(ph||e.tagName.toLowerCase())+']');var key=label+'@'+Math.round(r.x)+','+Math.round(r.y);if(seen[key])continue;seen[key]=1;` +
+    `var iv=r.top<vh&&r.bottom>0&&r.left<vw&&r.right>0;` +
+    `out.push({name:label,tag:e.tagName.toLowerCase(),role:e.getAttribute('role')||null,href:e.getAttribute('href')||null,inView:iv,x:Math.round(r.x),y:Math.round(r.y),w:Math.round(r.width),h:Math.round(r.height)});}` +
+    `out.sort(function(a,b){return (b.inView?1:0)-(a.inView?1:0);});` +
+    `return JSON.stringify(out.slice(0,60));})()`
+  );
+}
+
+export type InspectOpts = {
+  viewport?: { width: number; height: number };
+  session?: string;
+  warmupMs?: number;
+  binPath?: string;
+};
+
+/** Open `url`, return its interactive elements (accessible name + bbox) —
+ *  what an agent uses to choose a demo flow. */
+export async function inspectPage(url: string, opts: InspectOpts = {}): Promise<InspectResult> {
+  const bin = opts.binPath ?? resolveBin();
+  const session = opts.session ?? `open-take-inspect-${Math.random().toString(36).slice(2, 10)}`;
+  const vw = opts.viewport?.width ?? 1920;
+  const vh = opts.viewport?.height ?? 1080;
+
+  await ab(bin, session, ["set", "viewport", String(vw), String(vh)]);
+  await ab(bin, session, ["open", url]);
+  await sleep(opts.warmupMs ?? 1500);
+
+  let inner: [number, number] = [vw, vh];
+  try {
+    const arr = evalValue(await ab(bin, session, ["eval", "JSON.stringify([window.innerWidth, window.innerHeight])"]));
+    if (Array.isArray(arr) && arr.length === 2) inner = [Number(arr[0]), Number(arr[1])];
+  } catch {
+    /* fall back */
+  }
+
+  let elements: InspectElement[] = [];
+  try {
+    const v = evalValue(await ab(bin, session, ["eval", listInteractiveJs()]));
+    if (Array.isArray(v)) elements = v as InspectElement[];
+  } catch {
+    /* leave empty */
+  }
+
+  await ab(bin, session, ["close"]).catch(() => {});
+  return { url, viewport: { w: inner[0], h: inner[1] }, elements };
 }

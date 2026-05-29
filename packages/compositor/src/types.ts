@@ -9,6 +9,9 @@ export type BBox = { x: number; y: number; w: number; h: number };
 
 // --- capture input (matches adapter-agent-browser's event log shape) ---
 
+/** Editorial zoom intent for an action (set by the planner/agent). */
+export type ZoomIntent = "auto" | "never" | "always";
+
 export type CaptureClick = {
   /** click point, viewport CSS px */
   x: number;
@@ -20,6 +23,8 @@ export type CaptureClick = {
   /** selector / note, kept for editability */
   sel?: string;
   note?: string;
+  /** selective-zoom intent from the plan (default auto = heuristic) */
+  zoom?: ZoomIntent;
 };
 
 export type CaptureLog = {

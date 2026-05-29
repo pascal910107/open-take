@@ -5,8 +5,18 @@
 // A click targets an element by CSS `selector` or by accessible-name
 // `text` (how an agent naturally thinks — robust on real apps where CSS
 // hooks are unstable). Exactly one of selector/text.
+//
+// `zoom` is the editorial intent: "auto" (heuristic), "never" (global /
+// navigation payoff — keep full view), "always" (force bbox-fit zoom).
 export type TakeStep =
-  | { action: "click"; selector?: string; text?: string; note?: string; settleMs?: number }
+  | {
+      action: "click";
+      selector?: string;
+      text?: string;
+      note?: string;
+      settleMs?: number;
+      zoom?: "auto" | "never" | "always";
+    }
   | { action: "wait"; ms: number };
 
 export type TakePlan = {

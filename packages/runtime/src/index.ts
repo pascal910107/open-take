@@ -13,7 +13,14 @@ import { type CaptureOpts, captureTake } from "./capture";
 import type { TakePlan } from "./types";
 
 export type { TakePlan, TakeStep } from "./types";
-export { captureTake, type CaptureOpts } from "./capture";
+export {
+  captureTake,
+  type CaptureOpts,
+  inspectPage,
+  type InspectOpts,
+  type InspectResult,
+  type InspectElement,
+} from "./capture";
 
 export type MakeTakeOpts = {
   /** output polished mp4 path */
