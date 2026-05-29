@@ -96,7 +96,13 @@ function clickByTextJs(text: string): string {
     `function name(e){return (e.getAttribute('aria-label')||e.textContent||'').replace(/\\s+/g,' ').trim();}` +
     `var m=els.filter(function(e){return name(e)===t;})[0]||els.filter(function(e){return name(e).indexOf(t)!==-1;})[0];` +
     `if(!m)return 'NOTFOUND';` +
-    `var r=m.getBoundingClientRect();var b={x:Math.round(r.x),y:Math.round(r.y),w:Math.round(r.width),h:Math.round(r.height)};` +
+    // m.click() fires programmatically and never scrolls; below-fold targets
+    // would advance state off-screen. Scroll into view ONLY when out of frame
+    // so in-view beats keep their framing; re-read the rect post-scroll so the
+    // compositor gets a viewport-relative (in-frame) bbox.
+    `var r=m.getBoundingClientRect();` +
+    `if(r.top<0||r.bottom>window.innerHeight){m.scrollIntoView({block:'center'});r=m.getBoundingClientRect();}` +
+    `var b={x:Math.round(r.x),y:Math.round(r.y),w:Math.round(r.width),h:Math.round(r.height)};` +
     `m.click();return JSON.stringify(b);})()`
   );
 }
