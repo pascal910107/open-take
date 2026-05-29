@@ -210,11 +210,12 @@ Produces `demo.mp4` (1920×1080 @ 30fps) and `demo.composition.json` (editable).
   **hover** — apps whose wow is *scrolling through content* or a *hover-reveal*
   need a proxy; say so when you downgrade.
 - **Background capture is ~10fps** (agent-browser screencast). Discrete
-  click→state-change and typing look great. For **`drag`, continuous motion is
-  captured at 10fps while the synthetic cursor is smooth 30fps**, so on a *fast*
-  stroke the cursor visibly leads the drawn ink by a frame (they align exactly at
-  rest — it's the capture rate, not a bug). Mitigate with a slower `durationMs`
-  (1500–2500ms); the real fix (higher-fps capture) is future work. Don't demo
+  click→state-change and typing look great. For **`drag`**, the synthetic cursor
+  traces the stroke at the same constant pace it was drawn, so it tracks the ink
+  closely; the only residual is the ink lagging the pen by ~1 frame (the ink is
+  captured at 10fps, the cursor renders at 30fps) — which reads naturally as the
+  pen leading and ink following. A slower `durationMs` (1500–2500ms) makes it
+  even tighter. The real fix (higher-fps capture) is future work. Don't demo
   fast scrubbing/continuous animation as a hero beat yet.
 - viewport ≠ video scaling is implemented but lightly tested.
 

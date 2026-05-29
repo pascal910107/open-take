@@ -190,8 +190,14 @@ function alongPath(path: Pt[], u: number): Pt {
 export function cursorPos(t: number, legs: Leg[], comp: TakeComposition): Pt {
   for (const lg of legs) {
     if (lg.t0 <= t && t <= lg.t1) {
-      const p = smoother((t - lg.t0) / (lg.t1 - lg.t0));
-      if (lg.drag && lg.path) return alongPath(lg.path, p); // trace the stroke, no arc
+      const raw = (t - lg.t0) / (lg.t1 - lg.t0);
+      // A drag traces the captured stroke, which was drawn at CONSTANT speed
+      // (uniform-arc-length mouse moves) — so interpolate LINEARLY. Easing it
+      // (smootherstep) desyncs the cursor from the ink: the eased cursor lags
+      // in the first half (ink leads) then rushes ahead in the second (cursor
+      // leads), crossing mid-stroke. Easing is for travel legs only.
+      if (lg.drag && lg.path) return alongPath(lg.path, Math.max(0, Math.min(1, raw)));
+      const p = smoother(raw);
       const base = { x: lg.a.x + (lg.b.x - lg.a.x) * p, y: lg.a.y + (lg.b.y - lg.a.y) * p };
       const dx = lg.b.x - lg.a.x, dy = lg.b.y - lg.a.y;
       const L = Math.hypot(dx, dy) || 1;

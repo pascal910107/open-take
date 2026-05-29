@@ -102,6 +102,21 @@ function evalValue(raw: string): unknown {
 
 const boxFromEval = (raw: string): Box | null => findBox(evalValue(raw));
 
+// Pull the first and last numeric eval results out of a `batch --json` array
+// (the page-clock markers bracketing a drag's real draw window). Returns null
+// if the markers can't be read, so the caller falls back to wall-clock timing.
+function batchEvalEnds(raw: string): { start: number; end: number } | null {
+  try {
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr) || arr.length < 2) return null;
+    const start = Number(evalValue(JSON.stringify(arr[0])));
+    const end = Number(evalValue(JSON.stringify(arr[arr.length - 1])));
+    return Number.isFinite(start) && Number.isFinite(end) && end > start ? { start, end } : null;
+  } catch {
+    return null;
+  }
+}
+
 // Find a clickable by accessible name (aria-label or text), record its
 // rect (ground-truth bbox), and click it — all in one page eval so the
 // bbox and the action refer to the same element. Robust where CSS hooks
@@ -278,6 +293,24 @@ export async function captureTake(plan: TakePlan, opts: CaptureOpts): Promise<Ca
     /* fall back to requested viewport */
   }
 
+  // Calibrate the page clock (performance.now) against our capture clock
+  // (Date.now − t0). A drag's true on-screen window is measured in page time
+  // (markers inside the batch), but the cursor timeline runs on the capture
+  // clock — so map one to the other: captureMs(P) = P + pageOffset.
+  let pageOffset = 0;
+  let pageCalibrated = false;
+  try {
+    const w1 = Date.now();
+    const p = Number(evalValue(await ab(bin, session, ["eval", "performance.now()"])));
+    const w2 = Date.now();
+    if (Number.isFinite(p)) {
+      pageOffset = (w1 + w2) / 2 - t0 - p;
+      pageCalibrated = true;
+    }
+  } catch {
+    /* leave uncalibrated; drag falls back to wall-clock timing */
+  }
+
   type Pt = { x: number; y: number };
   // Resolve a viewport-px point from an explicit point, a CSS selector, or
   // an accessible name (bbox centre). No click/focus — for drag endpoints.
@@ -360,20 +393,31 @@ export async function captureTake(plan: TakePlan, opts: CaptureOpts): Promise<Ca
       // ~200ms each → a 1.6s drag took ~9s).
       const n = Math.max(8, Math.round(target / 40));
       const perStep = Math.round(target / n);
+      // Bracket the real press→release with page-clock markers. The batch's
+      // WALL-clock includes agent-browser process startup + teardown (~hundreds
+      // of ms) that isn't on screen — pacing the cursor by it desyncs it from
+      // the drawn ink (the ink visibly leads). performance.now() at down/up
+      // gives the true on-screen draw window instead.
       const dragCmds: string[][] = [
         ["mouse", "move", String(path[0]!.x), String(path[0]!.y)],
         ["mouse", "down"],
+        ["eval", "performance.now()"],
       ];
       for (let k = 1; k <= n; k++) {
         const p = sampleAlong(path, k / n);
         dragCmds.push(["wait", String(perStep)]);
         dragCmds.push(["mouse", "move", String(Math.round(p.x)), String(Math.round(p.y))]);
       }
+      dragCmds.push(["eval", "performance.now()"]);
       dragCmds.push(["mouse", "up"]);
-      const tMs = Date.now() - t0;
+      const tMsWall = Date.now() - t0;
       const tDrag = Date.now();
-      await abBatch(bin, session, dragCmds);
-      const durationMs = Date.now() - tDrag;
+      const dragOut = await abBatch(bin, session, dragCmds);
+      const wallDuration = Date.now() - tDrag;
+      // prefer the page-clock window; fall back to wall-clock if markers fail
+      const marks = pageCalibrated ? batchEvalEnds(dragOut) : null;
+      const tMs = marks ? Math.round(marks.start + pageOffset) : tMsWall;
+      const durationMs = marks ? Math.round(marks.end - marks.start) : wallDuration;
       events.push({
         kind: "drag",
         x: from.x,
