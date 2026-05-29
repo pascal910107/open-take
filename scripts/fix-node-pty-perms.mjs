@@ -52,3 +52,45 @@ if (existsSync(directPty)) totalFixed += fixHelperUnder(directPty);
 if (totalFixed > 0) {
   process.stdout.write(`fix-node-pty-perms: chmod +x on ${totalFixed} spawn-helper binar${totalFixed === 1 ? "y" : "ies"}\n`);
 }
+
+// @open-take/compositor renders via revideo, which spawns the prebuilt
+// `@ffmpeg-installer` / `@ffprobe-installer` binaries. pnpm 10 skips their
+// chmod postinstall (they're not in onlyBuiltDependencies), leaving them
+// non-executable → EACCES at render time. Walk the store and +x every
+// ffmpeg/ffprobe binary. Idempotent.
+function fixMediaBins(root) {
+  let count = 0;
+  if (!existsSync(root)) return count;
+  const stack = [root];
+  while (stack.length) {
+    const dir = stack.pop();
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const e of entries) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) {
+        // Don't descend into nested node_modules of node_modules to bound the walk.
+        if (e.name === "node_modules" && dir !== root) continue;
+        stack.push(p);
+      } else if ((e.isFile() || e.isSymbolicLink()) && (e.name === "ffmpeg" || e.name === "ffprobe")) {
+        try {
+          const mode = statSync(p).mode;
+          chmodSync(p, mode | 0o111);
+          count++;
+        } catch {
+          // symlink target missing etc — skip
+        }
+      }
+    }
+  }
+  return count;
+}
+
+const mediaFixed = fixMediaBins(PNPM_STORE);
+if (mediaFixed > 0) {
+  process.stdout.write(`fix-node-pty-perms: chmod +x on ${mediaFixed} ffmpeg/ffprobe binar${mediaFixed === 1 ? "y" : "ies"}\n`);
+}

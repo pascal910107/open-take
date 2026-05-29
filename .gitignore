@@ -8,3 +8,11 @@ dist
 .env.local
 .claude/
 .notes/
+
+# throwaway spikes — kept local (like .notes/spike-polish)
+/spike-revideo/
+
+# rendered artifacts — regenerable, bloaty
+*.mp4
+*.png
+*.webm

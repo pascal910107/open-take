@@ -1,7 +1,7 @@
 {
   "name": "@open-take/core",
   "version": "0.0.0",
-  "description": "Core types: take IR + action DSL + adapter interfaces. Framework-free; no cache/runtime (harvested slim from open-demo).",
+  "description": "Core types: take IR + action DSL + adapter interfaces. Framework-free.",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",

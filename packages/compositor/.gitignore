@@ -1,0 +1,4 @@
+dist/
+out-render/
+public/capture.mp4
+src/scene/.composition.json
