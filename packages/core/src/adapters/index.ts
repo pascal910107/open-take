@@ -1,6 +1,5 @@
-// Adapter interfaces. Bodies live in adapter packages:
-//   @open-take/adapter-agent-browser  (D8 primary)
-//   @open-take/adapter-playwright     (D8 alternate, stub through Session 9)
+// Adapter interfaces. Browser capture is now pure CDP in @open-take/runtime
+// (no browser-adapter package). Remaining adapter bodies:
 //   @open-take/adapter-node-pty       (D9)
 //   @open-take/adapter-elevenlabs     (D11)
 //   @open-take/adapter-ffmpeg         (D10)

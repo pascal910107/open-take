@@ -44,12 +44,14 @@ function run(cmd: string, args: string[]): Promise<void> {
   });
 }
 
-/** Normalise the capture to a constant-fps mp4 the web decoder can read. */
-async function toMp4(videoPath: string, outMp4: string): Promise<void> {
+/** Normalise the capture to a constant-fps mp4 the web decoder can read.
+ *  fps follows the composition so a hi-fps capture can render at 60 (the
+ *  render grid must match — a 30-grid would throw away the extra frames). */
+async function toMp4(videoPath: string, outMp4: string, fps: number): Promise<void> {
   await mkdir(dirname(outMp4), { recursive: true });
   await run("ffmpeg", [
     "-y", "-loglevel", "error", "-i", resolve(videoPath),
-    "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", "-r", "30", "-an", outMp4,
+    "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", "-r", String(fps), "-an", outMp4,
   ]);
 }
 
@@ -62,7 +64,7 @@ export async function renderTake(opts: RenderTakeOpts): Promise<{ mp4Path: strin
     );
 
   // 1. serve the capture as /capture.mp4 (vite public dir under PKG_ROOT)
-  await toMp4(opts.videoPath, PUBLIC_MP4);
+  await toMp4(opts.videoPath, PUBLIC_MP4, composition.output.fps);
 
   // 2. hand the composition to the scene (static import, rewritten per render)
   await mkdir(dirname(COMP_JSON), { recursive: true });

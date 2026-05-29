@@ -21,6 +21,7 @@ export {
   type InspectResult,
   type InspectElement,
 } from "./capture";
+export { captureTakeCDP } from "./cdp-capture";
 
 export type MakeTakeOpts = {
   /** output polished mp4 path */
@@ -39,10 +40,18 @@ export type MakeTakeResult = {
 
 export async function makeTake(plan: TakePlan, opts: MakeTakeOpts): Promise<MakeTakeResult> {
   const work = await mkdtemp(join(tmpdir(), "open-take-"));
-  const videoPath = join(work, "capture.webm");
+  const videoPath = join(work, "capture.mp4"); // CDP screencast → h264 mp4
 
   const log = await captureTake(plan, { ...opts.capture, videoPath });
-  const composition = planComposition(log, opts.planOpts);
+  // One knob: the render grid follows the capture fps (default 30) unless the
+  // caller pinned an explicit render fps. (A 30fps render of a 60fps capture
+  // would discard half the frames; matching them is what makes 60fps real.)
+  const captureFps = opts.capture?.fps ?? 30;
+  const planOpts =
+    opts.planOpts?.output?.fps == null
+      ? { ...opts.planOpts, output: { ...opts.planOpts?.output, fps: captureFps } }
+      : opts.planOpts;
+  const composition = planComposition(log, planOpts);
   const { mp4Path, compositionPath } = await renderTake({
     composition,
     videoPath,

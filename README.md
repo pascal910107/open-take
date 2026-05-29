@@ -20,7 +20,8 @@ by talking to the agent.
 ## Packages
 
 - `core` — take IR, action DSL, adapter interfaces (framework-free).
-- `adapter-agent-browser` — CDP capture + per-action event log.
+- `runtime` — capture (pure CDP: drive + screencast a self-launched Chrome) →
+  plan → render. Per-action ground-truth event log. No agent-browser.
 - `adapter-node-pty` — terminal capture → asciinema cast.
 - `adapter-ffmpeg` — transcode / mux / concat / zoompan.
 - `adapter-elevenlabs` — narration (+ a mock for keyless CI).

@@ -14,14 +14,11 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@open-take/compositor": "workspace:*"
-  },
-  "peerDependencies": {
-    "agent-browser": "^0.27.0"
+    "@open-take/compositor": "workspace:*",
+    "@puppeteer/browsers": "^2.6.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.1",
-    "agent-browser": "^0.27.0",
     "tsdown": "^0.9.0",
     "tsx": "^4.22.3",
     "typescript": "^5.6.3"

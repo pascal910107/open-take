@@ -14,9 +14,6 @@
   "dependencies": {
     "@open-take/runtime": "workspace:*"
   },
-  "peerDependencies": {
-    "agent-browser": "^0.27.0"
-  },
   "devDependencies": {
     "@types/node": "^22.10.1",
     "tsdown": "^0.9.0",

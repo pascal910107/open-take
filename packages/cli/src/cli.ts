@@ -33,7 +33,11 @@ const USAGE = `open-take — agent-native demo recorder
 
 Usage:
   open-take inspect <url> [--viewport 1920x1080]
-  open-take make --plan <plan.json> --out <out.mp4>
+  open-take make --plan <plan.json> --out <out.mp4> [--fps 60]
+
+  --fps <n>   capture AND render fps (default 30). 60 = smooth continuous
+              motion (drags/scroll/cursor), ~2× render cost. Capture is always
+              a pure-CDP screencast; this sets the encode + render grid.
 `;
 
 async function main() {
@@ -49,7 +53,13 @@ async function main() {
     const out = flag("--out") ?? "take.mp4";
     if (!planPath) throw new Error("make: missing --plan <plan.json>");
     const plan = JSON.parse(await readFile(planPath, "utf8")) as TakePlan;
-    const { mp4Path, compositionPath } = await makeTake(plan, { outPath: out, logProgress: true });
+    const fpsFlag = flag("--fps");
+    const fps = fpsFlag ? Number(fpsFlag) : undefined;
+    const { mp4Path, compositionPath } = await makeTake(plan, {
+      outPath: out,
+      logProgress: true,
+      ...(fps ? { capture: { fps } } : {}),
+    });
     process.stdout.write(`\nmp4: ${mp4Path}\ncomposition: ${compositionPath}\n`);
     return;
   }

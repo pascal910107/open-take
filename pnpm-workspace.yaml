@@ -3,5 +3,4 @@ packages:
   - apps/*
 
 onlyBuiltDependencies:
-  - agent-browser
   - esbuild

@@ -32,9 +32,9 @@ Run these five steps in order. Write down your answers for steps 1–3 *before*
 you touch the capture tooling — that's what keeps you honest.
 
 ### 1. UNDERSTAND (explore before deciding anything)
-Open the app and look. You may use the CLI's `inspect` (below) and/or drive
-`agent-browser` directly (`open`, `screenshot`, `snapshot`, `eval`) to see what
-the app *is* and what its interactions *do*. Answer, in writing:
+Open the app and look. Use the CLI's `inspect` (below) to list interactive
+elements (name + bbox), and open the URL in any browser to see what the app
+*is* and what its interactions *do*. Answer, in writing:
 - **What is this product and who is it for** — one sentence.
 - **What is its SINGLE most impressive / differentiating thing** — the "wow"
   that makes someone stop scrolling. (Not "it has a nice UI." The specific
@@ -155,7 +155,8 @@ dump of classes / `data-testid` / `getBoundingClientRect`), and target by
   for the start, `toSelector`/`toText` for the end → bbox centre). Add an
   optional `path` of viewport points for a freehand curve (overrides the straight
   start→end line). `durationMs` controls how long the stroke takes (default 1200;
-  **prefer 1500–2500 — slow strokes read better at 10fps capture**, see limits).
+  at the default ~10fps capture **prefer 1500–2500 — slow strokes read better**;
+  with `--fps 60` any speed stays smooth, see limits).
   - *Canvas surfaces have no element to target:* get the canvas bbox first
     (`agent-browser eval` a `getBoundingClientRect`), then compute `from`/`to`/
     `path` points **inside** it. Select the drawing tool with a `click` *before*
@@ -169,8 +170,19 @@ dump of classes / `data-testid` / `getBoundingClientRect`), and target by
 ### make (render)
 ```
 node packages/cli/dist/cli.js make --plan plan.json --out demo.mp4
+node packages/cli/dist/cli.js make --plan plan.json --out demo.mp4 --fps 60   # smooth motion
 ```
-Produces `demo.mp4` (1920×1080 @ 30fps) and `demo.composition.json` (editable).
+Produces `demo.mp4` (1920×1080 @ 30fps default) and `demo.composition.json` (editable).
+
+**`--fps 60` (high-fps, end-to-end).** One knob: it both **captures** at ~60fps
+(drives AND records over a direct CDP page session against a self-launched
+headless Chrome — bypassing agent-browser's ~10fps recordVideo ceiling) **and
+renders** the polished mp4 at 60fps. Use it whenever a beat has **continuous
+motion** — `drag`/sketch, scroll, video — so the background stays smooth and the
+ink keeps up with the cursor. Discrete click/type demos don't need it (30fps is
+fine and renders ~2× faster). Reuses the same locator logic, so robustness is
+unchanged; it just swaps the recorder. Needs a Chrome — auto-found from
+agent-browser's downloaded browser, or set `OPEN_TAKE_CHROME`.
 
 ## Capture robustness — checks that keep "user does nothing" honest
 - **Confirm no beat was dropped.** A missing target logs `captureTake: … not
@@ -209,17 +221,20 @@ Produces `demo.mp4` (1920×1080 @ 30fps) and `demo.composition.json` (editable).
 - **Vocabulary = click · type · drag · wait.** Still missing **scroll** and
   **hover** — apps whose wow is *scrolling through content* or a *hover-reveal*
   need a proxy; say so when you downgrade.
-- **Background capture is ~10fps** (agent-browser screencast). Discrete
-  click→state-change and typing look great. For **`drag`**, the synthetic cursor
-  traces the stroke at the same constant pace it was drawn, so it tracks the ink
-  closely; the only residual is the ink lagging the pen by ~1 frame (the ink is
-  captured at 10fps, the cursor renders at 30fps) — which reads naturally as the
-  pen leading and ink following. A slower `durationMs` (1500–2500ms) makes it
-  even tighter. The real fix (higher-fps capture) is future work. Don't demo
-  fast scrubbing/continuous animation as a hero beat yet.
+- **Default is ~10fps capture → 30fps render** (agent-browser screencast).
+  Discrete click→state-change and typing look great there. For continuous
+  motion (`drag`, scroll, animation) the background is choppy and the ink lags
+  the synthetic cursor by ~1 frame. **Fix: pass `--fps 60`** — captures ~60fps
+  AND renders at 60fps, so motion is smooth and the ink stays locked to the
+  cursor (verified end-to-end). At the default, soften motion with a slower
+  `durationMs` (1500–2500ms) and don't make fast scrubbing a hero beat; with
+  `--fps 60` it's fair game. (60fps roughly doubles render time + file size —
+  use it for motion demos, not click-only ones.)
 - viewport ≠ video scaling is implemented but lightly tested.
 
 ## Prerequisites
-- `agent-browser` 0.27+ on PATH.
+- A Chrome to drive: open-take auto-downloads **Chrome-for-Testing** on first
+  run (cached under `~/.open-take/browsers`), or set `OPEN_TAKE_CHROME` to a
+  Chrome binary. (No agent-browser needed — capture is pure CDP.)
 - Build once: `pnpm install && pnpm build` (CLI at `packages/cli/dist/cli.js`).
 - `ffmpeg`/`ffprobe` available (used for render + for extracting frames).

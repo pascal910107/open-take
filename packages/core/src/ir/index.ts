@@ -101,7 +101,7 @@ export type Demo = {
   name: string;
   canvas?: { width: number; height: number };
   voice?: string;
-  driver?: "agent-browser" | "playwright" | "computer-use";
+  driver?: "cdp" | "agent-browser" | "playwright" | "computer-use";
   mode?: "strict";
   steps: Step[];
   meta?: DemoMeta;

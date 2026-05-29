@@ -2,7 +2,7 @@
 // request ("make a demo of X"); the human talks to refine it. Kept thin:
 // the planning intelligence lives in the agent, not here.
 //
-// Three action vocabularies (all backed by the agent-browser driver):
+// Three action vocabularies (all driven over pure CDP — see cdp-capture.ts):
 //   click — orient / navigate / trigger a payoff
 //   type  — fill a field / search box / AI prompt (real keystrokes)
 //   drag  — sketch / draw / move (a PATH, not a point — canvas wow)
