@@ -81,7 +81,6 @@ function evalValue(raw: string): unknown {
   return deepParse(top);
 }
 
-const parseBox = (raw: string): Box | null => findBox(evalValue(raw));
 const boxFromEval = (raw: string): Box | null => findBox(evalValue(raw));
 
 // Find a clickable by accessible name (aria-label or text), record its
@@ -100,6 +99,24 @@ function clickByTextJs(text: string): string {
     // would advance state off-screen. Scroll into view ONLY when out of frame
     // so in-view beats keep their framing; re-read the rect post-scroll so the
     // compositor gets a viewport-relative (in-frame) bbox.
+    `var r=m.getBoundingClientRect();` +
+    `if(r.top<0||r.bottom>window.innerHeight){m.scrollIntoView({block:'center'});r=m.getBoundingClientRect();}` +
+    `var b={x:Math.round(r.x),y:Math.round(r.y),w:Math.round(r.width),h:Math.round(r.height)};` +
+    `m.click();return JSON.stringify(b);})()`
+  );
+}
+
+// Selector twin of clickByTextJs: resolve the element's rect AND click it in
+// ONE page eval, atomically. The old path made two separate agent-browser
+// round-trips (`get box <sel>` then `click <sel>`); under recording the CDP
+// `get box` call flaked (returned null ~1-in-3) and the beat was silently
+// skipped, gutting the demo. A single eval — the same mechanism the text
+// path already uses reliably — removes that race.
+function clickBySelectorJs(selector: string): string {
+  const s = JSON.stringify(selector);
+  return (
+    `(function(){var m=document.querySelector(${s});` +
+    `if(!m)return 'NOTFOUND';` +
     `var r=m.getBoundingClientRect();` +
     `if(r.top<0||r.bottom>window.innerHeight){m.scrollIntoView({block:'center'});r=m.getBoundingClientRect();}` +
     `var b={x:Math.round(r.x),y:Math.round(r.y),w:Math.round(r.width),h:Math.round(r.height)};` +
@@ -176,8 +193,7 @@ export async function captureTake(plan: TakePlan, opts: CaptureOpts): Promise<Ca
     if (step.text) {
       box = boxFromEval(await ab(bin, session, ["eval", clickByTextJs(step.text)]));
     } else if (step.selector) {
-      box = parseBox(await ab(bin, session, ["get", "box", step.selector]));
-      await ab(bin, session, ["click", step.selector]);
+      box = boxFromEval(await ab(bin, session, ["eval", clickBySelectorJs(step.selector)]));
     }
     if (box) {
       clicks.push({
