@@ -34,6 +34,25 @@ function ab(bin: string, session: string, args: string[]): Promise<string> {
   });
 }
 
+// Run a sequence of agent-browser commands in ONE process (stdin JSON),
+// paced internally with `wait <ms>` entries. Spawning a process per mouse
+// move (~200ms overhead each) made a 1.6s drag take ~9s; batching keeps the
+// whole paced stroke inside a single invocation so wall-clock ≈ the budget.
+function abBatch(bin: string, session: string, cmds: string[][]): Promise<string> {
+  return new Promise((res, rej) => {
+    const child = spawn(bin, ["--session-name", session, "batch", "--json"], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let out = "", err = "";
+    child.stdout.on("data", (d) => (out += d));
+    child.stderr.on("data", (d) => (err += d));
+    child.on("error", rej);
+    child.on("close", (code) => (code !== 0 && out.length === 0 ? rej(new Error(`agent-browser batch exited ${code}: ${err}`)) : res(out.trim())));
+    child.stdin.write(JSON.stringify(cmds));
+    child.stdin.end();
+  });
+}
+
 type Box = { x: number; y: number; w: number; h: number };
 
 function findBox(o: unknown): Box | null {
@@ -124,6 +143,85 @@ function clickBySelectorJs(selector: string): string {
   );
 }
 
+// --- type/drag resolvers ------------------------------------------------
+// type targets are form fields (input/textarea/contenteditable), which the
+// clickable locator above does NOT match. Resolve the field by accessible
+// name OR placeholder, scroll into view, focus + click (caret), return bbox.
+function focusFieldByTextJs(text: string): string {
+  const t = JSON.stringify(text);
+  return (
+    `(function(){var t=${t};` +
+    `var els=Array.prototype.slice.call(document.querySelectorAll('input,textarea,[contenteditable],[contenteditable=true],[role=textbox],[role=searchbox]'));` +
+    `function name(e){return (e.getAttribute('aria-label')||e.getAttribute('placeholder')||e.textContent||'').replace(/\\s+/g,' ').trim();}` +
+    `var m=els.filter(function(e){return name(e)===t;})[0]||els.filter(function(e){return name(e).indexOf(t)!==-1;})[0];` +
+    `if(!m)return 'NOTFOUND';` +
+    `var r=m.getBoundingClientRect();` +
+    `if(r.top<0||r.bottom>window.innerHeight){m.scrollIntoView({block:'center'});r=m.getBoundingClientRect();}` +
+    `var b={x:Math.round(r.x),y:Math.round(r.y),w:Math.round(r.width),h:Math.round(r.height)};` +
+    `m.focus();m.click();m.focus();return JSON.stringify(b);})()`
+  );
+}
+
+function focusSelectorJs(selector: string): string {
+  const s = JSON.stringify(selector);
+  return (
+    `(function(){var m=document.querySelector(${s});if(!m)return 'NOTFOUND';` +
+    `var r=m.getBoundingClientRect();` +
+    `if(r.top<0||r.bottom>window.innerHeight){m.scrollIntoView({block:'center'});r=m.getBoundingClientRect();}` +
+    `var b={x:Math.round(r.x),y:Math.round(r.y),w:Math.round(r.width),h:Math.round(r.height)};` +
+    `m.focus();m.click();m.focus();return JSON.stringify(b);})()`
+  );
+}
+
+// bbox-only resolvers for drag endpoints — never click/focus (a drag must
+// not deselect a tool or shift the canvas before the stroke).
+function boxSelectorJs(selector: string): string {
+  const s = JSON.stringify(selector);
+  return (
+    `(function(){var m=document.querySelector(${s});if(!m)return 'NOTFOUND';` +
+    `var r=m.getBoundingClientRect();` +
+    `if(r.top<0||r.bottom>window.innerHeight){m.scrollIntoView({block:'center'});r=m.getBoundingClientRect();}` +
+    `return JSON.stringify({x:Math.round(r.x),y:Math.round(r.y),w:Math.round(r.width),h:Math.round(r.height)});})()`
+  );
+}
+
+function boxByTextJs(text: string): string {
+  const t = JSON.stringify(text);
+  return (
+    `(function(){var t=${t};` +
+    `var els=Array.prototype.slice.call(document.querySelectorAll('button,a,[role=button],[role=link],[role=menuitem],[aria-label],li,[draggable=true]'));` +
+    `function name(e){return (e.getAttribute('aria-label')||e.textContent||'').replace(/\\s+/g,' ').trim();}` +
+    `var m=els.filter(function(e){return name(e)===t;})[0]||els.filter(function(e){return name(e).indexOf(t)!==-1;})[0];` +
+    `if(!m)return 'NOTFOUND';var r=m.getBoundingClientRect();` +
+    `if(r.top<0||r.bottom>window.innerHeight){m.scrollIntoView({block:'center'});r=m.getBoundingClientRect();}` +
+    `return JSON.stringify({x:Math.round(r.x),y:Math.round(r.y),w:Math.round(r.width),h:Math.round(r.height)});})()`
+  );
+}
+
+// Sample a viewport-px point a fraction u (0..1) along a polyline by arc
+// length — used to densify a drag into smooth mouse-move steps so canvas
+// drawing libs receive continuous pointermove (and the stroke looks drawn).
+function sampleAlong(pts: { x: number; y: number }[], u: number): { x: number; y: number } {
+  if (pts.length === 1) return pts[0]!;
+  const seg: number[] = [];
+  let total = 0;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const d = Math.hypot(pts[i + 1]!.x - pts[i]!.x, pts[i + 1]!.y - pts[i]!.y);
+    seg.push(d);
+    total += d;
+  }
+  if (total === 0) return pts[0]!;
+  let target = u * total;
+  for (let i = 0; i < seg.length; i++) {
+    if (target <= seg[i]! || i === seg.length - 1) {
+      const f = seg[i]! > 0 ? target / seg[i]! : 0;
+      return { x: pts[i]!.x + (pts[i + 1]!.x - pts[i]!.x) * f, y: pts[i]!.y + (pts[i + 1]!.y - pts[i]!.y) * f };
+    }
+    target -= seg[i]!;
+  }
+  return pts[pts.length - 1]!;
+}
+
 function ffprobe(path: string): Promise<{ width?: number; height?: number; fps?: string; durationS?: number }> {
   return new Promise((res) => {
     const c = spawn("ffprobe", [
@@ -180,12 +278,118 @@ export async function captureTake(plan: TakePlan, opts: CaptureOpts): Promise<Ca
     /* fall back to requested viewport */
   }
 
-  const clicks: CaptureLog["clicks"] = [];
+  type Pt = { x: number; y: number };
+  // Resolve a viewport-px point from an explicit point, a CSS selector, or
+  // an accessible name (bbox centre). No click/focus — for drag endpoints.
+  const resolvePoint = async (spec: { point?: Pt; selector?: string; text?: string }): Promise<Pt | null> => {
+    if (spec.point) return { x: Math.round(spec.point.x), y: Math.round(spec.point.y) };
+    if (spec.selector) {
+      const b = boxFromEval(await ab(bin, session, ["eval", boxSelectorJs(spec.selector)]));
+      return b ? { x: Math.round(b.x + b.w / 2), y: Math.round(b.y + b.h / 2) } : null;
+    }
+    if (spec.text) {
+      const b = boxFromEval(await ab(bin, session, ["eval", boxByTextJs(spec.text)]));
+      return b ? { x: Math.round(b.x + b.w / 2), y: Math.round(b.y + b.h / 2) } : null;
+    }
+    return null;
+  };
+
+  const events: CaptureLog["events"] = [];
   for (const step of plan.steps) {
     if (step.action === "wait") {
       await sleep(step.ms);
       continue;
     }
+
+    if (step.action === "type") {
+      // focus the field (ground-truth bbox), then type with real keystrokes
+      const label = step.text ?? step.selector;
+      const tMs = Date.now() - t0;
+      let box: Box | null = null;
+      if (step.text) box = boxFromEval(await ab(bin, session, ["eval", focusFieldByTextJs(step.text)]));
+      else if (step.selector) box = boxFromEval(await ab(bin, session, ["eval", focusSelectorJs(step.selector)]));
+      if (!box) {
+        console.error(`captureTake: type target not found, skipped: ${JSON.stringify(label)}`);
+        await sleep(step.settleMs ?? 600);
+        continue;
+      }
+      // type char-by-char, paced via `wait`, so the recording shows the text
+      // appear progressively (one `keyboard type` call is near-instant).
+      const chars = [...step.value];
+      const perChar = Math.min(60, Math.max(28, Math.round(1100 / Math.max(1, chars.length))));
+      const typeCmds: string[][] = [];
+      for (const ch of chars) {
+        typeCmds.push(["keyboard", "type", ch]);
+        typeCmds.push(["wait", String(perChar)]);
+      }
+      const tType = Date.now();
+      await abBatch(bin, session, typeCmds);
+      const durationMs = Date.now() - tType;
+      events.push({
+        kind: "type",
+        x: Math.round(box.x + box.w / 2),
+        y: Math.round(box.y + box.h / 2),
+        box,
+        tMs,
+        sel: label,
+        note: step.note,
+        text: step.value,
+        durationMs,
+        ...(step.zoom ? { zoom: step.zoom } : {}),
+      });
+      await sleep(step.settleMs ?? 900);
+      continue;
+    }
+
+    if (step.action === "drag") {
+      const from = await resolvePoint({ point: step.from, selector: step.selector, text: step.text });
+      const to = await resolvePoint({ point: step.to, selector: step.toSelector, text: step.toText });
+      const label = step.note ?? step.text ?? step.selector;
+      if (!from || !to) {
+        console.error(`captureTake: drag endpoint not found, skipped: ${JSON.stringify(label)}`);
+        await sleep(step.settleMs ?? 600);
+        continue;
+      }
+      // the polyline the stroke follows (viewport px)
+      const path: Pt[] = step.path?.length
+        ? step.path.map((p) => ({ x: Math.round(p.x), y: Math.round(p.y) }))
+        : [from, to];
+      const target = step.durationMs ?? 1200;
+      // densify into ~one move per 40ms so canvas libs see continuous motion;
+      // all moves + `wait` pacing run in ONE batch (per-move process spawn was
+      // ~200ms each → a 1.6s drag took ~9s).
+      const n = Math.max(8, Math.round(target / 40));
+      const perStep = Math.round(target / n);
+      const dragCmds: string[][] = [
+        ["mouse", "move", String(path[0]!.x), String(path[0]!.y)],
+        ["mouse", "down"],
+      ];
+      for (let k = 1; k <= n; k++) {
+        const p = sampleAlong(path, k / n);
+        dragCmds.push(["wait", String(perStep)]);
+        dragCmds.push(["mouse", "move", String(Math.round(p.x)), String(Math.round(p.y))]);
+      }
+      dragCmds.push(["mouse", "up"]);
+      const tMs = Date.now() - t0;
+      const tDrag = Date.now();
+      await abBatch(bin, session, dragCmds);
+      const durationMs = Date.now() - tDrag;
+      events.push({
+        kind: "drag",
+        x: from.x,
+        y: from.y,
+        to,
+        path,
+        tMs,
+        sel: label,
+        note: step.note,
+        durationMs,
+        ...(step.zoom ? { zoom: step.zoom } : {}),
+      });
+      await sleep(step.settleMs ?? 1100);
+      continue;
+    }
+
     // click: capture timestamp, resolve bbox (ground truth), click
     const label = step.text ?? step.selector;
     const tMs = Date.now() - t0;
@@ -196,7 +400,8 @@ export async function captureTake(plan: TakePlan, opts: CaptureOpts): Promise<Ca
       box = boxFromEval(await ab(bin, session, ["eval", clickBySelectorJs(step.selector)]));
     }
     if (box) {
-      clicks.push({
+      events.push({
+        kind: "click",
         x: Math.round(box.x + box.w / 2),
         y: Math.round(box.y + box.h / 2),
         box,
@@ -222,7 +427,7 @@ export async function captureTake(plan: TakePlan, opts: CaptureOpts): Promise<Ca
     video: { width: probe.width ?? inner[0], height: probe.height ?? inner[1], fps: probe.fps, durationS: probe.durationS },
     viewport: { w: inner[0], h: inner[1] },
     start: plan.startCursor ?? { x: Math.round(inner[0] * 0.25), y: Math.round(inner[1] * 0.9) },
-    clicks,
+    events,
     tEndMs,
   };
 }

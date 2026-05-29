@@ -116,6 +116,9 @@ export function buildStageKeyframes(comp: TakeComposition): StageKeyframes {
   enabled.forEach((e, i) => {
     const rampStart = e.zoom.inAtMs / 1000;
     const clickT = e.tMs / 1000;
+    // the action plays out (typing/drawing) for durationMs after tMs — hold
+    // the target framing through it (a point click has duration 0).
+    const actionEnd = (e.tMs + (e.durationMs ?? 0)) / 1000;
     push(rampStart, cur.s, cur.c); // hold current until ramp begins
     push(clickT, e.zoom.scale, e.zoom.center); // ramp to target by click
     cur = { s: e.zoom.scale, c: e.zoom.center };
@@ -124,7 +127,7 @@ export function buildStageKeyframes(comp: TakeComposition): StageKeyframes {
       // hold target until the next zoom begins ramping (then it pans)
       push(next.zoom.inAtMs / 1000, cur.s, cur.c);
     } else {
-      const holdEnd = clickT + HOLD;
+      const holdEnd = actionEnd + HOLD;
       push(holdEnd, cur.s, cur.c);
       push(holdEnd + ZOUT, rest, restC); // zoom back out
       cur = { s: rest, c: restC };
@@ -139,22 +142,56 @@ export function buildStageKeyframes(comp: TakeComposition): StageKeyframes {
 
 // --- cursor path (eased, with gentle arc) ------------------------------
 
-type Leg = { t0: number; t1: number; a: Pt; b: Pt };
+// A `drag` leg carries the polyline the cursor follows with the button held
+// (no perpendicular arc — it traces the real stroke). A normal travel leg has
+// no path and gets the gentle arc.
+type Leg = { t0: number; t1: number; a: Pt; b: Pt; drag?: boolean; path?: Pt[] };
 
 export function buildLegs(comp: TakeComposition): Leg[] {
-  const wp: Pt[] = [comp.start, ...comp.events.map((e) => e.point)];
-  return comp.events.map((e, i) => ({
-    t0: (e.tMs - comp.cursor.travelMs) / 1000,
-    t1: e.tMs / 1000,
-    a: wp[i]!,
-    b: wp[i + 1]!,
-  }));
+  const legs: Leg[] = [];
+  let cur: Pt = comp.start;
+  const travel = comp.cursor.travelMs / 1000;
+  for (const e of comp.events) {
+    const arrive = e.tMs / 1000;
+    legs.push({ t0: arrive - travel, t1: arrive, a: cur, b: e.point }); // travel to anchor
+    cur = e.point;
+    if (e.kind === "drag" && e.to) {
+      const dEnd = (e.tMs + (e.durationMs ?? 0)) / 1000;
+      const path = e.path && e.path.length >= 2 ? e.path : [e.point, e.to];
+      if (dEnd > arrive) legs.push({ t0: arrive, t1: dEnd, a: e.point, b: e.to, drag: true, path });
+      cur = e.to;
+    }
+  }
+  return legs;
+}
+
+/** Point a fraction `u` (0..1) along a polyline, parameterised by arc length. */
+function alongPath(path: Pt[], u: number): Pt {
+  if (path.length === 1) return path[0]!;
+  const seg: number[] = [];
+  let total = 0;
+  for (let i = 0; i < path.length - 1; i++) {
+    const d = Math.hypot(path[i + 1]!.x - path[i]!.x, path[i + 1]!.y - path[i]!.y);
+    seg.push(d);
+    total += d;
+  }
+  if (total === 0) return path[0]!;
+  let target = u * total;
+  for (let i = 0; i < seg.length; i++) {
+    if (target <= seg[i]! || i === seg.length - 1) {
+      const f = seg[i]! > 0 ? target / seg[i]! : 0;
+      return { x: path[i]!.x + (path[i + 1]!.x - path[i]!.x) * f, y: path[i]!.y + (path[i + 1]!.y - path[i]!.y) * f };
+    }
+    target -= seg[i]!;
+  }
+  return path[path.length - 1]!;
 }
 
 export function cursorPos(t: number, legs: Leg[], comp: TakeComposition): Pt {
   for (const lg of legs) {
     if (lg.t0 <= t && t <= lg.t1) {
       const p = smoother((t - lg.t0) / (lg.t1 - lg.t0));
+      if (lg.drag && lg.path) return alongPath(lg.path, p); // trace the stroke, no arc
       const base = { x: lg.a.x + (lg.b.x - lg.a.x) * p, y: lg.a.y + (lg.b.y - lg.a.y) * p };
       const dx = lg.b.x - lg.a.x, dy = lg.b.y - lg.a.y;
       const L = Math.hypot(dx, dy) || 1;
@@ -166,4 +203,9 @@ export function cursorPos(t: number, legs: Leg[], comp: TakeComposition): Pt {
   for (let i = 0; i < legs.length - 1; i++)
     if (legs[i]!.t1 < t && t < legs[i + 1]!.t0) return legs[i]!.b;
   return legs[legs.length - 1]!.b;
+}
+
+/** True while a drag is mid-stroke (button held) — for the pressed cursor. */
+export function isDragging(t: number, legs: Leg[]): boolean {
+  return legs.some((lg) => lg.drag === true && lg.t0 <= t && t <= lg.t1);
 }

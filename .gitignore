@@ -1,5 +1,6 @@
 node_modules
 dist
+out
 .turbo
 .open-take-cache
 *.log

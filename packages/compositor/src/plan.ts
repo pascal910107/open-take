@@ -50,17 +50,37 @@ export function planComposition(log: CaptureLog, opts: PlanOpts = {}): TakeCompo
 
   const rest = restStageScale(vW, vH, oW, oH, framing.insetFrac);
 
-  const events: CompEvent[] = log.clicks.map((c, i) => {
+  // Axis-aligned bbox of a polyline (video-px). Used so a drag zooms to fit
+  // the WHOLE stroke (a path, not a point): big cross-canvas drags fit ≈ rest
+  // → no zoom (correct, global); small localised drags zoom in.
+  const pathBBox = (pts: Pt[]): BBox => {
+    const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
+    const x = Math.min(...xs), y = Math.min(...ys);
+    return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
+  };
+
+  const events: CompEvent[] = log.events.map((c, i) => {
+    const kind = c.kind ?? "click";
     const point = mapPt({ x: c.x, y: c.y });
-    const bbox = c.box ? mapBox(c.box) : undefined;
     const isFirst = i === 0;
+    const intent = c.zoom ?? "auto";
+    const durationMs = "durationMs" in c ? c.durationMs : 0;
+
+    // drag: cursor path + the bbox we fit-zoom is the path's bbox
+    const to = kind === "drag" ? mapPt((c as { to: Pt }).to) : undefined;
+    const rawPath =
+      kind === "drag" ? ((c as { path?: Pt[] }).path ?? [{ x: c.x, y: c.y }, (c as { to: Pt }).to]) : undefined;
+    const path = rawPath?.map(mapPt);
+
+    // The region this action is "about" — what zoom should frame.
+    const bbox =
+      kind === "drag" && path ? pathBBox(path) : c.box ? mapBox(c.box) : undefined;
 
     let enabled = false;
     let scale = rest;
     let reason: string;
     const center = bbox ? { x: bbox.x + bbox.w / 2, y: bbox.y + bbox.h / 2 } : point;
     const fit = bbox ? bboxFitScale(bbox, oW, oH, fillFrac, maxScale, rest) : maxScale;
-    const intent = c.zoom ?? "auto";
 
     if (intent === "never") {
       enabled = false;
@@ -74,31 +94,38 @@ export function planComposition(log: CaptureLog, opts: PlanOpts = {}): TakeCompo
     } else {
       scale = fit;
       const meaningful = fit > rest * zoomRatio;
+      const region = kind === "drag" ? "drag path" : "element";
       if (isFirst && !zoomFirst) {
         enabled = false;
         reason = `first/orienting action — skipped by default (fit ${fit.toFixed(2)}x available)`;
       } else if (!meaningful) {
         enabled = false;
-        reason = `element fills the frame already (fit ${fit.toFixed(2)}x ≈ rest ${rest.toFixed(2)}x) — gentle/no zoom`;
+        reason = `${region} fills the frame already (fit ${fit.toFixed(2)}x ≈ rest ${rest.toFixed(2)}x) — gentle/no zoom`;
       } else {
         enabled = true;
-        reason = `bbox-fit ${fit.toFixed(2)}x (capped ${maxScale}x), element framed with ${Math.round(fillFrac * 100)}% fill`;
+        reason = `bbox-fit ${fit.toFixed(2)}x (capped ${maxScale}x), ${region} framed with ${Math.round(fillFrac * 100)}% fill`;
       }
     }
 
     return {
-      kind: "click",
+      kind,
       tMs: c.tMs,
       point,
       bbox,
       label: c.sel ?? c.note,
       zoom: { enabled, scale, center, inAtMs: Math.max(0, c.tMs - cursor.travelMs), reason },
+      ...(durationMs ? { durationMs } : {}),
+      ...(kind === "type" ? { text: (c as { text: string }).text } : {}),
+      ...(to ? { to } : {}),
+      ...(path ? { path } : {}),
     };
   });
 
   const start = log.start ? mapPt(log.start) : { x: vW * 0.25, y: vH * 0.9 };
-  const lastT = log.clicks.length ? log.clicks[log.clicks.length - 1]!.tMs : 0;
-  const durationMs = Math.max(log.tEndMs ?? 0, lastT + cursor.holdMs + cursor.zoomOutMs + 400);
+  const last = log.events.length ? log.events[log.events.length - 1]! : undefined;
+  // the last action ends durationMs after its tMs (typing/drag plays out)
+  const lastEnd = last ? last.tMs + ("durationMs" in last ? last.durationMs : 0) : 0;
+  const durationMs = Math.max(log.tEndMs ?? 0, lastEnd + cursor.holdMs + cursor.zoomOutMs + 400);
 
   return {
     output: { width: oW, height: oH, fps },

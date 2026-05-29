@@ -5,7 +5,7 @@
 //   await renderTake({ composition: comp, videoPath, outPath })
 //
 // Edit `comp` (zoom decisions, framing, cursor) and re-render — the
-// composition is the canonical source of truth.
+// composition is the editable source of truth.
 
 export * from "./types";
 export { planComposition, type PlanOpts } from "./plan";

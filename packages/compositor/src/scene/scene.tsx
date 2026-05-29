@@ -7,6 +7,7 @@ import {
   buildStageKeyframes,
   buildLegs,
   cursorPos,
+  isDragging,
   keyvalN,
   keyvalP,
   clampCenter,
@@ -108,6 +109,13 @@ export default makeScene2D("take", function* (view) {
           return [lx(c.x), ly(c.y)];
         }}
       >
+        {/* pressed-state ring while a drag is mid-stroke (button held) */}
+        <Circle
+          size={() => (isDragging(t(), legs) ? 30 : 0)}
+          fill={"rgba(255,255,255,0.16)"}
+          stroke={"white"}
+          lineWidth={2}
+        />
         <Line points={CURSOR.map(([x, y]) => [x + 2.5, y + 2.5])} closed fill={"rgba(0,0,0,0.35)"} />
         <Line points={CURSOR} closed fill={"rgb(20,20,24)"} stroke={"white"} lineWidth={2} />
       </Node>

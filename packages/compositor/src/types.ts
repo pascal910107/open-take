@@ -1,4 +1,4 @@
-// The editable take composition — its editable DNA. The agent (or a
+// The editable take composition — the source of truth. The agent (or a
 // human) edits THIS, and the revideo scene renders it deterministically.
 // All spatial fields are in VIDEO-pixel space (capture coords mapped
 // through viewport→video scaling), so the scene works in one coordinate
@@ -7,18 +7,20 @@
 export type Pt = { x: number; y: number };
 export type BBox = { x: number; y: number; w: number; h: number };
 
-// --- capture input (matches adapter-agent-browser's event log shape) ---
+// --- capture input (the ground-truth event log) -----------------------
 
 /** Editorial zoom intent for an action (set by the planner/agent). */
 export type ZoomIntent = "auto" | "never" | "always";
 
-export type CaptureClick = {
-  /** click point, viewport CSS px */
+/** Fields common to every captured action. `x,y` is the anchor / start
+ *  point (cursor target), viewport CSS px. */
+export type CaptureEventBase = {
+  /** anchor point (click target / field / drag start), viewport CSS px */
   x: number;
   y: number;
   /** element bounding box, viewport CSS px — the ground-truth edge */
   box?: BBox;
-  /** ms from recording start */
+  /** ms from recording start (when the cursor arrives / action begins) */
   tMs: number;
   /** selector / note, kept for editability */
   sel?: string;
@@ -27,11 +29,39 @@ export type CaptureClick = {
   zoom?: ZoomIntent;
 };
 
+/** A click (or a type's focus-click): an instantaneous action at a point. */
+export type CaptureClick = CaptureEventBase & { kind?: "click" };
+
+/** Typing into a focused field: the cursor parks and the zoom holds for
+ *  `durationMs` while the text appears in the recording. */
+export type CaptureType = CaptureEventBase & {
+  kind: "type";
+  /** what was typed (editability) */
+  text: string;
+  /** ms the typing occupies on screen (ground-truth wall time) */
+  durationMs: number;
+};
+
+/** A drag: a path from the anchor (`x,y`) to `to`, optionally via `path`,
+ *  with the button held for `durationMs`. */
+export type CaptureDrag = CaptureEventBase & {
+  kind: "drag";
+  /** drag end point, viewport CSS px */
+  to: { x: number; y: number };
+  /** full polyline incl. ends, viewport CSS px (freehand strokes) */
+  path?: { x: number; y: number }[];
+  /** ms the drag occupies on screen (ground-truth wall time) */
+  durationMs: number;
+};
+
+export type CaptureEvent = CaptureClick | CaptureType | CaptureDrag;
+
 export type CaptureLog = {
   video: { width: number; height: number; fps?: number | string; durationS?: number };
   viewport: { w: number; h: number };
   start?: { x: number; y: number };
-  clicks: CaptureClick[];
+  /** the ordered ground-truth actions (click / type / drag) */
+  events: CaptureEvent[];
   tEndMs?: number;
 };
 
@@ -51,14 +81,23 @@ export type ZoomDecision = {
 };
 
 export type CompEvent = {
-  kind: "click";
+  kind: "click" | "type" | "drag";
   tMs: number;
-  /** click point in video-px */
+  /** anchor point (click / focus / drag start) in video-px */
   point: Pt;
   /** element bbox in video-px (if known) */
   bbox?: BBox;
   label?: string;
   zoom: ZoomDecision;
+  /** how long the action plays out after `tMs` (type/drag); 0 for a click.
+   *  The cursor parks and the zoom holds for this long. */
+  durationMs?: number;
+  /** typed text (kind=type), for editability */
+  text?: string;
+  /** drag end point, video-px (kind=drag) */
+  to?: Pt;
+  /** drag polyline incl. ends, video-px (kind=drag) — the cursor path */
+  path?: Pt[];
 };
 
 export type FramingConfig = {

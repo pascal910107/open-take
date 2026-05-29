@@ -57,6 +57,10 @@ the app's signature moment; make the wow the hero, not an afterthought.
   restyle, navigation) OR **relocated** from the click (you click a button here,
   the result appears elsewhere — the engine zooms to the *clicked element's*
   bbox, so zooming would frame the wrong place).
+- For a **`drag`**, the engine fits the zoom to the **whole stroke's bounding
+  box** (a path, not a point). A big cross-canvas stroke fills the frame already
+  → `"auto"` keeps it full-view (correct). A small, localized drag → `"auto"`
+  zooms in. Use `"never"` to force full-view for a sweeping gesture.
 - Restraint reads as intentional. Reserve zoom for 1–2 beats at most; many great
   demos are 0-zoom. Don't add a zoom for "variety."
 
@@ -73,18 +77,24 @@ the ideal onto the capture vocabulary (next section) and decide your downgrades.
 Write the plan (schema below), then `make`. The runtime drives the live app and
 composites the polish.
 
-**The capture vocabulary is `click` + `wait` only** — no `type`, no `drag`, no
-`scroll`, no `hover`. This is the binding constraint. When a beat from your
-ideal needs something the vocabulary lacks:
-1. **Find a click-only path to the SAME editorial point.** Most apps have one
-   (an example/preset button instead of typing; a "load template"/built-in
-   sample instead of drawing; a feature dialog that ships pre-filled). The point
-   is the *wow*, not the mechanic.
-2. **If there's genuinely no click-only path, downgrade and flag it explicitly**
-   in your write-up. Do NOT silently fall back to clicking inert UI (selecting a
-   drawing tool draws nothing; clicking nav for its own sake says nothing). An
-   honest "the ideal needs drag/type, which the runtime can't capture yet" is a
-   real finding — surface it.
+**The capture vocabulary is `click` · `type` · `drag` · `wait`.** That covers
+most product wows: triggering UI (click), search boxes / AI prompts / forms
+(type), and sketching / drawing / moving on a canvas (drag — a *path*). What's
+still missing: **`scroll` and `hover`**. When a beat from your ideal needs one
+of those:
+1. **Find a path to the SAME editorial point with the vocabulary you have.** A
+   feature is usually reachable without scrolling (link straight to it); a
+   hover-reveal often has a click equivalent. The point is the *wow*, not the
+   mechanic.
+2. **If there's genuinely no path, downgrade and flag it explicitly** in your
+   write-up. Do NOT silently fall back to clicking inert UI. An honest "the ideal
+   needs scroll-reveal, which the runtime can't capture yet" is a real finding —
+   surface it.
+
+**Use the real mechanic when you have it.** Before drag/type existed, demos
+faked a sketch via a "load template" button and flagged the downgrade. Now: if
+the wow is drawing, *drag to draw it*; if it's search, *type the query*. Reach
+for a proxy only when the genuine action isn't in the vocabulary.
 
 ### 5. SHOW (frames, not claims)
 Extract frames from the MP4 and **look at them** before you call it done:
@@ -123,15 +133,35 @@ dump of classes / `data-testid` / `getBoundingClientRect`), and target by
   "steps": [
     { "action": "wait", "ms": 1100 },
     { "action": "click", "selector": ".some-icon-button", "zoom": "never", "note": "global payoff", "settleMs": 2000 },
-    { "action": "click", "text": "Open menu", "zoom": "always", "note": "local co-located popover", "settleMs": 1600 }
+    { "action": "type", "text": "Search the docs", "value": "polished demos, on tap", "zoom": "always", "note": "search box", "settleMs": 1200 },
+    { "action": "click", "text": "Open menu", "zoom": "always", "note": "local co-located popover", "settleMs": 1600 },
+    { "action": "drag", "from": { "x": 560, "y": 400 }, "to": { "x": 1140, "y": 400 },
+      "path": [{ "x": 560, "y": 400 }, { "x": 760, "y": 250 }, { "x": 1140, "y": 400 }],
+      "durationMs": 1600, "zoom": "auto", "note": "sketch on the canvas", "settleMs": 1200 }
   ]
 }
 ```
-- `click` targets by `text` (accessible name — robust) **or** `selector` (CSS —
-  for unlabeled controls). Both resolve the bbox and click in one atomic page
-  eval. Prefer `text`; use `selector` when there's no accessible name.
-- `settleMs`: hold after a click so its result is visible (~1300–2600ms). Give
-  big reveals a longer hold.
+- **`click`** targets by `text` (accessible name — robust) **or** `selector`
+  (CSS — for unlabeled controls). Both resolve the bbox and click in one atomic
+  page eval. Prefer `text`; use `selector` when there's no accessible name.
+- **`type`** locates a field by `text` (its accessible name **or placeholder**)
+  or `selector`, focuses it, and types `value` with real keystrokes, char by
+  char (the cursor parks on the field and the zoom holds while text appears).
+  For search boxes, AI prompts, forms. The field is usually a small target →
+  `"always"`/`"auto"` frames it nicely.
+- **`drag`** is a path with the button held — the canvas wow (sketch, draw a
+  shape, move an element). Give a **start** and **end**, each as either an
+  explicit viewport point (`from` / `to`) or a located element (`selector`/`text`
+  for the start, `toSelector`/`toText` for the end → bbox centre). Add an
+  optional `path` of viewport points for a freehand curve (overrides the straight
+  start→end line). `durationMs` controls how long the stroke takes (default 1200;
+  **prefer 1500–2500 — slow strokes read better at 10fps capture**, see limits).
+  - *Canvas surfaces have no element to target:* get the canvas bbox first
+    (`agent-browser eval` a `getBoundingClientRect`), then compute `from`/`to`/
+    `path` points **inside** it. Select the drawing tool with a `click` *before*
+    the drag.
+- `settleMs`: hold after the action so its result is visible (~1200–2600ms).
+  Give big reveals a longer hold.
 - `wait`: paces the video / orients at the start.
 - `startCursor`: where the synthetic cursor begins (viewport px); pick a spot
   that makes the first move to your first target a pleasing sweep.
@@ -143,12 +173,18 @@ node packages/cli/dist/cli.js make --plan plan.json --out demo.mp4
 Produces `demo.mp4` (1920×1080 @ 30fps) and `demo.composition.json` (editable).
 
 ## Capture robustness — checks that keep "user does nothing" honest
-- **Confirm no beat was dropped.** A missing target logs `captureTake: target
-  not found, skipped: …` to stderr, and the composition will have **fewer
-  `events` than you have `click` steps**. Check that count. If a beat was
-  dropped, fix the target (re-`inspect`; names/layout may have changed) or just
-  re-run (capture can flake on a cold first run) — never ship a silently-empty
-  demo. ALWAYS look at the frames (step 5) to catch this.
+- **Confirm no beat was dropped.** A missing target logs `captureTake: … not
+  found, skipped: …` to stderr, and the composition will have **fewer `events`
+  than you have action steps** (click/type/drag; `wait` is not an event). Check
+  that count. If a beat was dropped, fix the target (re-`inspect`; names/layout
+  may have changed) or just re-run (capture can flake on a cold first run) —
+  never ship a silently-empty demo. ALWAYS look at the frames (step 5) to catch
+  this.
+- **For `drag`, verify the stroke actually rendered.** A drag whose endpoints
+  resolved still produces *nothing visible* if the wrong tool was active or the
+  surface ignored synthetic input — eyeball the frames mid-stroke. (Select the
+  tool with a `click` first; CDP mouse input is trusted, so canvas libs that
+  listen for pointer events do respond.)
 - **Reset persistent app state.** Stateful apps (canvas tools, editors) persist
   to `localStorage`, and the recorder shares the browser profile across runs —
   so you can open onto leftover content instead of a clean slate. Clear it
@@ -170,13 +206,16 @@ Produces `demo.mp4` (1920×1080 @ 30fps) and `demo.composition.json` (editable).
   break the demo.
 
 ## Known limits (don't be surprised; flag when they bite the story)
-- **Vocabulary = click + wait.** No type/drag/scroll/hover. This is the main
-  ceiling on editorial quality: apps whose wow is *sketching, typing, dragging,
-  or scrolling through content* can only be shown via click-only proxies — say
-  so when you downgrade.
-- **Background capture is ~10fps** (agent-browser screencast) — great for
-  discrete click→state-change demos; scroll/drag/continuous-animation will look
-  choppy. The synthetic cursor and zoom are rendered smooth at 30fps regardless.
+- **Vocabulary = click · type · drag · wait.** Still missing **scroll** and
+  **hover** — apps whose wow is *scrolling through content* or a *hover-reveal*
+  need a proxy; say so when you downgrade.
+- **Background capture is ~10fps** (agent-browser screencast). Discrete
+  click→state-change and typing look great. For **`drag`, continuous motion is
+  captured at 10fps while the synthetic cursor is smooth 30fps**, so on a *fast*
+  stroke the cursor visibly leads the drawn ink by a frame (they align exactly at
+  rest — it's the capture rate, not a bug). Mitigate with a slower `durationMs`
+  (1500–2500ms); the real fix (higher-fps capture) is future work. Don't demo
+  fast scrubbing/continuous animation as a hero beat yet.
 - viewport ≠ video scaling is implemented but lightly tested.
 
 ## Prerequisites
