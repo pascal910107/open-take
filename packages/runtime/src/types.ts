@@ -2,8 +2,11 @@
 // request ("make a demo of X"); the human talks to refine it. Kept thin:
 // the planning intelligence lives in the agent, not here.
 
+// A click targets an element by CSS `selector` or by accessible-name
+// `text` (how an agent naturally thinks — robust on real apps where CSS
+// hooks are unstable). Exactly one of selector/text.
 export type TakeStep =
-  | { action: "click"; selector: string; note?: string; settleMs?: number }
+  | { action: "click"; selector?: string; text?: string; note?: string; settleMs?: number }
   | { action: "wait"; ms: number };
 
 export type TakePlan = {

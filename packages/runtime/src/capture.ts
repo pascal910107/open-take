@@ -36,25 +36,69 @@ function ab(bin: string, session: string, args: string[]): Promise<string> {
 
 type Box = { x: number; y: number; w: number; h: number };
 
-function parseBox(stdout: string): Box | null {
-  let v: unknown;
-  try {
-    v = JSON.parse(stdout);
-  } catch {
-    return null;
+function findBox(o: unknown): Box | null {
+  if (!o || typeof o !== "object") return null;
+  const r = o as Record<string, unknown>;
+  if (typeof r.x === "number" && typeof r.y === "number" && (typeof r.width === "number" || typeof r.w === "number"))
+    return { x: r.x, y: r.y, w: (r.width ?? r.w) as number, h: (r.height ?? r.h) as number };
+  for (const k of Object.keys(r)) {
+    const hit = findBox(r[k]);
+    if (hit) return hit;
   }
-  const find = (o: unknown): Box | null => {
-    if (!o || typeof o !== "object") return null;
-    const r = o as Record<string, unknown>;
-    if (typeof r.x === "number" && typeof r.y === "number" && (typeof r.width === "number" || typeof r.w === "number"))
-      return { x: r.x, y: r.y, w: (r.width ?? r.w) as number, h: (r.height ?? r.h) as number };
-    for (const k of Object.keys(r)) {
-      const hit = find(r[k]);
-      if (hit) return hit;
+  return null;
+}
+
+// Repeatedly JSON.parse while the value is still a string (handles double-
+// encoding).
+function deepParse(s: unknown): unknown {
+  let cur = s;
+  for (let i = 0; i < 5 && typeof cur === "string"; i++) {
+    try {
+      cur = JSON.parse(cur as string);
+    } catch {
+      break;
     }
-    return null;
-  };
-  return find(v);
+  }
+  return cur;
+}
+
+// Extract the actual returned value from agent-browser --json output.
+// eval:    {"success":true,"data":{"result":"<encoded>"},"error":null}
+// get box: similar wrapper around the box. Falls back to deep-parsing raw.
+function evalValue(raw: string): unknown {
+  let top: unknown;
+  try {
+    top = JSON.parse(raw);
+  } catch {
+    return deepParse(raw);
+  }
+  if (top && typeof top === "object") {
+    const o = top as Record<string, unknown>;
+    const data = o.data as Record<string, unknown> | undefined;
+    if (data && "result" in data) return deepParse(data.result);
+    for (const k of ["result", "output", "stdout", "value"]) if (k in o) return deepParse(o[k]);
+  }
+  return deepParse(top);
+}
+
+const parseBox = (raw: string): Box | null => findBox(evalValue(raw));
+const boxFromEval = (raw: string): Box | null => findBox(evalValue(raw));
+
+// Find a clickable by accessible name (aria-label or text), record its
+// rect (ground-truth bbox), and click it — all in one page eval so the
+// bbox and the action refer to the same element. Robust where CSS hooks
+// are unstable.
+function clickByTextJs(text: string): string {
+  const t = JSON.stringify(text);
+  return (
+    `(function(){var t=${t};` +
+    `var els=Array.prototype.slice.call(document.querySelectorAll('button,a,[role=button],[role=link],[role=menuitem],input[type=submit],input[type=button]'));` +
+    `function name(e){return (e.getAttribute('aria-label')||e.textContent||'').replace(/\\s+/g,' ').trim();}` +
+    `var m=els.filter(function(e){return name(e)===t;})[0]||els.filter(function(e){return name(e).indexOf(t)!==-1;})[0];` +
+    `if(!m)return 'NOTFOUND';` +
+    `var r=m.getBoundingClientRect();var b={x:Math.round(r.x),y:Math.round(r.y),w:Math.round(r.width),h:Math.round(r.height)};` +
+    `m.click();return JSON.stringify(b);})()`
+  );
 }
 
 function ffprobe(path: string): Promise<{ width?: number; height?: number; fps?: string; durationS?: number }> {
@@ -107,10 +151,8 @@ export async function captureTake(plan: TakePlan, opts: CaptureOpts): Promise<Ca
   // authoritative coordinate space = the recording page's CSS viewport
   let inner: [number, number] = [vw, vh];
   try {
-    const raw = await ab(bin, session, ["eval", "JSON.stringify([window.innerWidth, window.innerHeight])"]);
-    const m = JSON.parse(raw);
-    const arr = JSON.parse(typeof m === "string" ? m : (m.result ?? m.output ?? m.stdout ?? JSON.stringify(m)));
-    if (Array.isArray(arr) && arr.length === 2) inner = [arr[0], arr[1]];
+    const arr = evalValue(await ab(bin, session, ["eval", "JSON.stringify([window.innerWidth, window.innerHeight])"]));
+    if (Array.isArray(arr) && arr.length === 2) inner = [Number(arr[0]), Number(arr[1])];
   } catch {
     /* fall back to requested viewport */
   }
@@ -121,20 +163,28 @@ export async function captureTake(plan: TakePlan, opts: CaptureOpts): Promise<Ca
       await sleep(step.ms);
       continue;
     }
-    // click: query bbox (ground truth), timestamp, then click
-    const raw = await ab(bin, session, ["get", "box", step.selector]);
-    const box = parseBox(raw);
+    // click: capture timestamp, resolve bbox (ground truth), click
+    const label = step.text ?? step.selector;
     const tMs = Date.now() - t0;
-    await ab(bin, session, ["click", step.selector]);
+    let box: Box | null = null;
+    if (step.text) {
+      box = boxFromEval(await ab(bin, session, ["eval", clickByTextJs(step.text)]));
+    } else if (step.selector) {
+      box = parseBox(await ab(bin, session, ["get", "box", step.selector]));
+      await ab(bin, session, ["click", step.selector]);
+    }
     if (box) {
       clicks.push({
         x: Math.round(box.x + box.w / 2),
         y: Math.round(box.y + box.h / 2),
         box,
         tMs,
-        sel: step.selector,
+        sel: label,
         note: step.note,
       });
+    } else {
+      // a silently-dropped target would lose a demo beat — surface it
+      console.error(`captureTake: target not found, skipped: ${JSON.stringify(label)}`);
     }
     await sleep(step.settleMs ?? 1300);
   }
