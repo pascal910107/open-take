@@ -1,0 +1,26 @@
+{
+  "name": "open-take",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Agent-native demo recording. Tell your agent to make a demo of your local app/CLI; it drives the real thing and hands you a polished, re-editable video. Ground-truth event log -> cinematic auto-zoom. MIT.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@10.28.2",
+  "scripts": {
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "clean": "turbo run clean && rm -rf node_modules",
+    "postinstall": "node scripts/fix-node-pty-perms.mjs"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "turbo": "^2.3.0",
+    "typescript": "^5.6.3",
+    "tsdown": "^0.9.0"
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "name": "@open-take/adapter-elevenlabs",
+  "version": "0.0.0",
+  "description": "ElevenLabs TTSDriver + MockTTSDriver. v1 narration adapters (D11).",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test --import tsx/esm test/*.test.ts",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@open-take/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.1",
+    "tsdown": "^0.9.0",
+    "tsx": "^4.22.3",
+    "typescript": "^5.6.3"
+  }
+}

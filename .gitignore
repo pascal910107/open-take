@@ -1,0 +1,10 @@
+node_modules
+dist
+.turbo
+.open-take-cache
+*.log
+.DS_Store
+.env
+.env.local
+.claude/
+.notes/
