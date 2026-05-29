@@ -155,10 +155,10 @@ dump of classes / `data-testid` / `getBoundingClientRect`), and target by
   for the start, `toSelector`/`toText` for the end → bbox centre). Add an
   optional `path` of viewport points for a freehand curve (overrides the straight
   start→end line). `durationMs` controls how long the stroke takes (default 1200;
-  at the default ~10fps capture **prefer 1500–2500 — slow strokes read better**;
-  with `--fps 60` any speed stays smooth, see limits).
+  at the 60fps default any speed stays smooth; if you drop to `--fps 30`,
+  **prefer 1500–2500 — slow strokes read better**).
   - *Canvas surfaces have no element to target:* get the canvas bbox first
-    (`agent-browser eval` a `getBoundingClientRect`), then compute `from`/`to`/
+    (`inspect`, or a one-off CDP `getBoundingClientRect`), then compute `from`/`to`/
     `path` points **inside** it. Select the drawing tool with a `click` *before*
     the drag.
 - `settleMs`: hold after the action so its result is visible (~1200–2600ms).
@@ -169,20 +169,20 @@ dump of classes / `data-testid` / `getBoundingClientRect`), and target by
 
 ### make (render)
 ```
-node packages/cli/dist/cli.js make --plan plan.json --out demo.mp4
-node packages/cli/dist/cli.js make --plan plan.json --out demo.mp4 --fps 60   # smooth motion
+node packages/cli/dist/cli.js make --plan plan.json --out demo.mp4            # 60fps (default)
+node packages/cli/dist/cli.js make --plan plan.json --out demo.mp4 --fps 30   # fast-draft
 ```
-Produces `demo.mp4` (1920×1080 @ 30fps default) and `demo.composition.json` (editable).
+Produces `demo.mp4` (1920×1080 @ **60fps default**, matching premium screen recorders) and
+`demo.composition.json` (editable).
 
-**`--fps 60` (high-fps, end-to-end).** One knob: it both **captures** at ~60fps
-(drives AND records over a direct CDP page session against a self-launched
-headless Chrome — bypassing agent-browser's ~10fps recordVideo ceiling) **and
-renders** the polished mp4 at 60fps. Use it whenever a beat has **continuous
-motion** — `drag`/sketch, scroll, video — so the background stays smooth and the
-ink keeps up with the cursor. Discrete click/type demos don't need it (30fps is
-fine and renders ~2× faster). Reuses the same locator logic, so robustness is
-unchanged; it just swaps the recorder. Needs a Chrome — auto-found from
-agent-browser's downloaded browser, or set `OPEN_TAKE_CHROME`.
+**fps (default 60).** Capture is always a pure-CDP screencast (drives AND
+records over a self-launched headless Chrome); `--fps` sets both the capture
+encode and the render grid. 60 is the premium, premium screen recorders feel — continuous
+motion (`drag`/sketch, scroll, video) stays smooth and the ink keeps up with the
+cursor. **`--fps 30` halves render time + file size** — use it for fast drafts
+while iterating, or for pure click/type demos where the gain is marginal. Needs
+a Chrome — auto-downloads Chrome-for-Testing on first run, or set
+`OPEN_TAKE_CHROME`.
 
 ## Capture robustness — checks that keep "user does nothing" honest
 - **Confirm no beat was dropped.** A missing target logs `captureTake: … not
@@ -221,15 +221,12 @@ agent-browser's downloaded browser, or set `OPEN_TAKE_CHROME`.
 - **Vocabulary = click · type · drag · wait.** Still missing **scroll** and
   **hover** — apps whose wow is *scrolling through content* or a *hover-reveal*
   need a proxy; say so when you downgrade.
-- **Default is ~10fps capture → 30fps render** (agent-browser screencast).
-  Discrete click→state-change and typing look great there. For continuous
-  motion (`drag`, scroll, animation) the background is choppy and the ink lags
-  the synthetic cursor by ~1 frame. **Fix: pass `--fps 60`** — captures ~60fps
-  AND renders at 60fps, so motion is smooth and the ink stays locked to the
-  cursor (verified end-to-end). At the default, soften motion with a slower
-  `durationMs` (1500–2500ms) and don't make fast scrubbing a hero beat; with
-  `--fps 60` it's fair game. (60fps roughly doubles render time + file size —
-  use it for motion demos, not click-only ones.)
+- **fps: default 60 (capture + render), pure-CDP screencast.** Continuous
+  motion (`drag`, scroll, animation) is smooth and the ink stays locked to the
+  synthetic cursor. `--fps 30` halves render time + file size — fine for fast
+  drafts and pure click/type demos; on a 30fps render, soften strokes with a
+  slower `durationMs` (1500–2500ms). The old ~10fps agent-browser ceiling is
+  gone entirely.
 - viewport ≠ video scaling is implemented but lightly tested.
 
 ## Prerequisites

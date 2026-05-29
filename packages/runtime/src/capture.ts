@@ -208,10 +208,11 @@ export type CaptureOpts = {
   /** ms to let the page settle after capture start before the first action */
   warmupMs?: number;
   /**
-   * Capture + encode fps (default 30). Capture is a CDP screencast at the
-   * browser's native rate; this is the encode grid and the intended render
-   * fps. 60 = smooth continuous motion (drag/scroll/video), ~2× render cost;
-   * 30 = the default. See cdp-capture.ts.
+   * Capture + encode fps. Default 60 (matches premium screen recorders' default — the
+   * polished, premium feel). Capture is a CDP screencast at the browser's
+   * native rate; this is the encode grid and the intended render fps. Drop to
+   * 30 for fast-draft renders (~½ the render time + file size) while iterating.
+   * See cdp-capture.ts.
    */
   fps?: number;
   /** explicit Chrome binary (else auto-resolved system Chrome / auto-download) */
@@ -221,7 +222,7 @@ export type CaptureOpts = {
 /** Drive `plan` against the live app over CDP, return the ground-truth log. */
 export async function captureTake(plan: TakePlan, opts: CaptureOpts): Promise<CaptureLog> {
   const { captureTakeCDP } = await import("./cdp-capture");
-  return captureTakeCDP(plan, { ...opts, fps: opts.fps ?? 30 });
+  return captureTakeCDP(plan, { ...opts, fps: opts.fps ?? 60 });
 }
 
 // --- inspectPage: planning aid -----------------------------------------

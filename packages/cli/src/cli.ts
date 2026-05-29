@@ -35,9 +35,10 @@ Usage:
   open-take inspect <url> [--viewport 1920x1080]
   open-take make --plan <plan.json> --out <out.mp4> [--fps 60]
 
-  --fps <n>   capture AND render fps (default 30). 60 = smooth continuous
-              motion (drags/scroll/cursor), ~2× render cost. Capture is always
-              a pure-CDP screencast; this sets the encode + render grid.
+  --fps <n>   capture AND render fps (default 60, matches premium screen recorders).
+              Drop to 30 for fast-draft renders (~½ the time + file size) while
+              iterating. Capture is always a pure-CDP screencast; this sets the
+              encode + render grid.
 `;
 
 async function main() {
