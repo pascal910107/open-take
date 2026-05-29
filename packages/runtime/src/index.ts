@@ -43,8 +43,8 @@ export async function makeTake(plan: TakePlan, opts: MakeTakeOpts): Promise<Make
   const videoPath = join(work, "capture.mp4"); // CDP screencast → h264 mp4
 
   const log = await captureTake(plan, { ...opts.capture, videoPath });
-  // One knob: the render grid follows the capture fps (default 60, matching
-  // premium screen recorders) unless the caller pinned an explicit render fps. (A 30fps
+  // One knob: the render grid follows the capture fps (default 60) unless the
+  // caller pinned an explicit render fps. (A 30fps
   // render of a 60fps capture would discard half the frames; matching them is
   // what makes 60fps real.)
   const captureFps = opts.capture?.fps ?? 60;

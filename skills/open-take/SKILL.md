@@ -61,8 +61,16 @@ the app's signature moment; make the wow the hero, not an afterthought.
   box** (a path, not a point). A big cross-canvas stroke fills the frame already
   → `"auto"` keeps it full-view (correct). A small, localized drag → `"auto"`
   zooms in. Use `"never"` to force full-view for a sweeping gesture.
-- Restraint reads as intentional. Reserve zoom for 1–2 beats at most; many great
-  demos are 0-zoom. Don't add a zoom for "variety."
+- **Progressive zoom (zoom in, then zoom in MORE).** Consecutive zoom beats
+  don't reset to full view between them — the engine **pans and re-scales from
+  one zoom target straight to the next** (the cinematic, premium style). So you can open
+  a region, then push deeper: e.g. `click`(zoom a panel) → `hover`(zoom a control
+  *inside* it). A later beat on a *smaller* element gets a *higher* scale, so it
+  reads as "going deeper." Use this for reveal→detail arcs; it only zooms back
+  out at the end (or for a `scroll`/full-view beat). Still selective — 2–3
+  chained zooms max, each earning it.
+- Restraint reads as intentional. Reserve zoom for the beats that earn it; many
+  great demos are 0-zoom. Don't add a zoom for "variety."
 
 ### 3. SELF-CRITIQUE (before building — revise if it fails)
 Ask, honestly:
@@ -77,24 +85,22 @@ the ideal onto the capture vocabulary (next section) and decide your downgrades.
 Write the plan (schema below), then `make`. The runtime drives the live app and
 composites the polish.
 
-**The capture vocabulary is `click` · `type` · `drag` · `wait`.** That covers
-most product wows: triggering UI (click), search boxes / AI prompts / forms
-(type), and sketching / drawing / moving on a canvas (drag — a *path*). What's
-still missing: **`scroll` and `hover`**. When a beat from your ideal needs one
-of those:
-1. **Find a path to the SAME editorial point with the vocabulary you have.** A
-   feature is usually reachable without scrolling (link straight to it); a
-   hover-reveal often has a click equivalent. The point is the *wow*, not the
-   mechanic.
-2. **If there's genuinely no path, downgrade and flag it explicitly** in your
-   write-up. Do NOT silently fall back to clicking inert UI. An honest "the ideal
-   needs scroll-reveal, which the runtime can't capture yet" is a real finding —
-   surface it.
+**The capture vocabulary is `click` · `type` · `drag` · `scroll` · `hover` ·
+`press` · `wait`.** It covers most product wows directly:
+- **click** — trigger UI / orient / navigate.
+- **type** — search boxes, AI prompts, forms (real keystrokes).
+- **drag** — sketch / draw / move on a canvas (a *path*, not a point).
+- **scroll** — pan a landing page or feed to reveal content (to an element by
+  name, or a fixed amount); the frame stays full-view as the content moves.
+- **hover** — dwell on an element to reveal a tooltip / dropdown / hover-state.
+- **press** — a key or shortcut (Enter to submit, Escape, ⌘K palette, arrows).
 
-**Use the real mechanic when you have it.** Before drag/type existed, demos
-faked a sketch via a "load template" button and flagged the downgrade. Now: if
-the wow is drawing, *drag to draw it*; if it's search, *type the query*. Reach
-for a proxy only when the genuine action isn't in the vocabulary.
+**Use the real mechanic.** If the wow is drawing, *drag to draw it*; if it's
+search, *type the query then `press` Enter*; if it's a hover-reveal, *hover*; if
+it's "scroll through the gorgeous landing page", *scroll*. Reach for a proxy
+(and flag the downgrade out loud) only when the genuine action genuinely isn't
+expressible — e.g. a hover-reveal whose menu has no accessible name AND no
+stable selector. Don't silently fall back to clicking inert UI.
 
 ### 5. SHOW (frames, not claims)
 Extract frames from the MP4 and **look at them** before you call it done:
@@ -118,11 +124,11 @@ Returns `{ url, viewport, elements: [{name, tag, role, href, inView, x,y,w,h}] }
 
 **`inspect` only sees accessibly-named `button/a/[role]/input` elements.** Many
 real controls are unlabeled icon-buttons or `<div>`s with click handlers (app
-toolbars, canvas tools) and won't appear. For those, drive `agent-browser`
-directly to find a stable **CSS selector** (`eval` a `document.querySelectorAll`
-dump of classes / `data-testid` / `getBoundingClientRect`), and target by
-`selector`. Verify the interaction actually fires before planning it (e.g.
-`eval` `el.click()` and check the page changed).
+toolbars, canvas tools) and won't appear. For those, open the URL in any browser
+DevTools to find a stable **CSS selector** (classes / `data-testid` /
+`getBoundingClientRect`), and target by `selector`. Verify the interaction
+actually fires before planning it (in the console: `el.click()` and check the
+page changed).
 
 ### plan.json (a TakePlan)
 ```json
@@ -134,6 +140,10 @@ dump of classes / `data-testid` / `getBoundingClientRect`), and target by
     { "action": "wait", "ms": 1100 },
     { "action": "click", "selector": ".some-icon-button", "zoom": "never", "note": "global payoff", "settleMs": 2000 },
     { "action": "type", "text": "Search the docs", "value": "polished demos, on tap", "zoom": "always", "note": "search box", "settleMs": 1200 },
+    { "action": "press", "keys": "Enter", "selector": "#result", "zoom": "always", "note": "Enter submits → frame the result", "durationMs": 1200, "settleMs": 800 },
+    { "action": "press", "keys": "Meta+k", "selector": ".palette", "zoom": "always", "note": "⌘K opens the palette", "durationMs": 1400, "settleMs": 600 },
+    { "action": "scroll", "toText": "Pricing", "note": "pan down to the pricing section", "durationMs": 1100, "settleMs": 900 },
+    { "action": "hover", "text": "Profile", "zoom": "always", "note": "tooltip reveal", "durationMs": 1400, "settleMs": 600 },
     { "action": "click", "text": "Open menu", "zoom": "always", "note": "local co-located popover", "settleMs": 1600 },
     { "action": "drag", "from": { "x": 560, "y": 400 }, "to": { "x": 1140, "y": 400 },
       "path": [{ "x": 560, "y": 400 }, { "x": 760, "y": 250 }, { "x": 1140, "y": 400 }],
@@ -154,13 +164,33 @@ dump of classes / `data-testid` / `getBoundingClientRect`), and target by
   explicit viewport point (`from` / `to`) or a located element (`selector`/`text`
   for the start, `toSelector`/`toText` for the end → bbox centre). Add an
   optional `path` of viewport points for a freehand curve (overrides the straight
-  start→end line). `durationMs` controls how long the stroke takes (default 1200;
-  at the 60fps default any speed stays smooth; if you drop to `--fps 30`,
-  **prefer 1500–2500 — slow strokes read better**).
+  start→end line). The stroke **eases in and out** (accelerates into the line,
+  settles out — a natural hand-draw, in lockstep with the ink). `durationMs`
+  (default 1200): at the 60fps default a **natural ~900–1400** reads best — the
+  old "slow strokes read better" advice was a low-fps workaround; you no longer
+  need 2000ms+ unless you *want* a deliberate slow draw. Only on `--fps 30` lean
+  slower (1500–2500).
   - *Canvas surfaces have no element to target:* get the canvas bbox first
     (`inspect`, or a one-off CDP `getBoundingClientRect`), then compute `from`/`to`/
     `path` points **inside** it. Select the drawing tool with a `click` *before*
     the drag.
+- **`scroll`** pans the page. Either `toSelector`/`toText` (scroll until that
+  element is centred — robust, prefer this) or `dy` (signed pixels, + = down;
+  default ~0.8 viewport). The cursor **holds** (content moves underneath) and the
+  frame stays **full-view** — a scroll never zooms (and any prior zoom releases
+  to full-view for it). `durationMs` ≈ 900–1400. Use it to reveal sections of a
+  landing page / scroll a feed.
+- **`hover`** moves the cursor onto an element (by `text`/`selector`) and
+  **dwells** (`durationMs` ≈ 1200–1600) so a tooltip / dropdown / hover-state
+  shows — no click. Zooms like a click (auto/always); use `"never"` when the
+  reveal (a wide menu) spills past the element's own bbox.
+- **`press`** sends a key or shortcut via `keys`: a named key (`"Enter"`,
+  `"Escape"`, `"Tab"`, `"ArrowDown"`) or a combo (`"Meta+k"`, `"Control+Shift+p"`,
+  `"Shift+Tab"`). Keyboard-driven, so the **cursor does not move**. The press
+  lands on whatever has focus (e.g. a field a prior `type` filled → `Enter`
+  submits) or the document (⌘K-style listeners). To zoom on what it reveals, name
+  that element via `selector`/`text` (it's located *after* the press, then
+  framed). A bare press (no reveal) holds **full-view** for `durationMs`.
 - `settleMs`: hold after the action so its result is visible (~1200–2600ms).
   Give big reveals a longer hold.
 - `wait`: paces the video / orients at the start.
@@ -172,12 +202,12 @@ dump of classes / `data-testid` / `getBoundingClientRect`), and target by
 node packages/cli/dist/cli.js make --plan plan.json --out demo.mp4            # 60fps (default)
 node packages/cli/dist/cli.js make --plan plan.json --out demo.mp4 --fps 30   # fast-draft
 ```
-Produces `demo.mp4` (1920×1080 @ **60fps default**, matching premium screen recorders) and
+Produces `demo.mp4` (1920×1080 @ **60fps default**) and
 `demo.composition.json` (editable).
 
 **fps (default 60).** Capture is always a pure-CDP screencast (drives AND
 records over a self-launched headless Chrome); `--fps` sets both the capture
-encode and the render grid. 60 is the premium, premium screen recorders feel — continuous
+encode and the render grid. 60 is the premium, cinematic feel — continuous
 motion (`drag`/sketch, scroll, video) stays smooth and the ink keeps up with the
 cursor. **`--fps 30` halves render time + file size** — use it for fast drafts
 while iterating, or for pure click/type demos where the gain is marginal. Needs
@@ -185,9 +215,10 @@ a Chrome — auto-downloads Chrome-for-Testing on first run, or set
 `OPEN_TAKE_CHROME`.
 
 ## Capture robustness — checks that keep "user does nothing" honest
-- **Confirm no beat was dropped.** A missing target logs `captureTake: … not
+- **Confirm no beat was dropped.** A missing target logs `captureTakeCDP: … not
   found, skipped: …` to stderr, and the composition will have **fewer `events`
-  than you have action steps** (click/type/drag; `wait` is not an event). Check
+  than you have action steps** (click/type/drag/scroll/hover/press are events;
+  `wait` is not). Check
   that count. If a beat was dropped, fix the target (re-`inspect`; names/layout
   may have changed) or just re-run (capture can flake on a cold first run) —
   never ship a silently-empty demo. ALWAYS look at the frames (step 5) to catch
@@ -197,14 +228,14 @@ a Chrome — auto-downloads Chrome-for-Testing on first run, or set
   surface ignored synthetic input — eyeball the frames mid-stroke. (Select the
   tool with a `click` first; CDP mouse input is trusted, so canvas libs that
   listen for pointer events do respond.)
-- **Reset persistent app state.** Stateful apps (canvas tools, editors) persist
-  to `localStorage`, and the recorder shares the browser profile across runs —
-  so you can open onto leftover content instead of a clean slate. Clear it
-  first: `agent-browser --session-name x open <url>` then
-  `eval 'localStorage.clear()'`, close, then `make`.
-- **Target unlabeled controls by CSS selector**, resolved via `agent-browser
-  eval` (see inspect note). The selector path is atomic (resolve-bbox-and-click
-  in one eval), so it's as robust as the text path.
+- **App state starts clean each run.** Capture launches Chrome on a fresh temp
+  profile (removed on close), so `localStorage`/cookies do NOT leak between runs
+  — a stateful app (canvas tool, editor) opens empty every time. If your demo
+  *needs* seeded state, set it up within the plan itself (type/click your way
+  in), not across runs.
+- **Target unlabeled controls by CSS `selector`** (see inspect note). The
+  selector path is atomic (resolve-bbox-and-click in one page eval), so it's as
+  robust as the text path.
 
 ## Editorial guidance (what makes a good draft)
 - Lead with an orienting beat so the viewer sees the app whole; the
@@ -218,9 +249,14 @@ a Chrome — auto-downloads Chrome-for-Testing on first run, or set
   break the demo.
 
 ## Known limits (don't be surprised; flag when they bite the story)
-- **Vocabulary = click · type · drag · wait.** Still missing **scroll** and
-  **hover** — apps whose wow is *scrolling through content* or a *hover-reveal*
-  need a proxy; say so when you downgrade.
+- **Vocabulary = click · type · drag · scroll · hover · press · wait.** Covers
+  most product wows directly. Remaining edges to flag when they bite: a
+  hover-reveal whose menu has no accessible name *and* no stable selector;
+  multi-key sequences within one beat (chain separate `press` steps); precise
+  inner-scroller targeting (scroll dispatches a wheel at viewport centre, so it
+  pans the main document — a nested scroll region that isn't under centre may
+  need a `dy` tuned by hand). A real text-drag selection isn't a first-class verb
+  (use `drag` across the text, but it won't always select).
 - **fps: default 60 (capture + render), pure-CDP screencast.** Continuous
   motion (`drag`, scroll, animation) is smooth and the ink stays locked to the
   synthetic cursor. `--fps 30` halves render time + file size — fine for fast

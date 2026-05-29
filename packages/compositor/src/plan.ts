@@ -30,7 +30,8 @@ export type PlanOpts = {
 };
 
 export function planComposition(log: CaptureLog, opts: PlanOpts = {}): TakeComposition {
-  const vW = log.video.width, vH = log.video.height;
+  const vW = log.video.width,
+    vH = log.video.height;
   const oW = opts.output?.width ?? vW;
   const oH = opts.output?.height ?? vH;
   const fps = opts.output?.fps ?? 30;
@@ -54,8 +55,10 @@ export function planComposition(log: CaptureLog, opts: PlanOpts = {}): TakeCompo
   // the WHOLE stroke (a path, not a point): big cross-canvas drags fit ≈ rest
   // → no zoom (correct, global); small localised drags zoom in.
   const pathBBox = (pts: Pt[]): BBox => {
-    const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
-    const x = Math.min(...xs), y = Math.min(...ys);
+    const xs = pts.map((p) => p.x),
+      ys = pts.map((p) => p.y);
+    const x = Math.min(...xs),
+      y = Math.min(...ys);
     return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
   };
 
@@ -69,12 +72,13 @@ export function planComposition(log: CaptureLog, opts: PlanOpts = {}): TakeCompo
     // drag: cursor path + the bbox we fit-zoom is the path's bbox
     const to = kind === "drag" ? mapPt((c as { to: Pt }).to) : undefined;
     const rawPath =
-      kind === "drag" ? ((c as { path?: Pt[] }).path ?? [{ x: c.x, y: c.y }, (c as { to: Pt }).to]) : undefined;
+      kind === "drag"
+        ? ((c as { path?: Pt[] }).path ?? [{ x: c.x, y: c.y }, (c as { to: Pt }).to])
+        : undefined;
     const path = rawPath?.map(mapPt);
 
     // The region this action is "about" — what zoom should frame.
-    const bbox =
-      kind === "drag" && path ? pathBBox(path) : c.box ? mapBox(c.box) : undefined;
+    const bbox = kind === "drag" && path ? pathBBox(path) : c.box ? mapBox(c.box) : undefined;
 
     let enabled = false;
     let scale = rest;
@@ -82,7 +86,12 @@ export function planComposition(log: CaptureLog, opts: PlanOpts = {}): TakeCompo
     const center = bbox ? { x: bbox.x + bbox.w / 2, y: bbox.y + bbox.h / 2 } : point;
     const fit = bbox ? bboxFitScale(bbox, oW, oH, fillFrac, maxScale, rest) : maxScale;
 
-    if (intent === "never") {
+    if (kind === "scroll") {
+      // A scroll is a pan beat: the content moves, the frame stays full-view.
+      // Zooming would fight the motion, so a scroll never zooms.
+      enabled = false;
+      reason = "scroll — full view (content pans, no zoom)";
+    } else if (intent === "never") {
       enabled = false;
       reason = "plan: zoom=never (global/navigation payoff — keep full view)";
     } else if (intent === "always") {
@@ -113,9 +122,12 @@ export function planComposition(log: CaptureLog, opts: PlanOpts = {}): TakeCompo
       point,
       bbox,
       label: c.sel ?? c.note,
-      zoom: { enabled, scale, center, inAtMs: Math.max(0, c.tMs - cursor.travelMs), reason },
+      // zoom-in ramp starts zoomInMs before the action (decoupled from cursor
+      // travelMs so the zoom can be slower/gentler — a more cinematic feel).
+      zoom: { enabled, scale, center, inAtMs: Math.max(0, c.tMs - cursor.zoomInMs), reason },
       ...(durationMs ? { durationMs } : {}),
       ...(kind === "type" ? { text: (c as { text: string }).text } : {}),
+      ...(kind === "press" ? { keys: (c as { keys: string }).keys } : {}),
       ...(to ? { to } : {}),
       ...(path ? { path } : {}),
     };

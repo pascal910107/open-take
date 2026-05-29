@@ -19,7 +19,11 @@ export type Box = { x: number; y: number; w: number; h: number };
 export function findBox(o: unknown): Box | null {
   if (!o || typeof o !== "object") return null;
   const r = o as Record<string, unknown>;
-  if (typeof r.x === "number" && typeof r.y === "number" && (typeof r.width === "number" || typeof r.w === "number"))
+  if (
+    typeof r.x === "number" &&
+    typeof r.y === "number" &&
+    (typeof r.width === "number" || typeof r.w === "number")
+  )
     return { x: r.x, y: r.y, w: (r.width ?? r.w) as number, h: (r.height ?? r.h) as number };
   for (const k of Object.keys(r)) {
     const hit = findBox(r[k]);
@@ -148,12 +152,37 @@ export function boxByTextJs(text: string): string {
   const t = JSON.stringify(text);
   return (
     `(function(){var t=${t};` +
-    `var els=Array.prototype.slice.call(document.querySelectorAll('button,a,[role=button],[role=link],[role=menuitem],[aria-label],li,[draggable=true]'));` +
-    `function name(e){return (e.getAttribute('aria-label')||e.textContent||'').replace(/\\s+/g,' ').trim();}` +
+    `var els=Array.prototype.slice.call(document.querySelectorAll('button,a,[role=button],[role=link],[role=menuitem],[aria-label],[title],img[alt],li,[draggable=true]'));` +
+    `function name(e){return (e.getAttribute('aria-label')||e.getAttribute('title')||e.getAttribute('alt')||e.textContent||'').replace(/\\s+/g,' ').trim();}` +
     `var m=els.filter(function(e){return name(e)===t;})[0]||els.filter(function(e){return name(e).indexOf(t)!==-1;})[0];` +
     `if(!m)return 'NOTFOUND';var r=m.getBoundingClientRect();` +
     `if(r.top<0||r.bottom>window.innerHeight){m.scrollIntoView({block:'center'});r=m.getBoundingClientRect();}` +
     `return JSON.stringify({x:Math.round(r.x),y:Math.round(r.y),w:Math.round(r.width),h:Math.round(r.height)});})()`
+  );
+}
+
+// --- scroll-to-element delta -------------------------------------------
+// How far (signed px, + = down) to scroll so the element's centre lands at
+// viewport centre. Measures the CURRENT rect WITHOUT scrollIntoView (a jump
+// would defeat the smooth wheel ramp). Returns "NOTFOUND" or a {dy} JSON.
+export function scrollDeltaSelectorJs(selector: string): string {
+  const s = JSON.stringify(selector);
+  return (
+    `(function(){var m=document.querySelector(${s});if(!m)return 'NOTFOUND';` +
+    `var r=m.getBoundingClientRect();` +
+    `return JSON.stringify({dy:Math.round(r.top+r.height/2-window.innerHeight/2)});})()`
+  );
+}
+
+export function scrollDeltaByTextJs(text: string): string {
+  const t = JSON.stringify(text);
+  return (
+    `(function(){var t=${t};` +
+    `var els=Array.prototype.slice.call(document.querySelectorAll('button,a,[role=button],[role=link],[role=heading],[aria-label],[title],h1,h2,h3,li,section,p'));` +
+    `function name(e){return (e.getAttribute('aria-label')||e.getAttribute('title')||e.textContent||'').replace(/\\s+/g,' ').trim();}` +
+    `var m=els.filter(function(e){return name(e)===t;})[0]||els.filter(function(e){return name(e).indexOf(t)!==-1;})[0];` +
+    `if(!m)return 'NOTFOUND';var r=m.getBoundingClientRect();` +
+    `return JSON.stringify({dy:Math.round(r.top+r.height/2-window.innerHeight/2)});})()`
   );
 }
 
@@ -174,27 +203,49 @@ export function sampleAlong(pts: { x: number; y: number }[], u: number): { x: nu
   for (let i = 0; i < seg.length; i++) {
     if (target <= seg[i]! || i === seg.length - 1) {
       const f = seg[i]! > 0 ? target / seg[i]! : 0;
-      return { x: pts[i]!.x + (pts[i + 1]!.x - pts[i]!.x) * f, y: pts[i]!.y + (pts[i + 1]!.y - pts[i]!.y) * f };
+      return {
+        x: pts[i]!.x + (pts[i + 1]!.x - pts[i]!.x) * f,
+        y: pts[i]!.y + (pts[i + 1]!.y - pts[i]!.y) * f,
+      };
     }
     target -= seg[i]!;
   }
   return pts[pts.length - 1]!;
 }
 
-export function ffprobe(path: string): Promise<{ width?: number; height?: number; fps?: string; durationS?: number }> {
+export function ffprobe(
+  path: string,
+): Promise<{ width?: number; height?: number; fps?: string; durationS?: number }> {
   return new Promise((res) => {
-    const c = spawn("ffprobe", [
-      "-v", "error", "-select_streams", "v:0",
-      "-show_entries", "stream=width,height,r_frame_rate,duration",
-      "-show_entries", "format=duration", "-of", "json", path,
-    ], { stdio: ["ignore", "pipe", "ignore"] });
+    const c = spawn(
+      "ffprobe",
+      [
+        "-v",
+        "error",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=width,height,r_frame_rate,duration",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "json",
+        path,
+      ],
+      { stdio: ["ignore", "pipe", "ignore"] },
+    );
     let out = "";
     c.stdout.on("data", (d) => (out += d));
     c.on("close", () => {
       try {
         const j = JSON.parse(out);
         const s = j.streams?.[0] ?? {};
-        res({ width: s.width, height: s.height, fps: s.r_frame_rate, durationS: Number(s.duration ?? j.format?.duration ?? 0) });
+        res({
+          width: s.width,
+          height: s.height,
+          fps: s.r_frame_rate,
+          durationS: Number(s.duration ?? j.format?.duration ?? 0),
+        });
       } catch {
         res({});
       }
@@ -208,8 +259,8 @@ export type CaptureOpts = {
   /** ms to let the page settle after capture start before the first action */
   warmupMs?: number;
   /**
-   * Capture + encode fps. Default 60 (matches premium screen recorders' default — the
-   * polished, premium feel). Capture is a CDP screencast at the browser's
+   * Capture + encode fps. Default 60 (the polished, premium 60fps feel).
+   * Capture is a CDP screencast at the browser's
    * native rate; this is the encode grid and the intended render fps. Drop to
    * 30 for fast-draft renders (~½ the render time + file size) while iterating.
    * See cdp-capture.ts.

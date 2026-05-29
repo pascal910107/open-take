@@ -11,7 +11,15 @@
 // No deps — Node 22's global `WebSocket`/`fetch` carry the protocol.
 
 import { type ChildProcess, spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { createRequire } from "node:module";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -51,9 +59,16 @@ export function resolveChrome(explicit?: string): string | null {
   // legacy: a CfT an older agent-browser install left behind (also isolated)
   const abBrowsers = join(homedir(), ".agent-browser", "browsers");
   if (existsSync(abBrowsers)) {
-    for (const d of readdirSync(abBrowsers).filter((n) => n.startsWith("chrome-")).sort().reverse()) {
+    for (const d of readdirSync(abBrowsers)
+      .filter((n) => n.startsWith("chrome-"))
+      .sort()
+      .reverse()) {
       candidates.push(
-        join(abBrowsers, d, "Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"),
+        join(
+          abBrowsers,
+          d,
+          "Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+        ),
         join(abBrowsers, d, "chrome-linux64", "chrome"),
         join(abBrowsers, d, "chrome"),
       );
@@ -83,9 +98,8 @@ export async function ensureChrome(explicit?: string): Promise<string> {
   const found = resolveChrome(explicit);
   if (found) return found;
   try {
-    const { install, resolveBuildId, detectBrowserPlatform, computeExecutablePath, Browser } = await import(
-      "@puppeteer/browsers"
-    );
+    const { install, resolveBuildId, detectBrowserPlatform, computeExecutablePath, Browser } =
+      await import("@puppeteer/browsers");
     const platform = detectBrowserPlatform();
     if (!platform) throw new Error("unsupported platform");
     const buildId = await resolveBuildId(Browser.CHROME, platform, "stable");
@@ -216,7 +230,9 @@ export async function launchBrowser(opts: {
     return { cdp, targetId: target.id, close };
   } catch (e) {
     await close();
-    throw new Error(`open-take(hi-fps): browser launch failed: ${(e as Error).message}\n${stderr.slice(-600)}`);
+    throw new Error(
+      `open-take(hi-fps): browser launch failed: ${(e as Error).message}\n${stderr.slice(-600)}`,
+    );
   }
 }
 
@@ -263,7 +279,12 @@ async function pageTargetWs(port: number): Promise<{ wsUrl: string; id: string }
 // window keeps frame == viewport == event space, exactly. Returns the achieved
 // inner size; on a browser that won't resize (remote/CDP service) it falls back
 // to whatever the natural inner is — still self-consistent, just maybe smaller.
-export async function fitViewport(cdp: CDP, targetId: string, vw: number, vh: number): Promise<[number, number]> {
+export async function fitViewport(
+  cdp: CDP,
+  targetId: string,
+  vw: number,
+  vh: number,
+): Promise<[number, number]> {
   const readInner = async (): Promise<[number, number]> => {
     const r = await cdp.send<{ result?: { value?: string } }>("Runtime.evaluate", {
       expression: "JSON.stringify([window.innerWidth, window.innerHeight])",
@@ -287,7 +308,10 @@ export async function fitViewport(cdp: CDP, targetId: string, vw: number, vh: nu
     if (Math.abs(dw) <= 1 && Math.abs(dh) <= 1) break;
     width += dw;
     height += dh;
-    await cdp.send("Browser.setWindowBounds", { windowId: win.windowId, bounds: { width, height } });
+    await cdp.send("Browser.setWindowBounds", {
+      windowId: win.windowId,
+      bounds: { width, height },
+    });
     await sleep(120);
     inner = await readInner();
   }
@@ -313,7 +337,10 @@ export class Screencast {
   }
 
   /** Begin capture. `t0` (Date.now) anchors every frame + event onto one clock. */
-  async start(t0: number, opts: { maxWidth: number; maxHeight: number; quality?: number }): Promise<void> {
+  async start(
+    t0: number,
+    opts: { maxWidth: number; maxHeight: number; quality?: number },
+  ): Promise<void> {
     this.t0 = t0;
     this.cdp.on("Page.screencastFrame", (p: { data: string; sessionId: number }) => {
       const off = Date.now() - this.t0;
@@ -356,7 +383,11 @@ export function encodeFrames(
   // Each frame is shown until the next arrives; the first is held back to t0
   // so the video timeline starts where event timestamps do.
   const lines: string[] = [];
-  const bounds = [0, ...frames.slice(1).map((f) => f.offMs), Math.max(endMs, frames[frames.length - 1]!.offMs + 33)];
+  const bounds = [
+    0,
+    ...frames.slice(1).map((f) => f.offMs),
+    Math.max(endMs, frames[frames.length - 1]!.offMs + 33),
+  ];
   for (let i = 0; i < frames.length; i++) {
     const dur = Math.max(0.001, (bounds[i + 1]! - bounds[i]!) / 1000);
     lines.push(`file '${frames[i]!.file}'`, `duration ${dur.toFixed(4)}`);
@@ -372,12 +403,23 @@ export function encodeFrames(
 
   return new Promise((resolve, reject) => {
     const args = [
-      "-y", "-loglevel", "error",
-      "-f", "concat", "-safe", "0", "-i", listPath,
-      "-vsync", "cfr", "-r", String(fps),
+      "-y",
+      "-loglevel",
+      "error",
+      "-f",
+      "concat",
+      "-safe",
+      "0",
+      "-i",
+      listPath,
+      "-vsync",
+      "cfr",
+      "-r",
+      String(fps),
       // screencast frames can be odd-sized (e.g. 1280x657); yuv420p needs
       // even dims, so round down to the nearest even before pixel-format.
-      "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p",
+      "-vf",
+      "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p",
       ...codec,
       outPath,
     ];
@@ -385,7 +427,11 @@ export function encodeFrames(
     let err = "";
     c.stderr.on("data", (d) => (err += d));
     c.on("error", reject);
-    c.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`ffmpeg encode exited ${code}: ${err.slice(-800)}`))));
+    c.on("close", (code) =>
+      code === 0
+        ? resolve()
+        : reject(new Error(`ffmpeg encode exited ${code}: ${err.slice(-800)}`)),
+    );
   });
 }
 

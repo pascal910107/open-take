@@ -54,7 +54,42 @@ export type CaptureDrag = CaptureEventBase & {
   durationMs: number;
 };
 
-export type CaptureEvent = CaptureClick | CaptureType | CaptureDrag;
+/** A scroll: the content pans for `durationMs`. The cursor holds (no travel),
+ *  full-view (no zoom). `dy` is the signed pixels scrolled (editability). */
+export type CaptureScroll = CaptureEventBase & {
+  kind: "scroll";
+  /** signed pixels scrolled (positive = down) */
+  dy: number;
+  /** ms the scroll occupies on screen (ground-truth wall time) */
+  durationMs: number;
+};
+
+/** A hover: the cursor travels to `x,y` and dwells for `durationMs` so a
+ *  tooltip / menu / hover-state reveals. Like a click that doesn't click. */
+export type CaptureHover = CaptureEventBase & {
+  kind: "hover";
+  /** ms the dwell occupies on screen (ground-truth wall time) */
+  durationMs: number;
+};
+
+/** A key press / shortcut: keyboard-driven, so the cursor holds (no travel).
+ *  Holds for `durationMs` while the effect plays out; if a reveal element was
+ *  located, `box` carries its bbox so the zoom can frame it. */
+export type CapturePress = CaptureEventBase & {
+  kind: "press";
+  /** the chord pressed, e.g. "Enter" / "Meta+k" (editability) */
+  keys: string;
+  /** ms the hold occupies on screen (ground-truth wall time) */
+  durationMs: number;
+};
+
+export type CaptureEvent =
+  | CaptureClick
+  | CaptureType
+  | CaptureDrag
+  | CaptureScroll
+  | CaptureHover
+  | CapturePress;
 
 export type CaptureLog = {
   video: { width: number; height: number; fps?: number | string; durationS?: number };
@@ -81,19 +116,22 @@ export type ZoomDecision = {
 };
 
 export type CompEvent = {
-  kind: "click" | "type" | "drag";
+  kind: "click" | "type" | "drag" | "scroll" | "hover" | "press";
   tMs: number;
-  /** anchor point (click / focus / drag start) in video-px */
+  /** anchor point (click / focus / drag start / hover) in video-px. For a
+   *  scroll/press the cursor does not move; this is its resting point. */
   point: Pt;
   /** element bbox in video-px (if known) */
   bbox?: BBox;
   label?: string;
   zoom: ZoomDecision;
-  /** how long the action plays out after `tMs` (type/drag); 0 for a click.
-   *  The cursor parks and the zoom holds for this long. */
+  /** how long the action plays out after `tMs` (type/drag/scroll/hover/press);
+   *  0 for a click. The cursor parks and the zoom holds for this long. */
   durationMs?: number;
   /** typed text (kind=type), for editability */
   text?: string;
+  /** chord pressed (kind=press), for editability */
+  keys?: string;
   /** drag end point, video-px (kind=drag) */
   to?: Pt;
   /** drag polyline incl. ends, video-px (kind=drag) — the cursor path */
@@ -114,13 +152,23 @@ export type CursorConfig = {
   arcFrac: number;
   arcMax: number;
   rippleMs: number;
-  /** seconds to hold a zoom after a click, and to zoom back out */
+  /** ms to hold a zoom after the action settles, before zooming back out */
   holdMs: number;
+  /** ms for the zoom-OUT ramp (back to rest) */
   zoomOutMs: number;
-  /** easing for a travel move, as cubic-bezier control points
-   *  [x1,y1,x2,y2]. Default is decelerate-biased (soft start, long settle
-   *  into the target — the premium screen recorders feel). Drag strokes ignore this
-   *  (they trace the ink at constant speed). */
+  /** ms for the zoom-IN ramp (into a target). Decoupled from travelMs so the
+   *  zoom can be slower/gentler than the cursor (a cinematic ~1s zoom). */
+  zoomInMs: number;
+  /** ms to delay the synthetic cursor along a DRAG stroke, compensating for the
+   *  capture pipeline latency: the captured ink appears ~this long after the pen
+   *  actually moved, so without the delay the (exact-time) cursor leads the ink.
+   *  Tune so the cursor tip sits on the ink front mid-stroke. */
+  dragLagMs: number;
+  /** easing for a travel move, as cubic-bezier control points [x1,y1,x2,y2].
+   *  Default is a symmetric ease-in-out — measured from a reference recording, whose
+   *  cursor accelerates and decelerates evenly (a slow start, fast middle, soft
+   *  landing). Drag strokes ignore this (they ease the stroke in lockstep with
+   *  the captured ink — see math.ts). */
   travelEase: [number, number, number, number];
 };
 
@@ -148,16 +196,26 @@ export const DEFAULT_FRAMING: FramingConfig = {
 };
 
 export const DEFAULT_CURSOR: CursorConfig = {
-  travelMs: 600,
+  travelMs: 560,
   scale: 2.0,
-  arcFrac: 0.14,
-  arcMax: 90,
+  // Near-straight glide. The reference cursor barely bows (measured: a
+  // full-width move deviated <2% off the straight line), so the arc is small —
+  // just enough to avoid a robotic ruler-straight path, not a visible curve.
+  arcFrac: 0.05,
+  arcMax: 24,
   rippleMs: 450,
-  holdMs: 900,
-  zoomOutMs: 600,
-  // soft start, moderate early peak, then a long decelerating settle into the
-  // target (vs symmetric smootherstep, which brakes too late and reads as
-  // "snaps to a stop"). Tune toward [0.33,0,0.12,1] for snappier, or
-  // [0.42,0,0.58,1] for nearly-symmetric.
-  travelEase: [0.45, 0.05, 0.3, 1.0],
+  holdMs: 1100,
+  // Gentle, cinematic zoom (a ~1s ramp reads as premium); our
+  // old 600ms tied-to-travel zoom felt snappy/mechanical by comparison.
+  zoomOutMs: 800,
+  zoomInMs: 760,
+  // The captured ink trails the pen by the screencast/encode latency; delay the
+  // cursor the same so its tip rides the ink front (measured ~110ms here).
+  dragLagMs: 110,
+  // Symmetric ease-in-out, fit to a reference recording (cubic-bezier
+  // (.42,0,.58,1), RMS 0.028 vs the recording — best of every curve tried; the
+  // old decelerate-biased [.45,.05,.3,1] was the worst, RMS 0.090). This even
+  // accelerate/decelerate is the core of the "silky" feel. Tune toward
+  // [0.33,0,0.12,1] for snappier, or [0.6,0,0.4,1] for an even slower settle.
+  travelEase: [0.42, 0.0, 0.58, 1.0],
 };

@@ -78,8 +78,9 @@ export default makeScene2D("take", function* (view) {
         <Video src={comp.source.videoUrl} width={vW} height={vH} play={true} />
       </Rect>
 
-      {/* click ripples */}
-      {comp.events.map((e) => {
+      {/* click ripples — pointer-landing beats only (scroll/press have no
+          spatial click point, so they get no ripple) */}
+      {comp.events.filter((e) => e.kind !== "scroll" && e.kind !== "press").map((e) => {
         const ms = comp.cursor.rippleMs / 1000;
         const prog = () => {
           const dt = t() - e.tMs / 1000;

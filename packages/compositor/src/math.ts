@@ -11,20 +11,29 @@ export function smoother(t: number): number {
 }
 
 // Cubic-bezier easing y(x) with endpoints (0,0),(1,1) and control points
-// (x1,y1),(x2,y2) — the same model CSS/premium screen recorders use. Solves x(s)=x by
+// (x1,y1),(x2,y2) — the same model CSS easing uses. Solves x(s)=x by
 // bisection (cheap, monotone) then returns y(s). Lets the travel cursor use a
 // decelerate-biased curve (long, gentle settle) instead of symmetric easing.
 export function cubicBezier(x1: number, y1: number, x2: number, y2: number): (x: number) => number {
-  const bx = (s: number) => { const u = 1 - s; return 3 * u * u * s * x1 + 3 * u * s * s * x2 + s * s * s; };
-  const by = (s: number) => { const u = 1 - s; return 3 * u * u * s * y1 + 3 * u * s * s * y2 + s * s * s; };
+  const bx = (s: number) => {
+    const u = 1 - s;
+    return 3 * u * u * s * x1 + 3 * u * s * s * x2 + s * s * s;
+  };
+  const by = (s: number) => {
+    const u = 1 - s;
+    return 3 * u * u * s * y1 + 3 * u * s * s * y2 + s * s * s;
+  };
   return (x: number) => {
     if (x <= 0) return 0;
     if (x >= 1) return 1;
-    let lo = 0, hi = 1, s = x;
+    let lo = 0,
+      hi = 1,
+      s = x;
     for (let i = 0; i < 24; i++) {
       const xt = bx(s);
       if (Math.abs(xt - x) < 1e-4) break;
-      if (xt < x) lo = s; else hi = s;
+      if (xt < x) lo = s;
+      else hi = s;
       s = (lo + hi) / 2;
     }
     return by(s);
@@ -105,8 +114,10 @@ export function clampCenter(
 ): Pt {
   const halfW = outW / (2 * scale);
   const halfH = outH / (2 * scale);
-  const cx = videoW * scale >= outW ? Math.min(Math.max(center.x, halfW), videoW - halfW) : videoW / 2;
-  const cy = videoH * scale >= outH ? Math.min(Math.max(center.y, halfH), videoH - halfH) : videoH / 2;
+  const cx =
+    videoW * scale >= outW ? Math.min(Math.max(center.x, halfW), videoW - halfW) : videoW / 2;
+  const cy =
+    videoH * scale >= outH ? Math.min(Math.max(center.y, halfH), videoH - halfH) : videoH / 2;
   return { x: cx, y: cy };
 }
 
@@ -126,7 +137,22 @@ export function buildStageKeyframes(comp: TakeComposition): StageKeyframes {
   const HOLD = comp.cursor.holdMs / 1000;
   const ZOUT = comp.cursor.zoomOutMs / 1000;
 
-  const enabled = comp.events.filter((e) => e.zoom.enabled);
+  // Framing anchors over time. A zoom-enabled beat ramps to its target; a
+  // scroll (content pans) and a zoom-less press (Escape/Enter whose effect is
+  // global) ramp back to REST so the frame is full-view through them — without
+  // these, a prior zoom would persist across the scroll/keypress. Other
+  // disabled beats (a "never" click) keep holding the prior framing, unchanged.
+  type Anchor = { tMs: number; durationMs: number; inAtMs: number; scale: number; center: Pt };
+  const anchors: Anchor[] = [];
+  for (const e of comp.events) {
+    const base = { tMs: e.tMs, durationMs: e.durationMs ?? 0, inAtMs: e.zoom.inAtMs };
+    if (e.kind === "scroll" || (e.kind === "press" && !e.zoom.enabled)) {
+      anchors.push({ ...base, scale: rest, center: restC });
+    } else if (e.zoom.enabled) {
+      anchors.push({ ...base, scale: e.zoom.scale, center: e.zoom.center });
+    }
+  }
+
   const frames: { t: number; s: number; c: Pt }[] = [{ t: 0, s: rest, c: restC }];
   const push = (t: number, s: number, c: Pt) => {
     const last = frames[frames.length - 1]!;
@@ -134,19 +160,19 @@ export function buildStageKeyframes(comp: TakeComposition): StageKeyframes {
   };
 
   let cur = { s: rest, c: restC };
-  enabled.forEach((e, i) => {
-    const rampStart = e.zoom.inAtMs / 1000;
+  anchors.forEach((e, i) => {
+    const rampStart = e.inAtMs / 1000;
     const clickT = e.tMs / 1000;
-    // the action plays out (typing/drawing) for durationMs after tMs — hold
-    // the target framing through it (a point click has duration 0).
-    const actionEnd = (e.tMs + (e.durationMs ?? 0)) / 1000;
+    // the action plays out (typing/drawing/scrolling) for durationMs after tMs
+    // — hold the target framing through it (a point click has duration 0).
+    const actionEnd = (e.tMs + e.durationMs) / 1000;
     push(rampStart, cur.s, cur.c); // hold current until ramp begins
-    push(clickT, e.zoom.scale, e.zoom.center); // ramp to target by click
-    cur = { s: e.zoom.scale, c: e.zoom.center };
-    const next = enabled[i + 1];
+    push(clickT, e.scale, e.center); // ramp to target by the action
+    cur = { s: e.scale, c: e.center };
+    const next = anchors[i + 1];
     if (next) {
-      // hold target until the next zoom begins ramping (then it pans)
-      push(next.zoom.inAtMs / 1000, cur.s, cur.c);
+      // hold target until the next anchor begins ramping (then it pans)
+      push(next.inAtMs / 1000, cur.s, cur.c);
     } else {
       const holdEnd = actionEnd + HOLD;
       push(holdEnd, cur.s, cur.c);
@@ -173,13 +199,23 @@ export function buildLegs(comp: TakeComposition): Leg[] {
   let cur: Pt = comp.start;
   const travel = comp.cursor.travelMs / 1000;
   for (const e of comp.events) {
+    // scroll/press are not pointer-driven — the cursor holds where it was
+    // (the content pans / the keyboard acts). No travel leg; `cur` is untouched,
+    // so the between-legs parking logic keeps the cursor at its last anchor.
+    if (e.kind === "scroll" || e.kind === "press") continue;
     const arrive = e.tMs / 1000;
     legs.push({ t0: arrive - travel, t1: arrive, a: cur, b: e.point }); // travel to anchor
     cur = e.point;
     if (e.kind === "drag" && e.to) {
-      const dEnd = (e.tMs + (e.durationMs ?? 0)) / 1000;
+      // Delay the stroke by dragLagMs so the cursor rides the captured ink front
+      // (the ink trails the pen by the capture-pipeline latency). The cursor
+      // holds at the start point during the gap [arrive, arrive+lag], then traces
+      // — matching when the ink actually appears on screen.
+      const lag = comp.cursor.dragLagMs / 1000;
+      const start = arrive + lag;
+      const dEnd = (e.tMs + (e.durationMs ?? 0)) / 1000 + lag;
       const path = e.path && e.path.length >= 2 ? e.path : [e.point, e.to];
-      if (dEnd > arrive) legs.push({ t0: arrive, t1: dEnd, a: e.point, b: e.to, drag: true, path });
+      if (dEnd > start) legs.push({ t0: start, t1: dEnd, a: e.point, b: e.to, drag: true, path });
       cur = e.to;
     }
   }
@@ -201,7 +237,10 @@ function alongPath(path: Pt[], u: number): Pt {
   for (let i = 0; i < seg.length; i++) {
     if (target <= seg[i]! || i === seg.length - 1) {
       const f = seg[i]! > 0 ? target / seg[i]! : 0;
-      return { x: path[i]!.x + (path[i + 1]!.x - path[i]!.x) * f, y: path[i]!.y + (path[i + 1]!.y - path[i]!.y) * f };
+      return {
+        x: path[i]!.x + (path[i + 1]!.x - path[i]!.x) * f,
+        y: path[i]!.y + (path[i + 1]!.y - path[i]!.y) * f,
+      };
     }
     target -= seg[i]!;
   }
@@ -211,17 +250,19 @@ function alongPath(path: Pt[], u: number): Pt {
 export function cursorPos(t: number, legs: Leg[], comp: TakeComposition): Pt {
   for (const lg of legs) {
     if (lg.t0 <= t && t <= lg.t1) {
-      const raw = (t - lg.t0) / (lg.t1 - lg.t0);
-      // A drag traces the captured stroke, which was drawn at CONSTANT speed
-      // (uniform-arc-length mouse moves) — so interpolate LINEARLY. Easing it
-      // (smootherstep) desyncs the cursor from the ink: the eased cursor lags
-      // in the first half (ink leads) then rushes ahead in the second (cursor
-      // leads), crossing mid-stroke. Easing is for travel legs only.
-      if (lg.drag && lg.path) return alongPath(lg.path, Math.max(0, Math.min(1, raw)));
+      const raw = Math.max(0, Math.min(1, (t - lg.t0) / (lg.t1 - lg.t0)));
+      // A drag traces the captured stroke at CONSTANT speed (linear). The
+      // capture drives the pen at uniform arc-length steps, so the cursor must
+      // too or it desyncs from the ink. (Easing was tried and reverted: it makes
+      // the ease-in/out moves near-zero-displacement, and a held-button move
+      // that paints nothing stalls Chrome's headless input ~5s waiting for a
+      // frame commit — see cdp-capture.ts. Constant speed always paints.)
+      if (lg.drag && lg.path) return alongPath(lg.path, raw);
       const e = comp.cursor.travelEase;
       const p = e ? cubicBezier(e[0], e[1], e[2], e[3])(raw) : smoother(raw);
       const base = { x: lg.a.x + (lg.b.x - lg.a.x) * p, y: lg.a.y + (lg.b.y - lg.a.y) * p };
-      const dx = lg.b.x - lg.a.x, dy = lg.b.y - lg.a.y;
+      const dx = lg.b.x - lg.a.x,
+        dy = lg.b.y - lg.a.y;
       const L = Math.hypot(dx, dy) || 1;
       const arc = Math.min(comp.cursor.arcFrac * L, comp.cursor.arcMax) * Math.sin(Math.PI * p);
       return { x: base.x + (-dy / L) * arc, y: base.y + (dx / L) * arc };
