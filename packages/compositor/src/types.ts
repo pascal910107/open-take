@@ -117,6 +117,11 @@ export type CursorConfig = {
   /** seconds to hold a zoom after a click, and to zoom back out */
   holdMs: number;
   zoomOutMs: number;
+  /** easing for a travel move, as cubic-bezier control points
+   *  [x1,y1,x2,y2]. Default is decelerate-biased (soft start, long settle
+   *  into the target — the premium screen recorders feel). Drag strokes ignore this
+   *  (they trace the ink at constant speed). */
+  travelEase: [number, number, number, number];
 };
 
 export type TakeComposition = {
@@ -150,4 +155,9 @@ export const DEFAULT_CURSOR: CursorConfig = {
   rippleMs: 450,
   holdMs: 900,
   zoomOutMs: 600,
+  // soft start, moderate early peak, then a long decelerating settle into the
+  // target (vs symmetric smootherstep, which brakes too late and reads as
+  // "snaps to a stop"). Tune toward [0.33,0,0.12,1] for snappier, or
+  // [0.42,0,0.58,1] for nearly-symmetric.
+  travelEase: [0.45, 0.05, 0.3, 1.0],
 };

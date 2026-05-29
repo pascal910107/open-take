@@ -10,6 +10,27 @@ export function smoother(t: number): number {
   return t * t * t * (t * (t * 6 - 15) + 10);
 }
 
+// Cubic-bezier easing y(x) with endpoints (0,0),(1,1) and control points
+// (x1,y1),(x2,y2) — the same model CSS/premium screen recorders use. Solves x(s)=x by
+// bisection (cheap, monotone) then returns y(s). Lets the travel cursor use a
+// decelerate-biased curve (long, gentle settle) instead of symmetric easing.
+export function cubicBezier(x1: number, y1: number, x2: number, y2: number): (x: number) => number {
+  const bx = (s: number) => { const u = 1 - s; return 3 * u * u * s * x1 + 3 * u * s * s * x2 + s * s * s; };
+  const by = (s: number) => { const u = 1 - s; return 3 * u * u * s * y1 + 3 * u * s * s * y2 + s * s * s; };
+  return (x: number) => {
+    if (x <= 0) return 0;
+    if (x >= 1) return 1;
+    let lo = 0, hi = 1, s = x;
+    for (let i = 0; i < 24; i++) {
+      const xt = bx(s);
+      if (Math.abs(xt - x) < 1e-4) break;
+      if (xt < x) lo = s; else hi = s;
+      s = (lo + hi) / 2;
+    }
+    return by(s);
+  };
+}
+
 type KF<T> = [number, T];
 
 export function keyvalN(t: number, kfs: KF<number>[]): number {
@@ -197,7 +218,8 @@ export function cursorPos(t: number, legs: Leg[], comp: TakeComposition): Pt {
       // in the first half (ink leads) then rushes ahead in the second (cursor
       // leads), crossing mid-stroke. Easing is for travel legs only.
       if (lg.drag && lg.path) return alongPath(lg.path, Math.max(0, Math.min(1, raw)));
-      const p = smoother(raw);
+      const e = comp.cursor.travelEase;
+      const p = e ? cubicBezier(e[0], e[1], e[2], e[3])(raw) : smoother(raw);
       const base = { x: lg.a.x + (lg.b.x - lg.a.x) * p, y: lg.a.y + (lg.b.y - lg.a.y) * p };
       const dx = lg.b.x - lg.a.x, dy = lg.b.y - lg.a.y;
       const L = Math.hypot(dx, dy) || 1;
