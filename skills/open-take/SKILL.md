@@ -147,7 +147,7 @@ page changed).
     { "action": "click", "text": "Open menu", "zoom": "always", "note": "local co-located popover", "settleMs": 1600 },
     { "action": "drag", "from": { "x": 560, "y": 400 }, "to": { "x": 1140, "y": 400 },
       "path": [{ "x": 560, "y": 400 }, { "x": 760, "y": 250 }, { "x": 1140, "y": 400 }],
-      "durationMs": 1600, "zoom": "auto", "note": "sketch on the canvas", "settleMs": 1200 }
+      "durationMs": 1370, "zoom": "auto", "note": "sketch on the canvas (~660px path ÷ 480px/s)", "settleMs": 1200 }
   ]
 }
 ```
@@ -168,10 +168,10 @@ page changed).
   default `"smooth"` — a natural hand-draw; the cursor replays the same easing so
   it rides the ink front). Set `dragEasing: "linear"` (a capture option) for a
   constant-speed stroke. **Pace `durationMs` by the path's LENGTH, not a fixed
-  number** — aim for a confident **~500–700 px/s** (`durationMs ≈ pathLength /
-  0.6`). A 500px stroke → ~800ms; a 800px wave → ~1300ms. Much below ~400 px/s
-  reads sluggish; 2000ms+ is almost never right (the old "slow draws read better"
-  was a low-fps workaround). On `--fps 30` you can lean a touch slower.
+  number** — aim for a calm, confident **~480 px/s** (`durationMs ≈ pathLength /
+  0.48`). A 500px stroke → ~1040ms; an 800px wave → ~1670ms. Below ~400 px/s reads
+  sluggish, above ~600 hurried; 2000ms+ is almost never right (the old "slow draws
+  read better" was a low-fps workaround). On `--fps 30` you can lean a touch slower.
   - *Canvas surfaces have no element to target:* get the canvas bbox first
     (`inspect`, or a one-off CDP `getBoundingClientRect`), then compute `from`/`to`/
     `path` points **inside** it. Select the drawing tool with a `click` *before*
