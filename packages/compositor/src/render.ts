@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import { renderVideo } from "@revideo/renderer";
 import { type PlanOpts, planComposition } from "./plan";
 import type { CaptureLog, TakeComposition } from "./types";
+import { type CompositionIssue, formatIssues, validateComposition } from "./validate";
 
 // dist/index.js -> package root
 const PKG_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -37,6 +38,14 @@ export type RenderTakeOpts = {
    *  download). revideo forwards this to puppeteer.launch's executablePath;
    *  if unset, revideo's bundled puppeteer resolves its own. */
   chromePath?: string;
+  /** the capture log, for cross-checking that an edited composition didn't
+   *  drift an action's capture-locked tMs (see validateComposition). Optional —
+   *  the structural checks run regardless. */
+  captureLog?: CaptureLog;
+  /** skip the pre-render structural validation. Default false — we validate and
+   *  refuse to render an errored composition (a render is expensive; catch a bad
+   *  hand-edit in milliseconds instead). */
+  skipValidate?: boolean;
 };
 
 function run(cmd: string, args: string[]): Promise<void> {
@@ -67,6 +76,20 @@ export async function renderTake(opts: RenderTakeOpts): Promise<{ mp4Path: strin
       opts.log ?? (() => { throw new Error("renderTake: provide `log` or `composition`"); })(),
       opts.planOpts,
     );
+
+  // 0. validate BEFORE the expensive render. A hand-edited composition (the
+  //    refine loop) can carry a malformed zoom or a capture-locked tMs drift;
+  //    catch it in milliseconds rather than after a multi-second render.
+  if (!opts.skipValidate) {
+    const issues: CompositionIssue[] = validateComposition(composition, {
+      captureLog: opts.captureLog ?? opts.log,
+    });
+    const errors = issues.filter((i) => i.severity === "error");
+    const warns = issues.filter((i) => i.severity === "warn");
+    if (opts.logProgress && warns.length) process.stderr.write(`composition warnings:\n${formatIssues(warns)}\n`);
+    if (errors.length)
+      throw new Error(`composition has ${errors.length} error(s) — refusing to render:\n${formatIssues(errors)}`);
+  }
 
   // 1. serve the capture as /capture.mp4 (vite public dir under PKG_ROOT)
   await toMp4(opts.videoPath, PUBLIC_MP4, composition.output.fps);

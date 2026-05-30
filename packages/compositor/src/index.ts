@@ -10,4 +10,10 @@
 export * from "./types";
 export { planComposition, type PlanOpts } from "./plan";
 export { renderTake, type RenderTakeOpts } from "./render";
+export {
+  validateComposition,
+  formatIssues,
+  type CompositionIssue,
+  type ValidateOpts,
+} from "./validate";
 export * as math from "./math";

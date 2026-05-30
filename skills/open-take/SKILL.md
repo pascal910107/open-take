@@ -110,8 +110,37 @@ ffmpeg -ss <t> -i demo.mp4 -frames:v 1 frame.png                          # a si
 ```
 Then show the user the MP4 + your UNDERSTAND/DIRECT/CRITIQUE notes, and give an
 honest read on **editorial quality** (is the wow in there?), not just mechanics.
-Tell them they can refine by talking (which beats zoom, pacing, ordering) — the
-composition is editable.
+Tell them they can refine by talking — the composition is editable.
+
+### 6. REFINE (talk-to-edit — the honest promise)
+The draft is *competent*; **brilliant comes from the user talking.** When they
+react ("zoom less on the search", "hold the result longer", "tighter on the
+logo", "slower intro"), you **edit `demo.composition.json` and `render`** — you do
+**not** re-`make`. This is the product's core loop, so treat it as first-class.
+
+**Why it's cheap and safe:** `make` keeps the raw recording as
+`demo.capture.mp4`. `render` re-composites the *cinematic layer* (zoom, cursor,
+framing, pacing) over that frozen capture — **no app drive**. So a refine is
+~3× faster than a `make` (it skips the real-time capture) and **deterministic**:
+only your edit changes; the app can't drift, flake, or re-animate differently.
+
+**The boundary (be honest about it):**
+- **Editable by `render` (cinematic layer):** which beats zoom + how tight
+  (`zoom.enabled`/`scale`/`center`), zoom/hold pacing (`inAtMs`, `cursor.zoomInMs`/
+  `zoomOutMs`/`holdMs`), framing (`framing.insetFrac`/`background`/`cornerRadius`),
+  cursor feel/speed (`cursor.travel*`, `arc*`, easings), the intro travel
+  (`start`), and the tail (`durationMs`).
+- **Needs a fresh `make` (choreography):** what's clicked/typed/dragged, the beat
+  **order**, drag paths, typed text — and **an action beat's `tMs`**. The video is
+  temporal: `tMs` is *when that action is visible in the recording*, so moving it
+  desyncs the overlay from the on-screen action. You cannot retime an action by
+  editing JSON; re-capture to retime. **The capture-lock enforces this in the loop:**
+  `make` writes `<out>.capture.json` (the ground-truth log) and `render` auto-loads
+  it, so a drifted action `tMs` is *refused* with a field-precise error before any
+  render.
+
+Edit → `render` → SHOW → repeat until the user is happy. See **refine** under
+Mechanics for the language→field map.
 
 ## Mechanics
 
@@ -220,6 +249,52 @@ cursor. **`--fps 30` halves render time + file size** — use it for fast drafts
 while iterating, or for pure click/type demos where the gain is marginal. Needs
 a Chrome — auto-downloads Chrome-for-Testing on first run, or set
 `OPEN_TAKE_CHROME`.
+
+`make` prints all four artifacts and the exact `render` command to refine:
+```
+mp4:         demo.mp4
+composition: demo.composition.json   ← edit this
+capture:     demo.capture.mp4        ← render reads this (the frozen recording)
+capture log: demo.capture.json       ← render auto-loads this (capture-lock ground truth)
+```
+
+### refine (re-render edits — no app drive)
+```
+node packages/cli/dist/cli.js render \
+  --composition demo.composition.json --video demo.capture.mp4 --out demo.mp4
+```
+Re-renders the **edited** composition over the **kept** capture. Auto-loads the
+sibling capture log (`demo.capture.json`) as the capture-lock ground truth
+(`--capture-log <path>` overrides it). Validates first and **refuses to render an
+errored composition** (prints the field + a suggested fix in milliseconds, before
+paying for a render) — e.g. a `zoom.scale` below the rest scale (zooms *out* past
+the frame), a `zoom.inAtMs` after its action, or a **drifted action `tMs`** (the
+capture-lock). Warnings (a no-op zoom, a soft-cap scale) print but don't block.
+
+**Map the user's words to fields** (edit `demo.composition.json`, then `render`):
+- *"don't zoom on X" / "too zoomy"* → that beat's `zoom.enabled: false`.
+- *"zoom on X" / "tighter on X"* → `zoom.enabled: true` and/or raise `zoom.scale`
+  (toward ~2.0; the validator soft-caps ~2.5). If the beat has a `bbox`, set
+  `center` to its middle (`{x: bbox.x+bbox.w/2, y: bbox.y+bbox.h/2}`); a bbox-less
+  beat (a bare `press`) needs a hand-set `center` in video-px.
+- *"hold X longer" / "too quick"* → raise `cursor.holdMs` (global) — the dwell
+  after a beat settles before zooming out.
+- *"gentler / faster zoom"* → `cursor.zoomInMs` / `zoomOutMs` (bigger = slower
+  ramp); soften the curve with `cursor.zoomEase`.
+- *"start the zoom earlier"* → lower that beat's `zoom.inAtMs` (keep it ≥ 0 and
+  ≤ `tMs`; the default is `tMs − cursor.zoomInMs`).
+- *"tighter frame / less border"* → raise `framing.insetFrac` (toward 1.0);
+  *"more cinematic backdrop"* → `framing.background.from/to`, `cornerRadius`.
+- *"slower / silkier cursor"* → lower `cursor.travelWidthsPerSec` (or raise
+  `travelMaxMs`); *"less curve"* → lower `cursor.arcFrac`/`arcMax`.
+- *"slower intro"* → move `start` farther from the first target (longer opening
+  sweep), or add a leading `wait` **and re-`make`** if you need real dead time
+  before the first action (dead time is capture, not composition).
+- *"trim the end" / "it lingers"* → lower `durationMs` (keep it past the last
+  action + `cursor.zoomOutMs`, or the final zoom-out gets cut).
+- *"reorder / cut / change what it does / retime a beat"* → **choreography:
+  re-`make`** with an edited plan. `render` can't move an action in time (its
+  `tMs` is locked to the recording).
 
 ## Capture robustness — checks that keep "user does nothing" honest
 - **Confirm no beat was dropped.** A missing target logs `captureTakeCDP: … not

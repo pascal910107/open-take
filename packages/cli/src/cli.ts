@@ -4,9 +4,16 @@
 //   open-take inspect <url> [--viewport 1920x1080]
 //       -> JSON of interactive elements (accessible name + bbox) for planning
 //   open-take make --plan <plan.json> --out <out.mp4>
-//       -> plan -> capture -> polished mp4 + editable composition
+//       -> plan -> capture -> polished mp4 + editable composition + kept capture
+//   open-take render --composition <c.json> --video <capture.mp4> --out <mp4>
+//       -> re-render an EDITED composition over a kept capture (no app drive)
 import { readFile } from "node:fs/promises";
-import { inspectPage, makeTake, type TakePlan } from "@open-take/runtime";
+import {
+  inspectPage,
+  makeTake,
+  renderCompositionFile,
+  type TakePlan,
+} from "@open-take/runtime";
 
 const argv = process.argv.slice(2);
 const cmd = argv[0];
@@ -33,9 +40,20 @@ const USAGE = `open-take — agent-native demo recorder
 
 Usage:
   open-take inspect <url> [--viewport 1920x1080]
-  open-take make --plan <plan.json> --out <out.mp4> [--fps 60]
+  open-take make   --plan <plan.json> --out <out.mp4> [--fps 60]
+  open-take render --composition <c.json> --video <capture.mp4> --out <mp4>
 
-  --fps <n>   capture AND render fps (default 60 — the premium 60fps feel).
+  make    drive the app (real-time) → polished mp4 + editable
+          <out>.composition.json + KEPT <out>.capture.mp4 + <out>.capture.json
+          (the ground-truth log; render auto-loads it for the capture-lock check).
+  render  re-render an EDITED composition over a kept capture — NO app drive.
+          The refine loop: tweak the composition.json (zoom / pacing / framing),
+          re-render deterministically. Only the cinematic layer is editable this
+          way; changing what's clicked/typed or the beat order needs a fresh make.
+          Auto-loads <video>.json as the capture log (the capture-lock source);
+          --capture-log <path> overrides it.
+
+  --fps <n>   (make only) capture AND render fps (default 60 — the premium feel).
               Drop to 30 for fast-draft renders (~½ the time + file size) while
               iterating. Capture is always a pure-CDP screencast; this sets the
               encode + render grid.
@@ -56,12 +74,34 @@ async function main() {
     const plan = JSON.parse(await readFile(planPath, "utf8")) as TakePlan;
     const fpsFlag = flag("--fps");
     const fps = fpsFlag ? Number(fpsFlag) : undefined;
-    const { mp4Path, compositionPath } = await makeTake(plan, {
+    const { mp4Path, compositionPath, capturePath, captureLogPath } = await makeTake(plan, {
       outPath: out,
       logProgress: true,
       ...(fps ? { capture: { fps } } : {}),
     });
-    process.stdout.write(`\nmp4: ${mp4Path}\ncomposition: ${compositionPath}\n`);
+    process.stdout.write(
+      `\nmp4:         ${mp4Path}\ncomposition: ${compositionPath}\n` +
+        `capture:     ${capturePath}\ncapture log: ${captureLogPath}\n` +
+        `\nrefine: edit the composition.json, then\n` +
+        `  open-take render --composition ${compositionPath} --video ${capturePath} --out ${mp4Path}\n`,
+    );
+    return;
+  }
+  if (cmd === "render") {
+    const compositionPath = flag("--composition");
+    const video = flag("--video");
+    const out = flag("--out") ?? "take.mp4";
+    if (!compositionPath) throw new Error("render: missing --composition <c.json>");
+    if (!video) throw new Error("render: missing --video <capture.mp4>");
+    const { mp4Path } = await renderCompositionFile({
+      compositionPath,
+      capturePath: video,
+      outPath: out,
+      // override the auto-loaded sibling capture log (the capture-lock source)
+      ...(flag("--capture-log") ? { captureLogPath: flag("--capture-log") } : {}),
+      logProgress: true,
+    });
+    process.stdout.write(`\nmp4: ${mp4Path}\n`);
     return;
   }
   process.stderr.write(USAGE);
