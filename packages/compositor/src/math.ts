@@ -153,11 +153,40 @@ export function buildStageKeyframes(comp: TakeComposition): StageKeyframes {
     }
   }
 
-  const frames: { t: number; s: number; c: Pt }[] = [{ t: 0, s: rest, c: restC }];
+  // Scale and centre are evaluated independently (keyvalN / keyvalP), so their
+  // keyframe TIMES need not line up — `pushC` adds a centre-only keyframe.
+  const zf: { t: number; s: number }[] = [{ t: 0, s: rest }];
+  const cf: { t: number; c: Pt }[] = [{ t: 0, c: restC }];
   const push = (t: number, s: number, c: Pt) => {
-    const last = frames[frames.length - 1]!;
-    frames.push({ t: Math.max(t, last.t + 1e-3), s, c });
+    zf.push({ t: Math.max(t, zf[zf.length - 1]!.t + 1e-3), s });
+    cf.push({ t: Math.max(t, cf[cf.length - 1]!.t + 1e-3), c });
   };
+  const pushC = (t: number, c: Pt) => {
+    cf.push({ t: Math.max(t, cf[cf.length - 1]!.t + 1e-3), c });
+  };
+  // Invert the (monotone) zoom easing: smallest u with ease(u) ≥ target.
+  const ze = comp.cursor.zoomEase
+    ? cubicBezier(
+        comp.cursor.zoomEase[0],
+        comp.cursor.zoomEase[1],
+        comp.cursor.zoomEase[2],
+        comp.cursor.zoomEase[3],
+      )
+    : smoother;
+  const invEase = (target: number) => {
+    let lo = 0;
+    let hi = 1;
+    for (let i = 0; i < 30; i++) {
+      const m = (lo + hi) / 2;
+      if (ze(m) < target) lo = m;
+      else hi = m;
+    }
+    return (lo + hi) / 2;
+  };
+  // Scale at which the video re-covers the frame on both axes; below it the
+  // centre is forced to video-centre (clampCenter), so a recenter must FINISH by
+  // here or the tightening clamp "catches" the still-panning centre.
+  const fillThreshold = Math.max(oW / vW, oH / vH);
 
   let cur = { s: rest, c: restC };
   anchors.forEach((e, i) => {
@@ -176,15 +205,26 @@ export function buildStageKeyframes(comp: TakeComposition): StageKeyframes {
     } else {
       const holdEnd = actionEnd + HOLD;
       push(holdEnd, cur.s, cur.c);
+      // Final zoom-out. Land the CENTRE on rest at the fill-threshold crossing
+      // (the scale keeps its single smooth segment) so the centre clamp — which
+      // tightens to a point as the video re-covers the frame — never catches the
+      // still-panning centre and re-accelerates it (a two-stage stutter). Only
+      // when the zoom actually overfills AND sits off-centre.
+      const offset = Math.hypot(cur.c.x - restC.x, cur.c.y - restC.y) > 1;
+      if (offset && cur.s > fillThreshold && fillThreshold > rest) {
+        const uCross = invEase((fillThreshold - cur.s) / (rest - cur.s));
+        pushC(holdEnd + uCross * ZOUT, restC);
+      }
       push(holdEnd + ZOUT, rest, restC); // zoom back out
       cur = { s: rest, c: restC };
     }
   });
 
-  const T = Math.max(comp.durationMs / 1000, frames[frames.length - 1]!.t) + 0.3;
+  const lastT = Math.max(zf[zf.length - 1]!.t, cf[cf.length - 1]!.t);
+  const T = Math.max(comp.durationMs / 1000, lastT) + 0.3;
   push(T, rest, restC);
 
-  return { z: frames.map((f) => [f.t, f.s]), c: frames.map((f) => [f.t, f.c]), T };
+  return { z: zf.map((f) => [f.t, f.s]), c: cf.map((f) => [f.t, f.c]), T };
 }
 
 // --- cursor path (eased, with gentle arc) ------------------------------

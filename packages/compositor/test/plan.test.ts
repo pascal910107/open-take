@@ -89,6 +89,35 @@ test("drag easing: 'smooth' replays the baked smootherstep, absent ⇒ linear", 
   assert.ok(Math.abs(at(smooth) - 203.5) < 3, `smooth eases in (got ${at(smooth)})`);
 });
 
+test("zoom-out: an off-centre zoom lands the centre on rest before the scale", () => {
+  // First click orients (no zoom); the second is a small off-centre target → it
+  // zooms in, then the final zoom-out must settle the CENTRE to rest before the
+  // scale finishes, else the tightening centre clamp catches it (a two-stage
+  // stutter). The fix adds one centre-only keyframe at the fill-threshold cross.
+  const comp = planComposition(
+    log([
+      { kind: "click", x: 960, y: 540, box: { x: 940, y: 520, w: 40, h: 40 }, tMs: 1000 },
+      { kind: "click", x: 300, y: 200, box: { x: 290, y: 190, w: 20, h: 20 }, tMs: 3000 },
+    ]),
+  );
+  const stage = buildStageKeyframes(comp);
+  const zoomed = comp.events.some((e) => e.kind === "click" && e.zoom.enabled && e.tMs === 3000);
+  assert.ok(zoomed, "second click zooms (off-centre target)");
+  // the fix adds exactly one centre-only keyframe (centre settles early); scale
+  // keeps its single smooth zoom-out segment.
+  assert.equal(stage.c.length, stage.z.length + 1, "one extra centre-only keyframe");
+  // by the time the scale reaches rest (zoom-out end), the centre is ALREADY on
+  // video-centre — so the clamp never catches a still-panning centre.
+  const [cx, cy] = [comp.source.videoWidth / 2, comp.source.videoHeight / 2];
+  const scaleRestT = stage.z[stage.z.length - 2]![0]; // zoom-out end (before padding)
+  const before = stage.c.filter(([t]) => t < scaleRestT - 1e-6);
+  const landed = before[before.length - 1]![1];
+  assert.ok(
+    Math.abs(landed.x - cx) < 1 && Math.abs(landed.y - cy) < 1,
+    `centre is on rest (${landed.x},${landed.y}) before the scale finishes`,
+  );
+});
+
 test("zoom easing: keyvalN applies the supplied curve (default smootherstep)", () => {
   const kfs: [number, number][] = [
     [0, 0],
