@@ -349,6 +349,13 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
         }
         const path: Pt[] = pathPts.length ? pathPts : [from, to];
         const target = step.durationMs ?? 1200;
+        // Stroke pacing baked into the ink. "smooth" (default) accelerates in /
+        // decelerates out (a natural hand-draw); "linear" is constant speed. The
+        // compositor cursor replays the SAME curve (it's recorded on the event)
+        // so it stays locked to the ink. Time steps stay uniform; the EASING is
+        // applied to the along-path position, so the pen moves slow-fast-slow.
+        const dragEase = opts.dragEasing ?? "smooth";
+        const easeParam = dragEase === "smooth" ? smoother : (u: number) => u;
         // ~16ms steps → ~60 distinct frames/sec captured (one redraw per move);
         // this is what keeps the ink from lagging the cursor (spike VERDICT).
         const n = Math.max(12, Math.round(target / 16));
@@ -366,9 +373,10 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
         mouse(cdp, "mouseMoved", path[0]!.x, path[0]!.y, 0).catch(() => {});
         mouse(cdp, "mousePressed", path[0]!.x, path[0]!.y, 1).catch(() => {});
         for (let k = 1; k <= n; k++) {
-          // Constant-speed (uniform arc-length) steps; the compositor cursor
-          // matches this linear param (math.ts).
-          const p = sampleAlong(path, k / n);
+          // Eased along-path position over UNIFORM time steps → the pen draws
+          // slow-fast-slow (smooth) or constant (linear). cursorPos replays the
+          // same `easeParam`, so cursor and ink stay locked (math.ts).
+          const p = sampleAlong(path, easeParam(k / n));
           // FIRE-AND-FORGET the move (don't await its ack). A held-button
           // dispatchMouseEvent that paints nothing withholds its response ~5s in
           // headless (waiting for a frame commit) — awaiting each would stall the
@@ -399,6 +407,7 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
           sel: label,
           note: step.note,
           durationMs: drawnMs,
+          ease: dragEase,
           ...(step.zoom ? { zoom: step.zoom } : {}),
         });
         await sleep(step.settleMs ?? 1100);

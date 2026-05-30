@@ -164,12 +164,14 @@ page changed).
   explicit viewport point (`from` / `to`) or a located element (`selector`/`text`
   for the start, `toSelector`/`toText` for the end → bbox centre). Add an
   optional `path` of viewport points for a freehand curve (overrides the straight
-  start→end line). The stroke **eases in and out** (accelerates into the line,
-  settles out — a natural hand-draw, in lockstep with the ink). `durationMs`
-  (default 1200): at the 60fps default a **natural ~900–1400** reads best — the
-  old "slow strokes read better" advice was a low-fps workaround; you no longer
-  need 2000ms+ unless you *want* a deliberate slow draw. Only on `--fps 30` lean
-  slower (1500–2500).
+  start→end line). The stroke **accelerates in, decelerates out** (`dragEasing`
+  default `"smooth"` — a natural hand-draw; the cursor replays the same easing so
+  it rides the ink front). Set `dragEasing: "linear"` (a capture option) for a
+  constant-speed stroke. **Pace `durationMs` by the path's LENGTH, not a fixed
+  number** — aim for a confident **~500–700 px/s** (`durationMs ≈ pathLength /
+  0.6`). A 500px stroke → ~800ms; a 800px wave → ~1300ms. Much below ~400 px/s
+  reads sluggish; 2000ms+ is almost never right (the old "slow draws read better"
+  was a low-fps workaround). On `--fps 30` you can lean a touch slower.
   - *Canvas surfaces have no element to target:* get the canvas bbox first
     (`inspect`, or a one-off CDP `getBoundingClientRect`), then compute `from`/`to`/
     `path` points **inside** it. Select the drawing tool with a `click` *before*
@@ -192,7 +194,12 @@ page changed).
   that element via `selector`/`text` (it's located *after* the press, then
   framed). A bare press (no reveal) holds **full-view** for `durationMs`.
 - `settleMs`: hold after the action so its result is visible (~1200–2600ms).
-  Give big reveals a longer hold.
+  Give big reveals a longer hold. **Pacing matters for cursor silk:** the cursor
+  travels to the next target during the gap BEFORE it, so a tight gap forces a
+  fast, snappy move. When you pick a tool then immediately draw (`click` a
+  toolbar → `drag` on the canvas), give the click a generous `settleMs`
+  (**~1000–1200ms**) so the cursor can glide to the canvas at a calm, constant
+  speed instead of darting. Cramped gaps (<800ms) make the travel feel rushed.
 - `wait`: paces the video / orients at the start.
 - `startCursor`: where the synthetic cursor begins (viewport px); pick a spot
   that makes the first move to your first target a pleasing sweep.

@@ -192,19 +192,41 @@ export function buildStageKeyframes(comp: TakeComposition): StageKeyframes {
 // A `drag` leg carries the polyline the cursor follows with the button held
 // (no perpendicular arc — it traces the real stroke). A normal travel leg has
 // no path and gets the gentle arc.
-type Leg = { t0: number; t1: number; a: Pt; b: Pt; drag?: boolean; path?: Pt[] };
+type Leg = {
+  t0: number;
+  t1: number;
+  a: Pt;
+  b: Pt;
+  drag?: boolean;
+  path?: Pt[];
+  ease?: "linear" | "smooth";
+};
 
 export function buildLegs(comp: TakeComposition): Leg[] {
   const legs: Leg[] = [];
   let cur: Pt = comp.start;
-  const travel = comp.cursor.travelMs / 1000;
+  // Distance-aware travel: hold a roughly constant on-screen speed (premium
+  // feel) instead of a fixed duration (which makes short moves slow + long
+  // moves fast). Falls back to the fixed travelMs when speed is unset/0.
+  const { travelWidthsPerSec, travelMinMs, travelMaxMs, travelMs } = comp.cursor;
+  const speedPxPerMs = (travelWidthsPerSec || 0) * comp.source.videoWidth / 1000;
+  const travelDur = (a: Pt, b: Pt): number => {
+    if (speedPxPerMs <= 0) return travelMs / 1000;
+    const dist = Math.hypot(b.x - a.x, b.y - a.y);
+    return Math.min(travelMaxMs, Math.max(travelMinMs, dist / speedPxPerMs)) / 1000;
+  };
   for (const e of comp.events) {
     // scroll/press are not pointer-driven — the cursor holds where it was
     // (the content pans / the keyboard acts). No travel leg; `cur` is untouched,
     // so the between-legs parking logic keeps the cursor at its last anchor.
     if (e.kind === "scroll" || e.kind === "press") continue;
     const arrive = e.tMs / 1000;
-    legs.push({ t0: arrive - travel, t1: arrive, a: cur, b: e.point }); // travel to anchor
+    // Start travelDur before arrival, but never before the previous leg ended
+    // (a long glide into a quick succession would otherwise overlap it — then
+    // the move just runs in the available window, a touch faster than target).
+    const prevEnd = legs.length ? legs[legs.length - 1]!.t1 : 0;
+    const t0 = Math.max(arrive - travelDur(cur, e.point), prevEnd, 0);
+    legs.push({ t0, t1: arrive, a: cur, b: e.point }); // travel to anchor
     cur = e.point;
     if (e.kind === "drag" && e.to) {
       // Delay the stroke by dragLagMs so the cursor rides the captured ink front
@@ -215,7 +237,8 @@ export function buildLegs(comp: TakeComposition): Leg[] {
       const start = arrive + lag;
       const dEnd = (e.tMs + (e.durationMs ?? 0)) / 1000 + lag;
       const path = e.path && e.path.length >= 2 ? e.path : [e.point, e.to];
-      if (dEnd > start) legs.push({ t0: start, t1: dEnd, a: e.point, b: e.to, drag: true, path });
+      if (dEnd > start)
+        legs.push({ t0: start, t1: dEnd, a: e.point, b: e.to, drag: true, path, ease: e.ease });
       cur = e.to;
     }
   }
@@ -251,13 +274,14 @@ export function cursorPos(t: number, legs: Leg[], comp: TakeComposition): Pt {
   for (const lg of legs) {
     if (lg.t0 <= t && t <= lg.t1) {
       const raw = Math.max(0, Math.min(1, (t - lg.t0) / (lg.t1 - lg.t0)));
-      // A drag traces the captured stroke at CONSTANT speed (linear). The
-      // capture drives the pen at uniform arc-length steps, so the cursor must
-      // too or it desyncs from the ink. (Easing was tried and reverted: it makes
-      // the ease-in/out moves near-zero-displacement, and a held-button move
-      // that paints nothing stalls Chrome's headless input ~5s waiting for a
-      // frame commit — see cdp-capture.ts. Constant speed always paints.)
-      if (lg.drag && lg.path) return alongPath(lg.path, raw);
+      // A drag replays the captured stroke's pacing so the cursor stays locked
+      // to the ink: "smooth" (accel-in / decel-out — a natural hand-draw) or
+      // "linear" (constant speed). The capture bakes the SAME curve into the ink
+      // (cdp-capture.ts) and records it on the event; absent ⇒ linear (legacy).
+      // (Held-button moves are fire-and-forget there, so the slow eased ends —
+      // sub-pixel, no paint — no longer stall the stroke; cursor and ink are
+      // both ~stationary at the ends, so they stay locked.)
+      if (lg.drag && lg.path) return alongPath(lg.path, lg.ease === "smooth" ? smoother(raw) : raw);
       const e = comp.cursor.travelEase;
       const p = e ? cubicBezier(e[0], e[1], e[2], e[3])(raw) : smoother(raw);
       const base = { x: lg.a.x + (lg.b.x - lg.a.x) * p, y: lg.a.y + (lg.b.y - lg.a.y) * p };

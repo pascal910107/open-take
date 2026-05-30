@@ -268,6 +268,11 @@ export type CaptureOpts = {
   fps?: number;
   /** explicit Chrome binary (else auto-resolved system Chrome / auto-download) */
   chromePath?: string;
+  /** How a `drag` stroke is paced (and thus baked into the ink): "smooth"
+   *  (accel-in / decel-out — a natural hand-draw, default) or "linear"
+   *  (constant speed). Recorded on each drag event so the compositor cursor
+   *  replays the same easing and stays locked to the ink. */
+  dragEasing?: "linear" | "smooth";
 };
 
 /** Drive `plan` against the live app over CDP, return the ground-truth log. */

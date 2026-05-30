@@ -7,7 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { planComposition } from "../src/plan.js";
-import { buildLegs, buildStageKeyframes, keyvalN, restStageScale } from "../src/math.js";
+import { buildLegs, buildStageKeyframes, cursorPos, keyvalN, restStageScale } from "../src/math.js";
 import type { CaptureLog } from "../src/types.js";
 
 const VW = 1920,
@@ -34,6 +34,59 @@ test("scroll: never zooms and emits a scroll CompEvent", () => {
   assert.ok(scroll, "scroll event present");
   assert.equal(scroll!.zoom.enabled, false, "scroll never zooms");
   assert.equal(scroll!.durationMs, 1000, "scroll duration carried through");
+});
+
+test("travel is distance-aware: speed held ~constant, clamped to [min,max]", () => {
+  // Default cursor: 0.30 widths/s on a 1920-wide stage → 0.576 px/ms; floor
+  // 300ms (<173px), cap 1400ms (>806px). Three clicks exercise floor / cap /
+  // linear, spaced far enough apart that the anti-overlap clamp never trips.
+  const comp = planComposition(
+    log([
+      { kind: "click", x: 260, y: 940, box: { x: 240, y: 920, w: 40, h: 40 }, tMs: 2000 }, // 72px hop → floor
+      { kind: "click", x: 1400, y: 200, box: { x: 1380, y: 180, w: 40, h: 40 }, tMs: 4000 }, // 1359px → cap
+      { kind: "click", x: 900, y: 600, box: { x: 880, y: 580, w: 40, h: 40 }, tMs: 6500 }, // 640px → linear
+    ]),
+  );
+  // Pin the cursor model so the test is independent of DEFAULT_CURSOR tuning.
+  Object.assign(comp.cursor, { travelWidthsPerSec: 0.3, travelMinMs: 300, travelMaxMs: 1400 });
+  const legs = buildLegs(comp);
+  const dur = (i: number) => legs[i]!.t1 - legs[i]!.t0;
+  assert.ok(Math.abs(dur(0) - 0.3) < 0.02, `short hop floored to min (got ${dur(0).toFixed(3)}s)`);
+  assert.ok(Math.abs(dur(1) - 1.4) < 0.02, `long sweep capped to max (got ${dur(1).toFixed(3)}s)`);
+  // 640px / 0.576 px/ms ≈ 1.111s — proportional, strictly between the clamps.
+  assert.ok(Math.abs(dur(2) - 1.111) < 0.03, `mid travel scales with distance (got ${dur(2).toFixed(3)}s)`);
+  assert.ok(dur(0) < dur(2) && dur(2) < dur(1), "duration grows with distance");
+});
+
+test("drag easing: 'smooth' replays the baked smootherstep, absent ⇒ linear", () => {
+  // A 1000px horizontal stroke. At raw=0.25 the cursor x reveals the easing:
+  // linear → 350px (100 + 0.25·1000); smooth → ~203px (smootherstep(0.25)=.104).
+  const mk = (ease?: "linear" | "smooth") =>
+    planComposition(
+      log([
+        {
+          kind: "drag",
+          x: 100,
+          y: 500,
+          to: { x: 1100, y: 500 },
+          path: [
+            { x: 100, y: 500 },
+            { x: 1100, y: 500 },
+          ],
+          tMs: 1000,
+          durationMs: 1000,
+          ...(ease ? { ease } : {}),
+        },
+      ]),
+    );
+  const smooth = mk("smooth");
+  const linear = mk("linear");
+  const absent = mk(undefined);
+  for (const c of [smooth, linear, absent]) c.cursor.dragLagMs = 0; // leg = [1.0, 2.0]
+  const at = (c: ReturnType<typeof mk>) => cursorPos(1.25, buildLegs(c), c).x; // raw 0.25
+  assert.ok(Math.abs(at(linear) - 350) < 1, `linear holds constant speed (got ${at(linear)})`);
+  assert.ok(Math.abs(at(absent) - 350) < 1, "absent ease ⇒ linear (legacy)");
+  assert.ok(Math.abs(at(smooth) - 203.5) < 3, `smooth eases in (got ${at(smooth)})`);
 });
 
 test("scroll: cursor holds — no travel leg, parks at the prior anchor", () => {

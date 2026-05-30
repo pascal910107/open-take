@@ -76,6 +76,7 @@ export function planComposition(log: CaptureLog, opts: PlanOpts = {}): TakeCompo
         ? ((c as { path?: Pt[] }).path ?? [{ x: c.x, y: c.y }, (c as { to: Pt }).to])
         : undefined;
     const path = rawPath?.map(mapPt);
+    const ease = kind === "drag" ? (c as { ease?: "linear" | "smooth" }).ease : undefined;
 
     // The region this action is "about" — what zoom should frame.
     const bbox = kind === "drag" && path ? pathBBox(path) : c.box ? mapBox(c.box) : undefined;
@@ -130,6 +131,7 @@ export function planComposition(log: CaptureLog, opts: PlanOpts = {}): TakeCompo
       ...(kind === "press" ? { keys: (c as { keys: string }).keys } : {}),
       ...(to ? { to } : {}),
       ...(path ? { path } : {}),
+      ...(ease ? { ease } : {}),
     };
   });
 
