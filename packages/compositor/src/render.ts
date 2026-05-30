@@ -32,6 +32,11 @@ export type RenderTakeOpts = {
   composition?: TakeComposition;
   planOpts?: PlanOpts;
   logProgress?: boolean;
+  /** Chrome binary for the headless render. Pass the same Chrome-for-Testing
+   *  the capture path uses so a single browser serves both stages (no second
+   *  download). revideo forwards this to puppeteer.launch's executablePath;
+   *  if unset, revideo's bundled puppeteer resolves its own. */
+  chromePath?: string;
 };
 
 function run(cmd: string, args: string[]): Promise<void> {
@@ -82,7 +87,12 @@ export async function renderTake(opts: RenderTakeOpts): Promise<{ mp4Path: strin
         outDir: RENDER_OUT,
         workers: 1,
         logProgress: opts.logProgress ?? false,
-        puppeteer: { args: ["--no-sandbox", "--disable-setuid-sandbox"] },
+        // Reuse the capture-managed Chrome-for-Testing when given (one browser
+        // for both stages); else let revideo's puppeteer resolve its own.
+        puppeteer: {
+          args: ["--no-sandbox", "--disable-setuid-sandbox"],
+          ...(opts.chromePath ? { executablePath: opts.chromePath } : {}),
+        },
       },
     });
   } finally {

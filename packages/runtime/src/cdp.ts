@@ -106,7 +106,27 @@ export async function ensureChrome(explicit?: string): Promise<string> {
     const exe = computeExecutablePath({ browser: Browser.CHROME, buildId, cacheDir: CHROME_CACHE });
     if (!existsSync(exe)) {
       mkdirSync(CHROME_CACHE, { recursive: true });
-      await install({ browser: Browser.CHROME, buildId, cacheDir: CHROME_CACHE });
+      // First run on this machine: a one-time ~150MB fetch. Say so (and show
+      // coarse progress) so `make` doesn't look like a silent stall.
+      process.stderr.write(
+        `open-take: downloading Chrome for Testing (${buildId}, one-time) → ${CHROME_CACHE}\n`,
+      );
+      let lastPct = -1;
+      await install({
+        browser: Browser.CHROME,
+        buildId,
+        cacheDir: CHROME_CACHE,
+        downloadProgressCallback: (downloaded: number, total: number) => {
+          if (!total) return;
+          const pct = Math.floor((downloaded / total) * 100);
+          // throttle to whole-ten-percent steps to keep the log quiet
+          if (pct >= lastPct + 10 || pct === 100) {
+            lastPct = pct;
+            process.stderr.write(`open-take: …Chrome download ${pct}%\n`);
+          }
+        },
+      });
+      process.stderr.write("open-take: Chrome ready.\n");
     }
     mkdirSync(dirname(BUILDID_FILE), { recursive: true });
     writeFileSync(BUILDID_FILE, JSON.stringify({ buildId }));

@@ -26,6 +26,21 @@ by talking to the agent.
 - `adapter-ffmpeg` — transcode / mux / concat / zoompan.
 - `adapter-elevenlabs` — narration (+ a mock for keyless CI).
 
+## Browser (zero-config)
+
+open-take manages **one** browser for you. On the first `make`, it downloads a
+pinned Chrome-for-Testing (via `@puppeteer/browsers`) to `~/.open-take/browsers`
+— a one-time fetch, with a progress line — and reuses it on every later run.
+The **same** binary drives both capture and the headless render, so there's no
+second download. Point `OPEN_TAKE_CHROME` at a Chrome binary to override.
+
+> One caveat for the published package: the renderer (revideo) lists `puppeteer`
+> as a transitive dependency, whose installer fetches its *own* Chrome by
+> default. open-take never uses that copy (it always launches the CfT above), so
+> you can skip the redundant ~150MB download with
+> `PUPPETEER_SKIP_DOWNLOAD=true npm install`. (A library can't suppress a
+> transitive installer for you — npm/pnpm overrides are root-project-only.)
+
 ## Develop
 
 ```

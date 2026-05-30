@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { type PlanOpts, planComposition, renderTake, type TakeComposition } from "@open-take/compositor";
 import { type CaptureOpts, captureTake } from "./capture";
+import { ensureChrome } from "./cdp";
 import type { TakePlan } from "./types";
 
 export type { TakePlan, TakeStep } from "./types";
@@ -42,7 +43,12 @@ export async function makeTake(plan: TakePlan, opts: MakeTakeOpts): Promise<Make
   const work = await mkdtemp(join(tmpdir(), "open-take-"));
   const videoPath = join(work, "capture.mp4"); // CDP screencast → h264 mp4
 
-  const log = await captureTake(plan, { ...opts.capture, videoPath });
+  // Resolve (and, first run, download) Chrome ONCE, then hand the same binary
+  // to both capture and render. One browser serves the whole pipeline — no
+  // second download from revideo's bundled puppeteer.
+  const chromePath = await ensureChrome(opts.capture?.chromePath);
+
+  const log = await captureTake(plan, { ...opts.capture, chromePath, videoPath });
   // One knob: the render grid follows the capture fps (default 60) unless the
   // caller pinned an explicit render fps. (A 30fps
   // render of a 60fps capture would discard half the frames; matching them is
@@ -58,6 +64,7 @@ export async function makeTake(plan: TakePlan, opts: MakeTakeOpts): Promise<Make
     videoPath,
     outPath: resolve(opts.outPath),
     logProgress: opts.logProgress ?? false,
+    chromePath,
   });
 
   return { mp4Path, compositionPath, composition };
