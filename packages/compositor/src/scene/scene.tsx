@@ -12,6 +12,7 @@ import {
   keyvalP,
   clampCenter,
   smoother,
+  cubicBezier,
 } from "../math";
 import comp from "./.composition.json";
 
@@ -33,8 +34,10 @@ const CURSOR = [[0, 0], [0, 17], [4.5, 13], [7.5, 19.5], [10, 18.3], [7, 11.7], 
 export default makeScene2D("take", function* (view) {
   const t = createSignal(0);
 
-  const scaleAt = () => keyvalN(t(), stage.z);
-  const centerAt = () => clampCenter(keyvalP(t(), stage.c), scaleAt(), vW, vH, oW, oH);
+  // zoom/pan stage easing (scale + center in unison); falls back to smootherstep
+  const zoomEase = comp.cursor.zoomEase ? cubicBezier(...comp.cursor.zoomEase) : smoother;
+  const scaleAt = () => keyvalN(t(), stage.z, zoomEase);
+  const centerAt = () => clampCenter(keyvalP(t(), stage.c, zoomEase), scaleAt(), vW, vH, oW, oH);
 
   // static gradient backdrop
   view.add(

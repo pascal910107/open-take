@@ -89,6 +89,18 @@ test("drag easing: 'smooth' replays the baked smootherstep, absent ⇒ linear", 
   assert.ok(Math.abs(at(smooth) - 203.5) < 3, `smooth eases in (got ${at(smooth)})`);
 });
 
+test("zoom easing: keyvalN applies the supplied curve (default smootherstep)", () => {
+  const kfs: [number, number][] = [
+    [0, 0],
+    [1, 100],
+  ];
+  const dflt = keyvalN(0.25, kfs); // smootherstep(0.25)=0.104 → ~10.4
+  const lin = keyvalN(0.25, kfs, (u) => u); // linear → 25
+  assert.ok(Math.abs(dflt - 10.35) < 0.5, `default is smootherstep (got ${dflt})`);
+  assert.ok(Math.abs(lin - 25) < 0.01, `custom ease is applied (got ${lin})`);
+  assert.ok(dflt < lin, "smootherstep eases in (slower than linear early)");
+});
+
 test("scroll: cursor holds — no travel leg, parks at the prior anchor", () => {
   const comp = planComposition(
     log([

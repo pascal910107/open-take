@@ -182,6 +182,11 @@ export type CursorConfig = {
   /** ms for the zoom-IN ramp (into a target). Decoupled from travelMs so the
    *  zoom can be slower/gentler than the cursor (a cinematic ~1s zoom). */
   zoomInMs: number;
+  /** Easing for the zoom/pan stage ramps (scale + center together), as
+   *  cubic-bezier control points. Absent ⇒ symmetric smootherstep — whose broad
+   *  near-constant-velocity middle reads a bit linear, esp. on the zoom-OUT
+   *  settle. A decel-biased curve gives a softer landing into rest. */
+  zoomEase?: [number, number, number, number];
   /** ms to delay the synthetic cursor along a DRAG stroke, compensating for the
    *  capture pipeline latency: the captured ink appears ~this long after the pen
    *  actually moved, so without the delay the (exact-time) cursor leads the ink.
@@ -246,6 +251,11 @@ export const DEFAULT_CURSOR: CursorConfig = {
   // old 600ms tied-to-travel zoom felt snappy/mechanical by comparison.
   zoomOutMs: 800,
   zoomInMs: 760,
+  // Zoom/pan stage easing. Same decel-biased curve as the cursor — symmetric
+  // smootherstep (the fallback) has a broad near-constant-velocity middle that
+  // reads a touch linear, especially as the zoom-OUT settles back to rest; this
+  // gives a soft landing into rest. Applied to scale + center together.
+  zoomEase: [0.3, 0.0, 0.2, 1.0],
   // The captured ink trails the pen by the screencast/encode pipeline latency τ;
   // delay the cursor by τ so its tip rides the ink front. Set to τ EXACTLY and
   // the cursor locks to the ink at ALL stroke speeds (both are the same time-

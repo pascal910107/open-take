@@ -42,25 +42,25 @@ export function cubicBezier(x1: number, y1: number, x2: number, y2: number): (x:
 
 type KF<T> = [number, T];
 
-export function keyvalN(t: number, kfs: KF<number>[]): number {
+export function keyvalN(t: number, kfs: KF<number>[], ease: (u: number) => number = smoother): number {
   if (t <= kfs[0]![0]) return kfs[0]![1];
   if (t >= kfs[kfs.length - 1]![0]) return kfs[kfs.length - 1]![1];
   for (let i = 0; i < kfs.length - 1; i++) {
     const [t0, v0] = kfs[i]!;
     const [t1, v1] = kfs[i + 1]!;
-    if (t0 <= t && t <= t1) return v0 + (v1 - v0) * smoother((t - t0) / (t1 - t0));
+    if (t0 <= t && t <= t1) return v0 + (v1 - v0) * ease((t - t0) / (t1 - t0));
   }
   return kfs[kfs.length - 1]![1];
 }
 
-export function keyvalP(t: number, kfs: KF<Pt>[]): Pt {
+export function keyvalP(t: number, kfs: KF<Pt>[], ease: (u: number) => number = smoother): Pt {
   if (t <= kfs[0]![0]) return kfs[0]![1];
   if (t >= kfs[kfs.length - 1]![0]) return kfs[kfs.length - 1]![1];
   for (let i = 0; i < kfs.length - 1; i++) {
     const [t0, v0] = kfs[i]!;
     const [t1, v1] = kfs[i + 1]!;
     if (t0 <= t && t <= t1) {
-      const p = smoother((t - t0) / (t1 - t0));
+      const p = ease((t - t0) / (t1 - t0));
       return { x: v0.x + (v1.x - v0.x) * p, y: v0.y + (v1.y - v0.y) * p };
     }
   }
