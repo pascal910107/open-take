@@ -112,19 +112,20 @@ Then show the user the MP4 + your UNDERSTAND/DIRECT/CRITIQUE notes, and give an
 honest read on **editorial quality** (is the wow in there?), not just mechanics.
 Tell them they can refine by talking — the composition is editable.
 
-### 6. REFINE (talk-to-edit — the honest promise)
-The draft is *competent*; **brilliant comes from the user talking.** When they
-react ("zoom less on the search", "hold the result longer", "tighter on the
-logo", "slower intro"), you **edit `demo.composition.json` and `render`** — you do
-**not** re-`make`. This is the product's core loop, so treat it as first-class.
+### 6. REFINE (talk-to-edit)
+The draft is a starting point; the user refines it by reacting ("zoom less on the
+search", "hold the result longer", "tighter on the logo", "slower intro"). For
+those edits you **change `demo.composition.json` and `render`** — you do **not**
+re-`make`. Keep going until the user is happy; this is where a competent draft
+becomes brilliant.
 
-**Why it's cheap and safe:** `make` keeps the raw recording as
-`demo.capture.mp4`. `render` re-composites the *cinematic layer* (zoom, cursor,
-framing, pacing) over that frozen capture — **no app drive**. So a refine is
-~3× faster than a `make` (it skips the real-time capture) and **deterministic**:
-only your edit changes; the app can't drift, flake, or re-animate differently.
+**Why `render`, not re-`make`:** `make` keeps the raw recording as
+`demo.capture.mp4`; `render` re-composites the *cinematic layer* (zoom, cursor,
+framing, pacing) over that frozen capture — no app drive. So a refine is
+deterministic (only your edit changes; the app can't drift or re-animate) and
+~3× faster (it skips the live capture).
 
-**The boundary (be honest about it):**
+**The boundary:**
 - **Editable by `render` (cinematic layer):** which beats zoom + how tight
   (`zoom.enabled`/`scale`/`center`), zoom/hold pacing (`inAtMs`, `cursor.zoomInMs`/
   `zoomOutMs`/`holdMs`), framing (`framing.insetFrac`/`background`/`cornerRadius`),
@@ -132,15 +133,12 @@ only your edit changes; the app can't drift, flake, or re-animate differently.
   (`start`), and the tail (`durationMs`).
 - **Needs a fresh `make` (choreography):** what's clicked/typed/dragged, the beat
   **order**, drag paths, typed text — and **an action beat's `tMs`**. The video is
-  temporal: `tMs` is *when that action is visible in the recording*, so moving it
-  desyncs the overlay from the on-screen action. You cannot retime an action by
-  editing JSON; re-capture to retime. **The capture-lock enforces this in the loop:**
-  `make` writes `<out>.capture.json` (the ground-truth log) and `render` auto-loads
-  it, so a drifted action `tMs` is *refused* with a field-precise error before any
-  render.
+  temporal: `tMs` is *when that action is visible in the recording*, so editing it
+  desyncs the overlay from the on-screen action. You can't retime by editing JSON —
+  re-capture instead (`render` refuses a drifted `tMs` before it renders).
 
-Edit → `render` → SHOW → repeat until the user is happy. See **refine** under
-Mechanics for the language→field map.
+Edit → `render` → SHOW → repeat. See **refine** under Mechanics for the
+language→field map.
 
 ## Mechanics
 
@@ -247,8 +245,7 @@ encode and the render grid. 60 is the premium, cinematic feel — continuous
 motion (`drag`/sketch, scroll, video) stays smooth and the ink keeps up with the
 cursor. **`--fps 30` halves render time + file size** — use it for fast drafts
 while iterating, or for pure click/type demos where the gain is marginal. Needs
-a Chrome — auto-downloads Chrome-for-Testing on first run, or set
-`OPEN_TAKE_CHROME`.
+a Chrome (auto-downloaded on first run — see Prerequisites).
 
 `make` prints all four artifacts and the exact `render` command to refine:
 ```
@@ -331,20 +328,15 @@ capture-lock). Warnings (a no-op zoom, a soft-cap scale) print but don't block.
   break the demo.
 
 ## Known limits (don't be surprised; flag when they bite the story)
-- **Vocabulary = click · type · drag · scroll · hover · press · wait.** Covers
-  most product wows directly. Remaining edges to flag when they bite: a
-  hover-reveal whose menu has no accessible name *and* no stable selector;
-  multi-key sequences within one beat (chain separate `press` steps); precise
-  inner-scroller targeting (scroll dispatches a wheel at viewport centre, so it
-  pans the main document — a nested scroll region that isn't under centre may
-  need a `dy` tuned by hand). A real text-drag selection isn't a first-class verb
-  (use `drag` across the text, but it won't always select).
-- **fps: default 60 (capture + render), pure-CDP screencast.** Continuous
-  motion (`drag`, scroll, animation) is smooth and the ink stays locked to the
-  synthetic cursor. `--fps 30` halves render time + file size — fine for fast
-  drafts and pure click/type demos; on a 30fps render, soften strokes with a
-  slower `durationMs` (1500–2500ms). The old ~10fps agent-browser ceiling is
-  gone entirely.
+- **Vocabulary edges to flag when they bite the story:** a hover-reveal whose menu
+  has no accessible name *and* no stable selector; multi-key sequences within one
+  beat (chain separate `press` steps); precise inner-scroller targeting (scroll
+  dispatches a wheel at viewport centre, so it pans the main document — a nested
+  scroll region not under centre may need a hand-tuned `dy`); text selection isn't
+  a first-class verb (`drag` across the text, but it won't always select).
+- **fps: 60 by default; `--fps 30` is the fast-draft halving (see make).** Not a
+  story limit — 60 is smooth for continuous motion. On a 30fps render, lean drag
+  `durationMs` slower (1500–2500ms).
 - viewport ≠ video scaling is implemented but lightly tested.
 
 ## Prerequisites
