@@ -113,7 +113,15 @@ export async function renderTake(opts: RenderTakeOpts): Promise<{ mp4Path: strin
         // Reuse the capture-managed Chrome-for-Testing when given (one browser
         // for both stages); else let revideo's puppeteer resolve its own.
         puppeteer: {
-          args: ["--no-sandbox", "--disable-setuid-sandbox"],
+          // --password-store/--use-mock-keychain: never touch the OS keychain, so
+          // macOS doesn't pop a "Chrome wants to use Chromium Safe Storage" prompt
+          // mid-render (matches the capture launch in runtime/cdp.ts).
+          args: [
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--password-store=basic",
+            "--use-mock-keychain",
+          ],
           ...(opts.chromePath ? { executablePath: opts.chromePath } : {}),
         },
       },

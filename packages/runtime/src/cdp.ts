@@ -213,6 +213,15 @@ export async function launchBrowser(opts: {
       `--user-data-dir=${userDir}`,
       `--window-size=${opts.width},${opts.height}`,
       "--headless=new",
+      // automation browser (throwaway profile, loads the user's own target app);
+      // without this the launch hangs — never writes DevToolsActivePort — in
+      // sandboxed/containerised/CI contexts where Chrome's own sandbox can't init.
+      "--no-sandbox",
+      // never touch the OS keychain (macOS would pop a "Chrome for Testing wants
+      // to use Chromium Safe Storage" password prompt every capture); use an
+      // in-process store instead. These are puppeteer/playwright defaults.
+      "--password-store=basic",
+      "--use-mock-keychain",
       "--no-first-run",
       "--no-default-browser-check",
       "--hide-scrollbars",
@@ -421,6 +430,22 @@ export function encodeFrames(
     ? ["-c:v", "libvpx-vp9", "-b:v", "0", "-crf", "28", "-deadline", "good", "-cpu-used", "4"]
     : ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18"];
 
+  // Color: the screencast frames are full-range JPEGs (601). For h264, convert
+  // to STANDARD limited-range bt709 and label all four fields (range/matrix/
+  // primaries/transfer) so every downstream decoder agrees: the revideo render,
+  // end-user players, AND a browser <video>→canvas (the live-preview editor).
+  // Without tags ffmpeg stamped yuvj420p/pc/bt470bg, which Chrome's canvas
+  // mis-decodes as limited and over-brightens (~20 levels) → washed-out colors in
+  // a canvas preview, while ffmpeg/revideo honored the full-range tag and stayed
+  // faithful. `scale` converts (and sets range+matrix); `setparams` adds the
+  // primaries+transfer labels scale leaves unspecified, so all four are explicit.
+  const colorConvert = isWebm
+    ? ""
+    : ":in_range=full:in_color_matrix=bt470bg:out_range=tv:out_color_matrix=bt709";
+  const colorLabel = isWebm
+    ? ""
+    : ",setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709";
+
   return new Promise((resolve, reject) => {
     const args = [
       "-y",
@@ -439,7 +464,7 @@ export function encodeFrames(
       // screencast frames can be odd-sized (e.g. 1280x657); yuv420p needs
       // even dims, so round down to the nearest even before pixel-format.
       "-vf",
-      "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p",
+      `scale=trunc(iw/2)*2:trunc(ih/2)*2${colorConvert},format=yuv420p${colorLabel}`,
       ...codec,
       outPath,
     ];
