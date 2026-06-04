@@ -116,6 +116,13 @@ export type ZoomDecision = {
   center: Pt;
   /** when the zoom-in begins (ms) */
   inAtMs: number;
+  /** Optional "glide": a slow camera drift WHILE the zoom is held, as a velocity
+   *  in video-px per second {x,y}. The held centre pans from `center` by
+   *  `glide · holdSeconds` across the hold window (then the next beat ramps from
+   *  there / it zooms out from there). Adds life vs a dead-static hold (Screen
+   *  Studio's glide). Absent/0 ⇒ a still hold. Clamped to the video at read time,
+   *  so a drift just stops at the edge. Keep it gentle (tens of px/s). */
+  glide?: Pt;
   /** why this decision (for the human/agent reading the composition) */
   reason: string;
 };
@@ -151,7 +158,10 @@ export type FramingConfig = {
   insetFrac: number;
   cornerRadius: number;
   shadow: { color: string; blur: number; offset: Pt };
-  background: { from: string; to: string };
+  /** backdrop behind the framed video. `type` defaults to "gradient" (from→to);
+   *  "solid" fills `from` only. `angle` (deg, CSS-like: 0 = upward) rotates the
+   *  gradient; absent ⇒ the legacy top-left→bottom-right diagonal (pixel-identical). */
+  background: { from: string; to: string; type?: "gradient" | "solid"; angle?: number };
 };
 
 export type CursorConfig = {
@@ -187,6 +197,14 @@ export type CursorConfig = {
    *  near-constant-velocity middle reads a bit linear, esp. on the zoom-OUT
    *  settle. A decel-biased curve gives a softer landing into rest. */
   zoomEase?: [number, number, number, number];
+  /** Spring easing for the zoom/pan stage ramps, as a `bounce` amount ∈ [0,~0.6):
+   *  0 = critically damped (a soft physical ease-out), higher = more overshoot/
+   *  snap (the "silky" settle a premium screen-recorder has; ~0.06 for zoom). When
+   *  set, this WINS over `zoomEase` (see math.ts stageEasing). Absent ⇒ use
+   *  `zoomEase`/smootherstep. The segment duration stays zoomInMs/zoomOutMs;
+   *  bounce only shapes the curve. NB: large bounce can undershoot rest on the
+   *  zoom-OUT (momentary backdrop dead-space) — keep it small for zoom. */
+  zoomSpring?: number;
   /** ms to delay the synthetic cursor along a DRAG stroke, compensating for the
    *  capture pipeline latency: the captured ink appears ~this long after the pen
    *  actually moved, so without the delay the (exact-time) cursor leads the ink.
@@ -200,6 +218,21 @@ export type CursorConfig = {
   travelEase: [number, number, number, number];
 };
 
+/** Camera motion blur (temporal supersampling — what a real shutter does). The
+ *  renderer samples the composition camera at `samples` sub-times within each
+ *  output frame and averages them, so a fast zoom/pan/cursor smears in the
+ *  motion direction (a camera/shutter motion blur). It smears the
+ *  backdrop-reveal on a zoom-OUT into a soft gradient instead of a hard
+ *  single-frame pop. The captured video's frames repeat across sub-samples, so
+ *  the recording's own content is NOT blurred — only the camera move + cursor. */
+export type MotionBlurConfig = {
+  /** sub-frames sampled per output frame. 1 ⇒ OFF (no supersampling, no cost). */
+  samples: number;
+  /** fraction of the frame interval the shutter is open (0..1). Blur strength;
+   *  0 ⇒ OFF. ~0.5 = a 180° shutter, 1 = 360°. */
+  shutter: number;
+};
+
 export type TakeComposition = {
   output: { width: number; height: number; fps: number };
   source: {
@@ -210,17 +243,36 @@ export type TakeComposition = {
   };
   framing: FramingConfig;
   cursor: CursorConfig;
+  /** camera motion blur; absent ⇒ off (renders exactly as before). */
+  motionBlur?: MotionBlurConfig;
   /** cursor start, video-px */
   start: Pt;
   events: CompEvent[];
   durationMs: number;
 };
 
+/** True when motion blur is configured to actually do something (so the OFF
+ *  path stays byte-identical to the pre-motion-blur renderer). */
+export function motionBlurActive(mb: MotionBlurConfig | undefined): mb is MotionBlurConfig {
+  return !!mb && mb.samples > 1 && mb.shutter > 0;
+}
+
 export const DEFAULT_FRAMING: FramingConfig = {
   insetFrac: 0.92,
   cornerRadius: 28,
   shadow: { color: "rgba(0,0,0,0.55)", blur: 60, offset: { x: 0, y: 28 } },
   background: { from: "#1e1b3a", to: "#0a0e1c" },
+};
+
+// Camera motion blur, ON by default — it smooths the zoom
+// motion and softens the zoom-OUT backdrop reveal (the model-C hitch). 6
+// sub-frames is a good smoothness/speed balance; ~0.7 shutter is a strong-ish
+// blur without ghosting. EXPORT render cost scales with `samples` (renders at
+// fps·samples then averages), so `samples` is the quality⇄speed knob — drop it
+// to render faster, raise (≤~12) for silkier fast pans.
+export const DEFAULT_MOTION_BLUR: MotionBlurConfig = {
+  samples: 6,
+  shutter: 0.7,
 };
 
 export const DEFAULT_CURSOR: CursorConfig = {

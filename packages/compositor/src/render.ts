@@ -13,7 +13,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { renderVideo } from "@revideo/renderer";
 import { type PlanOpts, planComposition } from "./plan";
-import type { CaptureLog, TakeComposition } from "./types";
+import { type CaptureLog, type TakeComposition, motionBlurActive } from "./types";
 import { type CompositionIssue, formatIssues, validateComposition } from "./validate";
 
 // dist/index.js -> package root
@@ -46,6 +46,9 @@ export type RenderTakeOpts = {
    *  refuse to render an errored composition (a render is expensive; catch a bad
    *  hand-edit in milliseconds instead). */
   skipValidate?: boolean;
+  /** progress callback (0..1) forwarded from revideo's renderer — lets a caller
+   *  (e.g. the edit-server's render endpoint) stream a determinate progress bar. */
+  onProgress?: (progress: number) => void;
 };
 
 function run(cmd: string, args: string[]): Promise<void> {
@@ -64,16 +67,72 @@ function run(cmd: string, args: string[]): Promise<void> {
 async function toMp4(videoPath: string, outMp4: string, fps: number): Promise<void> {
   await mkdir(dirname(outMp4), { recursive: true });
   await run("ffmpeg", [
-    "-y", "-loglevel", "error", "-i", resolve(videoPath),
-    "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", "-r", String(fps), "-an", outMp4,
+    "-y",
+    "-loglevel",
+    "error",
+    "-i",
+    resolve(videoPath),
+    "-c:v",
+    "libx264",
+    "-pix_fmt",
+    "yuv420p",
+    "-crf",
+    "18",
+    "-r",
+    String(fps),
+    "-an",
+    outMp4,
   ]);
 }
 
-export async function renderTake(opts: RenderTakeOpts): Promise<{ mp4Path: string; compositionPath: string }> {
+/** Temporal-supersampling motion blur: the scene was rendered at fps·samples
+ *  (project.ts); average a trailing shutter window of sub-frames back down to the
+ *  output fps. `tmix=frames=M` averages M consecutive sub-frames; `fps=baseFps`
+ *  then decimates ≈every `samples`-th, so each output frame = the mean of the last
+ *  M sub-frames of its interval (a trailing shutter). Re-tags bt709/tv to match
+ *  the capture pipeline (the input is already bt709, but tmix→encode must keep it). */
+async function motionBlurMp4(
+  inMp4: string,
+  outMp4: string,
+  baseFps: number,
+  samples: number,
+  shutter: number,
+): Promise<void> {
+  const M = Math.max(1, Math.min(samples, Math.round(shutter * samples)));
+  const vf =
+    `tmix=frames=${M},fps=${baseFps},format=yuv420p,` +
+    "setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709";
+  await run("ffmpeg", [
+    "-y",
+    "-loglevel",
+    "error",
+    "-i",
+    resolve(inMp4),
+    "-vf",
+    vf,
+    "-c:v",
+    "libx264",
+    "-pix_fmt",
+    "yuv420p",
+    "-crf",
+    "18",
+    "-r",
+    String(baseFps),
+    "-an",
+    outMp4,
+  ]);
+}
+
+export async function renderTake(
+  opts: RenderTakeOpts,
+): Promise<{ mp4Path: string; compositionPath: string }> {
   const composition: TakeComposition =
     opts.composition ??
     planComposition(
-      opts.log ?? (() => { throw new Error("renderTake: provide `log` or `composition`"); })(),
+      opts.log ??
+        (() => {
+          throw new Error("renderTake: provide `log` or `composition`");
+        })(),
       opts.planOpts,
     );
 
@@ -86,9 +145,12 @@ export async function renderTake(opts: RenderTakeOpts): Promise<{ mp4Path: strin
     });
     const errors = issues.filter((i) => i.severity === "error");
     const warns = issues.filter((i) => i.severity === "warn");
-    if (opts.logProgress && warns.length) process.stderr.write(`composition warnings:\n${formatIssues(warns)}\n`);
+    if (opts.logProgress && warns.length)
+      process.stderr.write(`composition warnings:\n${formatIssues(warns)}\n`);
     if (errors.length)
-      throw new Error(`composition has ${errors.length} error(s) — refusing to render:\n${formatIssues(errors)}`);
+      throw new Error(
+        `composition has ${errors.length} error(s) — refusing to render:\n${formatIssues(errors)}`,
+      );
   }
 
   // 1. serve the capture as /capture.mp4 (vite public dir under PKG_ROOT)
@@ -110,6 +172,9 @@ export async function renderTake(opts: RenderTakeOpts): Promise<{ mp4Path: strin
         outDir: RENDER_OUT,
         workers: 1,
         logProgress: opts.logProgress ?? false,
+        ...(opts.onProgress
+          ? { progressCallback: (_worker: number, progress: number) => opts.onProgress!(progress) }
+          : {}),
         // Reuse the capture-managed Chrome-for-Testing when given (one browser
         // for both stages); else let revideo's puppeteer resolve its own.
         puppeteer: {
@@ -130,9 +195,21 @@ export async function renderTake(opts: RenderTakeOpts): Promise<{ mp4Path: strin
     process.chdir(prevCwd);
   }
 
-  // 4. deliver mp4 + the editable composition
+  // 4. deliver mp4 (motion-blur down from fps·samples if configured) + the
+  //    editable composition. OFF ⇒ a plain copy (byte-identical to before).
   await mkdir(dirname(resolve(opts.outPath)), { recursive: true });
-  await copyFile(resolve(PKG_ROOT, produced), resolve(opts.outPath));
+  const producedAbs = resolve(PKG_ROOT, produced);
+  if (motionBlurActive(composition.motionBlur)) {
+    await motionBlurMp4(
+      producedAbs,
+      resolve(opts.outPath),
+      composition.output.fps,
+      composition.motionBlur.samples,
+      composition.motionBlur.shutter,
+    );
+  } else {
+    await copyFile(producedAbs, resolve(opts.outPath));
+  }
   const compositionPath = resolve(opts.outPath).replace(/\.mp4$/i, "") + ".composition.json";
   await writeFile(compositionPath, JSON.stringify(composition, null, 2));
 

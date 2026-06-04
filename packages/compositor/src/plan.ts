@@ -10,6 +10,7 @@ import {
   type CursorConfig,
   DEFAULT_CURSOR,
   DEFAULT_FRAMING,
+  DEFAULT_MOTION_BLUR,
   type FramingConfig,
   type Pt,
   type TakeComposition,
@@ -19,9 +20,11 @@ export type PlanOpts = {
   output?: { width?: number; height?: number; fps?: number };
   framing?: Partial<FramingConfig>;
   cursor?: Partial<CursorConfig>;
-  /** element should fill this fraction of the frame when zoomed (default 0.6) */
+  /** element should fill this fraction of the frame when zoomed (default 0.55) */
   fillFrac?: number;
-  /** hard cap on zoom (default 2.0) */
+  /** hard cap on zoom (default 1.5 — a gentle workhorse; lower than
+   *  the old 2.0 reads more premium. Small targets still zoom, just not as hard;
+   *  raise per-beat in the editor when a tiny element needs it.) */
   maxScale?: number;
   /** require fit-scale to exceed rest*this to bother zooming (default 1.3) */
   zoomRatio?: number;
@@ -35,8 +38,8 @@ export function planComposition(log: CaptureLog, opts: PlanOpts = {}): TakeCompo
   const oW = opts.output?.width ?? vW;
   const oH = opts.output?.height ?? vH;
   const fps = opts.output?.fps ?? 30;
-  const fillFrac = opts.fillFrac ?? 0.6;
-  const maxScale = opts.maxScale ?? 2.0;
+  const fillFrac = opts.fillFrac ?? 0.55;
+  const maxScale = opts.maxScale ?? 1.5;
   const zoomRatio = opts.zoomRatio ?? 1.3;
   const zoomFirst = opts.zoomFirst ?? false;
 
@@ -146,6 +149,7 @@ export function planComposition(log: CaptureLog, opts: PlanOpts = {}): TakeCompo
     source: { videoUrl: "/capture.mp4", videoWidth: vW, videoHeight: vH, viewport: log.viewport },
     framing,
     cursor,
+    motionBlur: DEFAULT_MOTION_BLUR,
     start,
     events,
     durationMs,
