@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "baseUrl": ".",
+    "types": ["vite/client"],
+    "paths": {
+      "@compositor/*": ["../../packages/compositor/src/*"]
+    }
+  },
+  "include": ["src"]
+}

@@ -9,10 +9,11 @@
 //       -> re-render an EDITED composition over a kept capture (no app drive)
 import { readFile } from "node:fs/promises";
 import {
+  type TakePlan,
   inspectPage,
   makeTake,
   renderCompositionFile,
-  type TakePlan,
+  startEditServer,
 } from "@open-take/runtime";
 
 const argv = process.argv.slice(2);
@@ -42,6 +43,7 @@ Usage:
   open-take inspect <url> [--viewport 1920x1080]
   open-take make   --plan <plan.json> --out <out.mp4> [--fps 60]
   open-take render --composition <c.json> --video <capture.mp4> --out <mp4>
+  open-take edit   <take.mp4 | take dir> [--port 4178] [--no-open]
 
   make    drive the app (real-time) → polished mp4 + editable
           <out>.composition.json + KEPT <out>.capture.mp4 + <out>.capture.json
@@ -52,6 +54,11 @@ Usage:
           way; changing what's clicked/typed or the beat order needs a fresh make.
           Auto-loads <video>.json as the capture log (the capture-lock source);
           --capture-log <path> overrides it.
+  edit    open the web editor on a take: a live, scrubbable WYSIWYG preview +
+          property panel over the cinematic layer (zoom / cursor / framing /
+          pacing). Edits validate on save; Export re-renders over the kept
+          capture with live progress — all on 127.0.0.1, nothing uploaded.
+          Needs the editor build (pnpm --filter @open-take/editor build).
 
   --fps <n>   (make only) capture AND render fps (default 60 — the premium feel).
               Drop to 30 for fast-draft renders (~½ the time + file size) while
@@ -102,6 +109,18 @@ async function main() {
       logProgress: true,
     });
     process.stdout.write(`\nmp4: ${mp4Path}\n`);
+    return;
+  }
+  if (cmd === "edit") {
+    const takePath = positional[0];
+    if (!takePath) throw new Error("edit: missing <take.mp4 | take dir>");
+    const portFlag = flag("--port");
+    await startEditServer({
+      takePath,
+      ...(portFlag ? { port: Number(portFlag) } : {}),
+      open: !("--no-open" in flags),
+    });
+    await new Promise(() => {}); // keep alive until Ctrl-C
     return;
   }
   process.stderr.write(USAGE);

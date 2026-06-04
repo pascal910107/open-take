@@ -1,0 +1,233 @@
+{
+  "output": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30
+  },
+  "source": {
+    "videoUrl": "/capture.mp4",
+    "videoWidth": 1920,
+    "videoHeight": 1080,
+    "viewport": {
+      "w": 1920,
+      "h": 1080
+    }
+  },
+  "framing": {
+    "insetFrac": 0.92,
+    "cornerRadius": 28,
+    "shadow": {
+      "color": "rgba(0,0,0,0.55)",
+      "blur": 60,
+      "offset": {
+        "x": 0,
+        "y": 28
+      }
+    },
+    "background": {
+      "from": "#1e1b3a",
+      "to": "#0a0e1c"
+    }
+  },
+  "cursor": {
+    "travelMs": 560,
+    "travelWidthsPerSec": 0.35,
+    "travelMinMs": 300,
+    "travelMaxMs": 850,
+    "scale": 2,
+    "arcFrac": 0.05,
+    "arcMax": 24,
+    "rippleMs": 450,
+    "holdMs": 1100,
+    "zoomOutMs": 800,
+    "zoomInMs": 760,
+    "zoomEase": [
+      0.3,
+      0,
+      0.2,
+      1
+    ],
+    "dragLagMs": 190,
+    "travelEase": [
+      0.3,
+      0,
+      0.2,
+      1
+    ]
+  },
+  "start": {
+    "x": 520,
+    "y": 360
+  },
+  "events": [
+    {
+      "kind": "type",
+      "tMs": 1607,
+      "point": {
+        "x": 960,
+        "y": 507
+      },
+      "bbox": {
+        "x": 720,
+        "y": 475,
+        "w": 480,
+        "h": 64
+      },
+      "label": "Search the docs",
+      "zoom": {
+        "enabled": true,
+        "scale": 2,
+        "center": {
+          "x": 960,
+          "y": 507
+        },
+        "inAtMs": 847,
+        "reason": "plan: zoom=always → 2.00x (capped 2x)"
+      },
+      "durationMs": 875,
+      "text": "polished demos"
+    },
+    {
+      "kind": "press",
+      "tMs": 3189,
+      "point": {
+        "x": 960,
+        "y": 589
+      },
+      "bbox": {
+        "x": 583,
+        "y": 563,
+        "w": 753,
+        "h": 52
+      },
+      "label": "#result",
+      "zoom": {
+        "enabled": true,
+        "scale": 1.5298804780876494,
+        "center": {
+          "x": 959.5,
+          "y": 589
+        },
+        "inAtMs": 2429,
+        "reason": "plan: zoom=always → 1.53x (capped 2x)"
+      },
+      "durationMs": 1200,
+      "keys": "Enter"
+    },
+    {
+      "kind": "press",
+      "tMs": 5390,
+      "point": {
+        "x": 960,
+        "y": 344
+      },
+      "bbox": {
+        "x": 640,
+        "y": 220,
+        "w": 640,
+        "h": 248
+      },
+      "label": ".panel",
+      "zoom": {
+        "enabled": true,
+        "scale": 1.8,
+        "center": {
+          "x": 960,
+          "y": 344
+        },
+        "inAtMs": 4630,
+        "reason": "plan: zoom=always → 1.80x (capped 2x)"
+      },
+      "durationMs": 1400,
+      "keys": "Meta+k"
+    },
+    {
+      "kind": "press",
+      "tMs": 7707,
+      "point": {
+        "x": 960,
+        "y": 540
+      },
+      "label": "Escape closes palette (full view)",
+      "zoom": {
+        "enabled": false,
+        "scale": 0.92,
+        "center": {
+          "x": 960,
+          "y": 540
+        },
+        "inAtMs": 6947,
+        "reason": "no bbox in event log — cannot bbox-fit, so no zoom (avoids framing dead space)"
+      },
+      "durationMs": 900,
+      "keys": "Escape"
+    },
+    {
+      "kind": "scroll",
+      "tMs": 9254,
+      "point": {
+        "x": 960,
+        "y": 540
+      },
+      "label": "pan to Features",
+      "zoom": {
+        "enabled": false,
+        "scale": 0.92,
+        "center": {
+          "x": 960,
+          "y": 540
+        },
+        "inAtMs": 8494,
+        "reason": "scroll — full view (content pans, no zoom)"
+      },
+      "durationMs": 1101
+    },
+    {
+      "kind": "hover",
+      "tMs": 11059,
+      "point": {
+        "x": 960,
+        "y": 657
+      },
+      "bbox": {
+        "x": 900,
+        "y": 597,
+        "w": 120,
+        "h": 120
+      },
+      "label": ".avatar",
+      "zoom": {
+        "enabled": true,
+        "scale": 2,
+        "center": {
+          "x": 960,
+          "y": 657
+        },
+        "inAtMs": 10299,
+        "reason": "plan: zoom=always → 2.00x (capped 2x)"
+      },
+      "durationMs": 1400
+    },
+    {
+      "kind": "scroll",
+      "tMs": 13199,
+      "point": {
+        "x": 960,
+        "y": 540
+      },
+      "label": "pan to Pricing",
+      "zoom": {
+        "enabled": false,
+        "scale": 0.92,
+        "center": {
+          "x": 960,
+          "y": 540
+        },
+        "inAtMs": 12439,
+        "reason": "scroll — full view (content pans, no zoom)"
+      },
+      "durationMs": 1141
+    }
+  ],
+  "durationMs": 16640
+}

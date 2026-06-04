@@ -1,0 +1,35 @@
+// Single bridge to the compositor's SOURCE (via the @compositor Vite alias).
+// Everything spatial/temporal in the preview comes through here, so the editor
+// can never quietly fork the renderer's math. If math.ts changes, the preview
+// changes with it — no port to keep in sync.
+export {
+  smoother,
+  cubicBezier,
+  springEase,
+  stageEasing,
+  panEasing,
+  keyvalN,
+  keyvalP,
+  restStageScale,
+  clampCenter,
+  buildStageKeyframes,
+  buildLegs,
+  cursorPos,
+  isDragging,
+  gradientEndpoints,
+} from "@compositor/math";
+
+export { validateComposition, formatIssues } from "@compositor/validate";
+
+export type {
+  TakeComposition,
+  CompEvent,
+  CaptureLog,
+  Pt,
+  BBox,
+  FramingConfig,
+  CursorConfig,
+  ZoomDecision,
+} from "@compositor/types";
+
+export type { CompositionIssue } from "@compositor/validate";

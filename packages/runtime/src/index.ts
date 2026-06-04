@@ -21,9 +21,9 @@ import { dirname, join, resolve } from "node:path";
 import {
   type CaptureLog,
   type PlanOpts,
+  type TakeComposition,
   planComposition,
   renderTake,
-  type TakeComposition,
 } from "@open-take/compositor";
 import { type CaptureOpts, captureTake } from "./capture";
 import { ensureChrome } from "./cdp";
@@ -40,6 +40,7 @@ export {
 } from "./capture";
 export { captureTakeCDP } from "./cdp-capture";
 export { ensureChrome, resolveChrome } from "./cdp";
+export { startEditServer, type EditServerOpts } from "./edit-server";
 export { validateComposition, formatIssues, type CompositionIssue } from "@open-take/compositor";
 
 export type MakeTakeOpts = {
@@ -144,6 +145,8 @@ export type RenderCompositionOpts = {
   logProgress?: boolean;
   /** Chrome binary; resolved once if omitted */
   chromePath?: string;
+  /** render progress (0..1), forwarded from revideo — for a progress UI. */
+  onProgress?: (progress: number) => void;
 };
 
 /** Refine: re-render an EDITED composition over a saved capture — no app
@@ -162,6 +165,7 @@ export async function renderComposition(
     logProgress: opts.logProgress ?? false,
     chromePath,
     captureLog: opts.captureLog,
+    onProgress: opts.onProgress,
   });
 }
 
@@ -178,8 +182,11 @@ export async function renderCompositionFile(opts: {
   captureLogPath?: string | null;
   logProgress?: boolean;
   chromePath?: string;
+  onProgress?: (progress: number) => void;
 }): Promise<{ mp4Path: string; compositionPath: string }> {
-  const composition = JSON.parse(await readFile(resolve(opts.compositionPath), "utf8")) as TakeComposition;
+  const composition = JSON.parse(
+    await readFile(resolve(opts.compositionPath), "utf8"),
+  ) as TakeComposition;
   const captureLog =
     opts.captureLogPath === null
       ? undefined
@@ -187,7 +194,11 @@ export async function renderCompositionFile(opts: {
         ? (JSON.parse(await readFile(resolve(opts.captureLogPath), "utf8")) as CaptureLog)
         : await loadCaptureLogSibling(opts.capturePath);
   if (opts.logProgress)
-    process.stderr.write(captureLog ? "capture-lock: on (loaded capture log)\n" : "capture-lock: off (no capture log)\n");
+    process.stderr.write(
+      captureLog
+        ? "capture-lock: on (loaded capture log)\n"
+        : "capture-lock: off (no capture log)\n",
+    );
   return renderComposition({
     composition,
     capturePath: opts.capturePath,
@@ -195,5 +206,6 @@ export async function renderCompositionFile(opts: {
     captureLog,
     logProgress: opts.logProgress,
     chromePath: opts.chromePath,
+    onProgress: opts.onProgress,
   });
 }

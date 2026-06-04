@@ -1,0 +1,113 @@
+{
+  "video": {
+    "width": 1920,
+    "height": 1080,
+    "fps": "30/1",
+    "durationS": 15.766667
+  },
+  "viewport": {
+    "w": 1920,
+    "h": 1080
+  },
+  "start": {
+    "x": 520,
+    "y": 360
+  },
+  "events": [
+    {
+      "kind": "type",
+      "x": 960,
+      "y": 507,
+      "box": {
+        "x": 720,
+        "y": 475,
+        "w": 480,
+        "h": 64
+      },
+      "tMs": 1607,
+      "sel": "Search the docs",
+      "note": "search box",
+      "text": "polished demos",
+      "durationMs": 875,
+      "zoom": "always"
+    },
+    {
+      "kind": "press",
+      "x": 960,
+      "y": 589,
+      "box": {
+        "x": 583,
+        "y": 563,
+        "w": 753,
+        "h": 52
+      },
+      "tMs": 3189,
+      "keys": "Enter",
+      "sel": "#result",
+      "note": "Enter submits → result",
+      "durationMs": 1200,
+      "zoom": "always"
+    },
+    {
+      "kind": "press",
+      "x": 960,
+      "y": 344,
+      "box": {
+        "x": 640,
+        "y": 220,
+        "w": 640,
+        "h": 248
+      },
+      "tMs": 5390,
+      "keys": "Meta+k",
+      "sel": ".panel",
+      "note": "⌘K opens palette",
+      "durationMs": 1400,
+      "zoom": "always"
+    },
+    {
+      "kind": "press",
+      "x": 960,
+      "y": 540,
+      "tMs": 7707,
+      "keys": "Escape",
+      "note": "Escape closes palette (full view)",
+      "durationMs": 900
+    },
+    {
+      "kind": "scroll",
+      "x": 960,
+      "y": 540,
+      "tMs": 9254,
+      "dy": 1008,
+      "durationMs": 1101,
+      "note": "pan to Features"
+    },
+    {
+      "kind": "hover",
+      "x": 960,
+      "y": 657,
+      "box": {
+        "x": 900,
+        "y": 597,
+        "w": 120,
+        "h": 120
+      },
+      "tMs": 11059,
+      "sel": ".avatar",
+      "note": "hover reveals tooltip",
+      "durationMs": 1400,
+      "zoom": "always"
+    },
+    {
+      "kind": "scroll",
+      "x": 960,
+      "y": 540,
+      "tMs": 13199,
+      "dy": 1089,
+      "durationMs": 1141,
+      "note": "pan to Pricing"
+    }
+  ],
+  "tEndMs": 15245
+}
