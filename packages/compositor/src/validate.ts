@@ -30,7 +30,7 @@ export type CompositionIssue = {
 
 export type ValidateOpts = {
   /** soft ceiling on zoom scale — above it the pixels visibly soften (warn).
-   *  Default 2.5 (the planner caps auto-zoom at 2.0; manual edits get headroom). */
+   *  Default 2.5 (the planner caps auto-zoom at 1.5; manual edits get headroom). */
   maxScale?: number;
   /** the ground-truth capture log. When given, action `tMs` is checked against
    *  it (capture-lock). Omit to skip that check. */
@@ -43,7 +43,10 @@ const reqField: Record<string, string> = {
   drag: "to",
 };
 
-export function validateComposition(comp: TakeComposition, opts: ValidateOpts = {}): CompositionIssue[] {
+export function validateComposition(
+  comp: TakeComposition,
+  opts: ValidateOpts = {},
+): CompositionIssue[] {
   const issues: CompositionIssue[] = [];
   const err = (path: string, message: string, fix?: string) =>
     issues.push({ severity: "error", path, message, fix });
@@ -54,7 +57,8 @@ export function validateComposition(comp: TakeComposition, opts: ValidateOpts = 
 
   // --- output / source sanity ---
   const { width: oW, height: oH, fps } = comp.output;
-  if (!(oW > 0 && oH > 0)) err("output", `non-positive output size ${oW}x${oH}`, "set positive width/height");
+  if (!(oW > 0 && oH > 0))
+    err("output", `non-positive output size ${oW}x${oH}`, "set positive width/height");
   if (!(fps > 0)) err("output.fps", `fps must be > 0 (got ${fps})`, "set output.fps to 30 or 60");
   const { videoWidth: vW, videoHeight: vH } = comp.source;
   if (!(vW > 0 && vH > 0)) err("source", `non-positive source video size ${vW}x${vH}`);
@@ -84,17 +88,29 @@ export function validateComposition(comp: TakeComposition, opts: ValidateOpts = 
 
     if (e.tMs < 0) err(`${p}.tMs`, `negative tMs ${e.tMs}`);
     if (e.tMs > comp.durationMs)
-      err(`${p}.tMs`, `tMs ${e.tMs} exceeds composition durationMs ${comp.durationMs}`, "raise durationMs or remove the beat");
+      err(
+        `${p}.tMs`,
+        `tMs ${e.tMs} exceeds composition durationMs ${comp.durationMs}`,
+        "raise durationMs or remove the beat",
+      );
 
     // kind-specific required fields (editability invariants)
     const need = reqField[e.kind];
     if (need && (e as Record<string, unknown>)[need] == null)
-      err(`${p}.${need}`, `${e.kind} beat is missing "${need}"`, `restore ${need} from the capture`);
+      err(
+        `${p}.${need}`,
+        `${e.kind} beat is missing "${need}"`,
+        `restore ${need} from the capture`,
+      );
 
     // --- zoom decision ---
     const z = e.zoom;
     if (!z) {
-      err(`${p}.zoom`, "missing zoom decision", "every beat needs a zoom { enabled, scale, center, inAtMs }");
+      err(
+        `${p}.zoom`,
+        "missing zoom decision",
+        "every beat needs a zoom { enabled, scale, center, inAtMs }",
+      );
       continue;
     }
     // inAtMs must precede the action (the zoom-in ramps in before the beat lands)
@@ -199,6 +215,8 @@ export function formatIssues(issues: CompositionIssue[]): string {
   return issues
     .slice()
     .sort((a, b) => order(a.severity) - order(b.severity))
-    .map((i) => `  [${i.severity}] ${i.path}: ${i.message}${i.fix ? `\n          fix: ${i.fix}` : ""}`)
+    .map(
+      (i) => `  [${i.severity}] ${i.path}: ${i.message}${i.fix ? `\n          fix: ${i.fix}` : ""}`,
+    )
     .join("\n");
 }
