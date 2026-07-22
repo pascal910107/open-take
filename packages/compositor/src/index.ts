@@ -8,6 +8,8 @@
 // composition is the editable source of truth.
 
 export * from "./types";
+export * from "./presets";
+export { resolveFfmpeg, resolveFfprobe } from "./ffmpeg";
 export { planComposition, type PlanOpts } from "./plan";
 export { renderTake, type RenderTakeOpts } from "./render";
 export {

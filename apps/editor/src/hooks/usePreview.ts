@@ -15,6 +15,8 @@ export type UsePreview = {
   engine: PreviewEngine | null;
   status: LoadStatus;
   error: string | null;
+  /** the loaded capture video URL (bridge/sample/object URL) — for thumbnails */
+  videoSrc: string | null;
   source: SourceMeta | null;
   isPlaying: boolean;
   currentBeat: number;
@@ -47,6 +49,7 @@ export function usePreview(seed: SeedFn): UsePreview {
   const [source, setSource] = useState<SourceMeta | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentBeat, setCurrentBeat] = useState(-1);
+  const [videoSrc, setVideoSrc] = useState<string | null>(null);
   const objectUrl = useRef<string | null>(null);
 
   // create the engine once the canvas + video nodes exist
@@ -84,6 +87,7 @@ export function usePreview(seed: SeedFn): UsePreview {
       try {
         seed(comp, captureLog); // useComposition → engine.setComposition
         await eng.loadVideo(videoSrc);
+        setVideoSrc(videoSrc);
         setSource(meta);
         setCurrentBeat(activeBeatIndex(comp, 0));
         setStatus("ready");
@@ -153,6 +157,7 @@ export function usePreview(seed: SeedFn): UsePreview {
     engine,
     status,
     error,
+    videoSrc,
     source,
     isPlaying,
     currentBeat,

@@ -4,24 +4,52 @@ Agent-native demo recording. Tell your coding agent to make a demo of
 your app or CLI; it drives the real thing and produces a polished,
 re-editable video.
 
-**Status:** early — foundation only. The core types and the
-capture/compose adapters are in place and build green. The polish
-compositor and the agent runtime are next.
+**Status:** the pipeline works end-to-end — agent-planned capture (pure CDP),
+cinematic compositor (selective zoom, silky cursor, motion blur), and a
+conversational refine loop. Not yet published to npm.
 
-## How it works (target)
+## How it works
 
-The agent plans the demo and drives the real product — a browser via
-CDP, a CLI via a pty. Every action it issues is a ground-truth event
-(exact coordinates, timing). A compositor turns that event log into
-cinematic auto-zoom and a smooth synthetic cursor over the captured
-frames. Output: a polished MP4 and an editable composition you refine
-by talking to the agent.
+The agent plans the demo and drives the real product over CDP. Every action it
+issues is a ground-truth event (exact coordinates, timing). A compositor turns
+that event log into cinematic auto-zoom and a smooth synthetic cursor over the
+captured frames. Output: a polished MP4 and an editable composition you refine
+**by talking to the agent** — there is no video editor to learn.
+
+## Using it (the refine loop)
+
+Not on npm yet — from a checkout, `pnpm install && pnpm build` links the bin
+(`npx open-take …` works from the repo root). Once installed in a project,
+`npx open-take skill install` writes the agent guide into `.claude/skills/`
+so a coding agent can drive the whole loop; `npx open-take skill` prints it.
+
+```
+open-take make   --plan plan.json --out demo.mp4    # capture + polished master
+open-take edit   demo.mp4                           # visual editor: drag zoom regions,
+                                                    # looks, motion — live preview
+open-take render demo.mp4 --review                  # fast draft with beat numbers
+                                                    # burned in + REVIEW watermark
+open-take beats  demo.mp4 --card                    # the numbered beat sheet
+open-take ab     demo.mp4 --set zoom=light,tight --beat 2
+                                                    # a taste question as an A/B reel
+open-take render demo.mp4 --reveal                  # final master, revealed to post
+```
+
+You watch the review copy, give notes in plain language ("beat 3: no zoom",
+"look: slate"); the agent edits `demo.composition.json` and re-renders over the
+kept capture — deterministic, no app re-drive. Taste questions come back as a
+labeled A/B reel (the current state is always variant A, so "A" means keep it);
+every re-render keeps the previous master as `demo.prev.mp4`. See
+`skills/open-take/SKILL.md` for the full loop.
 
 ## Packages
 
-- `core` — take IR, action DSL, adapter interfaces (framework-free).
+- `cli` — the `open-take` bin: `inspect · make · render · beats · ab · edit · skill`.
 - `runtime` — capture (pure CDP: drive + screencast a self-launched Chrome) →
-  plan → render. Per-action ground-truth event log. No agent-browser.
+  plan → render; take resolution, review copies, A/B reels.
+- `compositor` — event log → editable `TakeComposition` → revideo render;
+  validation, presets (zoom levels / looks / pace / finish).
+- `core` — take IR, action DSL, adapter interfaces (framework-free).
 - `adapter-node-pty` — terminal capture → asciinema cast.
 - `adapter-ffmpeg` — transcode / mux / concat / zoompan.
 - `adapter-elevenlabs` — narration (+ a mock for keyless CI).

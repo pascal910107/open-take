@@ -2,7 +2,7 @@
   "name": "@open-take/editor",
   "version": "0.0.0",
   "private": true,
-  "description": "Web editor for the cinematic layer — live WYSIWYG preview of a TakeComposition over the capture video (read-only milestone). Refines composition.json; never touches the captured video.",
+  "description": "Editor v4 \u2014 icon-rail layered inspector + timeline over the live cinematic preview. Refines composition.json; never touches the captured video.",
   "license": "MIT",
   "type": "module",
   "scripts": {
@@ -13,9 +13,8 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@fontsource-variable/inter": "^5.2.8",
-    "@fontsource/jetbrains-mono": "^5.2.8",
-    "cmdk": "^1.1.1",
+    "@fontsource-variable/instrument-sans": "^5.2.8",
+    "@fontsource/geist-mono": "^5.2.8",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },

@@ -24,7 +24,7 @@ export type PlanOpts = {
   fillFrac?: number;
   /** hard cap on zoom (default 1.5 — a gentle workhorse; lower than
    *  the old 2.0 reads more premium. Small targets still zoom, just not as hard;
-   *  raise per-beat in the editor when a tiny element needs it.) */
+   *  raise per-beat in the composition when a tiny element needs it.) */
   maxScale?: number;
   /** require fit-scale to exceed rest*this to bother zooming (default 1.3) */
   zoomRatio?: number;

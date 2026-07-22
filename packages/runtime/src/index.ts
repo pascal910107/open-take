@@ -41,6 +41,25 @@ export {
 export { captureTakeCDP } from "./cdp-capture";
 export { ensureChrome, resolveChrome } from "./cdp";
 export { startEditServer, type EditServerOpts } from "./edit-server";
+export {
+  requireTakeFiles,
+  resolveTakePaths,
+  stagePrev,
+  type StagedPrev,
+  type TakePaths,
+} from "./take";
+export {
+  buildBeatSheet,
+  buildBadges,
+  renderReview,
+  renderAbReel,
+  renderBeforeAfter,
+  openPath,
+  revealPath,
+  SAY_IT_CARD,
+  type AbOpts,
+  type ReviewOpts,
+} from "./review";
 export { validateComposition, formatIssues, type CompositionIssue } from "@open-take/compositor";
 
 export type MakeTakeOpts = {

@@ -103,48 +103,101 @@ expressible — e.g. a hover-reveal whose menu has no accessible name AND no
 stable selector. Don't silently fall back to clicking inert UI.
 
 ### 5. SHOW (frames, not claims)
-Extract frames from the MP4 and **look at them** before you call it done:
+First verify it YOURSELF — extract frames and **look at them**:
 ```
 ffmpeg -i demo.mp4 -vf "fps=8/<dur>,scale=480:-1,tile=5x2" contact.png   # contact sheet
 ffmpeg -ss <t> -i demo.mp4 -frames:v 1 frame.png                          # a single moment
 ```
-Then show the user the MP4 + your UNDERSTAND/DIRECT/CRITIQUE notes, and give an
-honest read on **editorial quality** (is the wow in there?), not just mechanics.
-Tell them they can refine by talking — the composition is editable.
+Then hand the user the **review copy** — a fast draft with the beat numbers
+burned into the frame (the video itself teaches how to refer to moments) and a
+REVIEW watermark so it can't be mistaken for the postable master:
+```
+npx open-take render demo.mp4 --review        # auto-opens the player
+npx open-take beats  demo.mp4                 # prints the beat sheet
+```
+Paste the beat sheet into the conversation with your UNDERSTAND/DIRECT/CRITIQUE
+notes and an honest read on **editorial quality** (is the wow in there?). End
+with one hint line — the whole vocabulary a first-timer needs:
+> say it like: "beat 3: no zoom" · "tighter on beat 2" · "look: slate"
 
-### 6. REFINE (talk-to-edit)
-The draft is a starting point; the user refines it by reacting ("zoom less on the
-search", "hold the result longer", "tighter on the logo", "slower intro"). For
-those edits you **change `demo.composition.json` and `render`** — you do **not**
-re-`make`. Keep going until the user is happy; this is where a competent draft
-becomes brilliant.
+### 6. REFINE (the dailies loop — the user reacts, you cut)
+The user is the director watching dailies; you are the editor. They give notes
+in plain language ("開頭太慢", "beat 3 不用 zoom", "背景深一點"); you resolve,
+cut, and show.
 
-**Why `render`, not re-`make`:** `make` keeps the raw recording as
-`demo.capture.mp4`; `render` re-composites the *cinematic layer* (zoom, cursor,
-framing, pacing) over that frozen capture — no app drive. So a refine is
-deterministic (only your edit changes; the app can't drift or re-animate) and
-~3× faster (it skips the live capture).
+**The visual editor is the user's other door.** `npx open-take edit demo.mp4`
+opens a local editor (preview + icon-rail settings + timeline with zoom
+blocks); the user can drag zoom regions, switch looks, and tune motion there —
+edits autosave into the SAME `demo.composition.json` you edit. Offer it when
+the user wants to fine-tune many things by hand. Its Agent panel appends notes
+to `demo.notes.md` and prints `NOTE {...}` lines on the `edit` process stdout —
+**check `demo.notes.md` when the user says they left you notes**, and re-read
+`demo.composition.json` before editing it yourself (the user may have changed
+it in the editor).
 
-**The boundary:**
-- **Editable by `render` (cinematic layer):** which beats zoom + how tight
-  (`zoom.enabled`/`scale`/`center`), zoom/hold pacing (`inAtMs`, `cursor.zoomInMs`/
-  `zoomOutMs`/`holdMs`), framing (`framing.insetFrac`/`background`/`cornerRadius`),
-  cursor feel/speed (`cursor.travel*`, `arc*`, easings), the intro travel
-  (`start`), and the tail (`durationMs`).
-- **Needs a fresh `make` (choreography):** what's clicked/typed/dragged, the beat
-  **order**, drag paths, typed text — and **an action beat's `tMs`**. The video is
-  temporal: `tMs` is *when that action is visible in the recording*, so editing it
-  desyncs the overlay from the on-screen action. You can't retime by editing JSON —
-  re-capture instead (`render` refuses a drifted `tMs` before it renders).
+**Hard rules, in order:**
 
-Edit → `render` → SHOW → repeat. See **refine** under Mechanics for the
-language→field map.
+1. **ECHO before you touch anything.** Resolve every note to its target and say
+   it in one line each — `→ beat 3 · 0:07 · key .panel · zoom tight → off` —
+   so a misread costs a sentence, not a render. Resolve referents against the
+   ground truth: beat numbers → `events[n-1]`; "at 0:07" → the beat whose window
+   covers it; element words → fuzzy-match `events[].label`, then bboxes in
+   `demo.capture.json`; 開頭/intro → `start` + first beat; 結尾/tail →
+   `durationMs`.
+2. **Triage each note by cost, and say the cost:**
+   - **Instant (~10s draft):** anything in the cinematic layer — zoom on/off/
+     tightness/center, pacing, look, finish, intro, tail. Edit
+     `demo.composition.json` (presets below), then ONE `render --review` for ALL
+     batched notes from the message. The badges re-burn so the sheet never goes
+     stale.
+   - **A taste question ("how tight? 深一點? 快一點?"):** never guess twice —
+     run an `ab` reel with the bracketing values and ask for a letter:
+     ```
+     npx open-take ab demo.mp4 --set zoom=medium,close --beat 2
+     ```
+     The current state is always variant **A**, so **"A" means keep it** —
+     that's the undo. ONE knob per reel (the tool enforces it). FEEL knobs
+     (zoom tightness as motion, pace, finish/blur) render at full quality —
+     motion blur must be judged by eye, never on a draft.
+   - **Choreography (re-shoot, ~1min):** what's clicked/typed, beat order, drag
+     paths, action timing. Say "that's a re-shoot (~1 min)" and get a yes, then
+     re-`make`. **Beat numbers are re-dealt — re-run `render --review` + `beats`
+     and re-post the sheet.**
+3. **Every re-render keeps the previous master as `demo.prev.mp4`** — "keep the
+   old one" is mechanical:
+   `npx open-take ab demo.mp4 --before-after` replays
+   BEFORE then AFTER (twice) straight from the two files, no render.
+4. **Failures become handoff, not dead ends.** A validator refusal prints the
+   field + fix — relay it and apply the fix; never bypass validation.
+5. **The closing ritual.** On "好了" / "done": one full-quality master render,
+   reveal it, and print the ready line — nothing else:
+   ```
+   npx open-take render demo.mp4 --reveal
+   ready: /abs/path/demo.mp4 · 17.3s · 1920×1080@60 · 8.4 MB
+   ```
+
+**The cheap/expensive boundary (why triage works):** `render` re-composites the
+cinematic layer over the frozen `demo.capture.mp4` — deterministic, no app
+drive. The video is temporal, so *what happens and when* (`tMs`, order, text,
+paths) is capture-locked: `render` refuses a drifted `tMs`; those notes are
+re-`make` jobs.
+
+**Preset vocabulary (speak names, write numbers).** Curated bundles — see
+`packages/compositor/src/presets.ts`; `beats` reverse-maps values to names, and
+a non-matching value displays as `(custom)` — never silently round a custom
+value (bbox-derived precision is ground truth):
+- **zoom** (absolute scale): light 1.25 · medium 1.5 · tight 1.8 · close 2.2
+- **look** (background+corners+shadow as ONE bundle): midnight (default) · ink ·
+  slate · ocean · plum · ember · paper (light) · plain
+- **pace** (cursor speed+hold+ramps): calm · natural (default) · brisk
+- **finish** (motion blur): smooth (default, 6×0.7) · crisp (off, ~6× faster
+  exports) · heavy (8×0.85)
 
 ## Mechanics
 
 ### inspect (planning aid)
 ```
-node packages/cli/dist/cli.js inspect <url> [--viewport 1920x1080]
+npx open-take inspect <url> [--viewport 1920x1080]
 ```
 Returns `{ url, viewport, elements: [{name, tag, role, href, inView, x,y,w,h}] }`
 — elements with an **accessible name**. Target these by `text` (the locator).
@@ -233,8 +286,8 @@ page changed).
 
 ### make (render)
 ```
-node packages/cli/dist/cli.js make --plan plan.json --out demo.mp4            # 60fps (default)
-node packages/cli/dist/cli.js make --plan plan.json --out demo.mp4 --fps 30   # fast-draft
+npx open-take make --plan plan.json --out demo.mp4            # 60fps (default)
+npx open-take make --plan plan.json --out demo.mp4 --fps 30   # fast-draft
 ```
 Produces `demo.mp4` (1920×1080 @ **60fps default**) and
 `demo.composition.json` (editable).
@@ -257,10 +310,11 @@ capture log: demo.capture.json       ← render auto-loads this (capture-lock gr
 
 ### refine (re-render edits — no app drive)
 ```
-node packages/cli/dist/cli.js render \
-  --composition demo.composition.json --video demo.capture.mp4 --out demo.mp4
+npx open-take render demo.mp4        # <take> form: siblings resolve by convention
 ```
-Re-renders the **edited** composition over the **kept** capture. Auto-loads the
+Re-renders the **edited** composition over the **kept** capture, keeping the
+previous master as `demo.prev.mp4` (committed only on success — a refused render
+never clobbers the revert point). Auto-loads the
 sibling capture log (`demo.capture.json`) as the capture-lock ground truth
 (`--capture-log <path>` overrides it). Validates first and **refuses to render an
 errored composition** (prints the field + a suggested fix in milliseconds, before
@@ -340,8 +394,12 @@ capture-lock). Warnings (a no-op zoom, a soft-cap scale) print but don't block.
 - viewport ≠ video scaling is implemented but lightly tested.
 
 ## Prerequisites
+- The `open-take` bin resolvable by `npx open-take` — either the npm package
+  installed in the project, or (in this monorepo) `pnpm install && pnpm build`
+  (the root workspace links the bin, so `npx open-take` works here too).
 - A Chrome to drive: open-take auto-downloads **Chrome-for-Testing** on first
   run (cached under `~/.open-take/browsers`), or set `OPEN_TAKE_CHROME` to a
   Chrome binary. (No agent-browser needed — capture is pure CDP.)
-- Build once: `pnpm install && pnpm build` (CLI at `packages/cli/dist/cli.js`).
-- `ffmpeg`/`ffprobe` available (used for render + for extracting frames).
+- `ffmpeg`/`ffprobe`: system binaries if present, else the bundled
+  `@ffmpeg-installer`/`@ffprobe-installer` platform binaries resolve
+  automatically (frame extraction for SHOW still wants a system `ffmpeg`).

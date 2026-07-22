@@ -9,7 +9,14 @@
 // are never written here — the validator would reject a drift and the UI shows
 // them read-only.
 
-import type { CursorConfig, FramingConfig, Pt, TakeComposition, ZoomDecision } from "./compositor";
+import type {
+  CursorConfig,
+  FramingConfig,
+  MotionBlurConfig,
+  Pt,
+  TakeComposition,
+  ZoomDecision,
+} from "./compositor";
 
 // --- framing -----------------------------------------------------------------
 
@@ -102,4 +109,55 @@ export function setBeatDuration(
   durationMs: number,
 ): TakeComposition {
   return patchEvent(c, i, (e) => ({ ...e, durationMs }));
+}
+
+// --- v4 additions ------------------------------------------------------------
+
+/** Motion blur on/off + params; undefined removes the key (renders exactly as
+ *  the pre-blur path). */
+export function setMotionBlur(
+  c: TakeComposition,
+  mb: MotionBlurConfig | undefined,
+): TakeComposition {
+  if (!mb) {
+    const { motionBlur: _mb, ...rest } = c;
+    return rest;
+  }
+  return { ...c, motionBlur: { ...mb } };
+}
+
+/** Apply a whole Look bundle (background + cornerRadius + shadow together) —
+ *  the reference recorder curation move; insetFrac is untouched. */
+export function applyLook(
+  c: TakeComposition,
+  look: Pick<FramingConfig, "background" | "cornerRadius" | "shadow">,
+): TakeComposition {
+  return {
+    ...c,
+    framing: {
+      ...c.framing,
+      background: { ...look.background },
+      cornerRadius: look.cornerRadius,
+      shadow: { ...look.shadow, offset: { ...look.shadow.offset } },
+    },
+  };
+}
+
+/** Merge cursor fields AND rebase each beat's zoom.inAtMs that still sits on
+ *  the old `tMs − zoomInMs` derivation, so pacing changes actually move the
+ *  zoom ramps. Hand-tuned inAtMs values are left alone. (Mirrors the CLI `ab`
+ *  pace knob.) */
+export function setCursorRebased(
+  c: TakeComposition,
+  patch: Partial<CursorConfig>,
+): TakeComposition {
+  const next = { ...c.cursor, ...patch };
+  if (patch.zoomInMs == null || patch.zoomInMs === c.cursor.zoomInMs) return { ...c, cursor: next };
+  const oldZoomInMs = c.cursor.zoomInMs;
+  const events = c.events.map((e) =>
+    e.zoom.inAtMs === Math.max(0, e.tMs - oldZoomInMs)
+      ? { ...e, zoom: { ...e.zoom, inAtMs: Math.max(0, e.tMs - next.zoomInMs) } }
+      : e,
+  );
+  return { ...c, events, cursor: next };
 }

@@ -1,7 +1,7 @@
 // Generic revideo scene: renders ANY TakeComposition. Compiled by
 // revideo's vite at render time (NOT typechecked by tsc — excluded).
 // renderTake writes ./.composition.json before each render.
-import { makeScene2D, Rect, Video, Line, Circle, Node, Gradient } from "@revideo/2d";
+import { makeScene2D, Rect, Video, Line, Circle, Node, Gradient, Txt } from "@revideo/2d";
 import { createSignal, tween, linear } from "@revideo/core";
 import {
   buildStageKeyframes,
@@ -15,6 +15,7 @@ import {
   panEasing,
   gradientEndpoints,
   restStageScale,
+  smoother,
 } from "../math";
 import comp from "./.composition.json";
 
@@ -169,6 +170,62 @@ export default makeScene2D("take", function* (view) {
       </Node>
     </Node>,
   );
+
+  // Review decoration (badges / watermark / variant label) — SCREEN space,
+  // added AFTER the camera node so it draws on top and never rides the zoom.
+  // Only present on review copies and A/B reels (composition.review), never on
+  // the postable master. Text renders in Chrome, so no ffmpeg font filters.
+  const review = comp.review;
+  if (review) {
+    const k = oH / 1080; // scale UI with output size
+    const FONT = "system-ui, -apple-system, 'Segoe UI', 'Noto Sans', sans-serif";
+    const pad = 36 * k;
+    if (review.watermark) {
+      view.add(
+        <Txt
+          text={review.watermark}
+          position={[oW / 2 - pad, -oH / 2 + pad]}
+          offset={[1, -1]}
+          fontFamily={FONT}
+          fontSize={24 * k}
+          letterSpacing={4 * k}
+          fontWeight={600}
+          fill={"rgba(255,255,255,0.34)"}
+        />,
+      );
+    }
+    const pill = (text, opacity, big) => (
+      <Rect
+        layout
+        padding={[10 * k, 16 * k]}
+        radius={8 * k}
+        fill={"rgba(0,0,0,0.55)"}
+        position={[-oW / 2 + pad, oH / 2 - pad]}
+        offset={[-1, 1]}
+        opacity={opacity}
+      >
+        <Txt
+          text={text}
+          fontFamily={FONT}
+          fontSize={(big ? 30 : 25) * k}
+          fontWeight={500}
+          fill={"rgba(255,255,255,0.94)"}
+        />
+      </Rect>
+    );
+    for (const b of review.badges ?? []) {
+      // 120ms fade at each end so badge swaps don't pop
+      const op = () => {
+        const ms = t() * 1000;
+        if (ms < b.fromMs || ms >= b.toMs) return 0;
+        const inF = Math.min(1, (ms - b.fromMs) / 120);
+        const outF = Math.min(1, (b.toMs - ms) / 120);
+        return Math.min(inF, outF);
+      };
+      view.add(pill(b.text, op, false));
+    }
+    if (review.label) view.add(pill(review.label, 1, true));
+  }
 
   yield* tween(stage.T, (v) => t(v * stage.T), linear);
 });

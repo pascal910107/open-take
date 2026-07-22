@@ -63,9 +63,9 @@ export function springEase(bounce: number): (p: number) => number {
   };
 }
 
-// The stage (zoom + pan) easing, selected from the cursor config. Used
-// IDENTICALLY by the editor preview (derive.ts) and the revideo scene
-// (scene.tsx) so the two renderers can never drift. Precedence:
+// The stage (zoom + pan) easing, selected from the cursor config. The single
+// source the revideo scene (scene.tsx) consumes — any other renderer must use
+// it identically so renderers can never drift. Precedence:
 // spring (zoomSpring) → cubic-bezier (zoomEase) → smootherstep.
 export function stageEasing(cursor: TakeComposition["cursor"]): (u: number) => number {
   if (cursor.zoomSpring != null) return springEase(cursor.zoomSpring);

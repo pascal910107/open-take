@@ -21,6 +21,18 @@ export {
 
 export { validateComposition, formatIssues } from "@compositor/validate";
 
+export {
+  LOOKS,
+  MOTION,
+  ZOOM_LEVELS,
+  lookName,
+  motionName,
+  zoomLevelName,
+  finishName,
+} from "@compositor/presets";
+
+export { DEFAULT_MOTION_BLUR } from "@compositor/types";
+
 export type {
   TakeComposition,
   CompEvent,
@@ -29,6 +41,7 @@ export type {
   BBox,
   FramingConfig,
   CursorConfig,
+  MotionBlurConfig,
   ZoomDecision,
 } from "@compositor/types";
 

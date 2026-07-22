@@ -14,9 +14,9 @@
 
 import { spawn } from "node:child_process";
 import { createReadStream, statSync } from "node:fs";
-import { readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { appendFile, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { type IncomingMessage, type ServerResponse, createServer } from "node:http";
-import { basename, extname, join, normalize, resolve } from "node:path";
+import { extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   type CaptureLog,
@@ -35,14 +35,9 @@ export type EditServerOpts = {
   chromePath?: string;
 };
 
-type TakePaths = {
-  base: string;
-  name: string;
-  compositionPath: string;
-  capturePath: string;
-  captureLogPath: string;
-  outPath: string;
-};
+import { resolveTakePaths } from "./take";
+
+type TakePaths = Awaited<ReturnType<typeof resolveTakePaths>>;
 
 type RenderJob = {
   id: string;
@@ -67,34 +62,6 @@ const CONTENT_TYPE: Record<string, string> = {
   ".woff": "font/woff",
   ".map": "application/json; charset=utf-8",
 };
-
-/** Strip any known take suffix to get the shared base path, then derive the four
- *  sibling files by the makeTake layout. If a directory is given, pick the
- *  *.composition.json that actually has a sibling capture (a dir may hold
- *  several takes; prefer a complete one). */
-async function resolveTake(input: string): Promise<TakePaths> {
-  let p = resolve(input);
-  const s = await stat(p).catch(() => null);
-  if (s?.isDirectory()) {
-    const comps = (await readdir(p)).filter((e) => /\.composition\.json$/i.test(e));
-    if (comps.length === 0) throw new Error(`no *.composition.json found in ${p}`);
-    const hasCapture = (e: string) => existsFile(join(p, `${e.replace(/\.composition\.json$/i, "")}.capture.mp4`));
-    p = join(p, comps.find(hasCapture) ?? comps[0]!);
-  }
-  const base = p
-    .replace(/\.composition\.json$/i, "")
-    .replace(/\.capture\.json$/i, "")
-    .replace(/\.capture\.mp4$/i, "")
-    .replace(/\.mp4$/i, "");
-  return {
-    base,
-    name: basename(base),
-    compositionPath: `${base}.composition.json`,
-    capturePath: `${base}.capture.mp4`,
-    captureLogPath: `${base}.capture.json`,
-    outPath: `${base}.mp4`,
-  };
-}
 
 /** Locate the built editor SPA: a bundled copy (published package) first, then
  *  the monorepo build. */
@@ -190,7 +157,7 @@ function openBrowser(url: string) {
 export async function startEditServer(
   opts: EditServerOpts,
 ): Promise<{ url: string; close: () => Promise<void> }> {
-  const take = await resolveTake(opts.takePath);
+  const take = await resolveTakePaths(opts.takePath);
   // the two essentials must exist; the capture log is optional (skips the lock).
   for (const f of [take.compositionPath, take.capturePath]) {
     if (!(await stat(f).catch(() => null))?.isFile()) throw new Error(`missing take file: ${f}`);
@@ -210,11 +177,32 @@ export async function startEditServer(
   let job: RenderJob | null = null;
   let jobSeq = 0;
 
+  /** Atomic write (tmp + rename) — agents read this file concurrently. */
+  const persistComposition = async (comp: TakeComposition): Promise<void> => {
+    const tmp = `${take.compositionPath}.tmp`;
+    await writeFile(tmp, JSON.stringify(comp, null, 2));
+    await rename(tmp, take.compositionPath);
+  };
+
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url ?? "/", "http://localhost");
       const path = url.pathname;
       const method = req.method ?? "GET";
+
+      // same-origin guard: this is a loopback server, but a hostile web page
+      // could still fire cross-site requests at it — refuse foreign Origins
+      // and non-JSON bodies on state-changing endpoints.
+      if (method === "POST") {
+        const host = req.headers.host ?? "";
+        const origin = req.headers.origin;
+        const sameOrigin = !origin || origin === `http://${host}`;
+        const isJson = (req.headers["content-type"] ?? "").includes("application/json");
+        if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host) || !sameOrigin || !isJson) {
+          sendJson(res, 403, { error: "forbidden" });
+          return;
+        }
+      }
 
       // ---- API ----
       if (path === "/api/take" && method === "GET") {
@@ -235,8 +223,27 @@ export async function startEditServer(
         await serveFile(req, res, take.capturePath);
         return;
       }
+      if (path === "/api/take/mtime" && method === "GET") {
+        const st = await stat(take.compositionPath).catch(() => null);
+        sendJson(res, 200, { mtime: st ? st.mtimeMs : 0 });
+        return;
+      }
+      if (path === "/api/notes" && method === "POST") {
+        const { text } = JSON.parse(await readBody(req)) as { text?: string };
+        if (!text?.trim()) {
+          sendJson(res, 400, { error: "empty note" });
+          return;
+        }
+        const line = text.trim().replace(/\s+/g, " ").slice(0, 2000);
+        // durable for the agent to pick up later + live on stdout for an agent
+        // watching this process
+        await appendFile(`${take.base}.notes.md`, `- ${line}\n`);
+        process.stdout.write(`NOTE ${JSON.stringify({ take: take.name, text: line })}\n`);
+        sendJson(res, 200, { ok: true });
+        return;
+      }
       if (path === "/api/take/output" && method === "GET") {
-        await serveFile(req, res, take.outPath);
+        await serveFile(req, res, take.mp4Path);
         return;
       }
 
@@ -249,7 +256,7 @@ export async function startEditServer(
           sendJson(res, 400, { issues });
           return;
         }
-        await writeFile(take.compositionPath, JSON.stringify(comp, null, 2));
+        await persistComposition(comp);
         sendJson(res, 200, { ok: true, issues });
         return;
       }
@@ -267,7 +274,7 @@ export async function startEditServer(
           sendJson(res, 400, { issues });
           return;
         }
-        await writeFile(take.compositionPath, JSON.stringify(comp, null, 2));
+        await persistComposition(comp);
         const id = `${Date.now().toString(36)}-${++jobSeq}`;
         job = { id, progress: 0, status: "running", clients: new Set() };
         sendJson(res, 200, { jobId: id });
@@ -337,7 +344,7 @@ export async function startEditServer(
       await renderComposition({
         composition: comp,
         capturePath: take.capturePath,
-        outPath: take.outPath,
+        outPath: take.mp4Path,
         captureLog,
         chromePath: opts.chromePath,
         onProgress: (p) => {

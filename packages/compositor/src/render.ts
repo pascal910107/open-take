@@ -12,6 +12,7 @@ import { copyFile, mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { renderVideo } from "@revideo/renderer";
+import { resolveFfmpeg } from "./ffmpeg";
 import { type PlanOpts, planComposition } from "./plan";
 import { type CaptureLog, type TakeComposition, motionBlurActive } from "./types";
 import { type CompositionIssue, formatIssues, validateComposition } from "./validate";
@@ -46,9 +47,19 @@ export type RenderTakeOpts = {
    *  refuse to render an errored composition (a render is expensive; catch a bad
    *  hand-edit in milliseconds instead). */
   skipValidate?: boolean;
-  /** progress callback (0..1) forwarded from revideo's renderer — lets a caller
-   *  (e.g. the edit-server's render endpoint) stream a determinate progress bar. */
+  /** progress callback (0..1) forwarded from revideo's renderer. */
   onProgress?: (progress: number) => void;
+  /** render only this window of the composition timeline, in SECONDS — the
+   *  windowed-render path behind A/B variant reels (a 4s window instead of the
+   *  whole take). With motion blur OFF, frames are identical to the same span
+   *  of a full render (the timeline is deterministic). With blur active the
+   *  content matches but not bit-exactly: the tmix shutter windows are phased
+   *  from the CLIP start, and the first frame's trailing window is truncated.
+   *  Forwarded to revideo's projectSettings.range. */
+  rangeSec?: [number, number];
+  /** write the editable `<out>.composition.json` sibling (default true). Review
+   *  copies and A/B reels are disposable — they skip the sibling. */
+  writeCompositionSibling?: boolean;
 };
 
 function run(cmd: string, args: string[]): Promise<void> {
@@ -66,7 +77,7 @@ function run(cmd: string, args: string[]): Promise<void> {
  *  render grid must match — a 30-grid would throw away the extra frames). */
 async function toMp4(videoPath: string, outMp4: string, fps: number): Promise<void> {
   await mkdir(dirname(outMp4), { recursive: true });
-  await run("ffmpeg", [
+  await run(await resolveFfmpeg(), [
     "-y",
     "-loglevel",
     "error",
@@ -102,7 +113,7 @@ async function motionBlurMp4(
   const vf =
     `tmix=frames=${M},fps=${baseFps},format=yuv420p,` +
     "setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709";
-  await run("ffmpeg", [
+  await run(await resolveFfmpeg(), [
     "-y",
     "-loglevel",
     "error",
@@ -160,7 +171,10 @@ export async function renderTake(
   await mkdir(dirname(COMP_JSON), { recursive: true });
   await writeFile(COMP_JSON, JSON.stringify(composition, null, 2));
 
-  // 3. render headless, with cwd pinned to the package root
+  // 3. render headless, with cwd pinned to the package root.
+  // revideo's @revideo/telemetry phones home to PostHog by default; this is an
+  // all-local tool, so default it OFF (an explicit user-set value still wins).
+  if (process.env.DISABLE_TELEMETRY === undefined) process.env.DISABLE_TELEMETRY = "true";
   const prevCwd = process.cwd();
   process.chdir(PKG_ROOT);
   let produced: string;
@@ -171,6 +185,7 @@ export async function renderTake(
         outFile: "take.mp4",
         outDir: RENDER_OUT,
         workers: 1,
+        ...(opts.rangeSec ? { projectSettings: { range: opts.rangeSec } } : {}),
         logProgress: opts.logProgress ?? false,
         ...(opts.onProgress
           ? { progressCallback: (_worker: number, progress: number) => opts.onProgress!(progress) }
@@ -211,7 +226,12 @@ export async function renderTake(
     await copyFile(producedAbs, resolve(opts.outPath));
   }
   const compositionPath = resolve(opts.outPath).replace(/\.mp4$/i, "") + ".composition.json";
-  await writeFile(compositionPath, JSON.stringify(composition, null, 2));
+  if (opts.writeCompositionSibling !== false) {
+    // strip the render-time review decoration — the editable artifact is the
+    // clean composition, never the badged/watermarked variant of it.
+    const { review: _review, ...persisted } = composition;
+    await writeFile(compositionPath, JSON.stringify(persisted, null, 2));
+  }
 
   return { mp4Path: resolve(opts.outPath), compositionPath };
 }

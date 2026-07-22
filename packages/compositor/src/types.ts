@@ -233,6 +233,26 @@ export type MotionBlurConfig = {
   shutter: number;
 };
 
+/** One caption window on a review copy: the pill reads `text` from `fromMs`
+ *  (inclusive) to `toMs` (exclusive) on the composition timeline. */
+export type ReviewBadge = { fromMs: number; toMs: number; text: string };
+
+/** Render-time decoration for review copies and A/B variant reels: burned-in
+ *  beat badges, a REVIEW watermark, and a per-variant corner label. Drawn by the
+ *  scene in SCREEN space (fixed, outside the composition camera) so the text is
+ *  legible at any zoom. This is a render input only — it is never written into
+ *  the editable `*.composition.json` artifact (render strips it) and the
+ *  validator ignores it. Text renders in the headless Chrome, so any script
+ *  (incl. CJK) works without ffmpeg font filters. */
+export type ReviewDecor = {
+  /** top-right watermark, e.g. "REVIEW" — marks a copy as not-for-posting */
+  watermark?: string;
+  /** bottom-left caption pill, swapping per timeline window */
+  badges?: ReviewBadge[];
+  /** constant bottom-left variant label for A/B reels, e.g. "B · tight ×1.8" */
+  label?: string;
+};
+
 export type TakeComposition = {
   output: { width: number; height: number; fps: number };
   source: {
@@ -249,6 +269,8 @@ export type TakeComposition = {
   start: Pt;
   events: CompEvent[];
   durationMs: number;
+  /** render-time review decoration (badges/watermark/label); never persisted */
+  review?: ReviewDecor;
 };
 
 /** True when motion blur is configured to actually do something (so the OFF

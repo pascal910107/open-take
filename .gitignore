@@ -17,3 +17,9 @@ out
 *.mp4
 *.png
 *.webm
+
+# built skill bundle (copied from skills/open-take at build)
+packages/cli/skill/
+
+# bundled editor SPA (copied from apps/editor/dist at prepack)
+packages/runtime/editor-dist/

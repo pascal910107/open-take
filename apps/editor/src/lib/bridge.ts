@@ -34,6 +34,28 @@ export async function detectBridge(): Promise<BridgeTake | null> {
   }
 }
 
+/** Send a free-text note to the agent: appended to `<base>.notes.md` and
+ *  echoed on the edit-server's stdout as a NOTE line the agent can watch. */
+export async function sendNote(text: string): Promise<void> {
+  const r = await fetch("/api/notes", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+  if (!r.ok) throw new BridgeError("note rejected");
+}
+
+/** mtime of composition.json on disk — lets the editor notice agent edits. */
+export async function getCompositionMtime(): Promise<number | null> {
+  try {
+    const r = await fetch("/api/take/mtime");
+    if (!r.ok) return null;
+    return ((await r.json()) as { mtime: number }).mtime;
+  } catch {
+    return null;
+  }
+}
+
 /** Persist composition.json without rendering. Throws BridgeError(issues) on 400. */
 export async function saveComposition(comp: TakeComposition): Promise<void> {
   const r = await fetch("/api/composition", {

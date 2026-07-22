@@ -23,6 +23,7 @@ import {
 import { createRequire } from "node:module";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { resolveFfmpeg } from "@open-take/compositor";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const require = createRequire(import.meta.url);
@@ -398,14 +399,15 @@ export class Screencast {
 // (static stretches naturally hold one frame). `-vsync cfr -r <fps>` resamples
 // onto a constant grid the web/MP4 decoders downstream read cleanly. Codec
 // follows the output extension so the file stays honest (.webm→vp9, else h264).
-export function encodeFrames(
+export async function encodeFrames(
   frames: Frame[],
   endMs: number,
   outPath: string,
   fps: number,
-  ffmpegBin = "ffmpeg",
+  ffmpegBin?: string,
 ): Promise<void> {
   if (frames.length === 0) throw new Error("open-take(hi-fps): no frames captured");
+  const bin = ffmpegBin ?? (await resolveFfmpeg());
   const dir = frames[0]!.file.slice(0, frames[0]!.file.lastIndexOf("/"));
   const listPath = join(dir, "frames.concat");
 
@@ -433,7 +435,7 @@ export function encodeFrames(
   // Color: the screencast frames are full-range JPEGs (601). For h264, convert
   // to STANDARD limited-range bt709 and label all four fields (range/matrix/
   // primaries/transfer) so every downstream decoder agrees: the revideo render,
-  // end-user players, AND a browser <video>→canvas (the live-preview editor).
+  // end-user players, AND any browser <video>→canvas consumer.
   // Without tags ffmpeg stamped yuvj420p/pc/bt470bg, which Chrome's canvas
   // mis-decodes as limited and over-brightens (~20 levels) → washed-out colors in
   // a canvas preview, while ffmpeg/revideo honored the full-range tag and stayed
@@ -468,7 +470,7 @@ export function encodeFrames(
       ...codec,
       outPath,
     ];
-    const c = spawn(ffmpegBin, args, { stdio: ["ignore", "ignore", "pipe"] });
+    const c = spawn(bin, args, { stdio: ["ignore", "ignore", "pipe"] });
     let err = "";
     c.stderr.on("data", (d) => (err += d));
     c.on("error", reject);

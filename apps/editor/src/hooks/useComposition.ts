@@ -30,6 +30,8 @@ export type UseComposition = {
   warns: CompositionIssue[];
   canSave: boolean;
   dirty: boolean;
+  /** the last-saved comp — for transient hold-to-compare previews */
+  baseline: TakeComposition | null;
   selectedBeat: number;
   /** load a fresh take (resets baseline + history); pushes it to the engine. */
   seed: (comp: TakeComposition, captureLog?: CaptureLog | null) => void;
@@ -159,6 +161,7 @@ export function useComposition(engine: PreviewEngine | null): UseComposition {
     warns,
     canSave: comp != null && errors.length === 0,
     dirty: comp != null && comp !== baseline,
+    baseline,
     selectedBeat,
     seed,
     update,

@@ -69,6 +69,16 @@ export class PreviewEngine {
 
   private overlay: OverlayConfig = { enabled: false, beatIndex: -1 };
 
+  /** Inspect mode: draw the WIDE diagnostic frame (camera at rest, centred)
+   *  regardless of the timeline's zoom state — the canvas under the editor's
+   *  zoom-region box. Playback should switch it off. */
+  private inspect = false;
+  setInspectMode(on: boolean) {
+    if (this.inspect === on) return;
+    this.inspect = on;
+    if (!this.isPlaying) this.drawFrame(this.t);
+  }
+
   private listeners: Listeners = { time: new Set(), state: new Set(), loaded: new Set() };
 
   constructor(canvas: HTMLCanvasElement, video: HTMLVideoElement) {
@@ -271,6 +281,10 @@ export class PreviewEngine {
    *  the editor overlay on top (unblurred — an affordance, not part of the frame). */
   drawFrame(t: number) {
     if (!this.d) return;
+    if (this.inspect) {
+      this.drawSceneAt(this.ctx, t); // rest-framed via the inspect override, no blur
+      return;
+    }
     const mb = this.comp.motionBlur;
     if (mb && mb.samples > 1 && mb.shutter > 0) this.drawBlurred(t, mb.samples, mb.shutter);
     else this.drawSceneAt(this.ctx, t);
@@ -310,8 +324,8 @@ export class PreviewEngine {
       vH = comp.source.videoHeight;
     const oW = comp.output.width,
       oH = comp.output.height;
-    const s = this.d.scaleAt(t);
-    const c = this.d.centerAt(t);
+    const s = this.inspect ? this.d.rest : this.d.scaleAt(t);
+    const c = this.inspect ? { x: vW / 2, y: vH / 2 } : this.d.centerAt(t);
 
     // Composition camera: the backdrop is part of the
     // composition and is zoomed by the SAME camera as the screen (not a static

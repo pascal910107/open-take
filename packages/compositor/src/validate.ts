@@ -65,6 +65,29 @@ export function validateComposition(
 
   const rest = restStageScale(vW, vH, oW, oH, comp.framing.insetFrac);
 
+  // --- motion blur (render cost scales with samples: frames = fps × samples) ---
+  const mb = comp.motionBlur;
+  if (mb) {
+    if (!Number.isInteger(mb.samples) || mb.samples < 1 || mb.samples > 16)
+      err(
+        "motionBlur.samples",
+        `samples must be an integer 1-16 (got ${mb.samples})`,
+        "6 is the balanced default; 1 turns blur off",
+      );
+    else if (mb.samples > 9)
+      warn(
+        "motionBlur.samples",
+        `samples ${mb.samples} renders ${mb.samples}× the frames for little extra smoothness`,
+        "9 is the practical ceiling",
+      );
+    if (!(mb.shutter >= 0 && mb.shutter <= 1))
+      err(
+        "motionBlur.shutter",
+        `shutter must be 0..1 (got ${mb.shutter})`,
+        "0.7 is the default; 0 turns blur off",
+      );
+  }
+
   // --- duration / ordering ---
   const events = comp.events ?? [];
   let lastEnd = 0;
@@ -154,7 +177,7 @@ export function validateComposition(
             : "point at the on-screen target (video-px)",
         );
       // enabling zoom on a no-bbox beat means an invented center/scale — fine,
-      // but flag it so the editor knows it's not bbox-derived.
+      // but flag it so the refine loop knows it's not bbox-derived.
       if (!e.bbox)
         warn(
           `${p}.zoom`,

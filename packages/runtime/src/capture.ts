@@ -6,7 +6,7 @@
 // (shared by both paths) + the planning aid, and captureTake just delegates.
 
 import { spawn } from "node:child_process";
-import type { CaptureLog } from "@open-take/compositor";
+import { type CaptureLog, resolveFfprobe } from "@open-take/compositor";
 import { fitViewport, launchBrowser } from "./cdp";
 import type { TakePlan } from "./types";
 
@@ -213,12 +213,16 @@ export function sampleAlong(pts: { x: number; y: number }[], u: number): { x: nu
   return pts[pts.length - 1]!;
 }
 
-export function ffprobe(
+export async function ffprobe(
   path: string,
 ): Promise<{ width?: number; height?: number; fps?: string; durationS?: number }> {
+  // resolved binary (PATH or bundled installer); the probe itself stays
+  // best-effort — a failed probe resolves {} (callers have fallbacks).
+  const bin = await resolveFfprobe().catch(() => null);
+  if (!bin) return {};
   return new Promise((res) => {
     const c = spawn(
-      "ffprobe",
+      bin,
       [
         "-v",
         "error",

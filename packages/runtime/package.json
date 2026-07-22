@@ -1,18 +1,24 @@
 {
   "name": "@open-take/runtime",
-  "version": "0.0.0",
-  "description": "Thin take runtime — agent plan -> capture (event log) -> compositor -> polished mp4 + editable composition.",
+  "version": "0.1.0",
+  "description": "Thin take runtime \u2014 agent plan -> capture (event log) -> compositor -> polished mp4 + editable composition.",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "exports": { ".": "./dist/index.js" },
-  "files": ["dist"],
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "editor-dist"
+  ],
   "scripts": {
     "build": "tsdown",
     "typecheck": "tsc --noEmit",
     "test": "node --test --import tsx/esm test/*.test.ts",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "prepack": "node scripts/bundle-editor.mjs"
   },
   "dependencies": {
     "@open-take/compositor": "workspace:*",
@@ -23,5 +29,28 @@
     "tsdown": "^0.9.0",
     "tsx": "^4.22.3",
     "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "demo",
+    "screen-recording",
+    "video",
+    "agent",
+    "cdp",
+    "screencast"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pascal910107/open-take.git",
+    "directory": "packages/runtime"
+  },
+  "homepage": "https://github.com/pascal910107/open-take#readme",
+  "bugs": {
+    "url": "https://github.com/pascal910107/open-take/issues"
   }
 }

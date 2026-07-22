@@ -7,9 +7,9 @@ import {
   clampCenter,
   keyvalN,
   keyvalP,
+  panEasing,
   restStageScale,
   stageEasing,
-  panEasing,
 } from "./compositor";
 import type { CompEvent, Pt, TakeComposition } from "./compositor";
 

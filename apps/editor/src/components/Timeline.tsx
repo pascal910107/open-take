@@ -1,183 +1,244 @@
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+// Transport + ruler + filmstrip + zoom-block track + playhead. The timeline is
+// the "everyone gets it" surface: the filmstrip is the video, the iris blocks
+// are the zooms, dashed ghosts are beats a zoom could be added to.
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { PreviewEngine } from "../engine/preview";
-import { useEngineTime } from "../hooks/usePreview";
-import { type Derived, beatKindLabel, beatTitle, beatZooms, sampleScaleCurve } from "../lib/derive";
-import { scaleX, tc } from "../lib/format";
+import type { TakeComposition } from "../lib/compositor";
+import type { Derived } from "../lib/derive";
+import { IcNext, IcPause, IcPlay, IcPrev, IcZoom } from "../ui/icons";
 
-type Props = {
+const THUMBS = 18;
+
+function fmt(t: number): string {
+  const m = Math.floor(t / 60);
+  const s = t % 60;
+  return `${m}:${s < 10 ? "0" : ""}${s.toFixed(1)}`;
+}
+
+/** Seek a detached <video> through N evenly-spaced times and rasterise tiny
+ *  thumbnails for the filmstrip. */
+function useFilmstrip(videoSrc: string | null, durS: number): string[] {
+  const [thumbs, setThumbs] = useState<string[]>([]);
+  useEffect(() => {
+    if (!videoSrc) return;
+    let cancelled = false;
+    const v = document.createElement("video");
+    v.muted = true;
+    v.preload = "auto";
+    v.crossOrigin = "anonymous";
+    v.src = videoSrc;
+    const out: string[] = [];
+    const cv = document.createElement("canvas");
+    const grab = (i: number) => {
+      if (cancelled) return;
+      if (i >= THUMBS) {
+        setThumbs(out);
+        v.removeAttribute("src");
+        v.load();
+        return;
+      }
+      const t = ((i + 0.5) / THUMBS) * Math.max(0.1, Math.min(durS, v.duration || durS));
+      const onSeeked = () => {
+        v.removeEventListener("seeked", onSeeked);
+        if (cancelled) return;
+        const w = 120;
+        const h = Math.round((w * v.videoHeight) / Math.max(1, v.videoWidth));
+        cv.width = w;
+        cv.height = h;
+        cv.getContext("2d")?.drawImage(v, 0, 0, w, h);
+        try {
+          out.push(cv.toDataURL("image/jpeg", 0.6));
+        } catch {
+          /* tainted canvas — skip thumbs */
+        }
+        grab(i + 1);
+      };
+      v.addEventListener("seeked", onSeeked);
+      v.currentTime = Math.min(t, (v.duration || durS) - 0.05);
+    };
+    v.addEventListener("loadedmetadata", () => grab(0), { once: true });
+    return () => {
+      cancelled = true;
+      v.removeAttribute("src");
+      v.load();
+    };
+  }, [videoSrc, durS]);
+  return thumbs;
+}
+
+export function Timeline({
+  engine,
+  comp,
+  derived,
+  videoSrc,
+  isPlaying,
+  selectedBeat,
+  onSelectBeat,
+  onEnableZoom,
+}: {
   engine: PreviewEngine;
+  comp: TakeComposition;
   derived: Derived;
-  currentBeat: number;
+  videoSrc: string | null;
+  isPlaying: boolean;
   selectedBeat: number;
   onSelectBeat: (i: number) => void;
-};
+  onEnableZoom: (i: number) => void;
+}) {
+  const totalMs = derived.T * 1000;
+  const [t, setT] = useState(engine.currentTime);
+  useEffect(() => engine.on("time", setT), [engine]);
 
-const H = 104;
-const RULER_H = 22;
-const CURVE_TOP = 14;
-const CURVE_BOTTOM = H - RULER_H;
-const CURVE_BAND = CURVE_BOTTOM - CURVE_TOP;
+  const thumbs = useFilmstrip(videoSrc, comp.source.viewport ? derived.T : derived.T);
 
-function useMeasure<T extends HTMLElement>() {
-  const ref = useRef<T | null>(null);
-  const [w, setW] = useState(0);
-  useLayoutEffect(() => {
-    if (!ref.current) return;
-    const ro = new ResizeObserver(([e]) => setW(e!.contentRect.width));
-    ro.observe(ref.current);
-    setW(ref.current.clientWidth);
-    return () => ro.disconnect();
-  }, []);
-  return [ref, w] as const;
-}
+  const tlRef = useRef<HTMLDivElement | null>(null);
+  const scrub = (clientX: number) => {
+    const r = tlRef.current?.getBoundingClientRect();
+    if (!r) return;
+    const f = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+    engine.seek((f * totalMs) / 1000);
+  };
 
-// Live playhead — isolated so only it re-renders at 60fps.
-function Playhead({ engine, T, width }: { engine: PreviewEngine; T: number; width: number }) {
-  const t = useEngineTime(engine);
-  const x = T > 0 ? (t / T) * width : 0;
-  return (
-    <div className="playhead" style={{ transform: `translateX(${x}px)` }}>
-      <span className="playhead__grip" />
-    </div>
-  );
-}
+  const blocks = useMemo(() => {
+    const hold = comp.cursor.holdMs;
+    return comp.events.map((e, i) => {
+      const end = e.tMs + (e.durationMs ?? 0) + hold;
+      const next = comp.events[i + 1];
+      const t1 = e.zoom.enabled ? Math.min(next ? next.zoom.inAtMs : end, end) : 0;
+      return e.zoom.enabled
+        ? {
+            i,
+            ghost: false,
+            t0: e.zoom.inAtMs,
+            t1: Math.max(t1, e.zoom.inAtMs + 500),
+            scale: e.zoom.scale,
+          }
+        : {
+            i,
+            ghost: true,
+            t0: Math.max(0, e.tMs - 600),
+            t1: e.tMs + (e.durationMs ?? 600),
+            scale: 0,
+          };
+    });
+  }, [comp]);
 
-export function Timeline({ engine, derived, currentBeat, selectedBeat, onSelectBeat }: Props) {
-  const [ref, width] = useMeasure<HTMLDivElement>();
-  const dragging = useRef(false);
-  const T = derived.T;
-  const x = useCallback((t: number) => (T > 0 ? (t / T) * width : 0), [T, width]);
+  const beatsSorted = comp.events.map((e) => e.tMs / 1000);
+  const seekPrev = () => {
+    const cur = engine.currentTime;
+    const prev = [...beatsSorted].reverse().find((b) => b < cur - 0.2);
+    engine.seek(prev ?? 0);
+  };
+  const seekNext = () => {
+    const cur = engine.currentTime;
+    const next = beatsSorted.find((b) => b > cur + 0.2);
+    engine.seek(next ?? derived.T);
+  };
 
-  const seekToClientX = useCallback(
-    (clientX: number) => {
-      const el = ref.current;
-      if (!el) return;
-      const rect = el.getBoundingClientRect();
-      const frac = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-      engine.seek(frac * T);
-    },
-    [engine, T, ref],
-  );
-
-  // --- scale-curve area path ---
-  const norm = (s: number) =>
-    derived.peakScale > derived.rest ? (s - derived.rest) / (derived.peakScale - derived.rest) : 0;
-  const yOf = (s: number) => CURVE_BOTTOM - Math.max(0, Math.min(1, norm(s))) * CURVE_BAND;
-  // resample only when the geometry (derived) or the width changes — not on every
-  // playback beat-boundary re-render.
-  const curve = useMemo(
-    () =>
-      width > 0 ? sampleScaleCurve(derived, Math.min(720, Math.max(120, Math.round(width)))) : [],
-    [derived, width],
-  );
-  const areaPath = curve.length
-    ? `M0,${CURVE_BOTTOM} ` +
-      curve.map((p) => `L${x(p.t).toFixed(2)},${yOf(p.scale).toFixed(2)}`).join(" ") +
-      ` L${width.toFixed(2)},${CURVE_BOTTOM} Z`
-    : "";
-  const linePath = curve.length
-    ? "M" + curve.map((p) => `${x(p.t).toFixed(2)},${yOf(p.scale).toFixed(2)}`).join(" L")
-    : "";
-
-  // --- ruler seconds ---
-  const seconds: number[] = [];
-  for (let s = 0; s <= Math.floor(T); s++) seconds.push(s);
+  const ticks = [];
+  for (let s = 0; s <= Math.floor(derived.T); s++) ticks.push(s);
 
   return (
-    <div className="timeline">
-      <div className="timeline__legend">
-        <span className="legend__swatch" /> zoom scale
-        <span className="legend__rest">rest {scaleX(derived.rest)}</span>
-        <span className="legend__peak">peak {scaleX(derived.peakScale)}</span>
+    <div className="bottom">
+      <div className="transport">
+        <span className="time mono">
+          <b>{fmt(t)}</b> / {fmt(derived.T)}
+        </span>
+        <button type="button" className="tbtn" onClick={seekPrev} aria-label="上一個 beat">
+          <IcPrev />
+        </button>
+        <button
+          type="button"
+          className="tbtn play"
+          onClick={() => engine.toggle()}
+          aria-label="播放/暫停"
+        >
+          {isPlaying ? <IcPause /> : <IcPlay />}
+        </button>
+        <button type="button" className="tbtn" onClick={seekNext} aria-label="下一個 beat">
+          <IcNext />
+        </button>
       </div>
 
-      <div
-        className="timeline__track"
-        ref={ref}
-        style={{ height: H }}
-        onPointerDown={(e) => {
-          dragging.current = true;
-          (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
-          seekToClientX(e.clientX);
-        }}
-        onPointerMove={(e) => {
-          if (dragging.current) seekToClientX(e.clientX);
-        }}
-        onPointerUp={() => {
-          dragging.current = false;
-        }}
-        onPointerCancel={() => {
-          dragging.current = false;
-        }}
-      >
-        <svg className="timeline__svg" width={width} height={H} aria-hidden>
-          <defs>
-            <linearGradient id="zoomfill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="rgba(255,180,84,0.42)" />
-              <stop offset="100%" stopColor="rgba(255,180,84,0.04)" />
-            </linearGradient>
-          </defs>
-          {/* second gridlines */}
-          {seconds.map((s) => (
-            <line
-              key={s}
-              x1={x(s)}
-              x2={x(s)}
-              y1={CURVE_TOP - 4}
-              y2={CURVE_BOTTOM}
-              className="grid"
-            />
+      <div className="ruler">
+        {ticks
+          .filter((s) => s % 2 === 0)
+          .map((s) => (
+            <span key={s} className="mono" style={{ left: `${((s * 1000) / totalMs) * 100}%` }}>
+              {fmt(s).replace(".0", "")}
+            </span>
           ))}
-          {/* rest baseline */}
-          <line x1={0} x2={width} y1={CURVE_BOTTOM} y2={CURVE_BOTTOM} className="baseline" />
-          {/* zoom-scale area + outline */}
-          {areaPath && <path d={areaPath} fill="url(#zoomfill)" />}
-          {linePath && <path d={linePath} className="curveline" fill="none" />}
-          {/* beat ticks */}
-          {derived.comp.events.map((e, i) => (
-            <line
-              key={i}
-              x1={x(e.tMs / 1000)}
-              x2={x(e.tMs / 1000)}
-              y1={CURVE_TOP - 4}
-              y2={CURVE_BOTTOM + 4}
-              className={`beat-tick${i === currentBeat ? " is-active" : ""}${i === selectedBeat ? " is-selected" : ""}${beatZooms(e, derived.rest) ? " zooms" : ""}`}
-            />
-          ))}
-        </svg>
+        {ticks.map((s) => (
+          <i key={s} style={{ left: `${((s * 1000) / totalMs) * 100}%` }} />
+        ))}
+      </div>
 
-        {/* beat flags (HTML, so labels never distort) */}
-        <div className="timeline__flags">
-          {derived.comp.events.map((e, i) => (
+      <div className="tl" ref={tlRef}>
+        <div
+          className="filmstrip"
+          onPointerDown={(e) => {
+            scrub(e.clientX);
+            const move = (ev: PointerEvent) => scrub(ev.clientX);
+            const up = () => {
+              window.removeEventListener("pointermove", move);
+              window.removeEventListener("pointerup", up);
+            };
+            window.addEventListener("pointermove", move);
+            window.addEventListener("pointerup", up);
+          }}
+        >
+          {thumbs.map((src, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: static evenly-spaced strip
+            <img key={i} src={src} alt="" />
+          ))}
+        </div>
+        <div className="ztrack">
+          {blocks.map((b) => (
             <button
               type="button"
-              key={i}
-              className={`flag${i === currentBeat ? " is-active" : ""}${i === selectedBeat ? " is-selected" : ""}`}
-              style={{ left: x(e.tMs / 1000) }}
-              onPointerDown={(ev) => ev.stopPropagation()}
-              onClick={() => {
-                engine.seek(e.tMs / 1000);
-                onSelectBeat(i);
+              key={b.i}
+              className={`zb${b.ghost ? " ghost" : ""}${b.i === selectedBeat && !b.ghost ? " on" : ""}`}
+              style={{
+                left: `${(b.t0 / totalMs) * 100}%`,
+                width: `${(Math.max(600, b.t1 - b.t0) / totalMs) * 100}%`,
               }}
-              title={`${beatTitle(e)} · ${tc(e.tMs / 1000)}s`}
+              title={
+                b.ghost ? `在「${beatTitle(comp, b.i)}」加入 Zoom` : `Beat ${b.i + 1} · ×${b.scale}`
+              }
+              onClick={() => (b.ghost ? onEnableZoom(b.i) : onSelectBeat(b.i))}
             >
-              <span className="flag__kind">{beatKindLabel(e)}</span>
-              <span className="flag__title">{beatTitle(e)}</span>
+              {b.ghost ? (
+                "＋ Zoom"
+              ) : (
+                <>
+                  <IcZoom size={11} />
+                  {`×${+b.scale.toFixed(1)}`}
+                </>
+              )}
             </button>
           ))}
         </div>
-
-        <Playhead engine={engine} T={T} width={width} />
-
-        {/* ruler labels */}
-        <div className="timeline__ruler">
-          {seconds.map((s) => (
-            <span key={s} className="ruler__mark" style={{ left: x(s) }}>
-              {s}s
-            </span>
-          ))}
-        </div>
+        <div
+          className="playhead"
+          style={{ left: `${(t / derived.T) * 100}%` }}
+          onPointerDown={(e) => {
+            (e.target as HTMLElement).setPointerCapture(e.pointerId);
+          }}
+          onPointerMove={(e) => {
+            if ((e.buttons & 1) === 1) scrub(e.clientX);
+          }}
+        />
+      </div>
+      <div className="tlhint">
+        <IcZoom size={12} />
+        藍色是 Zoom 區塊 — 點擊調整；虛線位置可加入 Zoom
       </div>
     </div>
   );
+}
+
+function beatTitle(comp: TakeComposition, i: number): string {
+  const e = comp.events[i];
+  if (!e) return "";
+  return e.label ?? (e.kind === "type" && e.text ? `"${e.text}"` : e.kind);
 }
