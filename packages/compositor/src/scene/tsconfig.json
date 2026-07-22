@@ -1,0 +1,14 @@
+{
+  // The scene is NOT compiled by tsc (the package tsconfig excludes src/scene);
+  // it is compiled by revideo's vite at render time. But vite's dependency
+  // scanner still reads the nearest tsconfig to learn the JSX settings, and the
+  // repo base sets `jsx: react-jsx` with no import source (for apps/editor,
+  // which really is React). Without this override the scanner tries to resolve
+  // `react/jsx-dev-runtime` from scene.tsx, fails, and skips dependency
+  // pre-bundling with a scary warning on every render. The scene's JSX is
+  // revideo's, not React's.
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "@revideo/2d/lib"
+  }
+}

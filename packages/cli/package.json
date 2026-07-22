@@ -1,6 +1,6 @@
 {
   "name": "open-take",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Agent-native demo recorder \u2014 your agent explores the app, records, and renders a cinematic demo; you refine by talking.",
   "license": "MIT",
   "type": "module",
