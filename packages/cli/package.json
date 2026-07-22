@@ -1,6 +1,6 @@
 {
   "name": "open-take",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Agent-native demo recorder \u2014 your agent explores the app, records, and renders a cinematic demo; you refine by talking.",
   "license": "MIT",
   "type": "module",
@@ -12,7 +12,7 @@
     "skill"
   ],
   "scripts": {
-    "build": "tsdown && node scripts/copy-skill.mjs",
+    "build": "tsdown && node scripts/copy-skill.mjs && node scripts/copy-readme.mjs",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist"
   },

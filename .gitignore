@@ -21,5 +21,8 @@ out
 # built skill bundle (copied from skills/open-take at build)
 packages/cli/skill/
 
+# README copied from the repo root at build (npm needs it inside the package)
+packages/cli/README.md
+
 # bundled editor SPA (copied from apps/editor/dist at prepack)
 packages/runtime/editor-dist/
