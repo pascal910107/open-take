@@ -40,7 +40,7 @@ function probeStream(path: string, sel: "v:0" | "a:0"): Record<string, string> {
   );
   assert.equal(r.status, 0, `ffprobe ${sel} failed: ${r.stderr}`);
   const out: Record<string, string> = {};
-  for (const line of r.stdout.split("\n")) {
+  for (const line of r.stdout.split(/\r?\n/)) {
     const [k, v] = line.split("=");
     if (k && v) out[k] = v;
   }
@@ -54,7 +54,7 @@ function probe(path: string): ProbeResult {
     { encoding: "utf8" },
   );
   const format: Record<string, string> = {};
-  for (const line of fmt.stdout.split("\n")) {
+  for (const line of fmt.stdout.split(/\r?\n/)) {
     const [k, v] = line.split("=");
     if (k && v) format[k] = v;
   }
