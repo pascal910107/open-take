@@ -38,9 +38,34 @@ means keep it. Every re-render saves the previous master as `demo.prev.mp4`.
 
 - **Browser:** the first `make` downloads a pinned Chrome-for-Testing to
   `~/.open-take/browsers` and reuses it after that. `OPEN_TAKE_CHROME` overrides.
-- **Skip a redundant download:** the renderer's `puppeteer` fetches its own
-  Chrome that open-take never uses — install with
-  `PUPPETEER_SKIP_DOWNLOAD=true` to save ~150MB.
+- **Skip redundant browser artifacts:** open-take passes the same
+  Chrome-for-Testing binary to recording and rendering. The renderer's
+  transitive `puppeteer` dependency can otherwise download its own Chrome /
+  Chrome Headless Shell artifacts at **install** time, which open-take never
+  uses. Set the option *before* the install that pulls open-take in.
+
+  ```sh
+  # macOS / Linux — one install
+  PUPPETEER_SKIP_DOWNLOAD=true npm i -D open-take
+  ```
+
+  ```powershell
+  # PowerShell — one install
+  $env:PUPPETEER_SKIP_DOWNLOAD="true"; npm i -D open-take
+  ```
+
+  For a persistent project setting, create `.puppeteerrc.cjs` in the consuming
+  project before installing:
+
+  ```js
+  module.exports = { skipDownload: true };
+  ```
+
+  Already installed? Puppeteer's cache is normally `~/.cache/puppeteer` on
+  macOS/Linux and `%USERPROFILE%\.cache\puppeteer` on Windows. It is safe to
+  remove only if no other project on the machine relies on it. open-take cannot
+  set this on a consumer's behalf because Puppeteer reads configuration from
+  the consuming project; see [Puppeteer's configuration guide](https://pptr.dev/guides/configuration).
 - **Develop:** `pnpm install && pnpm build`.
 
 MIT.

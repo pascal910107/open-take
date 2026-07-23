@@ -15,8 +15,8 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
-  readdirSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -144,13 +144,22 @@ export async function ensureChrome(explicit?: string): Promise<string> {
 export class CDP {
   private ws: WebSocket;
   private id = 0;
-  private pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void }>();
-  private handlers = new Map<string, (params: any) => void>();
+  private pending = new Map<
+    number,
+    { resolve: (value: unknown) => void; reject: (error: Error) => void }
+  >();
+  private handlers = new Map<string, (params: unknown) => void>();
 
   private constructor(ws: WebSocket) {
     this.ws = ws;
     ws.addEventListener("message", (ev: MessageEvent) => {
-      const msg = JSON.parse(ev.data as string);
+      const msg = JSON.parse(ev.data as string) as {
+        id?: number;
+        error?: unknown;
+        result?: unknown;
+        method?: string;
+        params?: unknown;
+      };
       if (msg.id != null && this.pending.has(msg.id)) {
         const { resolve, reject } = this.pending.get(msg.id)!;
         this.pending.delete(msg.id);
@@ -169,16 +178,16 @@ export class CDP {
     });
   }
 
-  send<T = any>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+  send<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
     const id = ++this.id;
     return new Promise<T>((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      this.pending.set(id, { resolve: (value) => resolve(value as T), reject });
       this.ws.send(JSON.stringify({ id, method, params }));
     });
   }
 
-  on(method: string, fn: (params: any) => void): void {
-    this.handlers.set(method, fn);
+  on<T = unknown>(method: string, fn: (params: T) => void): void {
+    this.handlers.set(method, (params) => fn(params as T));
   }
 
   close(): void {
@@ -235,7 +244,9 @@ export async function launchBrowser(opts: {
     { stdio: ["ignore", "ignore", "pipe"] },
   );
   let stderr = "";
-  proc.stderr?.on("data", (d) => (stderr += d));
+  proc.stderr?.on("data", (d) => {
+    stderr += d;
+  });
 
   const close = async () => {
     const exited = new Promise<void>((res) => {
@@ -325,7 +336,10 @@ export async function fitViewport(
   };
   let win: { windowId: number; bounds: { width: number; height: number } } | null = null;
   try {
-    win = await cdp.send("Browser.getWindowForTarget", { targetId });
+    win = await cdp.send<{ windowId: number; bounds: { width: number; height: number } }>(
+      "Browser.getWindowForTarget",
+      { targetId },
+    );
   } catch {
     return readInner(); // can't resize — use the natural viewport
   }
@@ -472,7 +486,9 @@ export async function encodeFrames(
     ];
     const c = spawn(bin, args, { stdio: ["ignore", "ignore", "pipe"] });
     let err = "";
-    c.stderr.on("data", (d) => (err += d));
+    c.stderr.on("data", (d) => {
+      err += d;
+    });
     c.on("error", reject);
     c.on("close", (code) =>
       code === 0

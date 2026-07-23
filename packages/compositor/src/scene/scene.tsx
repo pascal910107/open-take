@@ -123,7 +123,7 @@ export default makeScene2D("take", function* (view) {
           spatial click point, so they get no ripple) */}
         {comp.events
           .filter((e) => e.kind !== "scroll" && e.kind !== "press")
-          .map((e) => {
+          .map((e, index) => {
             const ms = comp.cursor.rippleMs / 1000;
             const prog = () => {
               const dt = t() - e.tMs / 1000;
@@ -131,6 +131,7 @@ export default makeScene2D("take", function* (view) {
             };
             return (
               <Circle
+                key={`${e.kind}-${e.tMs}-${index}`}
                 position={[lx(e.point.x), ly(e.point.y)]}
                 size={() => {
                   const p = prog();

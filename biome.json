@@ -1,7 +1,16 @@
 {
   "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
   "files": {
-    "ignore": ["**/dist", "**/node_modules", "**/.open-take-cache", "spike/.open-take-cache"]
+    "ignore": [
+      "**/dist",
+      "**/.turbo",
+      "**/node_modules",
+      "**/.open-take-cache",
+      ".notes",
+      "out",
+      "spike-revideo",
+      "packages/runtime/editor-dist"
+    ]
   },
   "formatter": {
     "indentStyle": "space",
@@ -11,7 +20,13 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": true
+      "recommended": true,
+      "style": {
+        "noNonNullAssertion": "off",
+        "noUnusedTemplateLiteral": "off",
+        "useSingleVarDeclarator": "off",
+        "useTemplate": "off"
+      }
     }
   },
   "javascript": {
@@ -19,5 +34,27 @@
       "quoteStyle": "double",
       "semicolons": "always"
     }
-  }
+  },
+  "overrides": [
+    {
+      "include": ["apps/editor/src/ui/icons.tsx"],
+      "linter": {
+        "rules": {
+          "a11y": {
+            "noSvgWithoutTitle": "off"
+          }
+        }
+      }
+    },
+    {
+      "include": ["apps/editor/src/components/Stage.tsx"],
+      "linter": {
+        "rules": {
+          "a11y": {
+            "useKeyWithClickEvents": "off"
+          }
+        }
+      }
+    }
+  ]
 }

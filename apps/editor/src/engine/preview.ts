@@ -521,6 +521,6 @@ export class PreviewEngine {
 // local copy of math.ts smoother for the ripple curve (avoids a named import
 // clash with the re-export module; identical formula)
 function smoothstep(t: number): number {
-  t = Math.max(0, Math.min(1, t));
-  return t * t * t * (t * (t * 6 - 15) + 10);
+  const clamped = Math.max(0, Math.min(1, t));
+  return clamped * clamped * clamped * (clamped * (clamped * 6 - 15) + 10);
 }

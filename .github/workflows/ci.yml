@@ -1,0 +1,45 @@
+name: CI
+
+# Linux and Windows both build and run the unit/integration suite. Opener argv
+# is tested as pure platform-specific command specs, so Windows quoting stays
+# covered without launching GUI applications in CI. Linux additionally drives
+# its preinstalled Chrome through a real half-second Revideo render.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  # open-take manages ONE Chrome-for-Testing itself; the renderer's transitive
+  # puppeteer would fetch a second one at install for nothing. Skipping it here
+  # also keeps the flag we tell users about honest.
+  PUPPETEER_SKIP_DOWNLOAD: "true"
+  DISABLE_TELEMETRY: "true"
+
+jobs:
+  check:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false # a Windows failure must not hide the Linux result
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4 # version comes from packageManager in package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build # also produces the editor dist the edit-server tests serve
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm -r test
+      - name: Render smoke
+        if: runner.os == 'Linux'
+        run: |
+          chrome_path="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium)"
+          OPEN_TAKE_E2E_CHROME="$chrome_path" pnpm --filter @open-take/compositor test:render-smoke

@@ -6,8 +6,8 @@ import type { BBox, Pt, TakeComposition } from "./types";
 
 // smootherstep 6t^5-15t^4+10t^3
 export function smoother(t: number): number {
-  t = Math.max(0, Math.min(1, t));
-  return t * t * t * (t * (t * 6 - 15) + 10);
+  const clamped = Math.max(0, Math.min(1, t));
+  return clamped * clamped * clamped * (clamped * (clamped * 6 - 15) + 10);
 }
 
 // Cubic-bezier easing y(x) with endpoints (0,0),(1,1) and control points

@@ -12,7 +12,7 @@
   "scripts": {
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
-    "lint": "biome check .",
+    "lint": "biome lint .",
     "format": "biome format --write .",
     "clean": "turbo run clean && rm -rf node_modules",
     "postinstall": "node scripts/fix-node-pty-perms.mjs"

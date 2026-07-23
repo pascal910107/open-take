@@ -239,7 +239,9 @@ export async function ffprobe(
       { stdio: ["ignore", "pipe", "ignore"] },
     );
     let out = "";
-    c.stdout.on("data", (d) => (out += d));
+    c.stdout.on("data", (d) => {
+      out += d;
+    });
     c.on("close", () => {
       try {
         const j = JSON.parse(out);

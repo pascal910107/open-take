@@ -30,12 +30,12 @@ import {
   scrollDeltaSelectorJs,
 } from "./capture";
 import {
-  type CDP,
   type Browser,
+  type CDP,
+  Screencast,
   encodeFrames,
   fitViewport,
   launchBrowser,
-  Screencast,
   makeFrameDir,
 } from "./cdp";
 import type { TakePlan } from "./types";
@@ -46,8 +46,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // the compositor's drag easing in math.ts exactly so the cursor stays locked
 // to the captured ink).
 const smoother = (u: number) => {
-  u = Math.max(0, Math.min(1, u));
-  return u * u * u * (u * (u * 6 - 15) + 10);
+  const clamped = Math.max(0, Math.min(1, u));
+  return clamped * clamped * clamped * (clamped * (clamped * 6 - 15) + 10);
 };
 
 type Pt = { x: number; y: number };
