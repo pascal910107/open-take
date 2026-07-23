@@ -210,7 +210,7 @@ async function main() {
     process.stdout.write(
       `\nmp4:         ${mp4Path}\ncomposition: ${compositionPath}\n` +
         `capture:     ${capturePath}\ncapture log: ${captureLogPath}\n` +
-        `\nrefine by talking — or directly:\n` +
+        `\nrefine by asking your agent for changes — or directly:\n` +
         `  ${INVOKE} render ${mp4Path} --review   (draft copy with beat badges, auto-opens)\n` +
         `  ${INVOKE} beats  ${mp4Path}            (the numbered beat sheet)\n` +
         `  ${INVOKE} ab     ${mp4Path} --set zoom=light,tight --beat 2   (taste A/B)\n`,

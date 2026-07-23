@@ -2,7 +2,7 @@
 
 Tell your coding agent to make a demo of your app. It drives the real thing and
 returns a polished MP4 with a smooth cursor and cinematic zoom, plus an editable
-composition you can refine by talking.
+composition you refine by asking your agent for changes in plain language.
 
 ## Start
 

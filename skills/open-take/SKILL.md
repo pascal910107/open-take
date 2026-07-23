@@ -11,7 +11,8 @@ framing). **Your job is editorial: decide what demo is worth making, then make
 it.**
 
 The honest promise: you produce a strong *draft*. The output includes an
-editable composition; the user refines toward "brilliant" by talking. Don't aim
+editable composition; the user refines toward "brilliant" by giving you notes in
+plain language. Don't aim
 for one-shot perfection — aim for a coherent, legible draft that shows the
 product's real wow.
 
