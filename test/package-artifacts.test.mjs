@@ -94,7 +94,7 @@ test("packed release artifacts form a browser-download-free dependency chain", a
   );
   assert.equal(manifests.cli.version, "0.1.3");
   assert.equal(manifests.cli.dependencies["@open-take/runtime"], manifests.runtime.version);
-  assert.equal(manifests.initializer.version, "0.1.0");
+  assert.equal(manifests.initializer.version, "0.1.1");
   assert.equal(manifests.initializer.dependencies, undefined);
   entryText(entries.initializer, "package/LICENSE");
 

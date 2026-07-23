@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
   detectPackageManager,
+  findPnpmWorkspaceRoot,
   initCommand,
   initializeOpenTake,
   installCommand,
+  isPnpmWorkspaceRoot,
   requestedPackageManager,
   type Runner,
 } from "../src/index";
@@ -30,6 +32,15 @@ test("project package-manager metadata wins over the npm create launcher", async
   await writeFile(join(lockfileDir, "package.json"), "{}");
   await writeFile(join(lockfileDir, "yarn.lock"), "");
   assert.equal(detectPackageManager(lockfileDir, "npm/11.4.2 node/v22"), "yarn");
+
+  const workspaceRoot = await mkdtemp(join(tmpdir(), "create-open-take-workspace-"));
+  const workspaceChild = join(workspaceRoot, "packages", "app");
+  await mkdir(workspaceChild, { recursive: true });
+  await writeFile(join(workspaceRoot, "pnpm-workspace.yaml"), "packages:\n  - packages/*\n");
+  await writeFile(join(workspaceChild, "package.json"), "{}");
+  assert.equal(findPnpmWorkspaceRoot(workspaceChild), workspaceRoot);
+  assert.equal(detectPackageManager(workspaceChild, "npm/11.4.2 node/v22"), "pnpm");
+  assert.equal(isPnpmWorkspaceRoot(workspaceChild), false);
 });
 
 test("commands install the dev dependency and run the local init", () => {
@@ -38,6 +49,42 @@ test("commands install the dev dependency and run the local init", () => {
     args: ["install", "--save-dev", "open-take@latest"],
   });
   assert.deepEqual(initCommand("pnpm"), {
+    command: "pnpm",
+    args: ["exec", "open-take", "init"],
+  });
+  assert.deepEqual(installCommand("pnpm"), {
+    command: "pnpm",
+    args: ["add", "--save-dev", "open-take@latest"],
+  });
+  assert.deepEqual(installCommand("pnpm", "open-take@latest", { workspaceRoot: true }), {
+    command: "pnpm",
+    args: ["add", "--workspace-root", "--save-dev", "open-take@latest"],
+  });
+});
+
+test("initializer explicitly installs into a pnpm workspace root", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "create-open-take-pnpm-root-"));
+  await writeFile(join(cwd, "package.json"), "{}");
+  await writeFile(join(cwd, "pnpm-workspace.yaml"), "packages: []\n");
+  const calls: Array<{ command: string; args: string[] }> = [];
+  const runner: Runner = async (command, args) => {
+    calls.push({ command, args });
+  };
+
+  assert.equal(isPnpmWorkspaceRoot(cwd), true);
+  await initializeOpenTake({
+    cwd,
+    packageManager: "pnpm",
+    packageSpec: "open-take@0.1.3",
+    runner,
+    write: () => {},
+  });
+
+  assert.deepEqual(calls[0], {
+    command: "pnpm",
+    args: ["add", "--workspace-root", "--save-dev", "open-take@0.1.3"],
+  });
+  assert.deepEqual(calls[1], {
     command: "pnpm",
     args: ["exec", "open-take", "init"],
   });

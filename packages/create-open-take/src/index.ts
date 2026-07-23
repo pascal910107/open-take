@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 
 export type PackageManager = "npm" | "pnpm" | "yarn" | "bun";
 
@@ -24,6 +24,21 @@ export function requestedPackageManager(args: string[]): PackageManager | undefi
     throw new Error("Choose only one of --use-npm, --use-pnpm, --use-yarn, or --use-bun.");
   }
   return requested[0] ? FLAGS[requested[0]] : undefined;
+}
+
+export function findPnpmWorkspaceRoot(cwd: string): string | undefined {
+  let current = resolve(cwd);
+  for (;;) {
+    if (
+      existsSync(resolve(current, "pnpm-workspace.yaml")) ||
+      existsSync(resolve(current, "pnpm-workspace.yml"))
+    ) {
+      return current;
+    }
+    const parent = dirname(current);
+    if (parent === current) return undefined;
+    current = parent;
+  }
 }
 
 export function detectPackageManager(
@@ -52,6 +67,8 @@ export function detectPackageManager(
     }
   }
 
+  if (findPnpmWorkspaceRoot(cwd)) return "pnpm";
+
   const locks: Array<[string, PackageManager]> = [
     ["pnpm-lock.yaml", "pnpm"],
     ["yarn.lock", "yarn"],
@@ -72,10 +89,19 @@ export function detectPackageManager(
 export function installCommand(
   packageManager: PackageManager,
   packageSpec = "open-take@latest",
+  options: { workspaceRoot?: boolean } = {},
 ): { command: string; args: string[] } {
   switch (packageManager) {
     case "pnpm":
-      return { command: "pnpm", args: ["add", "--save-dev", packageSpec] };
+      return {
+        command: "pnpm",
+        args: [
+          "add",
+          ...(options.workspaceRoot ? ["--workspace-root"] : []),
+          "--save-dev",
+          packageSpec,
+        ],
+      };
     case "yarn":
       return { command: "yarn", args: ["add", "--dev", packageSpec] };
     case "bun":
@@ -83,6 +109,10 @@ export function installCommand(
     default:
       return { command: "npm", args: ["install", "--save-dev", packageSpec] };
   }
+}
+
+export function isPnpmWorkspaceRoot(cwd: string): boolean {
+  return findPnpmWorkspaceRoot(cwd) === resolve(cwd);
 }
 
 export function initCommand(packageManager: PackageManager): {
@@ -137,6 +167,9 @@ export async function initializeOpenTake(
   const install = installCommand(
     packageManager,
     options.packageSpec ?? process.env.OPEN_TAKE_PACKAGE ?? "open-take@latest",
+    {
+      workspaceRoot: packageManager === "pnpm" && isPnpmWorkspaceRoot(cwd),
+    },
   );
   await runner(install.command, install.args, { cwd, env: process.env });
 
