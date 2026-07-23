@@ -113,8 +113,8 @@ export async function makeTake(plan: TakePlan, opts: MakeTakeOpts): Promise<Make
   const tmpVideo = join(work, "capture.mp4"); // CDP screencast → h264 mp4
 
   // Resolve (and, first run, download) Chrome ONCE, then hand the same binary
-  // to both capture and render. One browser serves the whole pipeline — no
-  // second download from revideo's bundled puppeteer.
+  // to both capture and render. One browser serves the whole pipeline; the
+  // renderer uses puppeteer-core and never downloads another one.
   const chromePath = await ensureChrome(opts.capture?.chromePath);
 
   const log = await captureTake(plan, { ...opts.capture, chromePath, videoPath: tmpVideo });

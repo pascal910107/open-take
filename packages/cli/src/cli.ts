@@ -9,7 +9,7 @@
 //
 // The refine loop is conversational: the user talks, the agent edits
 // composition.json and drives these verbs. See skills/open-take/SKILL.md.
-import { stat as fsStat, mkdir, readFile, writeFile } from "node:fs/promises";
+import { stat as fsStat, readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -28,6 +28,7 @@ import {
   revealPath,
   stagePrev,
 } from "@open-take/runtime";
+import { installAgentSkill } from "./init";
 
 // how to invoke this CLI, for printed follow-up commands: the bin name when
 // installed, else the literal node path the user just ran (copy-pasteable).
@@ -82,6 +83,7 @@ Usage:
   open-take ab     <take> --set <knob>=<v1>,<v2>[,<v3>] [--beat N] [--full] [--draft] [--no-open]
   open-take ab     <take> --before-after [--beat N] [--full] [--no-open]
   open-take edit   <take> [--port 4178] [--no-open]
+  open-take init
   open-take skill  [install]
 
   <take> is any member of a take's artifact family (its .mp4, .composition.json,
@@ -118,10 +120,10 @@ Usage:
           it can't do (reorder, re-record) to your agent via the Agent panel
           (notes land in <base>.notes.md + this terminal).
 
-  skill   print the full agent guide (SKILL.md): the editorial method, the
-          plan.json schema, and the conversational refine loop. Driving an
-          agent? Start here. \`skill install\` writes it into this project's
-          .claude/skills/open-take/ so Claude Code discovers it automatically.
+  init    install the Open Take skill into this project for coding agents.
+
+  skill   print the full agent guide (SKILL.md). \`skill install\` remains as a
+          backwards-compatible alias for \`init\`.
 
   --fps <n>   (make only) capture AND render fps (default 60). Drop to 30 for
               fast drafts while iterating.
@@ -141,6 +143,32 @@ async function readyLine(mp4Path: string): Promise<string> {
 }
 
 async function main() {
+  const bundledSkill = async (): Promise<string> => {
+    // packaged copy (skill/SKILL.md beside dist/) first, monorepo source second
+    const here = dirname(fileURLToPath(import.meta.url)); // dist/ or src/
+    const candidates = [
+      resolve(here, "..", "skill", "SKILL.md"),
+      resolve(here, "..", "..", "..", "skills", "open-take", "SKILL.md"),
+    ];
+    for (const candidate of candidates) {
+      const text = await readFile(candidate, "utf8").catch(() => null);
+      if (text) return text;
+    }
+    throw new Error("SKILL.md not found (re-run the package build)");
+  };
+
+  if (cmd === "init") {
+    const installed = await installAgentSkill({
+      root: process.cwd(),
+      skillText: await bundledSkill(),
+    });
+    process.stdout.write(
+      `initialized: ${installed.canonicalPath}\n` +
+        `Ask your agent to "make a demo of <your app>".\n`,
+    );
+    return;
+  }
+
   if (cmd === "inspect") {
     const url = positional[0];
     if (!url) throw new Error("inspect: missing <url>");
@@ -301,24 +329,12 @@ async function main() {
   }
 
   if (cmd === "skill") {
-    // packaged copy (skill/SKILL.md beside dist/) first, monorepo source second
-    const here = dirname(fileURLToPath(import.meta.url)); // dist/
-    const candidates = [
-      resolve(here, "..", "skill", "SKILL.md"),
-      resolve(here, "..", "..", "..", "skills", "open-take", "SKILL.md"),
-    ];
-    let text: string | null = null;
-    for (const c of candidates) {
-      text = await readFile(c, "utf8").catch(() => null);
-      if (text) break;
-    }
-    if (!text) throw new Error("skill: SKILL.md not found (re-run the package build)");
+    const text = await bundledSkill();
     if (positional[0] === "install") {
-      const dest = resolve(process.cwd(), ".claude", "skills", "open-take", "SKILL.md");
-      await mkdir(dirname(dest), { recursive: true });
-      await writeFile(dest, text);
+      const installed = await installAgentSkill({ root: process.cwd(), skillText: text });
       process.stdout.write(
-        `installed: ${dest}\nClaude Code discovers it automatically — ask your agent to "make a demo of <your app>".\n`,
+        `installed: ${installed.canonicalPath}\n` +
+          `Ask your agent to "make a demo of <your app>".\n`,
       );
     } else {
       process.stdout.write(text);

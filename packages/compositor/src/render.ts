@@ -30,7 +30,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { renderVideo } from "@revideo/renderer";
+import { renderVideo } from "@open-take/revideo-renderer";
 import { repairBundledMediaPermissions, resolveFfmpeg } from "./ffmpeg";
 import { type PlanOpts, planComposition } from "./plan";
 import { type CaptureLog, type TakeComposition, motionBlurActive } from "./types";
@@ -52,10 +52,9 @@ export type RenderTakeOpts = {
   planOpts?: PlanOpts;
   logProgress?: boolean;
   /** Chrome binary for the headless render. Pass the same Chrome-for-Testing
-   *  the capture path uses so a single browser serves both stages (no second
-   *  download). revideo forwards this to puppeteer.launch's executablePath;
-   *  if unset, revideo's bundled puppeteer resolves its own. */
-  chromePath?: string;
+   *  the capture path uses so a single browser serves both stages. The
+   *  higher-level runtime resolves and supplies this to puppeteer-core. */
+  chromePath: string;
   /** the capture log, for cross-checking that an edited composition didn't
    *  drift an action's capture-locked tMs (see validateComposition). Optional —
    *  the structural checks run regardless. */
@@ -255,6 +254,11 @@ export async function renderTake(
 async function renderTakeExclusive(
   opts: RenderTakeOpts,
 ): Promise<{ mp4Path: string; compositionPath: string }> {
+  if (!opts.chromePath) {
+    throw new Error(
+      "renderTake: `chromePath` is required; use @open-take/runtime to resolve managed Chrome automatically",
+    );
+  }
   const composition: TakeComposition =
     opts.composition ??
     planComposition(
@@ -318,8 +322,7 @@ async function renderTakeExclusive(
           viteConfig: {
             server: { fs: { allow: [scratch, ...(deps ? [deps] : [])] } },
           },
-          // Reuse the capture-managed Chrome-for-Testing when given (one browser
-          // for both stages); else let revideo's puppeteer resolve its own.
+          // Reuse the capture-managed Chrome-for-Testing for both stages.
           puppeteer: {
             // --password-store/--use-mock-keychain: never touch the OS keychain, so
             // macOS doesn't pop a "Chrome wants to use Chromium Safe Storage" prompt
@@ -330,7 +333,7 @@ async function renderTakeExclusive(
               "--password-store=basic",
               "--use-mock-keychain",
             ],
-            ...(opts.chromePath ? { executablePath: opts.chromePath } : {}),
+            executablePath: opts.chromePath,
           },
         },
       });

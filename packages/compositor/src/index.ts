@@ -2,7 +2,7 @@
 // frames -> polished mp4 + an editable revideo composition.
 //
 //   const comp = planComposition(captureLog)   // default editable plan
-//   await renderTake({ composition: comp, videoPath, outPath })
+//   await renderTake({ composition: comp, videoPath, outPath, chromePath })
 //
 // Edit `comp` (zoom decisions, framing, cursor) and re-render — the
 // composition is the editable source of truth.

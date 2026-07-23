@@ -12,9 +12,8 @@ on:
   workflow_dispatch:
 
 env:
-  # open-take manages ONE Chrome-for-Testing itself; the renderer's transitive
-  # puppeteer would fetch a second one at install for nothing. Skipping it here
-  # also keeps the flag we tell users about honest.
+  # The workspace retains upstream @revideo/renderer only as a build input for
+  # our puppeteer-core bridge. Published consumers never install this copy.
   PUPPETEER_SKIP_DOWNLOAD: "true"
   DISABLE_TELEMETRY: "true"
 
@@ -38,6 +37,7 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm -r test
+      - run: pnpm test:package
       - name: Render smoke
         if: runner.os == 'Linux'
         run: |

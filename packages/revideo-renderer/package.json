@@ -1,0 +1,40 @@
+{
+  "name": "@open-take/revideo-renderer",
+  "version": "0.1.0",
+  "description": "Open Take's Revideo renderer bridge, using puppeteer-core with the Chrome Open Take already manages.",
+  "license": "MIT",
+  "main": "./dist/server/index.js",
+  "types": "./dist/server/index.d.ts",
+  "files": ["dist", "LICENSE"],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "node --check scripts/build.mjs",
+    "test": "node --test test/*.test.mjs",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@revideo/ffmpeg": "0.11.0",
+    "@revideo/telemetry": "0.11.0",
+    "@revideo/vite-plugin": "0.11.0",
+    "puppeteer-core": "25.3.0",
+    "uuid": "^14.0.1",
+    "vite": "^8.1.2"
+  },
+  "peerDependencies": {
+    "@revideo/core": "0.11.0"
+  },
+  "devDependencies": {
+    "@revideo/renderer": "0.11.0"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pascal910107/open-take.git",
+    "directory": "packages/revideo-renderer"
+  }
+}

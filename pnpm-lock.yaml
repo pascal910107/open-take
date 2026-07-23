@@ -119,6 +119,9 @@ importers:
       tsdown:
         specifier: ^0.9.0
         version: 0.9.9(typescript@5.9.3)
+      tsx:
+        specifier: ^4.22.3
+        version: 4.22.3
       typescript:
         specifier: ^5.6.3
         version: 5.9.3
@@ -131,15 +134,15 @@ importers:
       '@ffprobe-installer/ffprobe':
         specifier: ^2.1.2
         version: 2.1.2
+      '@open-take/revideo-renderer':
+        specifier: workspace:*
+        version: link:../revideo-renderer
       '@revideo/2d':
         specifier: 0.11.0
         version: 0.11.0
       '@revideo/core':
         specifier: 0.11.0
         version: 0.11.0
-      '@revideo/renderer':
-        specifier: 0.11.0
-        version: 0.11.0(@types/node@22.19.19)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yauzl@2.10.0)
       '@revideo/ui':
         specifier: 0.11.0
         version: 0.11.0
@@ -159,6 +162,49 @@ importers:
       typescript:
         specifier: ^5.6.3
         version: 5.9.3
+
+  packages/create-open-take:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.1
+        version: 22.19.19
+      tsdown:
+        specifier: ^0.9.0
+        version: 0.9.9(typescript@5.9.3)
+      tsx:
+        specifier: ^4.22.3
+        version: 4.22.3
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+
+  packages/revideo-renderer:
+    dependencies:
+      '@revideo/core':
+        specifier: 0.11.0
+        version: 0.11.0
+      '@revideo/ffmpeg':
+        specifier: 0.11.0
+        version: 0.11.0
+      '@revideo/telemetry':
+        specifier: 0.11.0
+        version: 0.11.0
+      '@revideo/vite-plugin':
+        specifier: 0.11.0
+        version: 0.11.0
+      puppeteer-core:
+        specifier: 25.3.0
+        version: 25.3.0(yauzl@2.10.0)
+      uuid:
+        specifier: ^14.0.1
+        version: 14.0.1
+      vite:
+        specifier: ^8.1.2
+        version: 8.1.5(@types/node@22.19.19)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)
+    devDependencies:
+      '@revideo/renderer':
+        specifier: 0.11.0
+        version: 0.11.0(@types/node@22.19.19)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yauzl@2.10.0)
 
   packages/runtime:
     dependencies:

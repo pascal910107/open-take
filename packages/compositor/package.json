@@ -1,6 +1,6 @@
 {
   "name": "@open-take/compositor",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Polish compositor (D3) \u2014 event log + captured frames -> polished mp4 + editable revideo composition.",
   "license": "MIT",
   "type": "module",
@@ -20,7 +20,7 @@
   "dependencies": {
     "@revideo/2d": "0.11.0",
     "@revideo/core": "0.11.0",
-    "@revideo/renderer": "0.11.0",
+    "@open-take/revideo-renderer": "workspace:*",
     "@revideo/ui": "0.11.0",
     "@revideo/vite-plugin": "0.11.0",
     "@ffmpeg-installer/ffmpeg": "^1.1.0",

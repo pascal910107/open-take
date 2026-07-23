@@ -1,24 +1,18 @@
 {
-  "name": "open-take",
-  "version": "0.1.3",
-  "description": "Agent-native demo recorder \u2014 your agent explores the app, records, and renders a cinematic demo; you refine by talking.",
+  "name": "create-open-take",
+  "version": "0.1.0",
+  "description": "Add Open Take and its agent skill to an existing app in one command.",
   "license": "MIT",
   "type": "module",
   "bin": {
-    "open-take": "./dist/cli.js"
+    "create-open-take": "./dist/cli.js"
   },
-  "files": [
-    "dist",
-    "skill"
-  ],
+  "files": ["dist"],
   "scripts": {
-    "build": "tsdown && node scripts/copy-skill.mjs && node scripts/copy-readme.mjs",
+    "build": "tsdown",
     "typecheck": "tsc --noEmit",
     "test": "node --test --import tsx/esm test/*.test.ts",
     "clean": "rm -rf dist"
-  },
-  "dependencies": {
-    "@open-take/runtime": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.10.1",
@@ -32,18 +26,11 @@
   "publishConfig": {
     "access": "public"
   },
-  "keywords": [
-    "demo",
-    "screen-recording",
-    "video",
-    "agent",
-    "cdp",
-    "screencast"
-  ],
+  "keywords": ["demo", "screen-recording", "video", "agent", "initializer"],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/pascal910107/open-take.git",
-    "directory": "packages/cli"
+    "directory": "packages/create-open-take"
   },
   "homepage": "https://github.com/pascal910107/open-take#readme",
   "bugs": {

@@ -1,6 +1,6 @@
 ---
 name: open-take
-description: Make a polished ~25s demo video of a web app the user names ("make a demo of <url/app> for Twitter"). Explore the app, decide the IDEAL demo editorial-first, render a cinematic MP4 (smooth synthetic cursor + selective click-zoom) plus an editable composition. Use when the user wants a shareable product demo of a running web app.
+description: Make a polished ~25s demo video of a web app the user names ("make a demo of this app for Twitter"). Explore the app, decide the IDEAL demo editorial-first, render a cinematic MP4 (smooth synthetic cursor + selective click-zoom) plus an editable composition. Use when the user wants a shareable product demo of a running web app.
 ---
 
 # open-take — make a demo of an app
@@ -28,8 +28,8 @@ limitation, not something to paper over).
 
 ## The loop
 
-Run these five steps in order. Write down your answers for steps 1–3 *before*
-you touch the capture tooling — that's what keeps you honest.
+Run this loop in order. Write down your answers for UNDERSTAND through
+SELF-CRITIQUE *before* you touch the capture tooling.
 
 ### 1. UNDERSTAND (explore before deciding anything)
 Open the app and look. Use the CLI's `inspect` (below) to list interactive
@@ -40,6 +40,23 @@ elements (name + bbox), and open the URL in any browser to see what the app
   that makes someone stop scrolling. (Not "it has a nice UI." The specific
   moment.)
 - **What ONE story should a ~25s demo tell** — one sentence.
+
+**Alignment gate — MUST confirm the thesis before DIRECT.** After exploring,
+use the host's structured question tool (Claude Code: `AskUserQuestion`; other
+agents: the equivalent) to ask which story the demo should prove. Skip only
+when the user already gave an unambiguous audience/purpose **and** hero outcome,
+or explicitly said to use your judgment; when skipping, restate the brief so
+they can correct it.
+
+- Ask **one question by default, two maximum**. Do not make the user restate
+  facts you can observe in the app.
+- Offer **2–3 concrete hero + payoff stories** grounded in what you observed,
+  put the recommended option first, and explain its advantage in one sentence.
+  If only one story is credible, ask the user to confirm that thesis and allow
+  a correction instead of inventing weak alternatives.
+- Ask audience/purpose as the second question only when it is unknown and
+  would materially change the story.
+- Do not write the plan or run `make` until a required answer arrives.
 
 ### 2. DIRECT (the editorial work — ignore capture feasibility here)
 Choose **3–5 beats** forming ONE coherent arc: a hook in the first ~2s → a

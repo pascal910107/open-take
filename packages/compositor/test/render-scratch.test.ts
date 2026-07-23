@@ -31,6 +31,7 @@ test("a failure while preparing a render removes its scratch directory", async (
         composition: planComposition(log),
         videoPath: join(tmpdir(), `open-take-missing-${process.pid}.mp4`),
         outPath: join(tmpdir(), `open-take-never-written-${process.pid}.mp4`),
+        chromePath: process.execPath,
       }),
     );
   } finally {
