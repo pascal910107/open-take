@@ -166,6 +166,10 @@ export type RenderCompositionOpts = {
   chromePath?: string;
   /** render progress (0..1), forwarded from revideo — for a progress UI. */
   onProgress?: (progress: number) => void;
+  /** Write the editable `<out>.composition.json` sibling (default true).
+   *  Callers that already persisted the composition under their own
+   *  concurrency guard can disable the second, unguarded write. */
+  writeCompositionSibling?: boolean;
 };
 
 /** Refine: re-render an EDITED composition over a saved capture — no app
@@ -185,6 +189,7 @@ export async function renderComposition(
     chromePath,
     captureLog: opts.captureLog,
     onProgress: opts.onProgress,
+    writeCompositionSibling: opts.writeCompositionSibling,
   });
 }
 

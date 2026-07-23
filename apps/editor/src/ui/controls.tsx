@@ -14,7 +14,7 @@ export function Row({
 }) {
   return (
     <div className="row">
-      <label>{label}</label>
+      <span className="rowlabel">{label}</span>
       {children}
       {value != null && <span className="val mono">{value}</span>}
     </div>

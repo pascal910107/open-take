@@ -18,11 +18,25 @@ import {
 import { useBridge } from "./hooks/useBridge";
 import { useComposition } from "./hooks/useComposition";
 import { type SeedFn, usePreview } from "./hooks/usePreview";
-import { getCompositionMtime, saveComposition } from "./lib/bridge";
+import {
+  ConflictError,
+  detectBridge,
+  getBaseMtime,
+  getCompositionMtime,
+  saveComposition,
+  setBaseMtime,
+} from "./lib/bridge";
+import type { TakeComposition } from "./lib/compositor";
+import {
+  type ConflictNotice,
+  type OperationResult,
+  resolveConflictAction,
+  shouldKeepConflict,
+} from "./lib/conflict";
 import { setBeatZoom, setStart } from "./lib/edit";
 import { IcCompare, IcExport, IcRedo, IcUndo } from "./ui/icons";
 
-type SaveState = "clean" | "saving" | "saved" | "error" | "invalid";
+type SaveState = "clean" | "saving" | "saved" | "error" | "export-error" | "invalid" | "conflict";
 
 export function App() {
   const seedRef = useRef<SeedFn | null>(null);
@@ -32,12 +46,20 @@ export function App() {
   useEffect(() => {
     seedRef.current = c.seed;
   }, [c.seed]);
-  const b = useBridge(p, c);
+  // Declared before useBridge so its stable callback can be the bridge's
+  // conflict sink. Both autosave and export use the same resolution UI.
+  const [conflict, setConflict] = useState<ConflictNotice | null>(null);
+  const [saveState, setSaveState] = useState<SaveState>("clean");
+  const [resolvingConflict, setResolvingConflict] = useState(false);
+  const handleBridgeConflict = useCallback((next: ConflictNotice) => {
+    setConflict(next);
+    setSaveState("conflict");
+  }, []);
+  const b = useBridge(p, c, handleBridgeConflict);
 
   const [pane, setPane] = useState<PaneKey>("zoom");
   const [comparing, setComparing] = useState(false);
   const [pickingStart, setPickingStart] = useState(false);
-  const [saveState, setSaveState] = useState<SaveState>("clean");
   const fileInput = useRef<HTMLInputElement | null>(null);
 
   const ready = p.status === "ready" && !!p.engine && !!c.derived;
@@ -51,7 +73,7 @@ export function App() {
   }, [p.engine, inspecting, pickingStart]);
   useEffect(() => {
     if (p.isPlaying && sel >= 0) c.selectBeat(-1);
-  }, [p.isPlaying]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [p.isPlaying, sel, c.selectBeat]);
 
   const selectBeat = useCallback(
     (i: number) => {
@@ -75,77 +97,130 @@ export function App() {
     [c, selectBeat],
   );
 
+  // Re-read the take from disk and adopt it wholesale (also re-bases the
+  // conflict guard — detectBridge records the mtime it read).
+  const reloadFromDisk = useCallback(async (): Promise<boolean> => {
+    const take = await detectBridge();
+    if (!take) return false;
+    c.seed(take.composition, take.captureLog);
+    return true;
+  }, [c.seed]);
+
+  const persistDraft = useCallback(
+    async (comp: TakeComposition | null): Promise<OperationResult> => {
+      if (!comp) {
+        setSaveState("error");
+        return "error";
+      }
+      setSaveState("saving");
+      try {
+        await saveComposition(comp);
+        // Mark only the snapshot that actually reached disk as saved. If the
+        // user edited during the request, the newer draft remains dirty.
+        c.commitSaved(comp);
+        setSaveState("saved");
+        return "done";
+      } catch (e) {
+        if (e instanceof ConflictError) {
+          setConflict({ mtime: e.mtime, operation: "save" });
+          setSaveState("conflict");
+          return "conflict";
+        }
+        setSaveState("error");
+        return "error";
+      }
+    },
+    [c.commitSaved],
+  );
+
   // debounced autosave over the bridge (the v4 top bar promises 已自動儲存).
   // Invalid edits show 設定無效 instead of silently freezing the save; failures
-  // retry with a longer backoff (the effect re-runs on saveState changes).
-  const lastSaveAt = useRef(0);
-  const mtimeRef = useRef<number | null>(null);
+  // retry with a longer backoff (the effect re-runs on saveState changes). A
+  // pending conflict parks the loop — retrying would just 409 again, and the
+  // decision is the user's.
   useEffect(() => {
-    if (!b.bridge || !c.dirty || !c.comp) return;
-    if (!c.canSave) {
-      setSaveState("invalid");
+    if (!b.bridge || b.busy || !c.dirty || !c.comp || conflict || saveState === "saving") {
       return;
     }
-    setSaveState("saving");
+    if (!c.canSave) {
+      if (saveState !== "invalid") setSaveState("invalid");
+      return;
+    }
     const comp = c.comp;
     const h = setTimeout(
       () => {
-        saveComposition(comp)
-          .then(async () => {
-            lastSaveAt.current = Date.now();
-            const m = await getCompositionMtime();
-            if (m != null) mtimeRef.current = m; // our own write, absorbed here
-            c.commitSaved(comp);
-            setSaveState("saved");
-          })
-          .catch(() => setSaveState("error"));
+        void persistDraft(comp);
       },
       saveState === "error" ? 3000 : 700,
     );
     return () => clearTimeout(h);
-  }, [b.bridge, c.comp, c.dirty, c.canSave, saveState === "error"]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [b.bridge, b.busy, c.comp, c.dirty, c.canSave, conflict, saveState, persistDraft]);
 
-  // notice AGENT edits on disk. Our own writes are absorbed at save/export
-  // time, so any OTHER mtime move is external. While the guards (dirty /
-  // saving / busy / just-saved) suppress pickup we leave mtimeRef stale — the
-  // change stays pending and is retried once quiet, instead of being silently
-  // swallowed. Known limit (recorded): an agent write landing while the user
-  // is mid-edit can still lose to the next autosave (last-writer-wins).
+  // Notice AGENT edits on disk. Every round-trip re-bases the guard's mtime
+  // (lib/bridge), so a mtime we didn't cause IS an outside write — no
+  // just-saved timing window to get wrong any more. When we're clean we adopt
+  // it silently; when the user has unsaved edits we leave it, because the save
+  // that would have clobbered it now comes back 409 and asks.
   useEffect(() => {
     if (!b.bridge) return;
     const t = setInterval(async () => {
       const m = await getCompositionMtime();
       if (m == null) return;
-      if (mtimeRef.current == null) {
-        mtimeRef.current = m;
+      if (getBaseMtime() === undefined) {
+        setBaseMtime(m);
         return;
       }
-      if (m === mtimeRef.current) return;
-      const suppressed =
-        Date.now() - lastSaveAt.current < 3000 || c.dirty || saveState === "saving" || b.busy;
-      if (suppressed) return; // keep pending — retried next tick
-      mtimeRef.current = m;
-      const r = await fetch("/api/take").catch(() => null);
-      if (!r?.ok) return;
-      const take = (await r.json()) as {
-        composition: Parameters<typeof c.seed>[0];
-        captureLog: Parameters<typeof c.seed>[1];
-      };
-      c.seed(take.composition, take.captureLog);
+      if (m === getBaseMtime()) return;
+      if (c.dirty || saveState === "saving" || b.busy || conflict) return;
+      await reloadFromDisk();
     }, 2000);
     return () => clearInterval(t);
-  }, [b.bridge, c.dirty, saveState, b.busy]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [b.bridge, c.dirty, saveState, b.busy, conflict, reloadFromDisk]);
 
-  // Export persists composition.json server-side — absorb that write so the
-  // poll doesn't mistake our own render for an agent edit (which would wipe
-  // the undo stack on every export).
-  const exportNow = useCallback(async () => {
-    lastSaveAt.current = Date.now();
-    await b.exportNow();
-    lastSaveAt.current = Date.now();
-    const m = await getCompositionMtime();
-    if (m != null) mtimeRef.current = m;
-  }, [b.exportNow]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 保留我的 / 採用對方 — the whole point of the 409: the loser of a
+  // dual-write is a person who gets asked, not an edit that vanishes.
+  const exportCurrent = useCallback(async (): Promise<OperationResult> => {
+    const result = await b.exportNow();
+    if (result === "done") setSaveState("saved");
+    else if (result === "error") setSaveState("export-error");
+    return result;
+  }, [b.exportNow]);
+
+  const resolveConflict = useCallback(
+    async (keep: "mine" | "theirs") => {
+      const current = conflict;
+      if (!current || resolvingConflict) return;
+      setResolvingConflict(true);
+      try {
+        const result = await resolveConflictAction(keep, current, {
+          reload: reloadFromDisk,
+          rebase: setBaseMtime,
+          retrySave: () => persistDraft(c.comp),
+          retryExport: exportCurrent,
+        });
+        if (result === "done") {
+          // A retry can itself discover a newer conflict. Only clear the
+          // original notice, never one installed while the retry was running.
+          setConflict((latest) => (latest === current ? null : latest));
+          setSaveState("saved");
+        } else if (result === "error") {
+          if (!shouldKeepConflict(keep, result)) {
+            // The guarded POST may already have succeeded before rendering or
+            // its SSE stream failed. The old write conflict is resolved; leave
+            // the operation error visible and let Export/autosave retry it.
+            setConflict((latest) => (latest === current ? null : latest));
+            setSaveState(current.operation === "export" ? "export-error" : "error");
+          } else {
+            // Reload failed, so adopting theirs did not happen. Keep asking.
+            setSaveState("conflict");
+          }
+        }
+      } finally {
+        setResolvingConflict(false);
+      }
+    },
+    [conflict, resolvingConflict, reloadFromDisk, persistDraft, c.comp, exportCurrent],
+  );
 
   // hold-to-compare: transient engine push of the last-saved baseline
   const compare = useCallback(
@@ -186,9 +261,13 @@ export function App() {
       ? "儲存中…"
       : saveState === "error"
         ? "儲存失敗，重試中…"
-        : saveState === "invalid"
-          ? "設定無效 — 未儲存"
-          : "已自動儲存";
+        : saveState === "export-error"
+          ? "Export 失敗 — 請重試"
+          : saveState === "invalid"
+            ? "設定無效 — 未儲存"
+            : saveState === "conflict"
+              ? "有衝突 — 未儲存"
+              : "已自動儲存";
 
   return (
     <div className="app">
@@ -199,7 +278,16 @@ export function App() {
             {(c.comp.durationMs / 1000).toFixed(1)}s · {c.comp.output.width}×{c.comp.output.height}{" "}
             ·{" "}
             {b.bridge ? (
-              <span className={saveState === "error" || saveState === "invalid" ? "err" : "ok"}>
+              <span
+                className={
+                  saveState === "error" ||
+                  saveState === "export-error" ||
+                  saveState === "invalid" ||
+                  saveState === "conflict"
+                    ? "err"
+                    : "ok"
+                }
+              >
                 {saveLabel}
               </span>
             ) : (
@@ -239,14 +327,50 @@ export function App() {
         <button
           type="button"
           className="export"
-          disabled={!ready || b.busy || (b.bridge && !c.canSave)}
-          title={b.bridge && !c.canSave ? "先修正無效的設定" : undefined}
-          onClick={b.bridge ? exportNow : b.downloadComposition}
+          disabled={
+            !ready || b.busy || saveState === "saving" || !!conflict || (b.bridge && !c.canSave)
+          }
+          title={
+            conflict
+              ? "請先處理編輯衝突"
+              : saveState === "saving"
+                ? "請等待目前的儲存完成"
+                : b.bridge && !c.canSave
+                  ? "先修正無效的設定"
+                  : undefined
+          }
+          onClick={b.bridge ? () => void exportCurrent() : b.downloadComposition}
         >
           <IcExport />
           {b.ex.phase === "rendering" ? `${pct}%` : b.bridge ? "Export" : "下載 JSON"}
         </button>
       </div>
+
+      {conflict && (
+        <div className="conflict">
+          <span>
+            Agent 在你編輯的同時改了這個 take。要保留哪一邊？
+            {c.dirty && <em>「採用對方」會丟掉你目前未儲存的修改。</em>}
+          </span>
+          <span className="spacer" />
+          <button
+            type="button"
+            className="ghost"
+            disabled={resolvingConflict}
+            onClick={() => void resolveConflict("theirs")}
+          >
+            採用對方
+          </button>
+          <button
+            type="button"
+            className="export"
+            disabled={resolvingConflict}
+            onClick={() => void resolveConflict("mine")}
+          >
+            保留我的
+          </button>
+        </div>
+      )}
 
       <div className="main">
         <Stage

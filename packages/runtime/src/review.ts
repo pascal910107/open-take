@@ -503,7 +503,9 @@ async function ffmpeg(args: string[]): Promise<void> {
   return new Promise((res, rej) => {
     const c = spawn(bin, args, { stdio: ["ignore", "ignore", "pipe"] });
     let err = "";
-    c.stderr.on("data", (d) => (err += d));
+    c.stderr.on("data", (d) => {
+      err += d;
+    });
     c.on("error", rej);
     c.on("close", (code) => (code === 0 ? res() : rej(new Error(`ffmpeg exited ${code}: ${err}`))));
   });
@@ -556,10 +558,24 @@ async function concatWithGaps(
 
 /** Spawn a fire-and-forget opener. spawn ENOENT arrives ASYNCHRONOUSLY on the
  *  child's "error" event (a try/catch around spawn never sees it and the
- *  process would die with an unhandled error) — so degrade via the listener. */
-function spawnOpener(cmd: string, args: string[], fallbackLine: string, useShell = false): void {
+ *  process would die with an unhandled error) — so degrade via the listener.
+ *
+ *  `windowsVerbatimArguments` hands argv to Windows unmodified: cmd.exe and explorer.exe
+ *  re-parse the raw command line by rules node's own quoting doesn't match, so
+ *  the command builders below quote for them (see winQuote). */
+export type OpenerCommand = {
+  command: string;
+  args: string[];
+  windowsVerbatimArguments: boolean;
+};
+
+function spawnOpener(spec: OpenerCommand, fallbackLine: string): void {
   try {
-    const c = spawn(cmd, args, { stdio: "ignore", detached: true, shell: useShell });
+    const c = spawn(spec.command, spec.args, {
+      stdio: "ignore",
+      detached: true,
+      windowsVerbatimArguments: spec.windowsVerbatimArguments,
+    });
     c.on("error", () => process.stdout.write(fallbackLine));
     c.unref();
   } catch {
@@ -567,19 +583,67 @@ function spawnOpener(cmd: string, args: string[], fallbackLine: string, useShell
   }
 }
 
+/** Wrap a path/URL for a verbatim Windows command line. Safe unquoted-inside:
+ *  `"` is illegal in Windows filenames, and cmd stops treating `&` `^` `|` as
+ *  metacharacters once quoted. */
+const winQuote = (s: string) => `"${s}"`;
+
+/** Pure command specs keep platform quoting independently testable on every
+ *  CI runner, including the Windows-only `start` title argument rule. */
+export function getOpenCommand(
+  target: string,
+  platform: NodeJS.Platform = process.platform,
+): OpenerCommand {
+  if (platform === "darwin") {
+    return { command: "open", args: [target], windowsVerbatimArguments: false };
+  }
+  if (platform === "win32") {
+    return {
+      command: "cmd",
+      args: ["/c", "start", '""', winQuote(target)],
+      windowsVerbatimArguments: true,
+    };
+  }
+  return { command: "xdg-open", args: [target], windowsVerbatimArguments: false };
+}
+
+export function getRevealCommand(
+  absolutePath: string,
+  platform: NodeJS.Platform = process.platform,
+): OpenerCommand {
+  if (platform === "darwin") {
+    return { command: "open", args: ["-R", absolutePath], windowsVerbatimArguments: false };
+  }
+  if (platform === "win32") {
+    return {
+      command: "explorer",
+      // explorer takes ONE argument: `/select,` glued to a quoted path.
+      args: [`/select,${winQuote(absolutePath)}`],
+      windowsVerbatimArguments: true,
+    };
+  }
+  return {
+    command: "xdg-open",
+    args: [dirname(absolutePath)],
+    windowsVerbatimArguments: false,
+  };
+}
+
 /** Open a file with the OS default player; degrade to printing the path. */
 export function openPath(p: string): void {
   const abs = resolve(p);
-  const cmd =
-    process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
-  spawnOpener(cmd, [abs], `open: ${abs}\n`, process.platform === "win32");
+  openWithOs(abs, `open: ${abs}\n`);
+}
+
+/** Hand a path or URL to the OS default handler. Windows needs `cmd /c start`
+ *  with an EMPTY first argument: `start` reads a lone quoted argument as the
+ *  window TITLE, so `start "<file>"` opens a blank console instead of the file. */
+export function openWithOs(target: string, fallbackLine: string): void {
+  spawnOpener(getOpenCommand(target), fallbackLine);
 }
 
 /** Reveal a file in Finder/Explorer; degrade to printing the path. */
 export function revealPath(p: string): void {
   const abs = resolve(p);
-  if (process.platform === "darwin") spawnOpener("open", ["-R", abs], `at: ${abs}\n`);
-  else if (process.platform === "win32")
-    spawnOpener("explorer", [`/select,${abs}`], `at: ${abs}\n`, true);
-  else spawnOpener("xdg-open", [dirname(abs)], `at: ${abs}\n`);
+  spawnOpener(getRevealCommand(abs), `at: ${abs}\n`);
 }

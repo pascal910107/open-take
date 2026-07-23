@@ -3,10 +3,10 @@
   "compilerOptions": {
     "noEmit": true,
     "baseUrl": ".",
-    "types": ["vite/client"],
+    "types": ["vite/client", "node"],
     "paths": {
       "@compositor/*": ["../../packages/compositor/src/*"]
     }
   },
-  "include": ["src"]
+  "include": ["src", "test"]
 }

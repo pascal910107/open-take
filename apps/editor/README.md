@@ -36,5 +36,7 @@ State: `hooks/useComposition` (draft + undo/redo + continuous validation),
 `hooks/usePreview` (engine + transport), `hooks/useBridge` (bridge detection +
 export). Edits go through the pure setters in `lib/edit.ts`. The App autosaves
 over the bridge (debounced, validity-gated) and polls `/api/take/mtime` to
-hot-reload agent edits (own writes are absorbed; a change arriving while dirty
-stays pending — last-writer-wins is a known limit, see .notes/HANDOFF.md).
+hot-reload agent edits. Saves and exports carry the last mtime the editor saw;
+the server refuses an overwrite with 409 if the agent changed the file first.
+Clean drafts adopt outside changes automatically, while dirty drafts pause
+autosave and ask the user to **保留我的** or **採用對方**.

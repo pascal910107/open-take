@@ -4,17 +4,22 @@
 // revideo render with live progress — all on 127.0.0.1, no external services.
 //
 // Endpoints (all under /api):
-//   GET  /api/take                 → { composition, captureLog, source, videoUrl, mp4Url }
+//   GET  /api/take                 → { composition, captureLog, source, videoUrl, mp4Url, mtime }
 //   GET  /api/take/video           → the kept capture mp4 (HTTP Range, for <video> seeking)
 //   GET  /api/take/output[?v=tok]  → the latest rendered mp4 (HTTP Range)
-//   POST /api/composition          → validate + persist <base>.composition.json (400 + issues on error)
-//   POST /api/render               → persist + start a render job → { jobId } (409 if one's running)
-//   GET  /api/render/:id/events    → SSE: progress* → done {mp4Url} | error {message}
+//   POST /api/composition          → guarded validate + persist (428 without base, 400 invalid)
+//   POST /api/render               → guarded persist + start → { jobId, mtime } (409 conflict/busy)
+//   GET  /api/render/:id/events    → SSE: progress* → done {mp4Url} | failed {message}
 // Everything else is static from the editor dist (SPA fallback to index.html).
+//
+// Two writers share composition.json: this editor and the agent (the Dailies
+// loop re-writes it between renders). Writes here are optimistically
+// concurrency-controlled — the client echoes back the mtime it last saw and a
+// write over a file that moved since is REFUSED with 409, rather than silently
+// winning. See persistGuarded.
 
-import { spawn } from "node:child_process";
 import { createReadStream, statSync } from "node:fs";
-import { appendFile, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { appendFile, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { type IncomingMessage, type ServerResponse, createServer } from "node:http";
 import { extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,6 +30,7 @@ import {
   validateComposition,
 } from "@open-take/compositor";
 import { renderComposition } from "./index";
+import { openWithOs } from "./review";
 
 export type EditServerOpts = {
   /** path to the take: its .mp4 / .composition.json / a dir containing them. */
@@ -48,6 +54,13 @@ type RenderJob = {
   clients: Set<ServerResponse>;
 };
 
+type EditServerDeps = {
+  /** Test seam for the long-running renderer. Production uses the real one. */
+  renderComposition?: typeof renderComposition;
+  /** Test seam immediately after the temp composition is written. */
+  beforeCompositionCommit?: () => Promise<void>;
+};
+
 const CONTENT_TYPE: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -63,14 +76,19 @@ const CONTENT_TYPE: Record<string, string> = {
   ".map": "application/json; charset=utf-8",
 };
 
-/** Locate the built editor SPA: a bundled copy (published package) first, then
- *  the monorepo build. */
+/** Locate the built editor SPA: prefer the live monorepo build during
+ *  development, then fall back to the bundled copy used by the published
+ *  package. */
 function resolveEditorDist(): string | null {
   const here = fileURLToPath(import.meta.url);
   const pkgRoot = resolve(here, "..", ".."); // dist/edit-server.js → packages/runtime
+  // In the monorepo the live editor build wins: editor-dist/ is a prepack COPY
+  // and goes stale the moment you rebuild the editor, which silently serves old
+  // JS to anyone testing a change. Published, that path doesn't exist (it would
+  // resolve under node_modules/apps/editor/…), so the copy is the only candidate.
   const candidates = [
-    resolve(pkgRoot, "editor-dist"),
     resolve(pkgRoot, "..", "..", "apps", "editor", "dist"),
+    resolve(pkgRoot, "editor-dist"),
   ];
   return candidates.find((c) => existsHtml(c)) ?? null;
 }
@@ -140,22 +158,16 @@ async function serveFile(req: IncomingMessage, res: ServerResponse, filePath: st
   }
 }
 
+/** Open the editor in the default browser. Shares the OS-opener with review.ts
+ *  — a private copy here is how the Windows `start`-eats-the-first-quoted-arg
+ *  bug survived in one place after being noticed in the other. */
 function openBrowser(url: string) {
-  const cmd =
-    process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
-  try {
-    spawn(cmd, [url], {
-      stdio: "ignore",
-      detached: true,
-      shell: process.platform === "win32",
-    }).unref();
-  } catch {
-    /* noop */
-  }
+  openWithOs(url, `open: ${url}\n`);
 }
 
 export async function startEditServer(
   opts: EditServerOpts,
+  deps: EditServerDeps = {},
 ): Promise<{ url: string; close: () => Promise<void> }> {
   const take = await resolveTakePaths(opts.takePath);
   // the two essentials must exist; the capture log is optional (skips the lock).
@@ -176,12 +188,92 @@ export async function startEditServer(
 
   let job: RenderJob | null = null;
   let jobSeq = 0;
+  // Set synchronously before the render endpoint's first await. Without this,
+  // two simultaneous POSTs can both observe `job === null`, persist, and
+  // replace each other's job before either request reaches the assignment.
+  let renderStarting = false;
 
-  /** Atomic write (tmp + rename) — agents read this file concurrently. */
-  const persistComposition = async (comp: TakeComposition): Promise<void> => {
-    const tmp = `${take.compositionPath}.tmp`;
-    await writeFile(tmp, JSON.stringify(comp, null, 2));
-    await rename(tmp, take.compositionPath);
+  const compositionMtime = async (): Promise<number> =>
+    (await stat(take.compositionPath).catch(() => null))?.mtimeMs ?? 0;
+
+  // Every write runs alone: check-then-write is only meaningful if nothing
+  // interleaves between the two, and this server can have an autosave and an
+  // export in flight at once.
+  let writeLock: Promise<unknown> = Promise.resolve();
+  const exclusive = <T>(fn: () => Promise<T>): Promise<T> => {
+    const run = writeLock.then(fn, fn);
+    writeLock = run.catch(() => {});
+    return run;
+  };
+
+  /** Persist unless someone else wrote first. `baseMtime` is the mtime the
+   *  client last read. Every API write must provide it; 保留我的 re-bases to
+   *  the 409's mtime and remains guarded against an even newer write.
+   *
+   *  We check once before writing the temp file and again immediately before
+   *  rename, so an agent write during serialization/I/O is refused too. No
+   *  portable filesystem API provides compare-and-swap by mtime: a different
+   *  process writing in the final stat→rename window can still be overwritten
+   *  unless every writer honors the same lock. */
+  const persistGuarded = async (
+    comp: TakeComposition,
+    baseMtime: number | undefined,
+  ): Promise<{ ok: true; mtime: number } | { ok: false; mtime: number }> =>
+    exclusive(async () => {
+      const onDisk = await compositionMtime();
+      if (baseMtime !== undefined && onDisk !== baseMtime) return { ok: false, mtime: onDisk };
+      const tmp = `${take.compositionPath}.tmp`;
+      let committed = false;
+      try {
+        await writeFile(tmp, JSON.stringify(comp, null, 2));
+        await deps.beforeCompositionCommit?.();
+        if (baseMtime !== undefined) {
+          const beforeRename = await compositionMtime();
+          if (beforeRename !== onDisk) return { ok: false, mtime: beforeRename };
+        }
+        await rename(tmp, take.compositionPath);
+        committed = true;
+        return { ok: true, mtime: await compositionMtime() };
+      } finally {
+        if (!committed) await unlink(tmp).catch(() => {});
+      }
+    });
+
+  type WritePayload = { composition: TakeComposition; baseMtime: number };
+
+  /** The write guard is mandatory. A missing base used to mean "force write",
+   *  which made a bare JSON body an invisible escape hatch around conflict
+   *  protection. Callers must first GET /api/take and echo its mtime. */
+  const readWrite = async (
+    req: IncomingMessage,
+    res: ServerResponse,
+  ): Promise<WritePayload | null> => {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(await readBody(req));
+    } catch {
+      sendJson(res, 400, { error: "invalid JSON request body" });
+      return null;
+    }
+    const candidate =
+      parsed && typeof parsed === "object"
+        ? (parsed as { composition?: unknown; baseMtime?: unknown })
+        : null;
+    if (
+      !candidate?.composition ||
+      typeof candidate.baseMtime !== "number" ||
+      !Number.isFinite(candidate.baseMtime)
+    ) {
+      sendJson(res, 428, {
+        error:
+          "write precondition required: send { composition, baseMtime } using the mtime from GET /api/take",
+      });
+      return null;
+    }
+    return {
+      composition: candidate.composition as TakeComposition,
+      baseMtime: candidate.baseMtime,
+    };
   };
 
   const server = createServer(async (req, res) => {
@@ -206,6 +298,11 @@ export async function startEditServer(
 
       // ---- API ----
       if (path === "/api/take" && method === "GET") {
+        // read the mtime BEFORE the contents: if a write lands in between, the
+        // client's base is older than what it holds and its next save 409s —
+        // the safe direction. (Reading it after could hand out a base newer
+        // than the composition we returned, which would silently clobber.)
+        const mtime = await compositionMtime();
         const composition = JSON.parse(
           await readFile(take.compositionPath, "utf8"),
         ) as TakeComposition;
@@ -216,6 +313,7 @@ export async function startEditServer(
           source: { name: take.name },
           videoUrl: "/api/take/video",
           mp4Url: "/api/take/output",
+          mtime,
         });
         return;
       }
@@ -224,8 +322,7 @@ export async function startEditServer(
         return;
       }
       if (path === "/api/take/mtime" && method === "GET") {
-        const st = await stat(take.compositionPath).catch(() => null);
-        sendJson(res, 200, { mtime: st ? st.mtimeMs : 0 });
+        sendJson(res, 200, { mtime: await compositionMtime() });
         return;
       }
       if (path === "/api/notes" && method === "POST") {
@@ -248,7 +345,9 @@ export async function startEditServer(
       }
 
       if (path === "/api/composition" && method === "POST") {
-        const comp = JSON.parse(await readBody(req)) as TakeComposition;
+        const payload = await readWrite(req, res);
+        if (!payload) return;
+        const { composition: comp, baseMtime } = payload;
         const captureLog = await loadCaptureLog();
         const issues = validateComposition(comp, captureLog ? { captureLog } : {});
         const errors = issues.filter((i) => i.severity === "error");
@@ -256,30 +355,50 @@ export async function startEditServer(
           sendJson(res, 400, { issues });
           return;
         }
-        await persistComposition(comp);
-        sendJson(res, 200, { ok: true, issues });
+        const saved = await persistGuarded(comp, baseMtime);
+        if (!saved.ok) {
+          sendJson(res, 409, { conflict: true, mtime: saved.mtime });
+          return;
+        }
+        sendJson(res, 200, { ok: true, issues, mtime: saved.mtime });
         return;
       }
 
       if (path === "/api/render" && method === "POST") {
-        if (job?.status === "running") {
+        if (renderStarting || job?.status === "running") {
           sendJson(res, 409, { error: "a render is already in progress" });
           return;
         }
-        const comp = JSON.parse(await readBody(req)) as TakeComposition;
-        const captureLog = (await loadCaptureLog()) ?? undefined;
-        const issues = validateComposition(comp, captureLog ? { captureLog } : {});
-        const errors = issues.filter((i: CompositionIssue) => i.severity === "error");
-        if (errors.length) {
-          sendJson(res, 400, { issues });
-          return;
+        renderStarting = true;
+        try {
+          const payload = await readWrite(req, res);
+          if (!payload) return;
+          const { composition: comp, baseMtime } = payload;
+          const captureLog = (await loadCaptureLog()) ?? undefined;
+          const issues = validateComposition(comp, captureLog ? { captureLog } : {});
+          const errors = issues.filter((i: CompositionIssue) => i.severity === "error");
+          if (errors.length) {
+            sendJson(res, 400, { issues });
+            return;
+          }
+          const saved = await persistGuarded(comp, baseMtime);
+          if (!saved.ok) {
+            // Same status as "render already running" above — the `conflict`
+            // flag is what tells the two apart on the client.
+            sendJson(res, 409, { conflict: true, mtime: saved.mtime });
+            return;
+          }
+          const id = `${Date.now().toString(36)}-${++jobSeq}`;
+          job = { id, progress: 0, status: "running", clients: new Set() };
+          // Re-base immediately: the guarded write already happened. Waiting
+          // for SSE `done` leaves the client stale when rendering fails or
+          // disconnects.
+          sendJson(res, 200, { jobId: id, mtime: saved.mtime });
+          // Run the render in the background; stream progress to SSE clients.
+          void runRender(job, comp, captureLog);
+        } finally {
+          renderStarting = false;
         }
-        await persistComposition(comp);
-        const id = `${Date.now().toString(36)}-${++jobSeq}`;
-        job = { id, progress: 0, status: "running", clients: new Set() };
-        sendJson(res, 200, { jobId: id });
-        // run the render in the background; stream progress to SSE clients.
-        void runRender(job, comp, captureLog);
         return;
       }
 
@@ -341,12 +460,16 @@ export async function startEditServer(
     captureLog: CaptureLog | undefined,
   ) {
     try {
-      await renderComposition({
+      await (deps.renderComposition ?? renderComposition)({
         composition: comp,
         capturePath: take.capturePath,
         outPath: take.mp4Path,
         captureLog,
         chromePath: opts.chromePath,
+        // POST /api/render already persisted `comp` under persistGuarded. A
+        // second write after a long render would overwrite any agent edit that
+        // landed while rendering.
+        writeCompositionSibling: false,
         onProgress: (p) => {
           j.progress = p;
           for (const c of j.clients) emit(c, "progress", { progress: p });
@@ -388,7 +511,9 @@ function emit(res: ServerResponse, event: string, data: unknown) {
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 }
 
-/** Bind to 127.0.0.1 only; if the port is taken, try the next few. */
+/** Bind to 127.0.0.1 only; if the port is taken, try the next few. Resolves the
+ *  port actually BOUND, which differs from the requested one when port 0 asks
+ *  the OS to choose (how the tests get an isolated server). */
 function listen(server: ReturnType<typeof createServer>, startPort: number): Promise<number> {
   return new Promise((res, rej) => {
     let port = startPort;
@@ -399,7 +524,10 @@ function listen(server: ReturnType<typeof createServer>, startPort: number): Pro
           tryOne();
         } else rej(e);
       });
-      server.listen(port, "127.0.0.1", () => res(port));
+      server.listen(port, "127.0.0.1", () => {
+        const addr = server.address();
+        res(addr && typeof addr === "object" ? addr.port : port);
+      });
     };
     tryOne();
   });

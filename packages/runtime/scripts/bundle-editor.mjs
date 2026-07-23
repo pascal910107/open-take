@@ -1,6 +1,7 @@
 // prepack: bundle the built editor SPA into the runtime tarball so the
-// published `open-take edit` can serve it (resolveEditorDist checks
-// packages/runtime/editor-dist FIRST, before the monorepo path).
+// published `open-take edit` can serve it. In development resolveEditorDist
+// prefers the live monorepo build; in the published package this bundled copy
+// is the available candidate.
 import { cpSync, existsSync, rmSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";

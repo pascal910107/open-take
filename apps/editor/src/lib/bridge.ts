@@ -12,6 +12,8 @@ export type BridgeTake = {
   source: { name: string };
   videoUrl: string;
   mp4Url: string;
+  /** composition.json's mtime when the server read it — see baseMtime below. */
+  mtime?: number;
 };
 
 export class BridgeError extends Error {
@@ -23,12 +25,37 @@ export class BridgeError extends Error {
   }
 }
 
+/** The agent writes composition.json too. Thrown when our write would have
+ *  landed on top of one we never saw — the caller must ask the user. */
+export class ConflictError extends Error {
+  /** the file's mtime as of the refusal: the base to re-send with when the
+   *  user chooses 保留我的. */
+  mtime: number;
+  constructor(mtime: number) {
+    super("composition.json changed on disk");
+    this.name = "ConflictError";
+    this.mtime = mtime;
+  }
+}
+
+// The mtime composition.json had when we last read or wrote it, i.e. the
+// version this editor's state descends from. Every server round-trip that
+// touches the file re-bases it, so a DIFFERENT mtime showing up means someone
+// else wrote — that's both the poll's signal and the write guard's base.
+let baseMtime: number | undefined;
+export const getBaseMtime = (): number | undefined => baseMtime;
+export const setBaseMtime = (m: number | undefined): void => {
+  baseMtime = m;
+};
+
 /** Probe the bridge. Returns the take payload, or null when not behind it. */
 export async function detectBridge(): Promise<BridgeTake | null> {
   try {
     const r = await fetch("/api/take");
     if (!r.ok) return null;
-    return (await r.json()) as BridgeTake;
+    const take = (await r.json()) as BridgeTake;
+    setBaseMtime(take.mtime);
+    return take;
   } catch {
     return null;
   }
@@ -56,15 +83,29 @@ export async function getCompositionMtime(): Promise<number | null> {
   }
 }
 
-/** Persist composition.json without rendering. Throws BridgeError(issues) on 400. */
-export async function saveComposition(comp: TakeComposition): Promise<void> {
-  const r = await fetch("/api/composition", {
+/** POST a composition with our concurrency base attached. Rejects with
+ *  ConflictError when the server refuses to overwrite an unseen edit. */
+async function postComposition(
+  path: string,
+  comp: TakeComposition,
+  fallbackMessage: string,
+): Promise<Record<string, unknown>> {
+  const r = await fetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(comp),
+    body: JSON.stringify({ composition: comp, baseMtime: getBaseMtime() }),
   });
-  const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new BridgeError(data.error ?? "save rejected", data.issues);
+  const data = (await r.json().catch(() => ({}))) as Record<string, unknown>;
+  if (r.status === 409 && data.conflict) throw new ConflictError(data.mtime as number);
+  if (!r.ok) throw new BridgeError((data.error as string) ?? fallbackMessage, data.issues as never);
+  if (typeof data.mtime === "number") setBaseMtime(data.mtime);
+  return data;
+}
+
+/** Persist composition.json without rendering. Throws BridgeError(issues) on
+ *  400, ConflictError on 409. */
+export async function saveComposition(comp: TakeComposition): Promise<void> {
+  await postComposition("/api/composition", comp, "save rejected");
 }
 
 /** Kick off a render and resolve when the mp4 is written, streaming progress. */
@@ -72,13 +113,7 @@ export async function renderViaBridge(
   comp: TakeComposition,
   onProgress: (p: number) => void,
 ): Promise<{ mp4Url: string }> {
-  const r = await fetch("/api/render", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(comp),
-  });
-  const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new BridgeError(data.error ?? "render rejected", data.issues);
+  const data = await postComposition("/api/render", comp, "render rejected");
   const jobId = data.jobId as string;
 
   return new Promise((resolve, reject) => {
@@ -90,7 +125,11 @@ export async function renderViaBridge(
     es.addEventListener("done", (e) => {
       settled = true;
       es.close();
-      resolve({ mp4Url: JSON.parse((e as MessageEvent).data).mp4Url as string });
+      // POST /api/render already returned the mtime of its guarded write. The
+      // renderer never rewrites composition.json, so `done` must not re-base:
+      // an agent may legitimately have changed the file during the render.
+      const done = JSON.parse((e as MessageEvent).data) as { mp4Url: string };
+      resolve({ mp4Url: done.mp4Url });
     });
     es.addEventListener("failed", (e) => {
       settled = true;

@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { BridgeError, detectBridge, renderViaBridge, saveComposition } from "../lib/bridge";
+import {
+  BridgeError,
+  ConflictError,
+  detectBridge,
+  renderViaBridge,
+  saveComposition,
+} from "../lib/bridge";
+import type { ConflictNotice, ConflictOperation, OperationResult } from "../lib/conflict";
 import type { UseComposition } from "./useComposition";
 import type { UsePreview } from "./usePreview";
 
@@ -16,7 +23,15 @@ const errMsg = (e: unknown): string => {
 
 // Connects the editor to the local edit-server: auto-loads the take when served
 // behind the bridge, and exposes Save / Export (real render) / Download.
-export function useBridge(p: UsePreview, c: UseComposition) {
+//
+// `onConflict` fires when the server refuses a write because the agent changed
+// composition.json underneath us. Pass a stable setter — the App owns the
+// resolution UI, since both this hook and the autosave loop can hit it.
+export function useBridge(
+  p: UsePreview,
+  c: UseComposition,
+  onConflict?: (conflict: ConflictNotice) => void,
+) {
   const [bridge, setBridge] = useState(false);
   const [ex, setEx] = useState<ExportState>({ phase: "idle", progress: 0 });
 
@@ -37,31 +52,54 @@ export function useBridge(p: UsePreview, c: UseComposition) {
     return () => {
       cancelled = true;
     };
-  }, [p.engine]); // the engine is created exactly once
+  }, [p.engine, p.load]); // the engine is created exactly once
 
-  const save = useCallback(async () => {
-    if (!c.comp) return;
+  // A conflict isn't a failure of the export — nothing was written and the
+  // user is about to be asked what to do — so drop back to idle rather than
+  // parking a red error under the button.
+  const handled = useCallback(
+    (e: unknown, operation: ConflictOperation): boolean => {
+      if (!(e instanceof ConflictError)) return false;
+      onConflict?.({ mtime: e.mtime, operation });
+      setEx({ phase: "idle", progress: 0 });
+      return true;
+    },
+    [onConflict],
+  );
+
+  const save = useCallback(async (): Promise<OperationResult> => {
+    const comp = c.comp;
+    if (!comp) return "error";
     setEx({ phase: "saving", progress: 0 });
     try {
-      await saveComposition(c.comp);
-      c.commitSaved();
+      await saveComposition(comp);
+      c.commitSaved(comp);
       setEx({ phase: "done", progress: 1, message: "Saved" });
+      return "done";
     } catch (e) {
+      if (handled(e, "save")) return "conflict";
       setEx({ phase: "error", progress: 0, message: errMsg(e) });
+      return "error";
     }
-  }, [c]);
+  }, [c, handled]);
 
-  const exportNow = useCallback(async () => {
-    if (!c.comp) return;
+  const exportNow = useCallback(async (): Promise<OperationResult> => {
+    const comp = c.comp;
+    if (!comp) return "error";
     setEx({ phase: "rendering", progress: 0 });
     try {
-      await renderViaBridge(c.comp, (pr) => setEx({ phase: "rendering", progress: pr }));
-      c.commitSaved();
+      await renderViaBridge(comp, (pr) => setEx({ phase: "rendering", progress: pr }));
+      // Commit exactly what was sent. Edits made while rendering stay dirty and
+      // are autosaved after `busy` drops instead of being mislabeled as saved.
+      c.commitSaved(comp);
       setEx({ phase: "done", progress: 1, message: "Exported" });
+      return "done";
     } catch (e) {
+      if (handled(e, "export")) return "conflict";
       setEx({ phase: "error", progress: 0, message: errMsg(e) });
+      return "error";
     }
-  }, [c]);
+  }, [c, handled]);
 
   const downloadComposition = useCallback(() => {
     if (!c.comp) return;
