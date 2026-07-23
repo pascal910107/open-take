@@ -6,6 +6,7 @@
 // with an install hint only when neither exists.
 
 import { spawnSync } from "node:child_process";
+import { chmod, stat } from "node:fs/promises";
 
 let cachedFfmpeg: string | undefined;
 let cachedFfprobe: string | undefined;
@@ -27,6 +28,30 @@ async function installerPath(pkg: string): Promise<string | null> {
   }
 }
 
+/** Some pnpm installs leave the platform packages' media binaries without an
+ *  executable bit. Repair the resolved target at the point of use as well as
+ *  in the repo postinstall: published consumers do not run this monorepo's
+ *  root lifecycle script. Windows does not use POSIX execute bits. */
+async function ensureExecutable(path: string | null): Promise<void> {
+  if (!path || process.platform === "win32") return;
+  try {
+    const info = await stat(path);
+    if ((info.mode & 0o111) === 0) await chmod(path, info.mode | 0o111);
+  } catch {
+    // Best effort. The normal spawn below still returns the useful failure.
+  }
+}
+
+/** Revideo resolves its own bundled ffprobe rather than calling
+ *  resolveFfprobe(), so repair both installer targets before invoking it. */
+export async function repairBundledMediaPermissions(): Promise<void> {
+  const paths = await Promise.all([
+    installerPath("@ffmpeg-installer/ffmpeg"),
+    installerPath("@ffprobe-installer/ffprobe"),
+  ]);
+  await Promise.all(paths.map(ensureExecutable));
+}
+
 export async function resolveFfmpeg(): Promise<string> {
   if (cachedFfmpeg) return cachedFfmpeg;
   if (runsOk("ffmpeg")) {
@@ -34,6 +59,7 @@ export async function resolveFfmpeg(): Promise<string> {
     return cachedFfmpeg;
   }
   const p = await installerPath("@ffmpeg-installer/ffmpeg");
+  await ensureExecutable(p);
   if (p && runsOk(p)) {
     cachedFfmpeg = p;
     return p;
@@ -50,6 +76,7 @@ export async function resolveFfprobe(): Promise<string> {
     return cachedFfprobe;
   }
   const p = await installerPath("@ffprobe-installer/ffprobe");
+  await ensureExecutable(p);
   if (p && runsOk(p)) {
     cachedFfprobe = p;
     return p;

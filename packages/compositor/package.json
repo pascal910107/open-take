@@ -9,16 +9,13 @@
   "exports": {
     ".": "./dist/index.js"
   },
-  "files": [
-    "dist",
-    "src/**/*.ts",
-    "src/**/*.tsx"
-  ],
+  "files": ["dist", "src/**/*.ts", "src/**/*.tsx", "src/scene/tsconfig.json"],
   "scripts": {
     "build": "tsdown",
     "typecheck": "tsc --noEmit",
     "test": "node --test --import tsx/esm test/*.test.ts",
-    "clean": "rm -rf dist out-render public/capture.mp4 src/scene/.composition.json"
+    "test:render-smoke": "node --test --import tsx/esm e2e/render-smoke.test.ts",
+    "clean": "rm -rf dist"
   },
   "dependencies": {
     "@revideo/2d": "0.11.0",
@@ -41,14 +38,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "keywords": [
-    "demo",
-    "screen-recording",
-    "video",
-    "agent",
-    "cdp",
-    "screencast"
-  ],
+  "keywords": ["demo", "screen-recording", "video", "agent", "cdp", "screencast"],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/pascal910107/open-take.git",

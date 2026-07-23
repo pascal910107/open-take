@@ -3,25 +3,42 @@
 //
 // Runs revideo headless (vite + chromium + ffmpeg). The renderer resolves
 // everything relative to process.cwd(), and injects `projectFile` verbatim
-// as an import specifier — so we chdir to the package root and use the
-// vite-root-absolute "/src/scene/project.ts" (a bare specifier hangs the
-// renderer forever; see spike-revideo/VERDICT.md).
+// as an import specifier — so the render runs from a directory laid out like
+// the package (src/ + public/) with the vite-root-absolute
+// "/src/scene/project.ts" (a bare specifier hangs the renderer forever; see
+// spike-revideo/VERDICT.md).
+//
+// That directory is a per-render SCRATCH COPY in the tmp dir, never the
+// installed package: a render used to write capture.mp4, .composition.json and
+// out-render/ into node_modules, which breaks read-only installs outright and
+// lets two renders read each other's composition. See prepareScratch.
 
 import { spawn } from "node:child_process";
-import { copyFile, mkdir, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { existsSync, realpathSync } from "node:fs";
+import {
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  symlink,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
+import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { renderVideo } from "@revideo/renderer";
-import { resolveFfmpeg } from "./ffmpeg";
+import { repairBundledMediaPermissions, resolveFfmpeg } from "./ffmpeg";
 import { type PlanOpts, planComposition } from "./plan";
 import { type CaptureLog, type TakeComposition, motionBlurActive } from "./types";
 import { type CompositionIssue, formatIssues, validateComposition } from "./validate";
 
 // dist/index.js -> package root
 const PKG_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const PUBLIC_MP4 = resolve(PKG_ROOT, "public/capture.mp4");
-const COMP_JSON = resolve(PKG_ROOT, "src/scene/.composition.json");
-const RENDER_OUT = "out-render"; // relative to cwd (= PKG_ROOT at render time)
+const RENDER_OUT = "out-render"; // relative to cwd (= the scratch dir at render time)
 
 export type RenderTakeOpts = {
   /** input capture video (webm or mp4) */
@@ -66,7 +83,9 @@ function run(cmd: string, args: string[]): Promise<void> {
   return new Promise((res, rej) => {
     const c = spawn(cmd, args, { stdio: ["ignore", "ignore", "pipe"] });
     let err = "";
-    c.stderr.on("data", (d) => (err += d));
+    c.stderr.on("data", (d) => {
+      err += d;
+    });
     c.on("error", rej);
     c.on("close", (code) => (code === 0 ? res() : rej(new Error(`${cmd} exited ${code}: ${err}`))));
   });
@@ -134,7 +153,106 @@ async function motionBlurMp4(
   ]);
 }
 
+// --- per-render scratch dir --------------------------------------------------
+
+/** The nearest node_modules above the installed package. Symlinked into the
+ *  scratch dir so the copied scene can still resolve `@revideo/*` — pnpm keeps
+ *  a node_modules beside the package, npm/yarn hoist it to the project root, so
+ *  walk up rather than assume either. */
+function hostNodeModules(): string | null {
+  let dir = PKG_ROOT;
+  for (;;) {
+    const candidate = join(dir, "node_modules");
+    if (existsSync(candidate)) return candidate;
+    const up = dirname(dir);
+    if (up === dir) return null;
+    dir = up;
+  }
+}
+
+/** The whole dependency tree in one directory, for vite's fs.allow. Vite serves
+ *  realpaths, and pnpm's are under `<root>/node_modules/.pnpm/…`, so the first
+ *  `node_modules` segment of a resolved dependency covers every layout. */
+function depsRoot(): string | null {
+  try {
+    const real = realpathSync(createRequire(import.meta.url).resolve("@revideo/core"));
+    const parts = real.split(sep);
+    const i = parts.indexOf("node_modules");
+    return i === -1 ? null : parts.slice(0, i + 1).join(sep);
+  } catch {
+    return null;
+  }
+}
+
+/** Copy a tree WITHOUT inheriting its permission bits. `fs.cp` preserves mode,
+ *  so copying out of a read-only install yields a read-only copy we then can't
+ *  write the composition into. Re-creating each file gives us the umask
+ *  default instead. The scene tree is a handful of small source files. */
+async function copyWritable(from: string, to: string): Promise<void> {
+  await mkdir(to, { recursive: true });
+  for (const e of await readdir(from, { withFileTypes: true })) {
+    const src = join(from, e.name);
+    const dst = join(to, e.name);
+    if (e.isDirectory()) await copyWritable(src, dst);
+    else if (e.isFile()) await writeFile(dst, await readFile(src));
+  }
+}
+
+async function cleanupScratch(dir: string): Promise<void> {
+  // Drop the node_modules LINK first and by name: recursive deletion around a
+  // link to the real dependency tree deserves an explicit safety boundary.
+  await unlink(join(dir, "node_modules")).catch(() => {});
+  if (!process.env.OPEN_TAKE_KEEP_SCRATCH) {
+    await rm(dir, { recursive: true, force: true });
+  } else {
+    process.stderr.write(`render scratch kept: ${dir}\n`);
+  }
+}
+
+/** Build the throwaway directory this render runs in: the package's `src/`
+ *  (the scene and everything it imports), this render's composition, the
+ *  normalised capture as vite's public asset, and a node_modules link. */
+async function prepareScratch(composition: TakeComposition, videoPath: string): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), "open-take-render-"));
+  try {
+    await copyWritable(join(PKG_ROOT, "src"), join(dir, "src"));
+    await writeFile(
+      join(dir, "src", "scene", ".composition.json"),
+      JSON.stringify(composition, null, 2),
+    );
+    const nm = hostNodeModules();
+    if (!nm) throw new Error("render: could not locate node_modules for the scene's imports");
+    // "junction" is the Windows directory link that doesn't need admin rights;
+    // ignored on POSIX.
+    await symlink(nm, join(dir, "node_modules"), "junction");
+    // fps follows the composition: the render grid must match the source, or a
+    // hi-fps capture is decimated before the scene ever sees it.
+    await toMp4(videoPath, join(dir, "public", "capture.mp4"), composition.output.fps);
+    return dir;
+  } catch (error) {
+    await cleanupScratch(dir);
+    throw error;
+  }
+}
+
+// process.chdir is process-global, so two renders in one process cannot run
+// concurrently no matter how isolated their directories are — the scratch dirs
+// remove the shared STATE, this removes the interleaving. (True parallelism
+// needs the renderer off cwd, or one child process per render.)
+let renderQueue: Promise<unknown> = Promise.resolve();
+
 export async function renderTake(
+  opts: RenderTakeOpts,
+): Promise<{ mp4Path: string; compositionPath: string }> {
+  const run = renderQueue.then(
+    () => renderTakeExclusive(opts),
+    () => renderTakeExclusive(opts),
+  );
+  renderQueue = run.catch(() => {});
+  return run;
+}
+
+async function renderTakeExclusive(
   opts: RenderTakeOpts,
 ): Promise<{ mp4Path: string; compositionPath: string }> {
   const composition: TakeComposition =
@@ -164,74 +282,87 @@ export async function renderTake(
       );
   }
 
-  // 1. serve the capture as /capture.mp4 (vite public dir under PKG_ROOT)
-  await toMp4(opts.videoPath, PUBLIC_MP4, composition.output.fps);
+  // Revideo spawns its bundled ffprobe directly. Repair installer permissions
+  // here so published consumers are protected even though they do not run the
+  // monorepo root's postinstall script.
+  await repairBundledMediaPermissions();
 
-  // 2. hand the composition to the scene (static import, rewritten per render)
-  await mkdir(dirname(COMP_JSON), { recursive: true });
-  await writeFile(COMP_JSON, JSON.stringify(composition, null, 2));
-
-  // 3. render headless, with cwd pinned to the package root.
-  // revideo's @revideo/telemetry phones home to PostHog by default; this is an
-  // all-local tool, so default it OFF (an explicit user-set value still wins).
-  if (process.env.DISABLE_TELEMETRY === undefined) process.env.DISABLE_TELEMETRY = "true";
-  const prevCwd = process.cwd();
-  process.chdir(PKG_ROOT);
-  let produced: string;
+  // 1. lay out this render's own directory (scene + composition + capture)
+  const scratch = await prepareScratch(composition, opts.videoPath);
+  const deps = depsRoot();
   try {
-    produced = await renderVideo({
-      projectFile: "/src/scene/project.ts",
-      settings: {
-        outFile: "take.mp4",
-        outDir: RENDER_OUT,
-        workers: 1,
-        ...(opts.rangeSec ? { projectSettings: { range: opts.rangeSec } } : {}),
-        logProgress: opts.logProgress ?? false,
-        ...(opts.onProgress
-          ? { progressCallback: (_worker: number, progress: number) => opts.onProgress!(progress) }
-          : {}),
-        // Reuse the capture-managed Chrome-for-Testing when given (one browser
-        // for both stages); else let revideo's puppeteer resolve its own.
-        puppeteer: {
-          // --password-store/--use-mock-keychain: never touch the OS keychain, so
-          // macOS doesn't pop a "Chrome wants to use Chromium Safe Storage" prompt
-          // mid-render (matches the capture launch in runtime/cdp.ts).
-          args: [
-            "--no-sandbox",
-            "--disable-setuid-sandbox",
-            "--password-store=basic",
-            "--use-mock-keychain",
-          ],
-          ...(opts.chromePath ? { executablePath: opts.chromePath } : {}),
+    // 2. render headless, with cwd pinned to the scratch dir.
+    // revideo's @revideo/telemetry phones home to PostHog by default; this is an
+    // all-local tool, so default it OFF (an explicit user-set value still wins).
+    if (process.env.DISABLE_TELEMETRY === undefined) process.env.DISABLE_TELEMETRY = "true";
+    const prevCwd = process.cwd();
+    process.chdir(scratch);
+    let produced: string;
+    try {
+      produced = await renderVideo({
+        projectFile: "/src/scene/project.ts",
+        settings: {
+          outFile: "take.mp4",
+          outDir: RENDER_OUT,
+          workers: 1,
+          ...(opts.rangeSec ? { projectSettings: { range: opts.rangeSec } } : {}),
+          logProgress: opts.logProgress ?? false,
+          ...(opts.onProgress
+            ? {
+                progressCallback: (_worker: number, progress: number) => opts.onProgress!(progress),
+              }
+            : {}),
+          // vite's dev server refuses to serve outside its root, and its root is
+          // now a tmp dir — so allow the dependency tree the scene imports
+          // through the node_modules link (vite resolves it to the realpath).
+          viteConfig: {
+            server: { fs: { allow: [scratch, ...(deps ? [deps] : [])] } },
+          },
+          // Reuse the capture-managed Chrome-for-Testing when given (one browser
+          // for both stages); else let revideo's puppeteer resolve its own.
+          puppeteer: {
+            // --password-store/--use-mock-keychain: never touch the OS keychain, so
+            // macOS doesn't pop a "Chrome wants to use Chromium Safe Storage" prompt
+            // mid-render (matches the capture launch in runtime/cdp.ts).
+            args: [
+              "--no-sandbox",
+              "--disable-setuid-sandbox",
+              "--password-store=basic",
+              "--use-mock-keychain",
+            ],
+            ...(opts.chromePath ? { executablePath: opts.chromePath } : {}),
+          },
         },
-      },
-    });
+      });
+    } finally {
+      process.chdir(prevCwd);
+    }
+
+    // 3. deliver mp4 (motion-blur down from fps·samples if configured) + the
+    //    editable composition. OFF ⇒ a plain copy (byte-identical to before).
+    await mkdir(dirname(resolve(opts.outPath)), { recursive: true });
+    const producedAbs = resolve(scratch, produced);
+    if (motionBlurActive(composition.motionBlur)) {
+      await motionBlurMp4(
+        producedAbs,
+        resolve(opts.outPath),
+        composition.output.fps,
+        composition.motionBlur.samples,
+        composition.motionBlur.shutter,
+      );
+    } else {
+      await copyFile(producedAbs, resolve(opts.outPath));
+    }
+    const compositionPath = resolve(opts.outPath).replace(/\.mp4$/i, "") + ".composition.json";
+    if (opts.writeCompositionSibling !== false) {
+      // strip the render-time review decoration — the editable artifact is the
+      // clean composition, never the badged/watermarked variant of it.
+      const { review: _review, ...persisted } = composition;
+      await writeFile(compositionPath, JSON.stringify(persisted, null, 2));
+    }
+
+    return { mp4Path: resolve(opts.outPath), compositionPath };
   } finally {
-    process.chdir(prevCwd);
+    await cleanupScratch(scratch);
   }
-
-  // 4. deliver mp4 (motion-blur down from fps·samples if configured) + the
-  //    editable composition. OFF ⇒ a plain copy (byte-identical to before).
-  await mkdir(dirname(resolve(opts.outPath)), { recursive: true });
-  const producedAbs = resolve(PKG_ROOT, produced);
-  if (motionBlurActive(composition.motionBlur)) {
-    await motionBlurMp4(
-      producedAbs,
-      resolve(opts.outPath),
-      composition.output.fps,
-      composition.motionBlur.samples,
-      composition.motionBlur.shutter,
-    );
-  } else {
-    await copyFile(producedAbs, resolve(opts.outPath));
-  }
-  const compositionPath = resolve(opts.outPath).replace(/\.mp4$/i, "") + ".composition.json";
-  if (opts.writeCompositionSibling !== false) {
-    // strip the render-time review decoration — the editable artifact is the
-    // clean composition, never the badged/watermarked variant of it.
-    const { review: _review, ...persisted } = composition;
-    await writeFile(compositionPath, JSON.stringify(persisted, null, 2));
-  }
-
-  return { mp4Path: resolve(opts.outPath), compositionPath };
 }

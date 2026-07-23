@@ -4,14 +4,16 @@
 // script walks every install location of node-pty under node_modules
 // and chmods the helper. Idempotent + safe to run on every install.
 //
-// Triggered via the root postinstall (see package.json). Silent on
-// non-darwin platforms where the helper does not ship as a separate
-// binary.
+// Triggered via the root postinstall (see package.json). Each repair is a no-op
+// when that platform/layout does not contain the relevant binaries.
 
 import { chmodSync, existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const REPO_ROOT = new URL("..", import.meta.url).pathname;
+// fileURLToPath, not .pathname: on Windows the latter yields "/C:/Users/…",
+// which every fs call then misses (silently — the walk just finds nothing).
+const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const PNPM_STORE = join(REPO_ROOT, "node_modules", ".pnpm");
 
 function walkNodePtyDirs(root) {
@@ -50,15 +52,18 @@ const directPty = join(REPO_ROOT, "node_modules", "node-pty");
 if (existsSync(directPty)) totalFixed += fixHelperUnder(directPty);
 
 if (totalFixed > 0) {
-  process.stdout.write(`fix-node-pty-perms: chmod +x on ${totalFixed} spawn-helper binar${totalFixed === 1 ? "y" : "ies"}\n`);
+  process.stdout.write(
+    `fix-node-pty-perms: chmod +x on ${totalFixed} spawn-helper binar${totalFixed === 1 ? "y" : "ies"}\n`,
+  );
 }
 
 // @open-take/compositor renders via revideo, which spawns the prebuilt
 // `@ffmpeg-installer` / `@ffprobe-installer` binaries. pnpm 10 skips their
 // chmod postinstall (they're not in onlyBuiltDependencies), leaving them
-// non-executable → EACCES at render time. Walk the store and +x every
-// ffmpeg/ffprobe binary. Idempotent.
-function fixMediaBins(root) {
+// non-executable → EACCES at render time. Traverse only installer packages,
+// rather than the whole dependency tree, and +x every ffmpeg/ffprobe binary.
+// Idempotent.
+function fixMediaBinsUnder(root) {
   let count = 0;
   if (!existsSync(root)) return count;
   const stack = [root];
@@ -73,10 +78,11 @@ function fixMediaBins(root) {
     for (const e of entries) {
       const p = join(dir, e.name);
       if (e.isDirectory()) {
-        // Don't descend into nested node_modules of node_modules to bound the walk.
-        if (e.name === "node_modules" && dir !== root) continue;
         stack.push(p);
-      } else if ((e.isFile() || e.isSymbolicLink()) && (e.name === "ffmpeg" || e.name === "ffprobe")) {
+      } else if (
+        (e.isFile() || e.isSymbolicLink()) &&
+        ["ffmpeg", "ffprobe", "ffmpeg.exe", "ffprobe.exe"].includes(e.name)
+      ) {
         try {
           const mode = statSync(p).mode;
           chmodSync(p, mode | 0o111);
@@ -90,7 +96,20 @@ function fixMediaBins(root) {
   return count;
 }
 
-const mediaFixed = fixMediaBins(PNPM_STORE);
+let mediaFixed = 0;
+if (existsSync(PNPM_STORE)) {
+  for (const entry of readdirSync(PNPM_STORE)) {
+    if (!entry.startsWith("@ffmpeg-installer+") && !entry.startsWith("@ffprobe-installer+")) {
+      continue;
+    }
+    mediaFixed += fixMediaBinsUnder(join(PNPM_STORE, entry));
+  }
+}
+// npm/yarn's hoisted layout does not have pnpm's encoded package directories.
+mediaFixed += fixMediaBinsUnder(join(REPO_ROOT, "node_modules", "@ffmpeg-installer"));
+mediaFixed += fixMediaBinsUnder(join(REPO_ROOT, "node_modules", "@ffprobe-installer"));
 if (mediaFixed > 0) {
-  process.stdout.write(`fix-node-pty-perms: chmod +x on ${mediaFixed} ffmpeg/ffprobe binar${mediaFixed === 1 ? "y" : "ies"}\n`);
+  process.stdout.write(
+    `fix-node-pty-perms: chmod +x on ${mediaFixed} ffmpeg/ffprobe binar${mediaFixed === 1 ? "y" : "ies"}\n`,
+  );
 }
