@@ -1,7 +1,8 @@
 {
   "name": "@open-take/adapter-ffmpeg",
   "version": "0.0.0",
-  "description": "ffmpeg compositor — mux, concat, zoompan. v1 default (D10); Remotion is v2.",
+  "private": true,
+  "description": "Dormant ffmpeg segment compositor retained for future terminal and audio work.",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -12,9 +13,6 @@
     "typecheck": "tsc --noEmit",
     "test": "node --test --import tsx/esm test/*.test.ts",
     "clean": "rm -rf dist"
-  },
-  "dependencies": {
-    "@open-take/core": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.10.1",

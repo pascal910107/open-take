@@ -1,27 +1,53 @@
-// ffmpeg Compositor (D10). Shells out to the system ffmpeg binary.
+// Dormant ffmpeg segment compositor: not wired into the current
+// cli -> runtime -> revideo compositor path. Kept for planned terminal/audio
+// work, with its contract colocated here until that integration exists.
 //
-// transcodeToCanonical normalises agent-browser WebM into the D21
+// transcodeToCanonical normalises WebM into the legacy canonical
 // canonical render profile so concat can be -c copy stream-copy.
 // concatSegments uses the concat demuxer (no re-encode); every input
 // must already match the canonical profile.
 //
-// Audio: agent-browser records video-only; we always inject a silent
+// Audio: video inputs may be silent; we inject a silent
 // stereo 48 kHz track via lavfi anullsrc so the MP4 has the audio
-// stream that the canonical profile + concat-demuxer requires. Session 6
-// will replace this with real narration via muxSegment.
+// stream that the canonical profile + concat-demuxer requires.
 
 import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type {
-  AudioTrackRef,
-  BBox,
-  Compositor,
-  ConcatOpts,
-  MuxOpts,
-  SegmentRef,
-} from "@open-take/core";
+
+export type BBox = [x: number, y: number, w: number, h: number];
+
+export type MuxOpts = {
+  videoPath: string;
+  audioPath?: string;
+  subtitlePath?: string;
+  outPath: string;
+};
+
+export type ConcatOpts = {
+  outPath: string;
+  htmlReplayPath?: string;
+  castPath?: string;
+};
+
+export type SegmentRef = {
+  mp4Path: string;
+  castPath?: string;
+};
+
+export type AudioTrackRef = {
+  path: string;
+  gainDb?: number;
+};
+
+export interface Compositor {
+  transcodeToCanonical(webmPath: string, mp4OutPath: string): Promise<void>;
+  muxSegment(opts: MuxOpts): Promise<{ mp4Path: string }>;
+  concatSegments(segments: SegmentRef[], opts: ConcatOpts): Promise<{ mp4Path: string }>;
+  zoom(input: string, bbox: BBox, scale: number, durationMs: number): Promise<string>;
+  mixAudio(tracks: AudioTrackRef[]): Promise<string>;
+}
 
 // Profile string that toolFp.renderProfile must match (D21). Bumping
 // the encode below requires minting v2 and bumping toolFp so caches
@@ -57,7 +83,8 @@ function runFfmpeg(ffmpegPath: string, args: string[]): Promise<void> {
     child.on("error", reject);
     child.on("close", (code) => {
       if (code === 0) resolve();
-      else reject(new Error(`ffmpeg exited ${code}\n--- ffmpeg stderr ---\n${stderr.slice(-4096)}`));
+      else
+        reject(new Error(`ffmpeg exited ${code}\n--- ffmpeg stderr ---\n${stderr.slice(-4096)}`));
     });
   });
 }
@@ -77,9 +104,7 @@ function runFfprobe(ffprobePath: string, args: string[]): Promise<string> {
     child.on("close", (code) => {
       if (code === 0) resolve(stdout);
       else
-        reject(
-          new Error(`ffprobe exited ${code}\n--- ffprobe stderr ---\n${stderr.slice(-4096)}`),
-        );
+        reject(new Error(`ffprobe exited ${code}\n--- ffprobe stderr ---\n${stderr.slice(-4096)}`));
     });
   });
 }
@@ -375,28 +400,50 @@ export async function castToMp4(
     // resample so the output conforms to the canonical profile.
     const args = [
       "-y",
-      "-f", "concat",
-      "-safe", "0",
-      "-i", ffconcatPath,
-      "-f", "lavfi",
-      "-t", totalSecStr,
-      "-i", `anullsrc=channel_layout=stereo:sample_rate=${CANONICAL_SAMPLE_RATE}`,
-      "-vf", `fps=${CANONICAL_FPS},format=yuv420p`,
-      "-c:v", "libx264",
-      "-profile:v", "baseline",
-      "-level", "4.1",
-      "-preset", "veryfast",
-      "-pix_fmt", "yuv420p",
-      "-r", String(CANONICAL_FPS),
-      "-g", String(CANONICAL_GOP),
-      "-keyint_min", String(CANONICAL_GOP),
-      "-sc_threshold", "0",
-      "-c:a", "aac",
-      "-ar", String(CANONICAL_SAMPLE_RATE),
-      "-ac", String(CANONICAL_AUDIO_CHANNELS),
-      "-b:a", "128k",
-      "-t", totalSecStr,
-      "-movflags", "+faststart",
+      "-f",
+      "concat",
+      "-safe",
+      "0",
+      "-i",
+      ffconcatPath,
+      "-f",
+      "lavfi",
+      "-t",
+      totalSecStr,
+      "-i",
+      `anullsrc=channel_layout=stereo:sample_rate=${CANONICAL_SAMPLE_RATE}`,
+      "-vf",
+      `fps=${CANONICAL_FPS},format=yuv420p`,
+      "-c:v",
+      "libx264",
+      "-profile:v",
+      "baseline",
+      "-level",
+      "4.1",
+      "-preset",
+      "veryfast",
+      "-pix_fmt",
+      "yuv420p",
+      "-r",
+      String(CANONICAL_FPS),
+      "-g",
+      String(CANONICAL_GOP),
+      "-keyint_min",
+      String(CANONICAL_GOP),
+      "-sc_threshold",
+      "0",
+      "-c:a",
+      "aac",
+      "-ar",
+      String(CANONICAL_SAMPLE_RATE),
+      "-ac",
+      String(CANONICAL_AUDIO_CHANNELS),
+      "-b:a",
+      "128k",
+      "-t",
+      totalSecStr,
+      "-movflags",
+      "+faststart",
       outPath,
     ];
     await runFfmpeg(ffmpegPath, args);
@@ -423,19 +470,20 @@ function runChildCapture(cmd: string, args: string[]): Promise<string> {
     child.on("error", reject);
     child.on("close", (code) => {
       if (code === 0) resolve(stdout);
-      else reject(new Error(`${cmd} exited ${code}\n--- ${cmd} stderr ---\n${stderr.slice(-4096)}`));
+      else
+        reject(new Error(`${cmd} exited ${code}\n--- ${cmd} stderr ---\n${stderr.slice(-4096)}`));
     });
   });
 }
 
-export async function probeDurationMs(
-  path: string,
-  ffprobePath = "ffprobe",
-): Promise<number> {
+export async function probeDurationMs(path: string, ffprobePath = "ffprobe"): Promise<number> {
   const out = await runFfprobe(ffprobePath, [
-    "-v", "error",
-    "-show_entries", "format=duration",
-    "-of", "default=nw=1:nk=1",
+    "-v",
+    "error",
+    "-show_entries",
+    "format=duration",
+    "-of",
+    "default=nw=1:nk=1",
     path,
   ]);
   const trimmed = out.trim();
@@ -447,7 +495,7 @@ export async function probeDurationMs(
 }
 
 export class FfmpegCompositor implements Compositor {
-  constructor(public ffmpegPath: string = "ffmpeg") {}
+  constructor(public ffmpegPath = "ffmpeg") {}
 
   // D21 canonical profile. Pad-to-fit-16:9 so an arbitrary input aspect
   // doesn't get cropped. Always inject silent stereo so every canonical
@@ -490,28 +538,50 @@ export class FfmpegCompositor implements Compositor {
 
     const args = [
       "-y",
-      "-i", webmPath,
-      "-f", "lavfi",
-      "-t", targetSec,
-      "-i", `anullsrc=channel_layout=stereo:sample_rate=${CANONICAL_SAMPLE_RATE}`,
-      "-map", "0:v:0",
-      "-map", "1:a:0",
-      "-c:v", "libx264",
-      "-profile:v", "baseline",
-      "-level", "4.1",
-      "-preset", "veryfast",
-      "-pix_fmt", "yuv420p",
-      "-vf", vf,
-      "-r", String(CANONICAL_FPS),
-      "-g", String(CANONICAL_GOP),
-      "-keyint_min", String(CANONICAL_GOP),
-      "-sc_threshold", "0",
-      "-c:a", "aac",
-      "-ar", String(CANONICAL_SAMPLE_RATE),
-      "-ac", String(CANONICAL_AUDIO_CHANNELS),
-      "-b:a", "128k",
-      "-t", targetSec,
-      "-movflags", "+faststart",
+      "-i",
+      webmPath,
+      "-f",
+      "lavfi",
+      "-t",
+      targetSec,
+      "-i",
+      `anullsrc=channel_layout=stereo:sample_rate=${CANONICAL_SAMPLE_RATE}`,
+      "-map",
+      "0:v:0",
+      "-map",
+      "1:a:0",
+      "-c:v",
+      "libx264",
+      "-profile:v",
+      "baseline",
+      "-level",
+      "4.1",
+      "-preset",
+      "veryfast",
+      "-pix_fmt",
+      "yuv420p",
+      "-vf",
+      vf,
+      "-r",
+      String(CANONICAL_FPS),
+      "-g",
+      String(CANONICAL_GOP),
+      "-keyint_min",
+      String(CANONICAL_GOP),
+      "-sc_threshold",
+      "0",
+      "-c:a",
+      "aac",
+      "-ar",
+      String(CANONICAL_SAMPLE_RATE),
+      "-ac",
+      String(CANONICAL_AUDIO_CHANNELS),
+      "-b:a",
+      "128k",
+      "-t",
+      targetSec,
+      "-movflags",
+      "+faststart",
       mp4OutPath,
     ];
 
@@ -554,18 +624,29 @@ export class FfmpegCompositor implements Compositor {
     if (!opts.audioPath) {
       const args = [
         "-y",
-        "-i", opts.videoPath,
-        "-f", "lavfi",
-        "-i", `anullsrc=channel_layout=stereo:sample_rate=${CANONICAL_SAMPLE_RATE}`,
-        "-map", "0:v:0",
-        "-map", "1:a:0",
-        "-c:v", "copy",
-        "-c:a", "aac",
-        "-ar", String(CANONICAL_SAMPLE_RATE),
-        "-ac", String(CANONICAL_AUDIO_CHANNELS),
-        "-b:a", "128k",
+        "-i",
+        opts.videoPath,
+        "-f",
+        "lavfi",
+        "-i",
+        `anullsrc=channel_layout=stereo:sample_rate=${CANONICAL_SAMPLE_RATE}`,
+        "-map",
+        "0:v:0",
+        "-map",
+        "1:a:0",
+        "-c:v",
+        "copy",
+        "-c:a",
+        "aac",
+        "-ar",
+        String(CANONICAL_SAMPLE_RATE),
+        "-ac",
+        String(CANONICAL_AUDIO_CHANNELS),
+        "-b:a",
+        "128k",
         "-shortest",
-        "-movflags", "+faststart",
+        "-movflags",
+        "+faststart",
         opts.outPath,
       ];
       await runFfmpeg(this.ffmpegPath, args);
@@ -582,17 +663,28 @@ export class FfmpegCompositor implements Compositor {
       const targetSec = (videoMs / 1000).toFixed(3);
       const args = [
         "-y",
-        "-i", opts.videoPath,
-        "-i", opts.audioPath,
-        "-map", "0:v:0",
-        "-map", "1:a:0",
-        "-c:v", "copy",
-        "-c:a", "aac",
-        "-ar", String(CANONICAL_SAMPLE_RATE),
-        "-ac", String(CANONICAL_AUDIO_CHANNELS),
-        "-b:a", "128k",
-        "-af", `apad=whole_dur=${targetSec},atrim=0:${targetSec},asetpts=PTS-STARTPTS`,
-        "-movflags", "+faststart",
+        "-i",
+        opts.videoPath,
+        "-i",
+        opts.audioPath,
+        "-map",
+        "0:v:0",
+        "-map",
+        "1:a:0",
+        "-c:v",
+        "copy",
+        "-c:a",
+        "aac",
+        "-ar",
+        String(CANONICAL_SAMPLE_RATE),
+        "-ac",
+        String(CANONICAL_AUDIO_CHANNELS),
+        "-b:a",
+        "128k",
+        "-af",
+        `apad=whole_dur=${targetSec},atrim=0:${targetSec},asetpts=PTS-STARTPTS`,
+        "-movflags",
+        "+faststart",
         opts.outPath,
       ];
       await runFfmpeg(this.ffmpegPath, args);
@@ -607,26 +699,44 @@ export class FfmpegCompositor implements Compositor {
     const extendSec = ((audioMs - videoMs) / 1000).toFixed(3);
     const args = [
       "-y",
-      "-i", opts.videoPath,
-      "-i", opts.audioPath,
+      "-i",
+      opts.videoPath,
+      "-i",
+      opts.audioPath,
       "-filter_complex",
       `[0:v]tpad=stop_mode=clone:stop_duration=${extendSec},fps=${CANONICAL_FPS},format=yuv420p,setsar=1[v]`,
-      "-map", "[v]",
-      "-map", "1:a:0",
-      "-c:v", "libx264",
-      "-profile:v", "baseline",
-      "-level", "4.1",
-      "-preset", "veryfast",
-      "-pix_fmt", "yuv420p",
-      "-r", String(CANONICAL_FPS),
-      "-g", String(CANONICAL_GOP),
-      "-keyint_min", String(CANONICAL_GOP),
-      "-sc_threshold", "0",
-      "-c:a", "aac",
-      "-ar", String(CANONICAL_SAMPLE_RATE),
-      "-ac", String(CANONICAL_AUDIO_CHANNELS),
-      "-b:a", "128k",
-      "-movflags", "+faststart",
+      "-map",
+      "[v]",
+      "-map",
+      "1:a:0",
+      "-c:v",
+      "libx264",
+      "-profile:v",
+      "baseline",
+      "-level",
+      "4.1",
+      "-preset",
+      "veryfast",
+      "-pix_fmt",
+      "yuv420p",
+      "-r",
+      String(CANONICAL_FPS),
+      "-g",
+      String(CANONICAL_GOP),
+      "-keyint_min",
+      String(CANONICAL_GOP),
+      "-sc_threshold",
+      "0",
+      "-c:a",
+      "aac",
+      "-ar",
+      String(CANONICAL_SAMPLE_RATE),
+      "-ac",
+      String(CANONICAL_AUDIO_CHANNELS),
+      "-b:a",
+      "128k",
+      "-movflags",
+      "+faststart",
       opts.outPath,
     ];
     await runFfmpeg(this.ffmpegPath, args);
@@ -637,10 +747,7 @@ export class FfmpegCompositor implements Compositor {
   // Concat demuxer with -c copy. Inputs MUST already be canonical
   // (transcodeToCanonical applied). Concat list lives in a tmp file
   // (ffmpeg concat demuxer requires it on disk).
-  async concatSegments(
-    segments: SegmentRef[],
-    opts: ConcatOpts,
-  ): Promise<{ mp4Path: string }> {
+  async concatSegments(segments: SegmentRef[], opts: ConcatOpts): Promise<{ mp4Path: string }> {
     if (segments.length === 0) {
       throw new Error("concatSegments: no segments");
     }
@@ -648,9 +755,12 @@ export class FfmpegCompositor implements Compositor {
       // Single-segment fast-path: copy the only segment to outPath.
       const args = [
         "-y",
-        "-i", segments[0]!.mp4Path,
-        "-c", "copy",
-        "-movflags", "+faststart",
+        "-i",
+        segments[0]!.mp4Path,
+        "-c",
+        "copy",
+        "-movflags",
+        "+faststart",
         opts.outPath,
       ];
       await runFfmpeg(this.ffmpegPath, args);
@@ -668,11 +778,16 @@ export class FfmpegCompositor implements Compositor {
     try {
       const args = [
         "-y",
-        "-f", "concat",
-        "-safe", "0",
-        "-i", listPath,
-        "-c", "copy",
-        "-movflags", "+faststart",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        listPath,
+        "-c",
+        "copy",
+        "-movflags",
+        "+faststart",
         opts.outPath,
       ];
       await runFfmpeg(this.ffmpegPath, args);
@@ -700,12 +815,7 @@ export class FfmpegCompositor implements Compositor {
   //   - We avoid `setpts` math by computing zoompan's frame-index
   //     window directly: `zoompan` is given the full source as input
   //     and produces a 1080p output with a per-frame zoom value.
-  async zoom(
-    input: string,
-    region: BBox,
-    scale: number,
-    durationMs: number,
-  ): Promise<string> {
+  async zoom(input: string, region: BBox, scale: number, durationMs: number): Promise<string> {
     if (scale <= 1 || !Number.isFinite(scale)) {
       throw new Error(`FfmpegCompositor.zoom: scale must be > 1, got ${scale}`);
     }
@@ -721,9 +831,7 @@ export class FfmpegCompositor implements Compositor {
     // over the first zoomFrames; hold at `scale` thereafter. `on` is
     // the output frame index inside zoompan.
     const z =
-      `if(lte(on,${zoomFrames}), ` +
-      `1 + (${scale - 1}) * on/${zoomFrames}, ` +
-      `${scale})`;
+      `if(lte(on,${zoomFrames}), ` + `1 + (${scale - 1}) * on/${zoomFrames}, ` + `${scale})`;
 
     // zoompan's pan expressions are in source-pixel coordinates pre-
     // zoom. Center the window on (cx, cy) so the zoom feels anchored
@@ -752,19 +860,32 @@ export class FfmpegCompositor implements Compositor {
     const outPath = join(work, "zoomed.mp4");
     const args = [
       "-y",
-      "-i", input,
-      "-c:v", "libx264",
-      "-profile:v", "baseline",
-      "-level", "4.1",
-      "-preset", "veryfast",
-      "-pix_fmt", "yuv420p",
-      "-vf", vf,
-      "-r", String(CANONICAL_FPS),
-      "-g", String(CANONICAL_GOP),
-      "-keyint_min", String(CANONICAL_GOP),
-      "-sc_threshold", "0",
-      "-c:a", "copy",
-      "-movflags", "+faststart",
+      "-i",
+      input,
+      "-c:v",
+      "libx264",
+      "-profile:v",
+      "baseline",
+      "-level",
+      "4.1",
+      "-preset",
+      "veryfast",
+      "-pix_fmt",
+      "yuv420p",
+      "-vf",
+      vf,
+      "-r",
+      String(CANONICAL_FPS),
+      "-g",
+      String(CANONICAL_GOP),
+      "-keyint_min",
+      String(CANONICAL_GOP),
+      "-sc_threshold",
+      "0",
+      "-c:a",
+      "copy",
+      "-movflags",
+      "+faststart",
       outPath,
     ];
     await runFfmpeg(this.ffmpegPath, args);
@@ -794,9 +915,12 @@ export class FfmpegCompositor implements Compositor {
         args.push("-af", `volume=${gain}dB`);
       }
       args.push(
-        "-c:a", "libmp3lame",
-        "-b:a", "128k",
-        "-ar", String(CANONICAL_SAMPLE_RATE),
+        "-c:a",
+        "libmp3lame",
+        "-b:a",
+        "128k",
+        "-ar",
+        String(CANONICAL_SAMPLE_RATE),
         outPath,
       );
       await runFfmpeg(this.ffmpegPath, args);
@@ -815,11 +939,16 @@ export class FfmpegCompositor implements Compositor {
     const inputs = tracks.map((_, i) => `[g${i}]`).join("");
     filterParts.push(`${inputs}amix=inputs=${tracks.length}:duration=longest:normalize=0[out]`);
     args.push(
-      "-filter_complex", filterParts.join(";"),
-      "-map", "[out]",
-      "-c:a", "libmp3lame",
-      "-b:a", "128k",
-      "-ar", String(CANONICAL_SAMPLE_RATE),
+      "-filter_complex",
+      filterParts.join(";"),
+      "-map",
+      "[out]",
+      "-c:a",
+      "libmp3lame",
+      "-b:a",
+      "128k",
+      "-ar",
+      String(CANONICAL_SAMPLE_RATE),
       outPath,
     );
     await runFfmpeg(this.ffmpegPath, args);

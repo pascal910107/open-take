@@ -62,10 +62,6 @@ importers:
         version: 6.4.3(@types/node@22.19.19)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.22.3)
 
   packages/adapter-elevenlabs:
-    dependencies:
-      '@open-take/core':
-        specifier: workspace:*
-        version: link:../core
     devDependencies:
       '@types/node':
         specifier: ^22.10.1
@@ -81,10 +77,6 @@ importers:
         version: 5.9.3
 
   packages/adapter-ffmpeg:
-    dependencies:
-      '@open-take/core':
-        specifier: workspace:*
-        version: link:../core
     devDependencies:
       '@types/node':
         specifier: ^22.10.1
@@ -101,9 +93,6 @@ importers:
 
   packages/adapter-node-pty:
     dependencies:
-      '@open-take/core':
-        specifier: workspace:*
-        version: link:../core
       node-pty:
         specifier: ^1.0.0
         version: 1.1.0
@@ -167,18 +156,6 @@ importers:
       tsx:
         specifier: ^4.22.3
         version: 4.22.3
-      typescript:
-        specifier: ^5.6.3
-        version: 5.9.3
-
-  packages/core:
-    devDependencies:
-      '@types/node':
-        specifier: ^22.10.1
-        version: 22.19.19
-      tsdown:
-        specifier: ^0.9.0
-        version: 0.9.9(typescript@5.9.3)
       typescript:
         specifier: ^5.6.3
         version: 5.9.3

@@ -1,7 +1,8 @@
 {
   "name": "@open-take/adapter-node-pty",
   "version": "0.0.0",
-  "description": "node-pty TerminalDriver + asciinema cast tee. v1 default terminal adapter (D9).",
+  "private": true,
+  "description": "Dormant node-pty + asciinema capture retained for future terminal recording.",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -13,7 +14,6 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@open-take/core": "workspace:*",
     "node-pty": "^1.0.0"
   },
   "devDependencies": {

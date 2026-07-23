@@ -1,4 +1,6 @@
-// node-pty + asciinema v2 cast tee. v1 default terminal adapter (D9).
+// Dormant node-pty + asciinema v2 cast adapter: not wired into the current
+// browser-only cli -> runtime capture path. Kept for the planned terminal
+// capture work, with its contract colocated here until that integration exists.
 //
 // Lifecycle: one PTY (spawned with the user's SHELL) per TerminalSession.
 // Cast writing is bracketed by startCast/stopCast; while a cast is open
@@ -14,20 +16,52 @@
 // calls leave it null (D9: "terminal state is action replay", not
 // "we always know exit codes").
 
-import {
-  createWriteStream,
-  mkdirSync,
-  type WriteStream,
-} from "node:fs";
+import { createWriteStream, mkdirSync, type WriteStream } from "node:fs";
 import { dirname } from "node:path";
-import type {
-  AssertionResult,
-  TerminalAction,
-  TerminalDriver,
-  TerminalOpts,
-  TerminalResult,
-  TerminalSession,
-} from "@open-take/core";
+
+export type TerminalAction =
+  | {
+      kind: "terminal.run";
+      cmd: string;
+      waitFor?: string;
+      waitForExit?: boolean;
+    }
+  | { kind: "terminal.sendKeys"; keys: string }
+  | { kind: "terminal.assertContains"; text: string }
+  | { kind: "terminal.assertExit"; code: number };
+
+export type AssertionResult = {
+  ok: boolean;
+  kind: string;
+  message?: string;
+};
+
+export type TerminalOpts = {
+  cwd?: string;
+  cols?: number;
+  rows?: number;
+};
+
+export type TerminalResult = {
+  exitCode: number | null;
+  bufferAtFinish: string;
+};
+
+export interface TerminalDriver {
+  open(opts: TerminalOpts): Promise<TerminalSession>;
+}
+
+export interface TerminalSession {
+  run(cmd: string, opts?: { waitFor?: string; waitForExit?: boolean }): Promise<TerminalResult>;
+  sendKeys(keys: string): Promise<void>;
+  read(): Promise<string>;
+  startCast(path: string): Promise<void>;
+  stopCast(): Promise<void>;
+  replayActions(actions: TerminalAction[]): Promise<void>;
+  dispose(): Promise<void>;
+  getLastExitCode(): number | null;
+  runActions(actions: TerminalAction[]): Promise<{ assertions: AssertionResult[] }>;
+}
 
 type IPty = {
   onData: (cb: (d: string) => void) => { dispose(): void };
@@ -53,9 +87,9 @@ const BUFFER_CAP = 1 << 16; // 64 KiB tail
 
 async function loadNodePty(): Promise<{ spawn: PtySpawn }> {
   const mod = await import("node-pty");
-  const spawnFn = (mod as { spawn?: PtySpawn; default?: { spawn?: PtySpawn } })
-    .spawn
-    ?? (mod as { default?: { spawn?: PtySpawn } }).default?.spawn;
+  const spawnFn =
+    (mod as { spawn?: PtySpawn; default?: { spawn?: PtySpawn } }).spawn ??
+    (mod as { default?: { spawn?: PtySpawn } }).default?.spawn;
   if (!spawnFn) {
     throw new Error("node-pty: spawn() export not found (peerDependency may be missing)");
   }
@@ -167,9 +201,7 @@ export class NodePtySession implements TerminalSession {
       // Append the marker via printf so a failed `cmd` doesn't suppress
       // the echo (printf is a builtin in bash/zsh; `;` instead of `&&`).
       this.writeInput(`printf '%s\\n' "${sentinel}:$?:_END_"\r`);
-      const match = await this.waitForRegex(
-        new RegExp(`${sentinel}:(-?\\d+):_END_`),
-      );
+      const match = await this.waitForRegex(new RegExp(`${sentinel}:(-?\\d+):_END_`));
       this.lastExitCode = Number.parseInt(match[1]!, 10);
       return { exitCode: this.lastExitCode, bufferAtFinish: this.buffer };
     }
@@ -238,9 +270,7 @@ export class NodePtySession implements TerminalSession {
     }
   }
 
-  async runActions(
-    actions: TerminalAction[],
-  ): Promise<{ assertions: AssertionResult[] }> {
+  async runActions(actions: TerminalAction[]): Promise<{ assertions: AssertionResult[] }> {
     const assertions: AssertionResult[] = [];
     for (const a of actions) {
       switch (a.kind) {

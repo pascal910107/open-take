@@ -1,25 +1,29 @@
-// ElevenLabs + Mock TTS adapters (D11). Both implement TTSDriver
-// from @open-take/core/adapters.
+// Dormant narration adapter: not wired into the current
+// cli -> runtime -> compositor product path. Kept for the planned narration
+// work, with its small contract colocated here until that integration exists.
 //
 // MockTTSDriver: silent MP3 (via ffmpeg lavfi) at a duration derived
-// from text length, plus a word-aligned VTT. Useful in CI and for
-// development without API keys; the runtime's narration sub-asset path
-// is exercised end-to-end against a mock driver in dryrun-matrix.
+// from text length, plus a word-aligned VTT. Useful in CI and for development
+// without API keys.
 //
 // ElevenLabsDriver: real API call. Uses the `with-timestamps` endpoint
 // (alignment per character) so we can build a character-accurate VTT
-// — that's what makes interlinear-style transcripts in the viewer
-// click-to-jump.
-//
-// Both write MP3 because that's the format architecture pins for
-// `audio.mp3` under .cache/renderings/<rk>/narration/<narrationHash>/.
-// Bumping the encoding requires bumping ttsModel in the StructuralFp.
+// for future transcript/subtitle support.
 
 import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { TTSDriver, TTSOpts } from "@open-take/core";
+
+export type TTSOpts = {
+  voiceId: string;
+  lang?: string;
+};
+
+export interface TTSDriver {
+  synthesize(text: string, opts: TTSOpts): Promise<{ audio: Uint8Array; vtt: string }>;
+  modelVersion(): string;
+}
 
 // ----- shared helpers ------------------------------------------------
 
@@ -33,16 +37,21 @@ function runFfmpeg(ffmpegPath: string, args: string[]): Promise<void> {
     child.on("error", reject);
     child.on("close", (code) => {
       if (code === 0) resolve();
-      else reject(new Error(`ffmpeg exited ${code}\n--- ffmpeg stderr ---\n${stderr.slice(-4096)}`));
+      else
+        reject(new Error(`ffmpeg exited ${code}\n--- ffmpeg stderr ---\n${stderr.slice(-4096)}`));
     });
   });
 }
 
 function fmtVttTime(sec: number): string {
-  if (!Number.isFinite(sec) || sec < 0) sec = 0;
-  const h = Math.floor(sec / 3600).toString().padStart(2, "0");
-  const m = Math.floor((sec % 3600) / 60).toString().padStart(2, "0");
-  const s = (sec % 60).toFixed(3).padStart(6, "0");
+  const value = Number.isFinite(sec) && sec >= 0 ? sec : 0;
+  const h = Math.floor(value / 3600)
+    .toString()
+    .padStart(2, "0");
+  const m = Math.floor((value % 3600) / 60)
+    .toString()
+    .padStart(2, "0");
+  const s = (value % 60).toFixed(3).padStart(6, "0");
   return `${h}:${m}:${s}`;
 }
 
@@ -51,8 +60,7 @@ export type WordCue = { text: string; start: number; end: number };
 export function buildVttFromWordCues(cues: WordCue[]): string {
   if (cues.length === 0) return "WEBVTT\n\n";
   const blocks = cues.map(
-    (c, i) =>
-      `${i + 1}\n${fmtVttTime(c.start)} --> ${fmtVttTime(c.end)}\n${c.text}`,
+    (c, i) => `${i + 1}\n${fmtVttTime(c.start)} --> ${fmtVttTime(c.end)}\n${c.text}`,
   );
   return "WEBVTT\n\n" + blocks.join("\n\n") + "\n";
 }
@@ -116,10 +124,7 @@ export class MockTTSDriver implements TTSDriver {
     this.minDurationSec = opts.minDurationSec ?? 0.5;
   }
 
-  async synthesize(
-    text: string,
-    _opts: TTSOpts,
-  ): Promise<{ audio: Uint8Array; vtt: string }> {
+  async synthesize(text: string, _opts: TTSOpts): Promise<{ audio: Uint8Array; vtt: string }> {
     const durationSec = mockDurationOf(text, this.charsPerSecond, this.minDurationSec);
     const audio = await synthesizeSilence(this.ffmpegPath, durationSec);
     const vtt = buildMockVtt(text, durationSec);
@@ -158,11 +163,16 @@ async function synthesizeSilence(ffmpegPath: string, sec: number): Promise<Uint8
   try {
     await runFfmpeg(ffmpegPath, [
       "-y",
-      "-f", "lavfi",
-      "-i", "anullsrc=channel_layout=mono:sample_rate=24000",
-      "-t", String(sec),
-      "-c:a", "libmp3lame",
-      "-b:a", "32k",
+      "-f",
+      "lavfi",
+      "-i",
+      "anullsrc=channel_layout=mono:sample_rate=24000",
+      "-t",
+      String(sec),
+      "-c:a",
+      "libmp3lame",
+      "-b:a",
+      "32k",
       outPath,
     ]);
     return new Uint8Array(readFileSync(outPath));
@@ -197,10 +207,7 @@ export class ElevenLabsDriver implements TTSDriver {
     this.fetchImpl = opts.fetchImpl ?? fetch;
   }
 
-  async synthesize(
-    text: string,
-    opts: TTSOpts,
-  ): Promise<{ audio: Uint8Array; vtt: string }> {
+  async synthesize(text: string, opts: TTSOpts): Promise<{ audio: Uint8Array; vtt: string }> {
     const voiceId = opts.voiceId;
     if (!voiceId) throw new Error("ElevenLabsDriver: opts.voiceId is required");
     const lang = opts.lang;
