@@ -25,8 +25,22 @@ export type CaptureEventBase = {
   /** selector / note, kept for editability */
   sel?: string;
   note?: string;
-  /** selective-zoom intent from the plan (default auto = heuristic) */
+  /** selective-zoom intent from the plan. Absent/"auto" ⇒ the camera director
+   *  decides from the ground-truth log; "always"/"never" hard-override it (and
+   *  cut the beat out of any cluster — an override is a segment boundary). */
   zoom?: ZoomIntent;
+  /** CAPTURE-DERIVED (frame-diff / mutation pass — the `effectBox` seam): the
+   *  region that actually CHANGED after the action, viewport CSS px. The
+   *  director frames THIS over `box` when present — a `type`'s result region, or
+   *  a payoff that lands somewhere other than where you clicked. Absent ⇒ the
+   *  director shapes an ROI from `box`/kind instead. */
+  effectBox?: BBox;
+  /** CAPTURE-DERIVED (same pass): fraction of the frame that changed after the
+   *  action, 0..1. ≥ camera.pullOutCoverage ⇒ the action repainted most of the
+   *  frame (nav / global restyle) ⇒ pull out to full view. Absent ⇒ the pull-out
+   *  branch is skipped (the director can't tell nav from popover on bbox alone —
+   *  it says so in the beat's `reason`). */
+  changeCoverage?: number;
 };
 
 /** A click (or a type's focus-click): an instantaneous action at a point. */
@@ -251,6 +265,53 @@ export type ReviewDecor = {
   badges?: ReviewBadge[];
   /** constant bottom-left variant label for A/B reels, e.g. "B · tight ×1.8" */
   label?: string;
+};
+
+/** The auto-camera director's tuning. ON by default (a plan that specifies no
+ *  zoom must still come out with sensible framing — the whole point). The
+ *  numbers are the FEEL knobs; judge them by eye on a rendered clip, not on
+ *  paper. `enabled: false` is the clean escape hatch: the director doesn't run
+ *  and ONLY explicit `zoom: "always"/"never"` produce zoom (auto/absent hold
+ *  full view). There is no legacy per-event heuristic to fall back to. */
+export type CameraConfig = {
+  enabled: boolean;
+  /** an ROI fills this fraction of the frame when framed (bigger ⇒ tighter). */
+  fillFrac: number;
+  /** hard ceiling on scale. NOT the main lever — ROI SIZE drives the actual
+   *  scale (a big type-ROI lands medium, a tiny icon lands tight); this just
+   *  stops a pinpoint ROI zooming past legibility. */
+  maxScale: number;
+  /** a punch that can't stay on screen this long is dropped to full view (a
+   *  sub-second punch reads as a flinch). Enforced AFTER hard breaks — the hold
+   *  extends into the gap before the next break, never merges across one. */
+  minHoldMs: number;
+  /** a scale below this isn't worth a distinct frame: a single beat that fits
+   *  under it holds full view, and a coalesced cluster whose UNION falls under
+   *  it splits instead (the two are "different regions" → chain/pull, not hold). */
+  minZoomScale: number;
+  /** gap between two actions greater than this ⇒ they cannot share a frame. */
+  coalesceWindowMs: number;
+  /** two ROIs whose centres are closer than this (fraction of video width) MAY
+   *  coalesce into one shared, held frame — the "cluster" (a thumbnail rail, a
+   *  toolbar). Farther apart ⇒ a re-frame (progressive/deeper), not a hold. */
+  travelThreshold: number;
+  /** changeCoverage ≥ this ⇒ the action repainted most of the frame (nav /
+   *  global) ⇒ pull out to full view. The nav-vs-popover divider — the one knob
+   *  to tune by eye on real captures (frame-diff pass populates the input). */
+  pullOutCoverage: number;
+};
+
+// Defaults tuned as a STARTING point — every number here is meant to be judged
+// on a rendered clip and A/B'd one at a time, not signed off on paper.
+export const DEFAULT_CAMERA: CameraConfig = {
+  enabled: true,
+  fillFrac: 0.6,
+  maxScale: 2.4,
+  minHoldMs: 1200,
+  minZoomScale: 1.25,
+  coalesceWindowMs: 900,
+  travelThreshold: 0.18,
+  pullOutCoverage: 0.55,
 };
 
 export type TakeComposition = {

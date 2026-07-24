@@ -11,6 +11,7 @@ export * from "./types";
 export * from "./presets";
 export { resolveFfmpeg, resolveFfprobe } from "./ffmpeg";
 export { planComposition, type PlanOpts } from "./plan";
+export { directCamera, type Beat, type Framing } from "./camera";
 export { renderTake, type RenderTakeOpts } from "./render";
 export {
   validateComposition,

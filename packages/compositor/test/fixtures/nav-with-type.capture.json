@@ -1,0 +1,85 @@
+{
+  "_comment": "ACCEPTANCE FIXTURE — the flatten case. A nav-heavy landing-page demo with a search+result, a small icon rail (cluster), and a scroll. NO event carries a `zoom` intent — the director must produce decent zoom from the ground-truth log alone. `effectBox`/`changeCoverage` are the Phase-B frame-diff annotations (here supplied by hand to pin Phase-A director logic): changeCoverage = fraction of the frame that changed after the action; effectBox = the region that actually changed (video-px, viewport==video here).",
+  "video": { "width": 1920, "height": 1080, "fps": "60/1", "durationS": 13.2 },
+  "viewport": { "w": 1920, "h": 1080 },
+  "start": { "x": 300, "y": 980 },
+  "events": [
+    {
+      "kind": "click",
+      "x": 868, "y": 38,
+      "box": { "x": 820, "y": 24, "w": 96, "h": 28 },
+      "tMs": 1400,
+      "sel": "Features",
+      "note": "nav → jumps to Features section (global repaint)",
+      "changeCoverage": 0.82
+    },
+    {
+      "kind": "click",
+      "x": 972, "y": 38,
+      "box": { "x": 930, "y": 24, "w": 84, "h": 28 },
+      "tMs": 3200,
+      "sel": "Pricing",
+      "note": "nav → jumps to Pricing (global repaint)",
+      "changeCoverage": 0.78
+    },
+    {
+      "kind": "type",
+      "x": 960, "y": 172,
+      "box": { "x": 641, "y": 150, "w": 638, "h": 44 },
+      "effectBox": { "x": 620, "y": 150, "w": 680, "h": 340 },
+      "tMs": 5000,
+      "sel": "Search the docs",
+      "note": "type a query — results grow DOWN out of the thin field",
+      "text": "polished demos",
+      "durationMs": 1600,
+      "changeCoverage": 0.30
+    },
+    {
+      "kind": "press",
+      "x": 970, "y": 355,
+      "box": { "x": 640, "y": 250, "w": 660, "h": 210 },
+      "tMs": 6900,
+      "keys": "Enter",
+      "sel": "#result",
+      "note": "Enter → the result the type already framed (same region)",
+      "durationMs": 1200,
+      "changeCoverage": 0.28
+    },
+    {
+      "kind": "click",
+      "x": 302, "y": 622,
+      "box": { "x": 280, "y": 600, "w": 44, "h": 44 },
+      "tMs": 8600,
+      "sel": "thumb 1",
+      "note": "icon rail — quick hit 1",
+      "changeCoverage": 0.06
+    },
+    {
+      "kind": "click",
+      "x": 382, "y": 622,
+      "box": { "x": 360, "y": 600, "w": 44, "h": 44 },
+      "tMs": 9000,
+      "sel": "thumb 2",
+      "note": "icon rail — quick hit 2",
+      "changeCoverage": 0.06
+    },
+    {
+      "kind": "click",
+      "x": 462, "y": 622,
+      "box": { "x": 440, "y": 600, "w": 44, "h": 44 },
+      "tMs": 9400,
+      "sel": "thumb 3",
+      "note": "icon rail — quick hit 3",
+      "changeCoverage": 0.07
+    },
+    {
+      "kind": "scroll",
+      "x": 960, "y": 540,
+      "tMs": 10600,
+      "dy": 1000,
+      "durationMs": 1100,
+      "note": "pan to footer"
+    }
+  ],
+  "tEndMs": 12300
+}
