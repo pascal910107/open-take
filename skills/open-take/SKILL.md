@@ -349,9 +349,16 @@ capture-lock). Warnings (a no-op zoom, a soft-cap scale) print but don't block.
 - *"hold X longer" / "too quick"* → raise `cursor.holdMs` (global) — the dwell
   after a beat settles before zooming out.
 - *"gentler / faster zoom"* → `cursor.zoomInMs` / `zoomOutMs` (bigger = slower
-  ramp); soften the curve with `cursor.zoomEase`.
+  ramp; defaults 730/1340 are frame-measured off reference recorder — pull-outs are
+  deliberately ~1.8× slower). The default CURVE is a critically-damped spring
+  (the measured premium feel); `cursor.zoomSpring: 0.05–0.3` adds a touch of
+  overshoot/snap. A composition carrying the legacy `cursor.zoomEase` (bezier)
+  keeps it until you delete the key, set `zoomSpring`, or apply a pace preset —
+  prefer removing `zoomEase` so the spring default applies.
 - *"start the zoom earlier"* → lower that beat's `zoom.inAtMs` (keep it ≥ 0 and
-  ≤ `tMs`; the default is `tMs − cursor.zoomInMs`).
+  ≤ `tMs`; the punch-in default is `tMs − cursor.zoomInMs`). NB a beat that
+  PULLS OUT (scroll / wider framing) auto-paces with `zoomOutMs` when its
+  `inAtMs` is still the planner default; a hand-edited `inAtMs` always wins.
 - *"tighter frame / less border"* → raise `framing.insetFrac` (toward 1.0);
   *"more cinematic backdrop"* → `framing.background.from/to`, `cornerRadius`.
 - *"slower / silkier cursor"* → lower `cursor.travelWidthsPerSec` (or raise

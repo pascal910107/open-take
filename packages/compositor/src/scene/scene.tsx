@@ -4,17 +4,11 @@
 import { makeScene2D, Rect, Video, Line, Circle, Node, Gradient, Txt } from "@revideo/2d";
 import { createSignal, tween, linear } from "@revideo/core";
 import {
-  buildStageKeyframes,
+  stageCamera,
   buildLegs,
   cursorPos,
   isDragging,
-  keyvalN,
-  keyvalP,
-  clampCenter,
-  stageEasing,
-  panEasing,
   gradientEndpoints,
-  restStageScale,
   smoother,
 } from "../math";
 import comp from "./.composition.json";
@@ -23,9 +17,9 @@ const vW = comp.source.videoWidth,
   vH = comp.source.videoHeight;
 const oW = comp.output.width,
   oH = comp.output.height;
-const stage = buildStageKeyframes(comp);
+const cam = stageCamera(comp);
 const legs = buildLegs(comp);
-const rest = restStageScale(vW, vH, oW, oH, comp.framing.insetFrac);
+const rest = cam.rest;
 
 // video-px -> stage-local coords (stage local origin = video centre)
 const lx = (px) => px - vW / 2;
@@ -46,12 +40,10 @@ const CURSOR = [
 export default makeScene2D("take", function* (view) {
   const t = createSignal(0);
 
-  // zoom/pan stage easing (scale + center in unison): spring → bezier → smoother
-  const scaleEase = stageEasing(comp.cursor); // zoom-IN: spring allowed
-  const panEase = panEasing(comp.cursor); // zoom-OUT scale + centre: smooth bezier
-  // spring in / bezier out (smooth settle); Math.max(rest,…) is a floor. Mirrors derive.ts.
-  const scaleAt = () => Math.max(rest, keyvalN(t(), stage.z, scaleEase, panEase));
-  const centerAt = () => clampCenter(keyvalP(t(), stage.c, panEase), scaleAt(), vW, vH, oW, oH);
+  // The camera: ONE eased viewport rect (centre + size in lockstep, targets
+  // pre-clamped at build) — see math.ts stageCamera. Mirrors the editor preview.
+  const scaleAt = () => cam.at(t()).scale;
+  const centerAt = () => cam.at(t()).center;
 
   // Composition camera: ONE camera zooms the WHOLE
   // composition (backdrop + the inset framed screen) together. At rest the
@@ -228,5 +220,5 @@ export default makeScene2D("take", function* (view) {
     if (review.label) view.add(pill(review.label, 1, true));
   }
 
-  yield* tween(stage.T, (v) => t(v * stage.T), linear);
+  yield* tween(cam.T, (v) => t(v * cam.T), linear);
 });

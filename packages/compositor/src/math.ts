@@ -43,44 +43,45 @@ export function cubicBezier(x1: number, y1: number, x2: number, y2: number): (x:
 // Spring-shaped easing y(p) over [0,1]: the unit step response of a damped
 // spring, time-normalised so it rises (and, for bounce>0, slightly overshoots)
 // then settles within the segment. `bounce` ∈ [0, ~0.6): 0 = critically damped
-// (no overshoot — a soft, physical ease-out); higher = more overshoot/snap. The
-// "silky" landing comes from a touch of overshoot (a near-critically-damped
-// zoom spring, bounce ~0.06; a snappier cursor ~0.13).
+// (no overshoot — a soft, physical ease-out); higher = more overshoot/snap.
+//
+// bounce 0 over the default zoom durations IS the measured reference recorder zoom
+// feel: frame-tracking an reference export gave a critically-damped spring on the
+// camera rect, ω≈9.4 rad/s in / ω≈5.2 out (which also matches the spring
+// preset numbers from the reference teardown, .notes/reference recorder-teardown.md) —
+// i.e. this exact curve over ~730ms in / ~1340ms out.
 //
 // Under time-normalisation the curve depends ONLY on the damping ratio ζ=1−bounce
 // (the natural frequency cancels), so a single `bounce` knob is the whole shape —
 // the segment DURATION stays whatever the keyframes say (zoomInMs/zoomOutMs).
+// The response is normalised by its end value so the segment lands on exactly 1
+// (no end-of-segment snap from the finite settle band).
 export function springEase(bounce: number): (p: number) => number {
   const zeta = Math.max(0.4, Math.min(1, 1 - bounce));
   const Ts = -Math.log(1e-3) / zeta; // settling time to the 0.1% band (ω0 = 1)
-  return (p: number) => {
-    if (p <= 0) return 0;
-    if (p >= 1) return 1;
-    const t = p * Ts;
+  const step = (t: number): number => {
     if (zeta >= 1) return 1 - Math.exp(-t) * (1 + t); // critically damped
     const wd = Math.sqrt(1 - zeta * zeta); // damped natural frequency (ω0 = 1)
     return 1 - Math.exp(-zeta * t) * (Math.cos(wd * t) + (zeta / wd) * Math.sin(wd * t));
   };
+  const end = step(Ts);
+  return (p: number) => {
+    if (p <= 0) return 0;
+    if (p >= 1) return 1;
+    return step(p * Ts) / end;
+  };
 }
 
-// The stage (zoom + pan) easing, selected from the cursor config. The single
-// source the revideo scene (scene.tsx) consumes — any other renderer must use
-// it identically so renderers can never drift. Precedence:
-// spring (zoomSpring) → cubic-bezier (zoomEase) → smootherstep.
+// The stage (camera rect) easing, selected from the cursor config. ONE curve
+// eases the whole rect — centre and size together (see stageCamera). The single
+// source the revideo scene (scene.tsx) AND the editor preview consume — any
+// other renderer must use it identically so renderers can never drift.
+// Precedence: spring (zoomSpring) → cubic-bezier (zoomEase) → the default
+// critically-damped spring (the measured reference recorder curve).
 export function stageEasing(cursor: TakeComposition["cursor"]): (u: number) => number {
   if (cursor.zoomSpring != null) return springEase(cursor.zoomSpring);
   if (cursor.zoomEase) return cubicBezier(...cursor.zoomEase);
-  return smoother;
-}
-
-// Easing for the CENTRE pan. Deliberately NEVER the spring: an overshooting
-// spring on a pan makes the camera wobble past its target and back (and re-
-// accelerates the zoom-out recenter = a stutter). Overshoot is only wanted on
-// the scale zoom-IN, so centre stays on the monotone bezier/smoother. For a
-// non-spring composition this equals stageEasing, so the default is unchanged.
-export function panEasing(cursor: TakeComposition["cursor"]): (u: number) => number {
-  if (cursor.zoomEase) return cubicBezier(...cursor.zoomEase);
-  return smoother;
+  return springEase(0);
 }
 
 // Backdrop gradient endpoints in TOP-LEFT origin (0..oW, 0..oH), shared by the
@@ -110,15 +111,10 @@ export function gradientEndpoints(
 
 type KF<T> = [number, T];
 
-// `easeDown` (optional) eases segments where the value FALLS (v1<v0) differently
-// from rising ones — used so the scale springs on zoom-IN but settles smoothly
-// (bezier, no overshoot/abruptness) on zoom-OUT. Omit it ⇒ one easing for all
-// (the default behaviour, unchanged).
 export function keyvalN(
   t: number,
   kfs: KF<number>[],
   ease: (u: number) => number = smoother,
-  easeDown?: (u: number) => number,
 ): number {
   if (t <= kfs[0]![0]) return kfs[0]![1];
   if (t >= kfs[kfs.length - 1]![0]) return kfs[kfs.length - 1]![1];
@@ -126,22 +122,7 @@ export function keyvalN(
     const [t0, v0] = kfs[i]!;
     const [t1, v1] = kfs[i + 1]!;
     if (t0 <= t && t <= t1) {
-      const e = easeDown && v1 < v0 ? easeDown : ease;
-      return v0 + (v1 - v0) * e((t - t0) / (t1 - t0));
-    }
-  }
-  return kfs[kfs.length - 1]![1];
-}
-
-export function keyvalP(t: number, kfs: KF<Pt>[], ease: (u: number) => number = smoother): Pt {
-  if (t <= kfs[0]![0]) return kfs[0]![1];
-  if (t >= kfs[kfs.length - 1]![0]) return kfs[kfs.length - 1]![1];
-  for (let i = 0; i < kfs.length - 1; i++) {
-    const [t0, v0] = kfs[i]!;
-    const [t1, v1] = kfs[i + 1]!;
-    if (t0 <= t && t <= t1) {
-      const p = ease((t - t0) / (t1 - t0));
-      return { x: v0.x + (v1.x - v0.x) * p, y: v0.y + (v1.y - v0.y) * p };
+      return v0 + (v1 - v0) * ease((t - t0) / (t1 - t0));
     }
   }
   return kfs[kfs.length - 1]![1];
@@ -206,13 +187,47 @@ export function clampCenter(
   return { x: cx, y: cy };
 }
 
-// --- stage (zoom/pan) keyframes from the composition -------------------
+// --- stage (camera rect) keyframes from the composition ----------------
+
+/** The camera as a viewport RECT in video-px: centre + full viewport width
+ *  (height is implied by the output aspect: h = w·oH/oW). scale = oW / w. */
+export type CamRect = { cx: number; cy: number; w: number };
 
 export type StageKeyframes = {
-  z: KF<number>[]; // absolute stage scale over time (seconds)
-  c: KF<Pt>[]; // raw video-px center over time (clamp at eval)
+  r: KF<CamRect>[]; // viewport rect over time (seconds)
   T: number; // total duration (s)
 };
+
+/** Interpolate the rect track: centre AND size move under the SAME eased
+ *  parameter. This is the whole trick (and what reference recorder does — verified
+ *  by frame-tracking an reference export: its pan curve overlays its viewport-WIDTH
+ *  curve exactly, not its scale curve): lerping the rect keeps every corner on
+ *  a straight line, so the screen-space path of the zoom target is strictly
+ *  monotone toward frame centre — no wrong-way "bounce" for ANY scale pair,
+ *  which scale+centre lerp can't guarantee (it hooks when scale > 2×rest). */
+export function keyvalR(t: number, kfs: KF<CamRect>[], ease: (u: number) => number): CamRect {
+  if (t <= kfs[0]![0]) return kfs[0]![1];
+  if (t >= kfs[kfs.length - 1]![0]) return kfs[kfs.length - 1]![1];
+  for (let i = 0; i < kfs.length - 1; i++) {
+    const [t0, v0] = kfs[i]!;
+    const [t1, v1] = kfs[i + 1]!;
+    if (t0 <= t && t <= t1) {
+      const p = ease((t - t0) / (t1 - t0));
+      // A spring ease (zoomSpring > 0) overshoots p past 1, extrapolating the
+      // rect beyond its target — that's the wanted "snap", but on a deep punch
+      // with a large bounce the extrapolated width could collapse through 0
+      // (scale sign-flip = garbage frames). Floor the width against the
+      // segment's own endpoints so overshoot can tighten at most 2× past the
+      // tighter one; monotone eases (p ∈ [0,1]) never hit the floor.
+      return {
+        cx: v0.cx + (v1.cx - v0.cx) * p,
+        cy: v0.cy + (v1.cy - v0.cy) * p,
+        w: Math.max(v0.w + (v1.w - v0.w) * p, Math.min(v0.w, v1.w) * 0.5),
+      };
+    }
+  }
+  return kfs[kfs.length - 1]![1];
+}
 
 export function buildStageKeyframes(comp: TakeComposition): StageKeyframes {
   const { videoWidth: vW, videoHeight: vH } = comp.source;
@@ -220,7 +235,25 @@ export function buildStageKeyframes(comp: TakeComposition): StageKeyframes {
   const rest = restStageScale(vW, vH, oW, oH, comp.framing.insetFrac);
   const restC: Pt = { x: vW / 2, y: vH / 2 };
   const HOLD = comp.cursor.holdMs / 1000;
-  const ZOUT = comp.cursor.zoomOutMs / 1000;
+  const ZOUT_MS = comp.cursor.zoomOutMs;
+
+  // A framing target is clamped ONCE, here at build time (the viewport crop
+  // stays inside the recording; an axis it doesn't cover centres). Every
+  // keyframe rect is therefore valid — and for a monotone ease (p ∈ [0,1];
+  // every default) lerped rect corners stay between the endpoints' corners, so
+  // every IN-BETWEEN rect is valid too. No per-frame clamp, so the clamp can
+  // never bend a path mid-flight (the old model's per-frame clamp force-
+  // centred the pan while the video under-covered the frame, then released it
+  // mid-zoom — a visible lurch; and its zoom-out "land the centre early"
+  // repair made pull-outs pan-then-zoom two-phase). A zoomSpring bounce > 0
+  // deliberately overshoots PAST the target rect (edge-flush targets can
+  // flash a sliver of backdrop during the settle — the physical cost of
+  // bounce; keyvalR floors only the width collapse).
+  const rectFor = (center: Pt, scale: number): CamRect => {
+    const c = clampCenter(center, scale, vW, vH, oW, oH);
+    return { cx: c.x, cy: c.y, w: oW / scale };
+  };
+  const restR = rectFor(restC, rest);
 
   // Framing anchors over time. A zoom-enabled beat ramps to its target; a
   // scroll (content pans) and a zoom-less press (Escape/Enter whose effect is
@@ -245,101 +278,100 @@ export function buildStageKeyframes(comp: TakeComposition): StageKeyframes {
     }
   }
 
-  // Scale and centre are evaluated independently (keyvalN / keyvalP), so their
-  // keyframe TIMES need not line up — `pushC` adds a centre-only keyframe.
-  const zf: { t: number; s: number }[] = [{ t: 0, s: rest }];
-  const cf: { t: number; c: Pt }[] = [{ t: 0, c: restC }];
-  const push = (t: number, s: number, c: Pt) => {
-    zf.push({ t: Math.max(t, zf[zf.length - 1]!.t + 1e-3), s });
-    cf.push({ t: Math.max(t, cf[cf.length - 1]!.t + 1e-3), c });
-  };
-  const pushC = (t: number, c: Pt) => {
-    cf.push({ t: Math.max(t, cf[cf.length - 1]!.t + 1e-3), c });
-  };
-  // Invert the zoom-OUT easing to time the centre recenter (the centre reaches
-  // rest exactly when the scale re-covers the frame — else the tightening centre-
-  // clamp catches the still-panning centre and re-accelerates it = the "two-stage"
-  // zoom-out stutter, commit b005cbe). The zoom-OUT scale uses panEasing (the
-  // monotone bezier — scale springs only on zoom-IN, settles smoothly on the way
-  // out), so invert THAT, by bisection.
-  const ze = panEasing(comp.cursor);
-  const invEase = (target: number) => {
-    let lo = 0;
-    let hi = 1;
-    for (let i = 0; i < 30; i++) {
-      const m = (lo + hi) / 2;
-      if (ze(m) < target) lo = m;
-      else hi = m;
-    }
-    return (lo + hi) / 2;
-  };
-  // Scale at which the video re-covers the frame on both axes; below it the
-  // centre is forced to video-centre (clampCenter), so a recenter must FINISH by
-  // here or the tightening clamp "catches" the still-panning centre.
-  const fillThreshold = Math.max(oW / vW, oH / vH);
+  const targets = anchors.map((e) => rectFor(e.center, e.scale));
 
-  let cur = { s: rest, c: restC };
+  // Effective ramp start per anchor. A PULL-OUT (wider viewport than the rect
+  // it leaves) paces with zoomOutMs — measured on the reference recorder reference
+  // the pull-out is ~1.8× slower than the punch-in. The stored inAtMs keeps
+  // governing punch-ins/same-size travels, and a HAND-SET inAtMs (≠ the
+  // planner default tMs − zoomInMs) wins even for a pull-out, so the per-beat
+  // timing knob stays live. When the zoomOutMs window would start before the
+  // previous action's end, shorten it toward the punch-in window rather than
+  // cut the payoff — but NEVER squeeze below min(zoomOutMs, zoomInMs) of real
+  // ramp: a pull-out with no window is a jump cut, which is strictly worse
+  // than leaving a payoff a little early.
+  const ZIN_MS = comp.cursor.zoomInMs;
+  const rampStartS = anchors.map((e, i) => {
+    const from = i > 0 ? targets[i - 1]! : restR;
+    const pullOut = targets[i]!.w > from.w + 1e-6;
+    const isDefaultInAt = Math.abs(e.inAtMs - Math.max(0, e.tMs - ZIN_MS)) < 1;
+    if (!pullOut || !isDefaultInAt) return e.inAtMs / 1000;
+    const desired = e.tMs - ZOUT_MS;
+    const prevEndMs = i > 0 ? anchors[i - 1]!.tMs + anchors[i - 1]!.durationMs : 0;
+    const start =
+      desired >= prevEndMs ? desired : Math.min(prevEndMs, e.tMs - Math.min(ZOUT_MS, ZIN_MS));
+    return Math.max(start, 0) / 1000;
+  });
+
+  const rf: { t: number; r: CamRect }[] = [{ t: 0, r: restR }];
+  const push = (t: number, r: CamRect) => {
+    rf.push({ t: Math.max(t, rf[rf.length - 1]!.t + 1e-3), r });
+  };
+
+  let cur = restR;
   anchors.forEach((e, i) => {
-    const rampStart = e.inAtMs / 1000;
     const clickT = e.tMs / 1000;
     // the action plays out (typing/drawing/scrolling) for durationMs after tMs
     // — hold the target framing through it (a point click has duration 0).
     const actionEnd = (e.tMs + e.durationMs) / 1000;
     const next = anchors[i + 1];
-    const holdEndT = next ? next.inAtMs / 1000 : actionEnd + HOLD;
+    const holdEndT = next ? rampStartS[i + 1]! : actionEnd + HOLD;
+    push(rampStartS[i]!, cur); // hold current until ramp begins
+    push(clickT, targets[i]!); // ONE eased rect segment lands at the action
+    cur = targets[i]!;
     // glide: drift the held centre across the hold window (velocity px/s ·
     // holdSeconds), so a held zoom slowly pans instead of sitting dead-static.
-    // (Eased with the stage easing like any centre segment; clampCenter keeps it
-    // in-bounds at read time. invEase below stays on the monotone bezier.)
-    let holdC = e.center;
+    // Clamped like any target so the drift can't leave the recording.
+    let holdR = cur;
     if (e.glide && (e.glide.x !== 0 || e.glide.y !== 0)) {
       const holdDur = Math.max(0, holdEndT - clickT);
-      holdC = { x: e.center.x + e.glide.x * holdDur, y: e.center.y + e.glide.y * holdDur };
+      holdR = rectFor(
+        { x: e.center.x + e.glide.x * holdDur, y: e.center.y + e.glide.y * holdDur },
+        e.scale,
+      );
     }
-    push(rampStart, cur.s, cur.c); // hold current until ramp begins
-    // Zoom-OUT across the fill-threshold INTO a beat (e.g. a rest/full-view beat):
-    // land the centre on its target AT the crossing so the tightening centre-clamp
-    // doesn't catch the still-panning centre and re-accelerate it. This is the same
-    // two-stage stutter b005cbe killed for the FINAL zoom-out — here for the
-    // between-beats ones (which went through this ramp and never got the fix).
-    if (
-      cur.s > fillThreshold &&
-      e.scale < fillThreshold &&
-      fillThreshold > rest &&
-      clickT > rampStart &&
-      Math.hypot(e.center.x - cur.c.x, e.center.y - cur.c.y) > 1
-    ) {
-      const uCross = invEase((fillThreshold - cur.s) / (e.scale - cur.s));
-      pushC(rampStart + uCross * (clickT - rampStart), e.center);
-    }
-    push(clickT, e.scale, e.center); // ramp to target by the action
-    cur = { s: e.scale, c: holdC };
-    if (next) {
-      // hold (or glide) the target until the next anchor begins ramping
-      push(holdEndT, cur.s, cur.c);
-    } else {
-      const holdEnd = holdEndT;
-      push(holdEnd, cur.s, cur.c);
-      // Final zoom-out. Land the CENTRE on rest at the fill-threshold crossing
-      // (the scale keeps its single smooth segment) so the centre clamp — which
-      // tightens to a point as the video re-covers the frame — never catches the
-      // still-panning centre and re-accelerates it (a two-stage stutter). Only
-      // when the zoom actually overfills AND sits off-centre.
-      const offset = Math.hypot(cur.c.x - restC.x, cur.c.y - restC.y) > 1;
-      if (offset && cur.s > fillThreshold && fillThreshold > rest) {
-        const uCross = invEase((fillThreshold - cur.s) / (rest - cur.s));
-        pushC(holdEnd + uCross * ZOUT, restC);
-      }
-      push(holdEnd + ZOUT, rest, restC); // zoom back out
-      cur = { s: rest, c: restC };
+    push(holdEndT, holdR); // hold (or glide) until the next ramp / the tail
+    cur = holdR;
+    if (!next) {
+      push(holdEndT + ZOUT_MS / 1000, restR); // final zoom-out, one rect segment
+      cur = restR;
     }
   });
 
-  const lastT = Math.max(zf[zf.length - 1]!.t, cf[cf.length - 1]!.t);
+  const lastT = rf[rf.length - 1]!.t;
   const T = Math.max(comp.durationMs / 1000, lastT) + 0.3;
-  push(T, rest, restC);
+  push(T, restR);
 
-  return { z: zf.map((f) => [f.t, f.s]), c: cf.map((f) => [f.t, f.c]), T };
+  return { r: rf.map((f) => [f.t, f.r]), T };
+}
+
+/** The one camera evaluator — scene.tsx (render) and the editor preview both
+ *  consume THIS, so preview and export can never drift. */
+export function stageCamera(comp: TakeComposition): {
+  T: number;
+  rest: number;
+  peakScale: number;
+  at: (t: number) => { scale: number; center: Pt };
+} {
+  const stage = buildStageKeyframes(comp);
+  const ease = stageEasing(comp.cursor);
+  const oW = comp.output.width;
+  const rest = restStageScale(
+    comp.source.videoWidth,
+    comp.source.videoHeight,
+    oW,
+    comp.output.height,
+    comp.framing.insetFrac,
+  );
+  const at = (t: number) => {
+    const r = keyvalR(t, stage.r, ease);
+    return { scale: oW / r.w, center: { x: r.cx, y: r.cy } };
+  };
+  // Peak by sampling (not just keyframe extremes): a spring ease overshoots
+  // mid-segment, so the true peak can sit above every keyframe.
+  let peakScale = stage.r.reduce((m, [, r]) => Math.max(m, oW / r.w), rest);
+  for (let i = 0; i <= 720; i++) peakScale = Math.max(peakScale, at((i / 720) * stage.T).scale);
+  return { T: stage.T, rest, peakScale, at };
 }
 
 // --- cursor path (eased, with gentle arc) ------------------------------

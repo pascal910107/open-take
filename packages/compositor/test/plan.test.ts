@@ -7,7 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { planComposition } from "../src/plan.js";
-import { buildLegs, buildStageKeyframes, cursorPos, keyvalN, restStageScale } from "../src/math.js";
+import { buildLegs, cursorPos, keyvalN, stageCamera } from "../src/math.js";
 import type { CaptureLog } from "../src/types.js";
 
 const VW = 1920,
@@ -89,33 +89,47 @@ test("drag easing: 'smooth' replays the baked smootherstep, absent ⇒ linear", 
   assert.ok(Math.abs(at(smooth) - 203.5) < 3, `smooth eases in (got ${at(smooth)})`);
 });
 
-test("zoom-out: an off-centre zoom lands the centre on rest before the scale", () => {
+test("final zoom-out: one eased rect — centre and viewport travel in lockstep", () => {
   // First click orients (no zoom); the second is a small off-centre target → it
-  // zooms in, then the final zoom-out must settle the CENTRE to rest before the
-  // scale finishes, else the tightening centre clamp catches it (a two-stage
-  // stutter). The fix adds one centre-only keyframe at the fill-threshold cross.
+  // zooms in, then the final zoom-out is ONE eased viewport-rect segment:
+  // centre and viewport width share the same eased parameter at every instant
+  // (single-phase — the old dual-track model produced a pan-then-zoom lurch),
+  // and the screen distance of the departed frame's centre shrinks monotonically.
   const comp = planComposition(
     log([
       { kind: "click", x: 960, y: 540, box: { x: 940, y: 520, w: 40, h: 40 }, tMs: 1000 },
       { kind: "click", x: 300, y: 200, box: { x: 290, y: 190, w: 20, h: 20 }, tMs: 3000 },
     ]),
   );
-  const stage = buildStageKeyframes(comp);
   const zoomed = comp.events.some((e) => e.kind === "click" && e.zoom.enabled && e.tMs === 3000);
   assert.ok(zoomed, "second click zooms (off-centre target)");
-  // the fix adds exactly one centre-only keyframe (centre settles early); scale
-  // keeps its single smooth zoom-out segment.
-  assert.equal(stage.c.length, stage.z.length + 1, "one extra centre-only keyframe");
-  // by the time the scale reaches rest (zoom-out end), the centre is ALREADY on
-  // video-centre — so the clamp never catches a still-panning centre.
-  const [cx, cy] = [comp.source.videoWidth / 2, comp.source.videoHeight / 2];
-  const scaleRestT = stage.z[stage.z.length - 2]![0]; // zoom-out end (before padding)
-  const before = stage.c.filter(([t]) => t < scaleRestT - 1e-6);
-  const landed = before[before.length - 1]![1];
+  const cam = stageCamera(comp);
+  const e = comp.events[1]!;
+  const t0 = (e.tMs + comp.cursor.holdMs) / 1000; // hold end = zoom-out start
+  const t1 = t0 + comp.cursor.zoomOutMs / 1000; // zoom-out end
+  const oW = comp.output.width;
+  const a = cam.at(t0);
+  const b = cam.at(t1 + 1e-3);
+  assert.ok(Math.abs(b.scale - cam.rest) < 1e-6, "scale lands on rest");
   assert.ok(
-    Math.abs(landed.x - cx) < 1 && Math.abs(landed.y - cy) < 1,
-    `centre is on rest (${landed.x},${landed.y}) before the scale finishes`,
+    Math.abs(b.center.x - VW / 2) < 1e-6 && Math.abs(b.center.y - VH / 2) < 1e-6,
+    "centre lands on video-centre WITH the scale (same segment end)",
   );
+  const w0 = oW / a.scale;
+  const w1 = oW / b.scale;
+  // the arriving framing's centre (video-centre) must approach the frame
+  // centre MONOTONICALLY on screen — no wrong-way swing, ever (rect-lerp
+  // guarantees it; the old dual-track model violated it).
+  let prev = Number.POSITIVE_INFINITY;
+  for (let k = 1; k <= 20; k++) {
+    const { scale, center } = cam.at(t0 + (k / 20) * (t1 - t0));
+    const uw = (oW / scale - w0) / (w1 - w0);
+    const uc = (center.x - a.center.x) / (b.center.x - a.center.x);
+    assert.ok(Math.abs(uw - uc) < 1e-9, `lockstep at k=${k}: u_width ${uw} vs u_centre ${uc}`);
+    const d = Math.hypot((VW / 2 - center.x) * scale, (VH / 2 - center.y) * scale);
+    assert.ok(d <= prev + 1e-9, `target approaches monotonically at k=${k} (${d} > ${prev})`);
+    prev = d;
+  }
 });
 
 test("zoom easing: keyvalN applies the supplied curve (default smootherstep)", () => {
@@ -236,10 +250,8 @@ test("stage keyframes hold the press reveal through its dwell", () => {
       },
     ]),
   );
-  const stage = buildStageKeyframes(comp);
-  // the zoom target scale should appear and be held: find the max scale keyframe
-  const maxScale = Math.max(...stage.z.map(([, s]) => s));
-  assert.ok(maxScale > 1, "stage zooms in for the reveal");
+  // the zoom target scale should appear and be held
+  assert.ok(stageCamera(comp).peakScale > 1, "stage zooms in for the reveal");
 });
 
 test("a zoom followed by a scroll returns to full view through the scroll", () => {
@@ -257,18 +269,108 @@ test("a zoom followed by a scroll returns to full view through the scroll", () =
       { kind: "scroll", x: 960, y: 540, dy: 900, tMs: 3000, durationMs: 1000 },
     ]),
   );
-  const stage = buildStageKeyframes(comp);
-  const rest = restStageScale(
-    VW,
-    VH,
-    comp.output.width,
-    comp.output.height,
-    comp.framing.insetFrac,
-  );
-  const atClick = keyvalN(1.0, stage.z); // zoomed in at the click
-  const midScroll = keyvalN(3.5, stage.z); // mid-scroll → must be back at rest
+  const cam = stageCamera(comp);
+  const rest = cam.rest;
+  const atClick = cam.at(1.0).scale; // zoomed in at the click
+  const midScroll = cam.at(3.5).scale; // mid-scroll → must be back at rest
   assert.ok(atClick > rest + 0.05, `expected zoom-in at click (${atClick} vs rest ${rest})`);
   assert.ok(Math.abs(midScroll - rest) < 1e-2, `expected rest mid-scroll, got ${midScroll}`);
+});
+
+test("legacy zoomEase (bezier) is still honored over the default spring", () => {
+  const comp = planComposition(
+    log([
+      { kind: "click", x: 960, y: 540, box: { x: 940, y: 520, w: 40, h: 40 }, tMs: 1000 },
+      { kind: "click", x: 300, y: 200, box: { x: 290, y: 190, w: 20, h: 20 }, tMs: 3000 },
+    ]),
+  );
+  const legacy = { ...comp, cursor: { ...comp.cursor, zoomEase: [0.3, 0, 0.2, 1] as [number, number, number, number] } };
+  // sample mid-ramp of the second beat's punch-in: the two curves must differ
+  const e = comp.events[1]!;
+  const tm = (e.zoom.inAtMs + (e.tMs - e.zoom.inAtMs) * 0.25) / 1000;
+  const sSpring = stageCamera(comp).at(tm).scale;
+  const sBezier = stageCamera(legacy).at(tm).scale;
+  assert.ok(
+    Math.abs(sSpring - sBezier) > 1e-3,
+    `zoomEase must change the curve (spring ${sSpring} vs bezier ${sBezier})`,
+  );
+});
+
+test("pull-out overlapped by the previous action still gets a real ramp (no jump cut)", () => {
+  // The type's payoff (durationMs) runs PAST the scroll's zoomOutMs window —
+  // the ramp must shorten, never collapse to a 1ms jump cut.
+  const comp = planComposition(
+    log([
+      {
+        kind: "type",
+        x: 960,
+        y: 172,
+        box: { x: 641, y: 150, w: 300, h: 44 },
+        tMs: 1000,
+        text: "abc",
+        durationMs: 3000,
+        zoom: "always",
+      },
+      { kind: "scroll", x: 960, y: 540, dy: 600, tMs: 2500, durationMs: 800 },
+    ]),
+  );
+  const cam = stageCamera(comp);
+  // max per-30fps-frame scale step through the whole timeline stays gradual
+  let maxStep = 0;
+  for (let t = 0; t < cam.T; t += 1 / 30) {
+    maxStep = Math.max(maxStep, Math.abs(cam.at(t + 1 / 30).scale - cam.at(t).scale));
+  }
+  assert.ok(
+    maxStep < 0.35,
+    `no frame-to-frame scale jump (worst step ${maxStep.toFixed(3)}/frame)`,
+  );
+});
+
+test("spring overshoot cannot collapse the viewport (extreme bounce + deep zoom)", () => {
+  const comp = planComposition(
+    log([{ kind: "click", x: 960, y: 540, box: { x: 950, y: 530, w: 20, h: 20 }, tMs: 2000 }]),
+  );
+  const e = comp.events[0]!;
+  const wild = {
+    ...comp,
+    cursor: { ...comp.cursor, zoomSpring: 0.59 },
+    events: [{ ...e, zoom: { ...e.zoom, enabled: true, scale: 5, center: { x: 960, y: 540 } } }],
+  };
+  const cam = stageCamera(wild);
+  for (let t = 0; t < cam.T; t += 0.01) {
+    const s = cam.at(t).scale;
+    assert.ok(s > 0 && s < 12, `scale stays sane at t=${t.toFixed(2)} (got ${s})`);
+  }
+});
+
+test("a hand-set inAtMs stays live for a pull-out beat", () => {
+  const comp = planComposition(
+    log([
+      {
+        kind: "click",
+        x: 300,
+        y: 200,
+        box: { x: 290, y: 190, w: 20, h: 20 },
+        tMs: 2000,
+        zoom: "always",
+      },
+      { kind: "scroll", x: 960, y: 540, dy: 600, tMs: 8000, durationMs: 500 },
+    ]),
+  );
+  const custom = {
+    ...comp,
+    events: comp.events.map((e, i) =>
+      i === 1 ? { ...e, zoom: { ...e.zoom, inAtMs: 7600 } } : e,
+    ),
+  };
+  // default: pull-out paces with zoomOutMs (starts ~ tMs−1340); custom: 7600.
+  const sDefault = stageCamera(comp).at(7.0).scale;
+  const sCustom = stageCamera(custom).at(7.0).scale;
+  assert.ok(sDefault < stageCamera(comp).peakScale - 0.05, "default pull-out already moving at 7.0s");
+  assert.ok(
+    Math.abs(sCustom - stageCamera(custom).peakScale) < 1e-6,
+    `custom inAtMs 7600 ⇒ still holding at 7.0s (got ${sCustom})`,
+  );
 });
 
 test("durations flow into total composition length (scroll/hover/press)", () => {

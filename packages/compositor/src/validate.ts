@@ -187,6 +187,24 @@ export function validateComposition(
     }
   }
 
+  // camera-rect spring: bounce shapes the ONE ease driving centre+size, so an
+  // out-of-range value corrupts every camera move (see math.ts springEase).
+  const spring = comp.cursor.zoomSpring;
+  if (spring != null) {
+    if (!(spring >= 0 && spring < 0.6))
+      err(
+        "cursor.zoomSpring",
+        `zoomSpring ${spring} outside [0, 0.6)`,
+        "0 = critically damped (the default feel); keep bounce ≤ 0.3",
+      );
+    else if (spring > 0.3)
+      warn(
+        "cursor.zoomSpring",
+        `zoomSpring ${spring} is a lot of bounce — the rect overshoot can flash backdrop at edge-flush targets and over-zoom tight punches`,
+        "keep ≤ 0.3 (the editor slider's max) unless the flash is wanted",
+      );
+  }
+
   // tail: the composition must outlast the last action (+ a little settle)
   if (comp.durationMs < lastEnd)
     err(

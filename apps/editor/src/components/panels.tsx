@@ -505,7 +505,7 @@ export function MotionPane({ c }: P) {
         <Row label="放大 退出" value={`${(cur.zoomOutMs / 1000).toFixed(2)}s`}>
           <Slider
             min={300}
-            max={1400}
+            max={1800}
             step={20}
             value={cur.zoomOutMs}
             onGestureStart={c.beginGesture}
@@ -522,7 +522,14 @@ export function MotionPane({ c }: P) {
             onChange={(v) => c.update((cc) => setCursor(cc, { holdMs: v }), "hold")}
           />
         </Row>
-        <Row label="彈性" value={(cur.zoomSpring ?? 0).toFixed(2)}>
+        {/* 0 = 預設臨界阻尼彈簧。舊 composition 若帶 zoomEase（貝茲），彈簧
+            未設時貝茲會生效 — 如實顯示，拖任一下滑桿（或套用節奏預設）即改用彈簧。 */}
+        <Row
+          label="彈性"
+          value={
+            cur.zoomSpring == null && cur.zoomEase ? "貝茲(舊)" : (cur.zoomSpring ?? 0).toFixed(2)
+          }
+        >
           <Slider
             min={0}
             max={0.3}
@@ -530,7 +537,16 @@ export function MotionPane({ c }: P) {
             value={cur.zoomSpring ?? 0}
             onGestureStart={c.beginGesture}
             onChange={(v) =>
-              c.update((cc) => setCursor(cc, { zoomSpring: v === 0 ? undefined : v }), "spring")
+              c.update(
+                (cc) =>
+                  setCursor(cc, {
+                    // moving the slider commits to the spring family: an explicit
+                    // 0 wins over a legacy zoomEase; with no zoomEase, 0 clears
+                    // back to the (identical) default spring.
+                    zoomSpring: v === 0 ? (cc.cursor.zoomEase ? 0 : undefined) : v,
+                  }),
+                "spring",
+              )
             }
           />
         </Row>

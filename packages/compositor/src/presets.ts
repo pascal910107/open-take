@@ -41,11 +41,16 @@ export function zoomLevelName(scale: number, tol = 0.07): ZoomLevelName | null {
 export type MotionPreset = Pick<
   CursorConfig,
   "travelWidthsPerSec" | "holdMs" | "zoomInMs" | "zoomOutMs"
->;
+> & { zoomEase?: undefined };
+// zoomIn/zoomOut anchored to the measured reference recorder springs (730/1340 —
+// see DEFAULT_CURSOR); calm/brisk scale both while keeping out ≈ 1.8× in.
+// Each preset also CLEARS a legacy zoomEase (spread leaves the key undefined;
+// JSON drops it) so applying a pace migrates an old composition onto the
+// default measured-SS spring curve instead of silently keeping the old bezier.
 export const MOTION: Record<"calm" | "natural" | "brisk", MotionPreset> = {
-  calm: { travelWidthsPerSec: 0.28, holdMs: 1500, zoomInMs: 950, zoomOutMs: 950 },
-  natural: { travelWidthsPerSec: 0.35, holdMs: 1100, zoomInMs: 760, zoomOutMs: 800 },
-  brisk: { travelWidthsPerSec: 0.45, holdMs: 750, zoomInMs: 560, zoomOutMs: 600 },
+  calm: { travelWidthsPerSec: 0.28, holdMs: 1500, zoomInMs: 900, zoomOutMs: 1650, zoomEase: undefined },
+  natural: { travelWidthsPerSec: 0.35, holdMs: 1100, zoomInMs: 730, zoomOutMs: 1340, zoomEase: undefined },
+  brisk: { travelWidthsPerSec: 0.45, holdMs: 750, zoomInMs: 550, zoomOutMs: 1000, zoomEase: undefined },
 };
 export type MotionName = keyof typeof MOTION;
 

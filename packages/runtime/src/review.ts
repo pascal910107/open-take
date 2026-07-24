@@ -347,7 +347,11 @@ export function abWindow(
   for (const c of comps) {
     const e = c.events[i];
     if (!e) continue;
-    from = Math.min(from, Math.max(0, e.zoom.inAtMs - 1200));
+    // A PULL-OUT beat's camera ramp can start up to zoomOutMs before its tMs
+    // (math.ts pull-out pacing — earlier than the stored inAtMs); open the
+    // window on whichever is earlier so the clip keeps a static lead-in.
+    const rampFrom = Math.min(e.zoom.inAtMs, e.tMs - c.cursor.zoomOutMs);
+    from = Math.min(from, Math.max(0, rampFrom - 1200));
     const next = c.events[i + 1];
     const ownEnd = e.tMs + (e.durationMs ?? 0) + c.cursor.holdMs + c.cursor.zoomOutMs;
     // no durationMs clamp: the scene runs to its last keyframe + tail, and a

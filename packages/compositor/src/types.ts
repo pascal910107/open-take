@@ -201,23 +201,27 @@ export type CursorConfig = {
   rippleMs: number;
   /** ms to hold a zoom after the action settles, before zooming back out */
   holdMs: number;
-  /** ms for the zoom-OUT ramp (back to rest) */
+  /** ms for a zoom-OUT / pull-out ramp (to rest OR to any wider framing).
+   *  Measured on a reference recorder export: the pull-out is ~1.8× slower than the
+   *  punch-in (their zoom-out spring ω≈5.2 rad/s ⇒ ~1340ms of critically-damped
+   *  settle) — a slow, soft release reads premium; a fast one reads like a
+   *  flinch. */
   zoomOutMs: number;
   /** ms for the zoom-IN ramp (into a target). Decoupled from travelMs so the
-   *  zoom can be slower/gentler than the cursor (a cinematic ~1s zoom). */
+   *  zoom can be slower/gentler than the cursor. Measured reference punch-in spring
+   *  ω≈9.4 rad/s ⇒ ~730ms. */
   zoomInMs: number;
-  /** Easing for the zoom/pan stage ramps (scale + center together), as
-   *  cubic-bezier control points. Absent ⇒ symmetric smootherstep — whose broad
-   *  near-constant-velocity middle reads a bit linear, esp. on the zoom-OUT
-   *  settle. A decel-biased curve gives a softer landing into rest. */
+  /** Optional cubic-bezier easing for the camera-rect ramps (centre + size in
+   *  lockstep — see math.ts stageCamera). Absent ⇒ the default critically-
+   *  damped spring (the measured reference recorder curve). Set this only to force a
+   *  bezier feel; `zoomSpring` wins over it when both are set. */
   zoomEase?: [number, number, number, number];
-  /** Spring easing for the zoom/pan stage ramps, as a `bounce` amount ∈ [0,~0.6):
-   *  0 = critically damped (a soft physical ease-out), higher = more overshoot/
-   *  snap (the "silky" settle a premium screen-recorder has; ~0.06 for zoom). When
-   *  set, this WINS over `zoomEase` (see math.ts stageEasing). Absent ⇒ use
-   *  `zoomEase`/smootherstep. The segment duration stays zoomInMs/zoomOutMs;
-   *  bounce only shapes the curve. NB: large bounce can undershoot rest on the
-   *  zoom-OUT (momentary backdrop dead-space) — keep it small for zoom. */
+  /** Spring easing for the camera-rect ramps, as a `bounce` amount ∈ [0,~0.6):
+   *  0 = critically damped (the measured reference recorder zoom curve — also the
+   *  default when neither zoomSpring nor zoomEase is set), higher = more
+   *  overshoot/snap. The segment duration stays zoomInMs/zoomOutMs; bounce only
+   *  shapes the curve. Bounce > 0 overshoots the RECT (a touch past the target
+   *  frame, then settle) — keep it small. */
   zoomSpring?: number;
   /** ms to delay the synthetic cursor along a DRAG stroke, compensating for the
    *  capture pipeline latency: the captured ink appears ~this long after the pen
@@ -382,15 +386,13 @@ export const DEFAULT_CURSOR: CursorConfig = {
   arcMax: 24,
   rippleMs: 450,
   holdMs: 1100,
-  // Gentle, cinematic zoom (a ~1s ramp reads as premium); our
-  // old 600ms tied-to-travel zoom felt snappy/mechanical by comparison.
-  zoomOutMs: 800,
-  zoomInMs: 760,
-  // Zoom/pan stage easing. Same decel-biased curve as the cursor — symmetric
-  // smootherstep (the fallback) has a broad near-constant-velocity middle that
-  // reads a touch linear, especially as the zoom-OUT settles back to rest; this
-  // gives a soft landing into rest. Applied to scale + center together.
-  zoomEase: [0.3, 0.0, 0.2, 1.0],
+  // Camera ramp durations, measured off a reference recorder export by frame-
+  // tracking (see math.ts springEase): punch-in spring ω≈9.4 rad/s ≈ 730ms,
+  // pull-out ω≈5.2 ≈ 1340ms. The slow soft release is half the premium feel.
+  // No zoomEase/zoomSpring set ⇒ stageEasing falls to springEase(0), the
+  // critically-damped spring that IS the measured SS curve over these windows.
+  zoomOutMs: 1340,
+  zoomInMs: 730,
   // The captured ink trails the pen by the screencast/encode pipeline latency τ;
   // delay the cursor by τ so its tip rides the ink front. Set to τ EXACTLY and
   // the cursor locks to the ink at ALL stroke speeds (both are the same time-

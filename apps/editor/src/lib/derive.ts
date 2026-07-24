@@ -1,16 +1,7 @@
 // Pure, memoizable derivations shared by the engine (drawing) and the UI
 // (timeline). All geometry/timing comes from the compositor's math — this just
 // packages it for repeated reads at arbitrary t.
-import {
-  buildLegs,
-  buildStageKeyframes,
-  clampCenter,
-  keyvalN,
-  keyvalP,
-  panEasing,
-  restStageScale,
-  stageEasing,
-} from "./compositor";
+import { stageCamera } from "./compositor";
 import type { CompEvent, Pt, TakeComposition } from "./compositor";
 
 export type Derived = {
@@ -28,23 +19,12 @@ export type Derived = {
 };
 
 export function derive(comp: TakeComposition): Derived {
-  const vW = comp.source.videoWidth;
-  const vH = comp.source.videoHeight;
-  const oW = comp.output.width;
-  const oH = comp.output.height;
-  const stage = buildStageKeyframes(comp);
-  const rest = restStageScale(vW, vH, oW, oH, comp.framing.insetFrac);
-  const scaleEase = stageEasing(comp.cursor); // zoom-IN: spring → bezier → smoother
-  const panEase = panEasing(comp.cursor); // zoom-OUT scale + centre: smooth bezier (no overshoot)
-
-  // spring on the way IN, bezier on the way OUT (smooth settle, never abrupt).
-  // Math.max(rest, …) is a belt-and-suspenders floor (bezier-out can't dip anyway).
-  const scaleAt = (t: number) => Math.max(rest, keyvalN(t, stage.z, scaleEase, panEase));
-  const centerAt = (t: number) =>
-    clampCenter(keyvalP(t, stage.c, panEase), scaleAt(t), vW, vH, oW, oH);
-  const peakScale = stage.z.reduce((m, [, s]) => Math.max(m, s), rest);
-
-  return { comp, T: stage.T, rest, scaleAt, centerAt, peakScale };
+  // The compositor's own camera evaluator (one eased viewport rect — see
+  // math.ts stageCamera). scene.tsx consumes the same one, so preview == export.
+  const cam = stageCamera(comp);
+  const scaleAt = (t: number) => cam.at(t).scale;
+  const centerAt = (t: number) => cam.at(t).center;
+  return { comp, T: cam.T, rest: cam.rest, scaleAt, centerAt, peakScale: cam.peakScale };
 }
 
 /** Sample scale(t) across the whole timeline → points for the area curve. */
