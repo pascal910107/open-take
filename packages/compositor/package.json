@@ -1,7 +1,7 @@
 {
   "name": "@open-take/compositor",
-  "version": "0.1.2",
-  "description": "Polish compositor (D3) \u2014 event log + captured frames -> polished mp4 + editable revideo composition.",
+  "version": "0.2.0",
+  "description": "Polish compositor (D3) — event log + captured frames -> polished mp4 + editable revideo composition.",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -9,7 +9,12 @@
   "exports": {
     ".": "./dist/index.js"
   },
-  "files": ["dist", "src/**/*.ts", "src/**/*.tsx", "src/scene/tsconfig.json"],
+  "files": [
+    "dist",
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "src/scene/tsconfig.json"
+  ],
   "scripts": {
     "build": "tsdown",
     "typecheck": "tsc --noEmit",
@@ -18,13 +23,13 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
+    "@ffprobe-installer/ffprobe": "^2.1.2",
+    "@open-take/revideo-renderer": "workspace:*",
     "@revideo/2d": "0.11.0",
     "@revideo/core": "0.11.0",
-    "@open-take/revideo-renderer": "workspace:*",
     "@revideo/ui": "0.11.0",
-    "@revideo/vite-plugin": "0.11.0",
-    "@ffmpeg-installer/ffmpeg": "^1.1.0",
-    "@ffprobe-installer/ffprobe": "^2.1.2"
+    "@revideo/vite-plugin": "0.11.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.1",
@@ -38,7 +43,14 @@
   "publishConfig": {
     "access": "public"
   },
-  "keywords": ["demo", "screen-recording", "video", "agent", "cdp", "screencast"],
+  "keywords": [
+    "demo",
+    "screen-recording",
+    "video",
+    "agent",
+    "cdp",
+    "screencast"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/pascal910107/open-take.git",

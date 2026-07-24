@@ -326,6 +326,13 @@ capture:     demo.capture.mp4        ← render reads this (the frozen recording
 capture log: demo.capture.json       ← render auto-loads this (capture-lock ground truth)
 ```
 
+After the capture, `make` frame-diffs the recording around every action and
+writes what each one actually changed into the log (`effectBox` — the changed
+region; `changeCoverage` — how much of the frame it touched). The auto-camera
+frames the PAYOFF region rather than just the clicked control (a search's
+results, a preview that swaps elsewhere) and pulls out to full view on global
+repaints (nav / restyle). Fully automatic; you never write these fields.
+
 ### refine (re-render edits — no app drive)
 ```
 npx open-take render demo.mp4        # <take> form: siblings resolve by convention

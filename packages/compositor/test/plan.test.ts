@@ -4,10 +4,10 @@
 // the cursor and don't ripple; hover behaves like a click; press frames a
 // reveal; durations flow into the timeline.
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
-import { planComposition } from "../src/plan.js";
+import { test } from "node:test";
 import { buildLegs, cursorPos, keyvalN, stageCamera } from "../src/math.js";
+import { planComposition } from "../src/plan.js";
 import type { CaptureLog } from "../src/types.js";
 
 const VW = 1920,
@@ -54,7 +54,10 @@ test("travel is distance-aware: speed held ~constant, clamped to [min,max]", () 
   assert.ok(Math.abs(dur(0) - 0.3) < 0.02, `short hop floored to min (got ${dur(0).toFixed(3)}s)`);
   assert.ok(Math.abs(dur(1) - 1.4) < 0.02, `long sweep capped to max (got ${dur(1).toFixed(3)}s)`);
   // 640px / 0.576 px/ms ≈ 1.111s — proportional, strictly between the clamps.
-  assert.ok(Math.abs(dur(2) - 1.111) < 0.03, `mid travel scales with distance (got ${dur(2).toFixed(3)}s)`);
+  assert.ok(
+    Math.abs(dur(2) - 1.111) < 0.03,
+    `mid travel scales with distance (got ${dur(2).toFixed(3)}s)`,
+  );
   assert.ok(dur(0) < dur(2) && dur(2) < dur(1), "duration grows with distance");
 });
 
@@ -284,7 +287,10 @@ test("legacy zoomEase (bezier) is still honored over the default spring", () => 
       { kind: "click", x: 300, y: 200, box: { x: 290, y: 190, w: 20, h: 20 }, tMs: 3000 },
     ]),
   );
-  const legacy = { ...comp, cursor: { ...comp.cursor, zoomEase: [0.3, 0, 0.2, 1] as [number, number, number, number] } };
+  const legacy = {
+    ...comp,
+    cursor: { ...comp.cursor, zoomEase: [0.3, 0, 0.2, 1] as [number, number, number, number] },
+  };
   // sample mid-ramp of the second beat's punch-in: the two curves must differ
   const e = comp.events[1]!;
   const tm = (e.zoom.inAtMs + (e.tMs - e.zoom.inAtMs) * 0.25) / 1000;
@@ -359,18 +365,49 @@ test("a hand-set inAtMs stays live for a pull-out beat", () => {
   );
   const custom = {
     ...comp,
-    events: comp.events.map((e, i) =>
-      i === 1 ? { ...e, zoom: { ...e.zoom, inAtMs: 7600 } } : e,
-    ),
+    events: comp.events.map((e, i) => (i === 1 ? { ...e, zoom: { ...e.zoom, inAtMs: 7600 } } : e)),
   };
   // default: pull-out paces with zoomOutMs (starts ~ tMs−1340); custom: 7600.
   const sDefault = stageCamera(comp).at(7.0).scale;
   const sCustom = stageCamera(custom).at(7.0).scale;
-  assert.ok(sDefault < stageCamera(comp).peakScale - 0.05, "default pull-out already moving at 7.0s");
+  assert.ok(
+    sDefault < stageCamera(comp).peakScale - 0.05,
+    "default pull-out already moving at 7.0s",
+  );
   assert.ok(
     Math.abs(sCustom - stageCamera(custom).peakScale) < 1e-6,
     `custom inAtMs 7600 ⇒ still holding at 7.0s (got ${sCustom})`,
   );
+});
+
+test("press Escape dismisses — full view even with a tempting effectBox", () => {
+  // The frame-diff of a dismissal is the VACATED overlay region; framing it
+  // would punch into blank space. Escape means "close" — the director must
+  // return to full view regardless of the annotation.
+  const comp = planComposition(
+    log([
+      {
+        kind: "click",
+        x: 300,
+        y: 200,
+        box: { x: 290, y: 190, w: 20, h: 20 },
+        tMs: 1000,
+        zoom: "always",
+      },
+      {
+        kind: "press",
+        x: 960,
+        y: 540,
+        keys: "Escape",
+        tMs: 3200,
+        effectBox: { x: 700, y: 300, w: 400, h: 300 },
+        changeCoverage: 0.12,
+      },
+    ]),
+  );
+  const esc = comp.events[1]!;
+  assert.equal(esc.zoom.enabled, false, "Escape holds full view");
+  assert.match(esc.zoom.reason, /dismissal/i);
 });
 
 test("durations flow into total composition length (scroll/hover/press)", () => {

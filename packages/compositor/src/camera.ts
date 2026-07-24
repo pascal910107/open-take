@@ -45,6 +45,8 @@ export type Beat = {
   intent: ZoomIntent;
   /** short label (sel / note) for the cluster tag in the reason. */
   label?: string;
+  /** press only: the key chord (for the Escape-dismissal rule). */
+  keys?: string;
 };
 
 /** The director's per-beat verdict. plan.ts adds `inAtMs` to make a full
@@ -134,7 +136,14 @@ export function directCamera(
 
     // explicit overrides win, and are segment boundaries (Q2 / point 3).
     if (b.intent === "never")
-      return { roi, scale, forceFull: true, forcePunch: false, boundary: true, reason: "plan: zoom=never → full view" };
+      return {
+        roi,
+        scale,
+        forceFull: true,
+        forcePunch: false,
+        boundary: true,
+        reason: "plan: zoom=never → full view",
+      };
     if (b.intent === "always")
       return {
         roi,
@@ -149,7 +158,27 @@ export function directCamera(
 
     // a scroll is a pan beat: content moves, the frame stays full-view.
     if (b.kind === "scroll")
-      return { roi: undefined, scale: rest, forceFull: true, forcePunch: false, boundary: true, reason: "scroll — full view (content pans)" };
+      return {
+        roi: undefined,
+        scale: rest,
+        forceFull: true,
+        forcePunch: false,
+        boundary: true,
+        reason: "scroll — full view (content pans)",
+      };
+
+    // Escape DISMISSES: its visual change is something VANISHING, so the
+    // frame-diff effectBox is the vacated region — framing it would punch into
+    // blank space. The editorial payoff of a dismissal is the restored page.
+    if (b.kind === "press" && b.keys && /(^|\+)esc(ape)?$/i.test(b.keys.trim()))
+      return {
+        roi: undefined,
+        scale: rest,
+        forceFull: true,
+        forcePunch: false,
+        boundary: true,
+        reason: "Escape (dismissal) — full view",
+      };
 
     // global repaint (nav / restyle): the payoff is the whole page → pull out.
     // Needs the frame-diff annotation; without it this branch is skipped (the
@@ -167,11 +196,25 @@ export function directCamera(
     // the opening beat orients: open on the whole app (Q3 — falls out of "the
     // camera opens full", no zoomFirst flag). A cold-open uses zoom=always.
     if (i === 0)
-      return { roi, scale, forceFull: true, forcePunch: false, boundary: true, reason: "opening beat — full view (orienting)" };
+      return {
+        roi,
+        scale,
+        forceFull: true,
+        forcePunch: false,
+        boundary: true,
+        reason: "opening beat — full view (orienting)",
+      };
 
     // nothing locatable to frame (a bare Escape/Enter with no reveal).
     if (!roi)
-      return { roi, scale, forceFull: true, forcePunch: false, boundary: true, reason: "no bbox to frame → full view" };
+      return {
+        roi,
+        scale,
+        forceFull: true,
+        forcePunch: false,
+        boundary: true,
+        reason: "no bbox to frame → full view",
+      };
 
     // not tight enough to earn a distinct frame (a big element fills it already).
     if (scale < cam.minZoomScale)
@@ -185,7 +228,14 @@ export function directCamera(
       };
 
     // an ordinary punchable beat — eligible to coalesce with its neighbours.
-    return { roi, scale, forceFull: false, forcePunch: false, boundary: gapBreak, reason: `punch ${scale.toFixed(2)}× (ROI-fit)` };
+    return {
+      roi,
+      scale,
+      forceFull: false,
+      forcePunch: false,
+      boundary: gapBreak,
+      reason: `punch ${scale.toFixed(2)}× (ROI-fit)`,
+    };
   });
 
   // --- phase 2: coalesce adjacent punchable beats into shared-frame clusters --
@@ -216,7 +266,13 @@ export function directCamera(
       last.scale = fit(roi);
       last.center = centerOf(roi);
     } else {
-      segs.push({ idx: [i], kind: "punch", roi: n.roi, scale: n.scale, center: n.roi ? centerOf(n.roi) : restC });
+      segs.push({
+        idx: [i],
+        kind: "punch",
+        roi: n.roi,
+        scale: n.scale,
+        center: n.roi ? centerOf(n.roi) : restC,
+      });
     }
   }
 

@@ -101,6 +101,7 @@ export function planComposition(log: CaptureLog, opts: PlanOpts = {}): TakeCompo
       point,
       intent,
       label,
+      ...(kind === "press" ? { keys: (c as { keys?: string }).keys } : {}),
     };
 
     const ev: Omit<CompEvent, "zoom"> = {
@@ -166,7 +167,10 @@ export function planComposition(log: CaptureLog, opts: PlanOpts = {}): TakeCompo
 // explicit plan intent produces zoom — "always" frames the element bbox, every-
 // thing else holds full view. Deliberately dumb: this is the fully-hand-driven
 // escape hatch, not a second heuristic.
-function manualFraming(b: Beat, rest: number): {
+function manualFraming(
+  b: Beat,
+  rest: number,
+): {
   enabled: boolean;
   scale: number;
   center: Pt;
@@ -180,5 +184,10 @@ function manualFraming(b: Beat, rest: number): {
       reason: "camera off · plan: zoom=always (raise scale by hand)",
     };
   }
-  return { enabled: false, scale: rest, center: b.point, reason: "camera off · full view (no explicit zoom)" };
+  return {
+    enabled: false,
+    scale: rest,
+    center: b.point,
+    reason: "camera off · full view (no explicit zoom)",
+  };
 }

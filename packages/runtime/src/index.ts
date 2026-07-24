@@ -27,6 +27,7 @@ import {
 } from "@open-take/compositor";
 import { type CaptureOpts, captureTake } from "./capture";
 import { ensureChrome } from "./cdp";
+import { annotateCaptureLog } from "./frame-diff";
 import type { TakePlan } from "./types";
 
 export type { TakePlan, TakeStep } from "./types";
@@ -39,6 +40,12 @@ export {
   type InspectElement,
 } from "./capture";
 export { captureTakeCDP } from "./cdp-capture";
+export {
+  annotateCaptureLog,
+  diffFrames,
+  type AnnotateOpts,
+  type FrameDiffResult,
+} from "./frame-diff";
 export { ensureChrome, resolveChrome } from "./cdp";
 export { startEditServer, type EditServerOpts } from "./edit-server";
 export {
@@ -68,6 +75,11 @@ export type MakeTakeOpts = {
   /** tune the default composition (zoom fill/cap, framing, cursor) */
   planOpts?: PlanOpts;
   capture?: Omit<CaptureOpts, "videoPath">;
+  /** frame-diff the capture to annotate each event with what it actually
+   *  changed on screen (effectBox/changeCoverage — the camera director's
+   *  nav-vs-popover + payoff-framing inputs). Default true; annotation
+   *  failures never fail the take. */
+  frameDiff?: boolean;
   logProgress?: boolean;
 };
 
@@ -117,7 +129,16 @@ export async function makeTake(plan: TakePlan, opts: MakeTakeOpts): Promise<Make
   // renderer uses puppeteer-core and never downloads another one.
   const chromePath = await ensureChrome(opts.capture?.chromePath);
 
-  const log = await captureTake(plan, { ...opts.capture, chromePath, videoPath: tmpVideo });
+  const raw = await captureTake(plan, { ...opts.capture, chromePath, videoPath: tmpVideo });
+
+  // Tier-2 annotation: diff the recording around each action so the log
+  // carries what each action actually changed (effectBox/changeCoverage) —
+  // the director's ground truth for payoff-framing and nav pull-outs. The
+  // annotated log is what gets KEPT, so later re-plans keep the signal.
+  const log =
+    opts.frameDiff === false
+      ? raw
+      : await annotateCaptureLog(raw, tmpVideo, { logProgress: opts.logProgress });
 
   // KEEP the capture beside the output so refinement can re-render over it
   // without re-driving the app (the refine loop's whole point). Keep the LOG
