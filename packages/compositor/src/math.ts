@@ -45,10 +45,10 @@ export function cubicBezier(x1: number, y1: number, x2: number, y2: number): (x:
 // then settles within the segment. `bounce` ∈ [0, ~0.6): 0 = critically damped
 // (no overshoot — a soft, physical ease-out); higher = more overshoot/snap.
 //
-// bounce 0 over the default zoom durations IS the measured reference recorder zoom
-// feel: frame-tracking an reference export gave a critically-damped spring on the
+// bounce 0 over the default zoom durations IS the measured reference zoom
+// feel: frame-tracking a reference export gave a critically-damped spring on the
 // camera rect, ω≈9.4 rad/s in / ω≈5.2 out (which also matches the spring
-// preset numbers from the reference teardown, .notes/reference recorder-teardown.md) —
+// preset numbers from the reference teardown) —
 // i.e. this exact curve over ~730ms in / ~1340ms out.
 //
 // Under time-normalisation the curve depends ONLY on the damping ratio ζ=1−bounce
@@ -77,7 +77,7 @@ export function springEase(bounce: number): (p: number) => number {
 // source the revideo scene (scene.tsx) AND the editor preview consume — any
 // other renderer must use it identically so renderers can never drift.
 // Precedence: spring (zoomSpring) → cubic-bezier (zoomEase) → the default
-// critically-damped spring (the measured reference recorder curve).
+// critically-damped spring (the measured reference curve).
 export function stageEasing(cursor: TakeComposition["cursor"]): (u: number) => number {
   if (cursor.zoomSpring != null) return springEase(cursor.zoomSpring);
   if (cursor.zoomEase) return cubicBezier(...cursor.zoomEase);
@@ -199,8 +199,8 @@ export type StageKeyframes = {
 };
 
 /** Interpolate the rect track: centre AND size move under the SAME eased
- *  parameter. This is the whole trick (and what reference recorder does — verified
- *  by frame-tracking an reference export: its pan curve overlays its viewport-WIDTH
+ *  parameter. This is the whole trick (verified
+ *  by frame-tracking a reference export: its pan curve overlays its viewport-WIDTH
  *  curve exactly, not its scale curve): lerping the rect keeps every corner on
  *  a straight line, so the screen-space path of the zoom target is strictly
  *  monotone toward frame centre — no wrong-way "bounce" for ANY scale pair,
@@ -281,7 +281,7 @@ export function buildStageKeyframes(comp: TakeComposition): StageKeyframes {
   const targets = anchors.map((e) => rectFor(e.center, e.scale));
 
   // Effective ramp start per anchor. A PULL-OUT (wider viewport than the rect
-  // it leaves) paces with zoomOutMs — measured on the reference recorder reference
+  // it leaves) paces with zoomOutMs — measured on the reference export,
   // the pull-out is ~1.8× slower than the punch-in. The stored inAtMs keeps
   // governing punch-ins/same-size travels, and a HAND-SET inAtMs (≠ the
   // planner default tMs − zoomInMs) wins even for a pull-out, so the per-beat

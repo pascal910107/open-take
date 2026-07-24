@@ -16,7 +16,7 @@ the captured video.
 - **UI dev:** `pnpm --filter @open-take/editor dev` — sample/drop mode, no
   rendering.
 
-## Layout (reference recorder structure, our skin)
+## Layout (reference-app structure, our skin)
 
 - **Stage** (`components/Stage.tsx`) — engine canvas; selecting a zoom block
   enters INSPECT mode (wide rest-framed still) with a draggable/resizable

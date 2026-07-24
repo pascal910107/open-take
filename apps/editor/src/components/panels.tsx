@@ -139,7 +139,7 @@ export function ZoomPane({ c }: P) {
                     }
                   />
                 </Row>
-                <p className="hint">漂移＝Zoom 停留時鏡頭緩慢滑動（reference recorder 的 glide）。</p>
+                <p className="hint">漂移＝Zoom 停留時鏡頭緩慢滑動（即 glide）。</p>
               </Adv>
             </>
           )}

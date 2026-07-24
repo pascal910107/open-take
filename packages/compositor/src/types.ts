@@ -202,7 +202,7 @@ export type CursorConfig = {
   /** ms to hold a zoom after the action settles, before zooming back out */
   holdMs: number;
   /** ms for a zoom-OUT / pull-out ramp (to rest OR to any wider framing).
-   *  Measured on a reference recorder export: the pull-out is ~1.8× slower than the
+   *  Measured on a reference export: the pull-out is ~1.8× slower than the
    *  punch-in (their zoom-out spring ω≈5.2 rad/s ⇒ ~1340ms of critically-damped
    *  settle) — a slow, soft release reads premium; a fast one reads like a
    *  flinch. */
@@ -213,11 +213,11 @@ export type CursorConfig = {
   zoomInMs: number;
   /** Optional cubic-bezier easing for the camera-rect ramps (centre + size in
    *  lockstep — see math.ts stageCamera). Absent ⇒ the default critically-
-   *  damped spring (the measured reference recorder curve). Set this only to force a
+   *  damped spring (the measured reference curve). Set this only to force a
    *  bezier feel; `zoomSpring` wins over it when both are set. */
   zoomEase?: [number, number, number, number];
   /** Spring easing for the camera-rect ramps, as a `bounce` amount ∈ [0,~0.6):
-   *  0 = critically damped (the measured reference recorder zoom curve — also the
+   *  0 = critically damped (the measured reference zoom curve — also the
    *  default when neither zoomSpring nor zoomEase is set), higher = more
    *  overshoot/snap. The segment duration stays zoomInMs/zoomOutMs; bounce only
    *  shapes the curve. Bounce > 0 overshoots the RECT (a touch past the target
@@ -386,7 +386,7 @@ export const DEFAULT_CURSOR: CursorConfig = {
   arcMax: 24,
   rippleMs: 450,
   holdMs: 1100,
-  // Camera ramp durations, measured off a reference recorder export by frame-
+  // Camera ramp durations, measured off a reference export by frame-
   // tracking (see math.ts springEase): punch-in spring ω≈9.4 rad/s ≈ 730ms,
   // pull-out ω≈5.2 ≈ 1340ms. The slow soft release is half the premium feel.
   // No zoomEase/zoomSpring set ⇒ stageEasing falls to springEase(0), the

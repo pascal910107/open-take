@@ -1,4 +1,4 @@
-// Curated preset vocabulary — the reference recorder move (named levels, not raw
+// Curated preset vocabulary — the presets move (named levels, not raw
 // numbers) applied to the conversational refine loop. The composition schema
 // stays raw numbers; presets are a dictionary the CLI/agent speak: the agent
 // writes numbers into composition.json, and `beats`/`ab` reverse-map numbers
@@ -42,7 +42,7 @@ export type MotionPreset = Pick<
   CursorConfig,
   "travelWidthsPerSec" | "holdMs" | "zoomInMs" | "zoomOutMs"
 > & { zoomEase?: undefined };
-// zoomIn/zoomOut anchored to the measured reference recorder springs (730/1340 —
+// zoomIn/zoomOut anchored to the measured reference springs (730/1340 —
 // see DEFAULT_CURSOR); calm/brisk scale both while keeping out ≈ 1.8× in.
 // Each preset also CLEARS a legacy zoomEase (spread leaves the key undefined;
 // JSON drops it) so applying a pace migrates an old composition onto the

@@ -1,4 +1,4 @@
-// The icon rail — the reference recorder navigation move: one icon per settings
+// The icon rail — the reference navigation move: one icon per settings
 // category; clicking opens that category's panel. Icons over text walls.
 import type { JSX } from "react";
 import { IcAgent, IcBg, IcClip, IcCursor, IcFrame, IcMotion, IcZoom } from "../ui/icons";

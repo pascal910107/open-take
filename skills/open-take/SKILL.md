@@ -356,7 +356,7 @@ capture-lock). Warnings (a no-op zoom, a soft-cap scale) print but don't block.
 - *"hold X longer" / "too quick"* → raise `cursor.holdMs` (global) — the dwell
   after a beat settles before zooming out.
 - *"gentler / faster zoom"* → `cursor.zoomInMs` / `zoomOutMs` (bigger = slower
-  ramp; defaults 730/1340 are frame-measured off reference recorder — pull-outs are
+  ramp; defaults 730/1340 are frame-measured off a reference recorder — pull-outs are
   deliberately ~1.8× slower). The default CURVE is a critically-damped spring
   (the measured premium feel); `cursor.zoomSpring: 0.05–0.3` adds a touch of
   overshoot/snap. A composition carrying the legacy `cursor.zoomEase` (bezier)

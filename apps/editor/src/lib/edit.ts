@@ -127,7 +127,7 @@ export function setMotionBlur(
 }
 
 /** Apply a whole Look bundle (background + cornerRadius + shadow together) —
- *  the reference recorder curation move; insetFrac is untouched. */
+ *  the curated-look move; insetFrac is untouched. */
 export function applyLook(
   c: TakeComposition,
   look: Pick<FramingConfig, "background" | "cornerRadius" | "shadow">,
