@@ -70,20 +70,39 @@ const union = (a: BBox, b: BBox): BBox => {
 // grows DOWNWARD out of it. Framing the strip alone puts dead header above and
 // crops the result below. Grow the ROI down (never up) so the frame sits over
 // field + result: a taller ROI ⇒ lower scale AND a centre that drops below the
-// field — both correct. This is the BLIND guess; when the frame-diff pass gives
-// a real effectBox, that wins over this (roiForBeat prefers effectBox).
+// field — both correct. For a type this also CAPS the effectBox height: a
+// search/filter result list is open-ended, so the raw frame-diff region can
+// span the whole viewport and flatten the punch to ~1× — growDown bounds how far
+// down the frame reaches while the effectBox still supplies the real reveal width.
 function growDown(box: BBox, video: { w: number; h: number }): BBox {
   const grownH = Math.max(box.h, Math.min(video.h * 0.42, box.w * 0.55));
   const h = Math.min(grownH, video.h - box.y); // never spill past the video edge
   return { x: box.x, y: box.y, w: box.w, h };
 }
 
-/** The region a beat is "about" — what the camera should frame. Prefers the
- *  captured effect region; else shapes one from the element bbox by kind. */
+/** The region a beat is "about" — what the camera should frame. A type is
+ *  field-anchored and height-capped (its reveal is open-ended); every other
+ *  kind trusts the captured effect region, else shapes one from the bbox. */
 function roiForBeat(b: Beat, video: { w: number; h: number }): BBox | undefined {
+  if (b.kind === "type" && b.box) {
+    // Bound the frame to "field + top of results": keep the effectBox's real
+    // reveal WIDTH, but cap the HEIGHT to growDown's result-sized window so an
+    // open-ended result list can't flatten the punch to ~1× (see growDown).
+    const capH = growDown(b.box, video).h;
+    if (b.effectBox) {
+      const x = Math.min(b.box.x, b.effectBox.x);
+      const right = Math.max(b.box.x + b.box.w, b.effectBox.x + b.effectBox.w);
+      const bottom = b.effectBox.y + b.effectBox.h;
+      // Floor at the field height so a reveal that lands at/above the field top
+      // (a rare upward-opening autocomplete) can't yield a zero/negative ROI —
+      // we then simply frame the field, never punch into the vacated space above.
+      const h = Math.max(b.box.h, Math.min(capH, bottom - b.box.y));
+      return { x, y: b.box.y, w: right - x, h };
+    }
+    return growDown(b.box, video);
+  }
   if (b.effectBox) return b.effectBox;
   if (!b.box) return undefined;
-  if (b.kind === "type") return growDown(b.box, video);
   return b.box;
 }
 

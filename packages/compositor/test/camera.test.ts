@@ -73,6 +73,43 @@ test("nav-with-type: a zoom-less plan auto-frames sensibly (the flatten case)", 
   assert.ok(Math.abs(scroll.zoom.scale - rest) < 1e-6, "scroll scale is rest");
 });
 
+test("type with a tall open-ended effectBox still punches (not flattened to ~1×)", () => {
+  // A real search: a thin field whose result list grows DOWN and fills most of
+  // the viewport, so the frame-diff effectBox is ~640px tall. Fitting ALL of it
+  // into 60% of the frame is ~1.01× — imperceptible. The director must cap the
+  // type's ROI to the field-anchored result window so the punch stays visible.
+  // (This is the case the acceptance fixture's 340px effectBox does NOT reach.)
+  const log: CaptureLog = {
+    video: { width: 1920, height: 1080, fps: "60/1" },
+    viewport: { w: 1920, h: 1080 },
+    start: { x: 520, y: 480 },
+    events: [
+      {
+        kind: "type",
+        x: 960,
+        y: 183,
+        box: { x: 641, y: 163, w: 638, h: 39 },
+        effectBox: { x: 640, y: 160, w: 672, h: 640 }, // open-ended result list
+        tMs: 2000,
+        text: "Interrupt",
+        durationMs: 700,
+        zoom: "always",
+        changeCoverage: 0.19,
+      },
+    ],
+    tEndMs: 5000,
+  };
+  const type = planComposition(log, { output: { fps: 60 } }).events[0]!;
+  assert.equal(type.zoom.enabled, true, "the always-type is framed");
+  // the raw-effectBox fit would be ~1.01× (648/640) — the cap must keep it a
+  // real, visible punch centred below the field.
+  assert.ok(
+    type.zoom.scale > 1.4 && type.zoom.scale < 2.0,
+    `tall-effectBox type stays a visible punch, not ~1× (got ${type.zoom.scale.toFixed(3)}×)`,
+  );
+  assert.ok(type.zoom.center.y > 163 + 39 + 80, "the frame sits below the field (result region)");
+});
+
 test("camera.enabled=false: the manual escape hatch ignores the director", () => {
   const log = fixture("nav-with-type.capture.json");
   const comp = planComposition(log, { output: { fps: 60 }, camera: { enabled: false } });
