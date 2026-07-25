@@ -63,8 +63,29 @@ for (let i = 0; i < argv.length; i++) {
 }
 
 const log = (msg) => process.stdout.write(`${msg}\n`);
+
+// Version bumps are written to disk before the gates run (the gates must test
+// what would ship). Anything that aborts before the release commit therefore
+// has to put the manifests back, or a failed run leaves a dirty tree that the
+// next run's preflight refuses to start from.
+const snapshots = new Map();
+function restoreManifests() {
+  for (const [path, contents] of snapshots) {
+    try {
+      writeFileSync(path, contents);
+    } catch {
+      /* best effort — never mask the original failure */
+    }
+  }
+  const n = snapshots.size;
+  snapshots.clear();
+  return n;
+}
+
 const die = (msg) => {
+  const restored = restoreManifests();
   process.stderr.write(`\nrelease: ${msg}\n`);
+  if (restored) process.stderr.write(`release: reverted ${restored} version bump(s)\n`);
   process.exit(1);
 };
 
@@ -173,6 +194,7 @@ function bumpVersion(current, how) {
 // the whole manifest and bury the one-line diff a release commit should be.
 function writeVersion(pkg, version) {
   const src = readFileSync(pkg.manifestPath, "utf8");
+  if (!snapshots.has(pkg.manifestPath)) snapshots.set(pkg.manifestPath, src);
   const next = src.replace(/("version"\s*:\s*")[^"]+(")/, `$1${version}$2`);
   if (next === src && !src.includes(`"version": "${version}"`))
     die(`could not rewrite the version field in ${pkg.manifestPath}`);
@@ -284,18 +306,21 @@ gate("typecheck", "pnpm", ["typecheck"]);
 gate("test", "pnpm", ["-r", "--if-present", "test"]);
 gate("package artifacts", "pnpm", ["test:package"]);
 
-if (!resuming && !DRY) {
+if (DRY) {
+  const reverted = restoreManifests();
+  log(`\ndry run complete — would publish ${chain.length} package(s) at ${version}`);
+  if (reverted) log(`(reverted ${reverted} version bump(s); the tree is untouched)`);
+  process.exit(0);
+}
+
+if (!resuming) {
   const dirty = git("status", "--porcelain");
   if (dirty) {
     run("git", ["add", "-A"]);
     run("git", ["commit", "-q", "-m", `release: ${version}`]);
+    snapshots.clear(); // committed — a later failure must not revert it
     log(`\n▸ committed release: ${version}`);
   }
-}
-
-if (DRY) {
-  log(`\ndry run complete — would publish ${chain.length} package(s) at ${version}`);
-  process.exit(0);
 }
 
 log(`\n▸ publishing ${chain.length} package(s) in dependency order`);

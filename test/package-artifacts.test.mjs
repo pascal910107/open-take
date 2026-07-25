@@ -79,23 +79,44 @@ test("packed release artifacts form a browser-download-free dependency chain", a
     ]),
   );
 
-  assert.equal(manifests.bridge.version, "0.1.0");
   assert.equal(manifests.bridge.dependencies.puppeteer, undefined);
   assert.equal(manifests.bridge.dependencies["puppeteer-core"], "25.3.0");
-  assert.equal(manifests.compositor.version, "0.1.2");
+
+  // Each link pins the EXACT version of the package below it. Asserting the
+  // relationship rather than literal numbers is what keeps this a release gate:
+  // hardcoded versions made the test fail on every bump, so it stopped being
+  // run and stopped catching anything.
   assert.equal(
     manifests.compositor.dependencies["@open-take/revideo-renderer"],
     manifests.bridge.version,
   );
-  assert.equal(manifests.runtime.version, "0.1.2");
   assert.equal(
     manifests.runtime.dependencies["@open-take/compositor"],
     manifests.compositor.version,
   );
-  assert.equal(manifests.cli.version, "0.1.3");
   assert.equal(manifests.cli.dependencies["@open-take/runtime"], manifests.runtime.version);
-  assert.equal(manifests.initializer.version, "0.1.1");
+
+  // Shape only — NOT lockstep. scripts/release.mjs versions the chain as a
+  // unit, but a package legitimately sitting on an older version is fine as
+  // long as the pin above resolves to it (revideo-renderer did exactly that
+  // through 0.2.0). Asserting the policy here would fail a correct tree.
+  for (const name of ["bridge", "compositor", "runtime", "cli"]) {
+    assert.match(manifests[name].version, /^\d+\.\d+\.\d+/, `${name} needs a real version`);
+  }
+
+  // `workspace:*` must never reach a tarball: pnpm rewrites it at pack time,
+  // npm does not, so this is the assertion that a release went out through the
+  // right package manager.
+  for (const [name, manifest] of Object.entries(manifests)) {
+    for (const [dep, range] of Object.entries(manifest.dependencies ?? {})) {
+      assert.doesNotMatch(range, /^workspace:/, `${name} shipped an unresolved ${dep} range`);
+    }
+  }
+
+  // The initializer installs open-take@latest instead of depending on it, which
+  // is what lets it version independently of the chain.
   assert.equal(manifests.initializer.dependencies, undefined);
+  assert.match(manifests.initializer.version, /^\d+\.\d+\.\d+/);
   entryText(entries.initializer, "package/LICENSE");
 
   const declarations = entryText(entries.bridge, "package/dist/server/render-video.d.ts");
