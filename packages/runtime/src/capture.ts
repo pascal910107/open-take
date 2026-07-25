@@ -272,6 +272,15 @@ export type CaptureOpts = {
    * See cdp-capture.ts.
    */
   fps?: number;
+  /**
+   * Capture pixel density (device scale factor). Default 2: record at Retina
+   * density — 2 physical px per CSS px — so a camera zoom ≤2× always has
+   * ≥1:1 source pixels per output pixel and stays sharp (matches how premium
+   * screen recorders keep zooms crisp). Coordinates everywhere (events, log,
+   * composition) stay in CSS px; only the video bitmap is denser. Drop to 1
+   * if a heavy page can't hold the capture fps at 4K screencast.
+   */
+  captureScale?: number;
   /** explicit Chrome binary (else auto-resolved system Chrome / auto-download) */
   chromePath?: string;
   /** How a `drag` stroke is paced (and thus baked into the ink): "smooth"

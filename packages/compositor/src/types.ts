@@ -322,6 +322,10 @@ export type TakeComposition = {
   output: { width: number; height: number; fps: number };
   source: {
     videoUrl: string;
+    /** stage size the source video is DRAWN at (capture viewport CSS px) —
+     *  the coordinate space of every event/bbox below. A Retina capture's
+     *  file is denser (viewport × captureScale); the scene stretches it to
+     *  this size, so the extra pixels only sharpen sampling under zoom. */
     videoWidth: number;
     videoHeight: number;
     viewport: { w: number; h: number };

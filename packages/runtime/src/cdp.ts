@@ -213,15 +213,22 @@ export async function launchBrowser(opts: {
   width: number;
   height: number;
   chromePath?: string;
+  /** Physical pixels per CSS px (Retina density). A whole-browser launch flag,
+   *  NOT a per-page metrics override, so frame/viewport/event-space stay
+   *  consistent: events remain CSS px, the window surface (what the
+   *  screencast captures) is exactly `deviceScaleFactor`× that. */
+  deviceScaleFactor?: number;
 }): Promise<Browser> {
   const chrome = await ensureChrome(opts.chromePath);
   const userDir = mkdtempSync(join(tmpdir(), "open-take-cdp-"));
+  const dsf = opts.deviceScaleFactor ?? 1;
   const proc: ChildProcess = spawn(
     chrome,
     [
       "--remote-debugging-port=0", // pick a free port; read it back from DevToolsActivePort
       `--user-data-dir=${userDir}`,
       `--window-size=${opts.width},${opts.height}`,
+      ...(dsf !== 1 ? [`--force-device-scale-factor=${dsf}`] : []),
       "--headless=new",
       // automation browser (throwaway profile, loads the user's own target app);
       // without this the launch hangs — never writes DevToolsActivePort — in

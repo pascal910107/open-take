@@ -213,25 +213,38 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
   const vw = plan.viewport?.width ?? 1920;
   const vh = plan.viewport?.height ?? 1080;
   const fps = Math.min(60, Math.max(24, Math.round(opts.fps ?? 60)));
+  const scale = Math.max(1, opts.captureScale ?? 2);
   const out = resolve(opts.videoPath);
 
   let browser: Browser | null = null;
   const frameDir = makeFrameDir();
   try {
-    browser = await launchBrowser({ width: vw, height: vh, chromePath: opts.chromePath });
+    browser = await launchBrowser({
+      width: vw,
+      height: vh,
+      chromePath: opts.chromePath,
+      deviceScaleFactor: scale,
+    });
     const { cdp } = browser;
     await cdp.send("Page.enable");
     await cdp.send("Runtime.enable");
     // Grow the window so the natural viewport == requested (headless reserves
     // window chrome). This — NOT a metrics override — keeps the captured frame,
-    // the viewport, and the event coordinate space all the same size.
+    // the viewport, and the event coordinate space all the same size (the
+    // frame is exactly `scale`× the CSS event space; see launchBrowser).
     const inner = await fitViewport(cdp, browser.targetId, vw, vh);
 
     await navigate(cdp, plan.url);
 
     const screencast = new Screencast(cdp, frameDir);
     const t0 = Date.now();
-    await screencast.start(t0, { maxWidth: inner[0], maxHeight: inner[1], quality: 92 });
+    // max dims in PHYSICAL px — at deviceScaleFactor 2 the surface is 2× the
+    // CSS viewport; capping at CSS size would silently downscale back to 1×.
+    await screencast.start(t0, {
+      maxWidth: inner[0] * scale,
+      maxHeight: inner[1] * scale,
+      quality: 92,
+    });
 
     // Raster pump. Page.startScreencast only emits a frame when the renderer
     // produces one, and in headless a state change that isn't driven by trusted

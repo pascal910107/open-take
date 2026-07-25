@@ -127,6 +127,8 @@ Usage:
 
   --fps <n>   (make only) capture AND render fps (default 60). Drop to 30 for
               fast drafts while iterating.
+  --capture-scale <n>   (make only) capture pixel density (default 2 — Retina;
+              keeps zooms sharp). Drop to 1 if a heavy page can't hold fps.
 `;
 
 const fmtBytes = (n: number): string =>
@@ -188,6 +190,8 @@ async function main() {
     const plan = JSON.parse(await readFile(planPath, "utf8")) as TakePlan;
     const fpsFlag = flag("--fps");
     const fps = fpsFlag ? Number(fpsFlag) : undefined;
+    const scaleFlag = flag("--capture-scale");
+    const captureScale = scaleFlag ? Number(scaleFlag) : undefined;
     // a re-make (re-shoot) is a new generation: keep the old master as prev so
     // --before-after compares against the take the user just reacted to.
     const takePre = await resolveTakePaths(out).catch(() => null);
@@ -199,7 +203,9 @@ async function main() {
       made = await makeTake(plan, {
         outPath: out,
         logProgress: true,
-        ...(fps ? { capture: { fps } } : {}),
+        ...(fps || captureScale
+          ? { capture: { ...(fps ? { fps } : {}), ...(captureScale ? { captureScale } : {}) } }
+          : {}),
       });
       await staged.commit();
     } catch (e) {

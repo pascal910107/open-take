@@ -37,8 +37,16 @@ export type PlanOpts = {
 };
 
 export function planComposition(log: CaptureLog, opts: PlanOpts = {}): TakeComposition {
-  const vW = log.video.width,
-    vH = log.video.height;
+  // Stage space = the capture VIEWPORT (CSS px), NOT the video file's pixel
+  // size. A Retina capture (captureScale 2) records a 2×-dense bitmap of the
+  // same viewport; the scene draws it at viewport size, so the denser bitmap
+  // only sharpens sampling under zoom. Keying the stage to the viewport keeps
+  // every calibrated quantity — camera scales (rest/minZoomScale/maxScale),
+  // cursor/ripple sizes, framing radius/shadow — meaning the same thing at
+  // any capture density. (Pre-Retina logs have video == viewport, so this is
+  // byte-identical for them.)
+  const vW = log.viewport.w,
+    vH = log.viewport.h;
   const oW = opts.output?.width ?? vW;
   const oH = opts.output?.height ?? vH;
   const fps = opts.output?.fps ?? 30;
@@ -47,7 +55,8 @@ export function planComposition(log: CaptureLog, opts: PlanOpts = {}): TakeCompo
   const cursor: CursorConfig = { ...DEFAULT_CURSOR, ...opts.cursor };
   const camera: CameraConfig = { ...DEFAULT_CAMERA, ...opts.camera };
 
-  // viewport CSS px -> video px
+  // log coords (viewport CSS px) -> stage px. Identity today (stage IS the
+  // viewport); kept as an explicit mapping seam.
   const sx = vW / log.viewport.w;
   const sy = vH / log.viewport.h;
   const mapPt = (p: Pt): Pt => ({ x: p.x * sx, y: p.y * sy });
