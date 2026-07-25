@@ -239,7 +239,10 @@ async function publishOne(pkg, version, otp) {
       return otp;
     }
     const output = `${res.stdout ?? ""}${res.stderr ?? ""}`;
-    const needsOtp = /EOTP|one-time pass|otp/i.test(output);
+    // Match npm's actual error, not any mention of "otp" — npm prints a 2FA
+    // deprecation notice on every command, which a loose pattern reads as a
+    // password prompt.
+    const needsOtp = /\bEOTP\b|one-time password/i.test(output);
     if (needsOtp && attempt < 3) {
       otp = await ask(`  ${pkg.name}: npm one-time password: `);
       continue;
@@ -260,21 +263,28 @@ log("");
 preflightGit();
 if (!DRY) preflightNpm();
 
-// An unfinished release — versions bumped and committed, but some package never
-// made it to the registry (an OTP expiring mid-chain is the usual cause). Resume
-// at the current version instead of bumping past a half-published release.
+// An unfinished release — versions bumped and committed, but the publish never
+// finished (an OTP expiring is the usual cause). The signal is HEAD itself: this
+// script only writes a `release: X` commit AFTER the gates pass, so a clean tree
+// sitting on one, at a version that is not fully on the registry, is a run that
+// died between commit and publish. Resume it rather than bump past it.
 const liveVersions = new Map();
 for (const p of chain) liveVersions.set(p.name, await publishedVersions(p.name));
 const unpublished = chain.filter((p) => !liveVersions.get(p.name).has(p.version));
 const explicitStep = positional[0];
-const resuming = unpublished.length > 0 && unpublished.length < chain.length && !explicitStep;
+const headRelease = /^release: (\d+\.\d+\.\d+\S*)$/.exec(git("log", "-1", "--pretty=%s"))?.[1];
+const resuming =
+  !explicitStep &&
+  unpublished.length > 0 &&
+  headRelease !== undefined &&
+  chain.every((p) => p.version === headRelease);
 
 let version;
 if (resuming) {
-  version = unpublished[0].version;
-  log(`\nresuming an unfinished release — already live:`);
+  version = headRelease;
+  log(`\nresuming the unfinished release ${version} (HEAD is its release commit)`);
   for (const p of chain)
-    if (!unpublished.includes(p)) log(`  · ${p.name}@${p.version}`);
+    log(`  ${unpublished.includes(p) ? "·" : "✓"} ${p.name}@${p.version}`);
 } else {
   // The CLI's version is the release number; the rest of the chain moves with
   // it. Lockstep is deliberate — one number to reason about, and a dependency
@@ -301,10 +311,19 @@ if (!resuming) {
   log(`\n▸ bumped ${chain.length} package.json files to ${version}`);
 }
 
-gate("build", "pnpm", ["build"]);
-gate("typecheck", "pnpm", ["typecheck"]);
-gate("test", "pnpm", ["-r", "--if-present", "test"]);
-gate("package artifacts", "pnpm", ["test:package"]);
+// On a resume the gates are skipped by default, and that is load-bearing rather
+// than a shortcut: a `release: X` commit only exists because the gates passed on
+// this exact tree, and re-running them burns two minutes — longer than the ~30s
+// life of the one-time password the resume is usually there to spend.
+if (resuming && !has("--force-gates")) {
+  log(`\n▸ gates skipped — they passed on this tree in the run that committed ${version}`);
+  log(`  (re-run them with --force-gates)`);
+} else {
+  gate("build", "pnpm", ["build"]);
+  gate("typecheck", "pnpm", ["typecheck"]);
+  gate("test", "pnpm", ["-r", "--if-present", "test"]);
+  gate("package artifacts", "pnpm", ["test:package"]);
+}
 
 if (DRY) {
   const reverted = restoreManifests();
