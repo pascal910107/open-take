@@ -10,12 +10,15 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { captureLogPathFor, loadCaptureLogSibling } from "../src/index.js";
 
 test("captureLogPathFor: <x>.capture.mp4 → <x>.capture.json (sibling convention)", () => {
-  assert.equal(captureLogPathFor("/out/demo.capture.mp4"), "/out/demo.capture.json");
-  assert.equal(captureLogPathFor("/out/demo.capture.MP4"), "/out/demo.capture.json"); // case-insensitive
+  // Both sides go through resolve(): the function absolutises deliberately, and
+  // "/out/…" is NOT an absolute path on Windows — it picks up a drive letter and
+  // backslashes, so a literal expectation only ever held on POSIX.
+  assert.equal(captureLogPathFor("/out/demo.capture.mp4"), resolve("/out/demo.capture.json"));
+  assert.equal(captureLogPathFor("/out/demo.capture.MP4"), resolve("/out/demo.capture.json")); // case-insensitive
   assert.ok(captureLogPathFor("relative.capture.mp4").endsWith("relative.capture.json")); // absolutised
 });
 
