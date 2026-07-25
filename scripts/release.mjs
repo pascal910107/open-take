@@ -272,17 +272,36 @@ const liveVersions = new Map();
 for (const p of chain) liveVersions.set(p.name, await publishedVersions(p.name));
 const unpublished = chain.filter((p) => !liveVersions.get(p.name).has(p.version));
 const explicitStep = positional[0];
-const headRelease = /^release: (\d+\.\d+\.\d+\S*)$/.exec(git("log", "-1", "--pretty=%s"))?.[1];
+// Find the release commit this tree is sitting on. Not necessarily HEAD —
+// fixing whatever broke the publish (or writing a note) legitimately lands
+// commits on top of it.
+function findReleaseCommit() {
+  const lines = git("log", "-30", "--pretty=%H %s").split("\n");
+  for (const line of lines) {
+    const m = /^(\S+) release: (\d+\.\d+\.\d+\S*)$/.exec(line);
+    if (m) return { sha: m[1], version: m[2] };
+  }
+  return null;
+}
+const priorRelease = findReleaseCommit();
 const resuming =
   !explicitStep &&
   unpublished.length > 0 &&
-  headRelease !== undefined &&
-  chain.every((p) => p.version === headRelease);
+  priorRelease !== null &&
+  chain.every((p) => p.version === priorRelease.version);
+
+// The gates can only be skipped if nothing that ends up IN a tarball has
+// changed since they ran. Commits that touch tooling or notes leave the
+// published artifacts identical; a change under packages/ or test/ does not.
+function shippedFilesChangedSince(sha) {
+  const changed = git("diff", "--name-only", `${sha}..HEAD`).split("\n").filter(Boolean);
+  return changed.filter((f) => f.startsWith("packages/") || f.startsWith("test/"));
+}
 
 let version;
 if (resuming) {
-  version = headRelease;
-  log(`\nresuming the unfinished release ${version} (HEAD is its release commit)`);
+  version = priorRelease.version;
+  log(`\nresuming the unfinished release ${version} (committed ${priorRelease.sha.slice(0, 8)})`);
   for (const p of chain)
     log(`  ${unpublished.includes(p) ? "·" : "✓"} ${p.name}@${p.version}`);
 } else {
@@ -311,14 +330,18 @@ if (!resuming) {
   log(`\n▸ bumped ${chain.length} package.json files to ${version}`);
 }
 
-// On a resume the gates are skipped by default, and that is load-bearing rather
-// than a shortcut: a `release: X` commit only exists because the gates passed on
-// this exact tree, and re-running them burns two minutes — longer than the ~30s
-// life of the one-time password the resume is usually there to spend.
-if (resuming && !has("--force-gates")) {
-  log(`\n▸ gates skipped — they passed on this tree in the run that committed ${version}`);
-  log(`  (re-run them with --force-gates)`);
+// Skipping the gates on a resume is load-bearing rather than a shortcut: they
+// already passed on the release commit, and re-running them burns two minutes —
+// longer than the ~30s life of the one-time password the resume exists to spend.
+// Only safe while the packaged files are byte-identical to what they gated.
+const dirtySinceRelease = resuming ? shippedFilesChangedSince(priorRelease.sha) : [];
+if (resuming && !has("--force-gates") && dirtySinceRelease.length === 0) {
+  log(`\n▸ gates skipped — they passed on ${priorRelease.sha.slice(0, 8)}, and nothing`);
+  log(`  that ships has changed since (--force-gates to run them anyway)`);
 } else {
+  if (dirtySinceRelease.length)
+    log(`\n▸ running the gates: ${dirtySinceRelease.length} packaged file(s) changed since the`);
+  if (dirtySinceRelease.length) log(`  release commit — ${dirtySinceRelease.slice(0, 3).join(", ")}`);
   gate("build", "pnpm", ["build"]);
   gate("typecheck", "pnpm", ["typecheck"]);
   gate("test", "pnpm", ["-r", "--if-present", "test"]);
