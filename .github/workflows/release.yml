@@ -1,0 +1,78 @@
+name: Release
+
+# Publishing runs HERE, not on a laptop. `pnpm release` prepares and tags; this
+# workflow uploads. Authentication is npm Trusted Publishing (OIDC): GitHub mints
+# a short-lived token bound to this repository and this workflow file, and npm
+# checks it against the trusted publisher configured on each package. There is no
+# npm token in this repo, nothing to rotate, and no 2FA code to type.
+#
+# The trust boundary this creates: anyone who can push a `v*` tag can publish.
+#
+# NOTE ci.yml does NOT run on tags (`on: push: branches: [main]` only covers
+# branches), so the gates below are not a duplicate — without them a tag would
+# publish with nothing checking it.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Pack everything but upload nothing"
+        type: boolean
+        default: true
+
+# Never let two releases upload at once; a half-finished pair of runs is the one
+# state the resume logic cannot reason about.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  PUPPETEER_SKIP_DOWNLOAD: "true"
+  DISABLE_TELEMETRY: "true"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # mints the OIDC token; without it npm falls back to looking for a token
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4 # version comes from packageManager in package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # Trusted publishing needs npm >= 11.5.1; the npm bundled with Node 22 is
+      # older and would quietly fall back to token auth and fail as a 404.
+      - name: Upgrade npm for OIDC support
+        run: |
+          npm install -g npm@latest
+          npm --version
+
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build # also produces the editor dist that runtime's prepack bundles
+
+      # The same gates `pnpm release` runs locally. A tag can reach here from any
+      # tree, so this is the last thing standing between a tag and the registry.
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm -r test
+      - run: pnpm test:package
+
+      - name: Publish (OIDC)
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            node scripts/publish-oidc.mjs --dry-run
+          else
+            node scripts/publish-oidc.mjs "$VERSION"
+          fi
