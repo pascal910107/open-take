@@ -47,7 +47,7 @@ const INDEPENDENT = new Set(["create-open-take"]);
 
 const argv = process.argv.slice(2);
 const has = (f) => argv.includes(f);
-const valueOf = (f) => {
+const flagValue = (f) => {
   const i = argv.indexOf(f);
   return i === -1 ? undefined : argv[i + 1];
 };
@@ -230,8 +230,9 @@ async function ask(question) {
 // Returns the OTP actually used, so one code covers the whole chain (npm
 // accepts a code for its full ~30s window; re-prompting per package is what
 // makes a four-package release race the clock).
-async function publishOne(pkg, version, otp) {
+async function publishOne(pkg, version, initialOtp) {
   const args = ["--filter", pkg.name, "publish", "--no-git-checks", "--access", "public"];
+  let otp = initialOtp;
   for (let attempt = 0; ; attempt++) {
     const res = run("pnpm", [...args, ...(otp ? ["--otp", otp] : [])], { capture: true });
     if (res.status === 0) {
@@ -342,8 +343,11 @@ if (resuming && !has("--force-gates") && dirtySinceRelease.length === 0) {
   if (dirtySinceRelease.length)
     log(`\n▸ running the gates: ${dirtySinceRelease.length} packaged file(s) changed since the`);
   if (dirtySinceRelease.length) log(`  release commit — ${dirtySinceRelease.slice(0, 3).join(", ")}`);
+  // Same set CI runs, in the same order — a release must not be able to ship
+  // something the pipeline would reject.
   gate("build", "pnpm", ["build"]);
   gate("typecheck", "pnpm", ["typecheck"]);
+  gate("lint", "pnpm", ["lint"]);
   gate("test", "pnpm", ["-r", "--if-present", "test"]);
   gate("package artifacts", "pnpm", ["test:package"]);
 }
@@ -366,7 +370,7 @@ if (!resuming) {
 }
 
 log(`\n▸ publishing ${chain.length} package(s) in dependency order`);
-let otp = valueOf("--otp");
+let otp = flagValue("--otp");
 for (const pkg of chain) {
   if (liveVersions.get(pkg.name).has(version)) {
     log(`  · ${pkg.name}@${version} already on the registry — skipped`);
