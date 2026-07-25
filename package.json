@@ -14,6 +14,7 @@
     "typecheck": "turbo run typecheck",
     "lint": "biome lint .",
     "test:package": "node --test test/package-artifacts.test.mjs",
+    "release": "node scripts/release.mjs",
     "format": "biome format --write .",
     "clean": "turbo run clean && rm -rf node_modules",
     "postinstall": "node scripts/fix-node-pty-perms.mjs"
