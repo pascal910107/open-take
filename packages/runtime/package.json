@@ -1,6 +1,6 @@
 {
   "name": "@open-take/runtime",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Thin take runtime — agent plan -> capture (event log) -> compositor -> polished mp4 + editable composition.",
   "license": "MIT",
   "type": "module",
