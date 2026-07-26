@@ -207,7 +207,8 @@ value (bbox-derived precision is ground truth):
 - **zoom** (absolute scale): light 1.25 · medium 1.5 · tight 1.8 · close 2.2
 - **look** (background+corners+shadow as ONE bundle): midnight (default) · ink ·
   slate · ocean · plum · ember · paper (light) · plain
-- **pace** (cursor speed+hold+ramps): calm · natural (default) · brisk
+- **pace** (cursor speed+hold+ramps+pull-out dwell as ONE bundle): calm ·
+  natural (default) · brisk
 - **finish** (motion blur): smooth (default, 6×0.7) · crisp (off, ~6× faster
   exports) · heavy (8×0.85)
 
@@ -256,7 +257,13 @@ page changed).
   or `selector`, focuses it, and types `value` with real keystrokes, char by
   char (the cursor parks on the field and the zoom holds while text appears).
   For search boxes, AI prompts, forms. The field is usually a small target →
-  `"always"`/`"auto"` frames it nicely.
+  `"always"`/`"auto"` frames it nicely. **`"clear": true`** selects the field's
+  existing value first so the typing REPLACES it (rename / edit-a-setting /
+  correct-text beats — without it, typing appends at the caret; a `press
+  "Meta+a"` does NOT work, dispatched key events never run Chrome's editing
+  commands). **`"perCharMs"`** overrides the typing pace (default auto-paces
+  ~1.1s per beat, 28–90ms per char; mostly-CJK text runs ~1.4× slower) — raise
+  for a deliberate hero reveal, lower for a fast burst.
 - **`drag`** is a path with the button held — the canvas wow (sketch, draw a
   shape, move an element). Give a **start** and **end**, each as either an
   explicit viewport point (`from` / `to`) or a located element (`selector`/`text`
@@ -355,6 +362,18 @@ capture-lock). Warnings (a no-op zoom, a soft-cap scale) print but don't block.
   beat (a bare `press`) needs a hand-set `center` in video-px.
 - *"hold X longer" / "too quick"* → raise `cursor.holdMs` (global) — the dwell
   after a beat settles before zooming out.
+- *"it zooms away while I'm still reading" / "rushed between beats"* →
+  `cursor.pullOutDwellMs` (default 800): the minimum stay on a payoff before a
+  squeezed pull-out may depart — it then LANDS late (after its own action)
+  instead of fleeing the frame. 0 restores the legacy depart-at-action-end.
+- *"the zoom stops abruptly" / "the ending clicks off"* → `cursor.zoomSettleFrac`
+  (default 0.04): the residual each camera move keeps settling INTO the hold
+  (an asymptotic tail instead of a velocity cliff at the keyframe). 0 = the old
+  hard-normalized spring cut. Inert while `zoomEase`/`zoomSpring` is set.
+- *"cut the dead opening" / "it starts before the app painted"* → `startMs`
+  (top-level, ms): head-trims the DELIVERED mp4 on the composition timeline —
+  no more `ffmpeg -ss` side-files that desync from the refine loop. Keep it ≤
+  the first beat's `zoom.inAtMs` (the validator warns past that).
 - *"gentler / faster zoom"* → `cursor.zoomInMs` / `zoomOutMs` (bigger = slower
   ramp; defaults 730/1340 are frame-measured off a reference recorder — pull-outs are
   deliberately ~1.8× slower). The default CURVE is a critically-damped spring
@@ -380,14 +399,12 @@ capture-lock). Warnings (a no-op zoom, a soft-cap scale) print but don't block.
   `tMs` is locked to the recording).
 
 ## Capture robustness — checks that keep "user does nothing" honest
-- **Confirm no beat was dropped.** A missing target logs `captureTakeCDP: … not
-  found, skipped: …` to stderr, and the composition will have **fewer `events`
-  than you have action steps** (click/type/drag/scroll/hover/press are events;
-  `wait` is not). Check
-  that count. If a beat was dropped, fix the target (re-`inspect`; names/layout
-  may have changed) or just re-run (capture can flake on a cold first run) —
-  never ship a silently-empty demo. ALWAYS look at the frames (step 5) to catch
-  this.
+- **Confirm no beat was dropped.** A missing target is skipped, recorded on the
+  capture log (`skipped[]`), and listed in `make`'s end-of-run summary
+  (`⚠ n steps skipped`); `--strict` additionally exits non-zero. If a beat was
+  dropped, fix the target (re-`inspect`; names/layout may have changed) or just
+  re-run (capture can flake on a cold first run) — never ship a silently-empty
+  demo. ALWAYS look at the frames (step 5) to catch this.
 - **For `drag`, verify the stroke actually rendered.** A drag whose endpoints
   resolved still produces *nothing visible* if the wrong tool was active or the
   surface ignored synthetic input — eyeball the frames mid-stroke. (Select the
@@ -423,6 +440,12 @@ capture-lock). Warnings (a no-op zoom, a soft-cap scale) print but don't block.
 - **fps: 60 by default; `--fps 30` is the fast-draft halving (see make).** Not a
   story limit — 60 is smooth for continuous motion. On a 30fps render, lean drag
   `durationMs` slower (1500–2500ms).
+- **Captures run cold-cache.** The fresh temp profile means a fresh HTTP cache:
+  webfonts are waited on before recording starts (`document.fonts.ready`,
+  bounded), but any OTHER third-party asset — hero images, lazy chunks, CDN
+  scripts — loads cold in every take, unlike a returning user's browser. If a
+  late asset pops in the frames, self-host it or add a leading `wait`; use
+  `startMs` to trim what still slips into the head.
 - viewport ≠ video scaling is implemented but lightly tested.
 
 ## Prerequisites
