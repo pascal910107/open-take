@@ -72,6 +72,11 @@ function beatTitle(e: CompEvent): string {
 
 const trunc = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
+/** "click Open menu" — the shared beat vocabulary (beat sheet rows, frames rows). */
+export function beatLabel(e: CompEvent): string {
+  return `${KIND_LABEL[e.kind]} ${trunc(beatTitle(e), 24)}`;
+}
+
 function fmtTime(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
@@ -168,7 +173,7 @@ export function buildBadges(comp: TakeComposition): ReviewBadge[] {
  *  (2 blur samples would render 2× the frames for a tmix window that rounds to
  *  1 — all cost, zero blur.) FEEL questions (blur, pace, zoom silkiness) must
  *  be judged on full quality — use `ab`. */
-function toDraft(comp: TakeComposition): TakeComposition {
+export function toDraft(comp: TakeComposition): TakeComposition {
   const { motionBlur: _mb, ...rest } = comp;
   return { ...rest, output: { ...comp.output, fps: Math.min(30, comp.output.fps) } };
 }
@@ -200,6 +205,30 @@ export async function renderReview(
     writeCompositionSibling: false,
   });
   return { reviewPath: take.reviewPath, sheet: buildBeatSheet(comp, take.name) };
+}
+
+/** Draft-quality re-render of the CURRENT composition to `<base>.draft.mp4` —
+ *  no badges, no watermark, and never the master's path, so a mid-refine
+ *  frame-check (edit → draft → `frames`) costs seconds without downgrading or
+ *  clobbering the postable mp4. Disposable like the review copy. */
+export async function renderDraft(
+  take: TakePaths,
+  opts: ReviewOpts = {},
+): Promise<{ draftPath: string }> {
+  await requireTakeFiles(take, { capture: true });
+  const comp = JSON.parse(await readFile(take.compositionPath, "utf8")) as TakeComposition;
+  const captureLog = await loadLogSibling(take.capturePath);
+  const chromePath = await ensureChrome(opts.chromePath);
+  await renderTake({
+    composition: toDraft(comp),
+    videoPath: take.capturePath,
+    outPath: take.draftPath,
+    captureLog,
+    logProgress: opts.logProgress ?? true,
+    chromePath,
+    writeCompositionSibling: false,
+  });
+  return { draftPath: take.draftPath };
 }
 
 // --- A/B variant reels -------------------------------------------------------

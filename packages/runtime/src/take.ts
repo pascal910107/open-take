@@ -17,6 +17,9 @@ export type TakePaths = {
   captureLogPath: string;
   /** `<base>.review.mp4` — draft copy with burned beat badges (disposable) */
   reviewPath: string;
+  /** `<base>.draft.mp4` — clean draft-quality re-render (disposable; never
+   *  clobbers the postable master) */
+  draftPath: string;
   /** `<base>.ab.mp4` — the A/B variant reel (disposable) */
   abPath: string;
   /** `<base>.prev.mp4` — the previous master, kept so "A" can mean revert */
@@ -54,6 +57,7 @@ export async function resolveTakePaths(input: string): Promise<TakePaths> {
     .replace(/\.capture\.json$/i, "")
     .replace(/\.capture\.mp4$/i, "")
     .replace(/\.review\.mp4$/i, "")
+    .replace(/\.draft\.mp4$/i, "")
     .replace(/\.ab\.mp4$/i, "")
     .replace(/\.prev\.mp4$/i, "")
     .replace(/\.mp4$/i, "");
@@ -65,6 +69,7 @@ export async function resolveTakePaths(input: string): Promise<TakePaths> {
     capturePath: `${base}.capture.mp4`,
     captureLogPath: `${base}.capture.json`,
     reviewPath: `${base}.review.mp4`,
+    draftPath: `${base}.draft.mp4`,
     abPath: `${base}.ab.mp4`,
     prevPath: `${base}.prev.mp4`,
   };

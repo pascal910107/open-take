@@ -327,6 +327,11 @@ export type InspectElement = {
 
 export type InspectResult = {
   url: string;
+  /** where the navigation actually landed (redirects, SPA rewrites) */
+  finalUrl: string;
+  /** document.title — the one-call check that this is the app you think it is
+   *  (a stale port number silently serves a different project's dev server) */
+  title: string;
   viewport: { w: number; h: number };
   elements: InspectElement[];
 };
@@ -384,8 +389,10 @@ export async function inspectPage(url: string, opts: InspectOpts = {}): Promise<
     } catch {
       /* leave empty */
     }
+    const title = await evalRaw("document.title").catch(() => "");
+    const finalUrl = (await evalRaw("location.href").catch(() => "")) || url;
 
-    return { url, viewport: { w: inner[0], h: inner[1] }, elements };
+    return { url, finalUrl, title, viewport: { w: inner[0], h: inner[1] }, elements };
   } finally {
     await browser.close();
   }

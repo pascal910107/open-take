@@ -22,6 +22,8 @@ import {
   renderAbReel,
   renderBeforeAfter,
   renderCompositionFile,
+  renderDraft,
+  renderFrames,
   renderReview,
   requireTakeFiles,
   resolveTakePaths,
@@ -79,9 +81,10 @@ const USAGE = `open-take — agent-native demo recorder
 
 Usage:
   open-take inspect <url> [--viewport 1920x1080]
-  open-take make   --plan <plan.json> --out <out.mp4> [--fps 60]
-  open-take render <take> [--review] [--open] [--reveal] [--no-open]
+  open-take make   --plan <plan.json> --out <out.mp4> [--fps 60] [--draft]
+  open-take render <take> [--review] [--draft] [--open] [--reveal] [--no-open]
   open-take beats  <take> [--card]
+  open-take frames <take> [--beat N]
   open-take ab     <take> --set <knob>=<v1>,<v2>[,<v3>] [--beat N] [--full] [--draft] [--no-open]
   open-take ab     <take> --before-after [--beat N] [--full] [--no-open]
   open-take edit   <take> [--port 4178] [--no-open]
@@ -101,9 +104,20 @@ Usage:
           watermark — never overwrites the postable master. Review copies
           auto-open in the player (--no-open to skip; --reveal to reveal
           instead).
+          --draft renders a clean draft copy to <base>.draft.mp4 (30fps cap +
+          motion blur off, no badges) — the cheap re-render for frame checks
+          mid-refine; never overwrites the master. Does not auto-open.
           (legacy flags --composition/--video/--out/--capture-log still work)
   beats   print the numbered beat sheet — the shared map for notes like
           "beat 3: no zoom". --card appends the say-it cheat card.
+  frames  extract a beat-aware contact sheet (<base>.frames.png) from the
+          delivered mp4: an intro row, one row per beat (a mid-travel cell +
+          4 samples across the beat's camera HOLD, timed off the real camera
+          schedule), a tail row. --beat N densifies one beat into a 10-cell
+          strip with per-cell phase labels. Pass <base>.draft.mp4 or
+          <base>.review.mp4 as <take> to sample that copy instead of the
+          master. Seconds (pure ffmpeg, no render) — this is the verification
+          step: judge framing on HOLD cells, never mid-ramp.
   ab      answer a taste question by eye: ONE knob, up to 3 candidate values
           (the current state is always variant A), rendered as a labeled reel —
           each variant plays twice. Auto-opens (--no-open to skip).
@@ -195,9 +209,9 @@ async function main() {
     const planPath = flag("--plan");
     const out = flag("--out") ?? "take.mp4";
     if (!planPath) throw new Error("make: missing --plan <plan.json>");
-    if (/\.(review|ab|prev|capture)\.mp4$/i.test(out))
+    if (/\.(review|draft|ab|prev|capture)\.mp4$/i.test(out))
       throw new Error(
-        `make: ".review/.ab/.prev/.capture" are reserved take suffixes — pick another --out name`,
+        `make: ".review/.draft/.ab/.prev/.capture" are reserved take suffixes — pick another --out name`,
       );
     const plan = JSON.parse(await readFile(planPath, "utf8")) as TakePlan;
     const fpsFlag = flag("--fps");
@@ -221,6 +235,7 @@ async function main() {
         outPath: out,
         logProgress: true,
         verbose: has("--verbose"),
+        draft: has("--draft"),
         ...(fps || captureScale
           ? { capture: { ...(fps ? { fps } : {}), ...(captureScale ? { captureScale } : {}) } }
           : {}),
@@ -233,10 +248,14 @@ async function main() {
       throw e;
     }
     const { mp4Path, compositionPath, capturePath, captureLogPath, skipped } = made;
+    const draftNote = has("--draft")
+      ? ` (DRAFT quality — \`${INVOKE} render ${mp4Path}\` masters it)`
+      : "";
     process.stdout.write(
-      `\nmp4:         ${mp4Path}\ncomposition: ${compositionPath}\n` +
+      `\nmp4:         ${mp4Path}${draftNote}\ncomposition: ${compositionPath}\n` +
         `capture:     ${capturePath}\ncapture log: ${captureLogPath}\n` +
         `\nrefine by asking your agent for changes — or directly:\n` +
+        `  ${INVOKE} frames ${mp4Path}            (beat-aware contact sheet — verify first)\n` +
         `  ${INVOKE} render ${mp4Path} --review   (draft copy with beat badges, auto-opens)\n` +
         `  ${INVOKE} beats  ${mp4Path}            (the numbered beat sheet)\n` +
         `  ${INVOKE} ab     ${mp4Path} --set zoom=light,tight --beat 2   (taste A/B)\n`,
@@ -302,6 +321,16 @@ async function main() {
       return;
     }
 
+    if (has("--draft")) {
+      const { draftPath } = await renderDraft(take, { logProgress: true });
+      process.stdout.write(
+        `\ndraft: ${draftPath}\n  check it: ${INVOKE} frames ${draftPath}\n`,
+      );
+      if (has("--reveal")) revealPath(draftPath);
+      else if (has("--open")) openPath(draftPath);
+      return;
+    }
+
     await requireTakeFiles(take, { capture: true });
     const staged = await stagePrev(take.mp4Path, take.prevPath);
     try {
@@ -319,6 +348,29 @@ async function main() {
       await staged.abort();
       throw e;
     }
+    return;
+  }
+
+  if (cmd === "frames") {
+    const takeArg = positional[0];
+    if (!takeArg) throw new Error("frames: missing <take>");
+    const take = await resolveTakePaths(takeArg);
+    const beatFlag = flag("--beat");
+    const beat = beatFlag ? Number(beatFlag) : undefined;
+    if (beatFlag && (!Number.isInteger(beat) || beat! < 1))
+      throw new Error(`frames: --beat expects a 1-based beat number (got "${beatFlag}")`);
+    // naming a disposable copy samples that copy; anything else = the master.
+    const sourcePath = /\.(draft|review)\.mp4$/i.test(takeArg)
+      ? /\.draft\.mp4$/i.test(takeArg)
+        ? take.draftPath
+        : take.reviewPath
+      : undefined;
+    const { framesPath, sheet } = await renderFrames(take, {
+      ...(beat != null ? { beat } : {}),
+      ...(sourcePath ? { sourcePath } : {}),
+    });
+    process.stdout.write(`${sheet}\n`);
+    if (has("--open")) openPath(framesPath);
     return;
   }
 

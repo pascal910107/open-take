@@ -28,6 +28,7 @@ import {
 import { type CaptureOpts, captureTake } from "./capture";
 import { ensureChrome } from "./cdp";
 import { annotateCaptureLog } from "./frame-diff";
+import { toDraft } from "./review";
 import type { TakePlan } from "./types";
 
 export type { TakePlan, TakeStep } from "./types";
@@ -58,15 +59,28 @@ export {
 export {
   buildBeatSheet,
   buildBadges,
+  beatLabel,
   renderReview,
+  renderDraft,
   renderAbReel,
   renderBeforeAfter,
+  toDraft,
   openPath,
   revealPath,
   SAY_IT_CARD,
   type AbOpts,
   type ReviewOpts,
 } from "./review";
+export {
+  buildFramePlan,
+  buildFrameSheet,
+  renderFrames,
+  type FramePlan,
+  type FrameRow,
+  type FrameCell,
+  type FramePhase,
+  type FramesOpts,
+} from "./frames";
 export { validateComposition, formatIssues, type CompositionIssue } from "@open-take/compositor";
 
 export type MakeTakeOpts = {
@@ -85,6 +99,11 @@ export type MakeTakeOpts = {
    *  are useful when debugging framing, but on a normal run they bury the
    *  warnings an author must act on (a skipped step). */
   verbose?: boolean;
+  /** render the INITIAL mp4 at draft quality (30fps cap + motion blur off,
+   *  ~6-12× faster) for the iterate loop; the capture still records at the
+   *  full fps and the composition sibling keeps the full-quality settings, so
+   *  the closing `render` produces the real master from the same take. */
+  draft?: boolean;
 };
 
 export type MakeTakeResult = {
@@ -168,13 +187,18 @@ export async function makeTake(plan: TakePlan, opts: MakeTakeOpts): Promise<Make
       : opts.planOpts;
   const composition = planComposition(log, planOpts);
   const { mp4Path, compositionPath } = await renderTake({
-    composition,
+    // A draft take renders fast (30fps cap + no blur) but PLANS at full
+    // quality: the sibling written below keeps the real settings, so the
+    // closing `render` masters this same take without a re-make.
+    composition: opts.draft ? toDraft(composition) : composition,
     videoPath: capturePath,
     outPath: resolve(opts.outPath),
     logProgress: opts.logProgress ?? false,
     chromePath,
     captureLog: log,
+    ...(opts.draft ? { writeCompositionSibling: false } : {}),
   });
+  if (opts.draft) await writeFile(compositionPath, JSON.stringify(composition, null, 2));
 
   return {
     mp4Path,

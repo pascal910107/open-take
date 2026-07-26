@@ -35,7 +35,29 @@ SELF-CRITIQUE *before* you touch the capture tooling.
 ### 1. UNDERSTAND (explore before deciding anything)
 Open the app and look. Use the CLI's `inspect` (below) to list interactive
 elements (name + bbox), and open the URL in any browser to see what the app
-*is* and what its interactions *do*. Answer, in writing:
+*is* and what its interactions *do*.
+
+**Explore efficiently — the measured time sink is HERE, not the renders:**
+- **Confirm the target first.** `inspect` returns the page `title` + `finalUrl`
+  — check they name the app you were asked to demo before exploring anything
+  (dev servers auto-increment ports; a stale URL silently serves a different
+  project).
+- **Front-load a source read.** If the app's source is available, start a
+  parallel source read (a subagent, if your host has one) the moment you have
+  the URL, and probe the live app while it runs. Selectors, routes, seeded
+  data, and feature lists come back cheaper from source than from clicking.
+- **Answer content questions from source, never by UI trial-and-error.** "Which
+  search term has hits on a distant page", "what data exists to demo with",
+  "what does this list contain" — grep the source/data files ONCE instead of
+  probing the UI one query at a time (a measured run burned ~4 min on 9
+  serial search-term probes that one grep would have answered).
+- **Batch UI probes.** Take screenshots / run interaction probes in batches,
+  not one round-trip each; lazy-loading apps make serial probing expensive.
+- Interaction probing is still irreplaceable for *behavior* (focus races,
+  animation timing, what a click actually reveals) — spend the round-trips
+  there, not on content questions.
+
+Answer, in writing:
 - **What is this product and who is it for** — one sentence.
 - **What is its SINGLE most impressive / differentiating thing** — the "wow"
   that makes someone stop scrolling. (Not "it has a nice UI." The specific
@@ -100,8 +122,12 @@ If the answer to any is weak, revise the DIRECT step. This is also where you map
 the ideal onto the capture vocabulary (next section) and decide your downgrades.
 
 ### 4. CAPTURE & RENDER (through the runtime)
-Write the plan (schema below), then `make`. The runtime drives the live app and
-composites the polish.
+Write the plan (schema below), then `make --draft`. The runtime drives the live
+app and composites the polish. **Draft-first is the default loop:** the first
+render and every mid-refine re-render are drafts (30fps cap, no motion blur —
+several times faster); the full-quality master is rendered ONCE, at the closing
+ritual. The capture itself still records at the full fps and the composition
+keeps the full-quality settings, so nothing is lost — only deferred.
 
 **The capture vocabulary is `click` · `type` · `drag` · `scroll` · `hover` ·
 `press` · `wait`.** It covers most product wows directly:
@@ -121,11 +147,20 @@ expressible — e.g. a hover-reveal whose menu has no accessible name AND no
 stable selector. Don't silently fall back to clicking inert UI.
 
 ### 5. SHOW (frames, not claims)
-First verify it YOURSELF — extract frames and **look at them**:
+First verify it YOURSELF — get the beat-aware contact sheet and **look at it**:
 ```
-ffmpeg -i demo.mp4 -vf "fps=8/<dur>,scale=480:-1,tile=5x2" contact.png   # contact sheet
-ffmpeg -ss <t> -i demo.mp4 -frames:v 1 frame.png                          # a single moment
+npx open-take frames demo.mp4              # <base>.frames.png + a row/time table
+npx open-take frames demo.mp4 --beat 3     # 10-cell strip of one beat
 ```
+`frames` samples off the REAL camera schedule: an intro row (dead-opening
+check), one row per beat (a mid-travel cell + 4 samples across the camera's
+HOLD), a tail row (lingering-ending check). **Judge framing and payoffs on
+HOLD cells only** — cells labeled `(travel)`/`(tail)` are mid-motion by design;
+misreading a settle tail as "the zoom didn't apply" is the classic false alarm
+this exists to prevent. What to look for: every beat's payoff visible and
+legible, no dead opening, no skipped beat, drags actually inked. A raw
+`ffmpeg -ss <t> -i demo.mp4 -frames:v 1 frame.png` is still fine for one
+specific moment.
 Then hand the user the **review copy** — a fast draft with the beat numbers
 burned into the frame (the video itself teaches how to refer to moments) and a
 REVIEW watermark so it can't be mistaken for the postable master:
@@ -167,7 +202,9 @@ it in the editor).
      tightness/center, pacing, look, finish, intro, tail. Edit
      `demo.composition.json` (presets below), then ONE `render --review` for ALL
      batched notes from the message. The badges re-burn so the sheet never goes
-     stale.
+     stale. To verify an edit YOURSELF before showing it, `render --draft`
+     (clean `<base>.draft.mp4`, no badges) then `frames demo.draft.mp4` —
+     seconds, and the master is never touched mid-refine.
    - **A taste question ("how tight? 深一點? 快一點?"):** never guess twice —
      run an `ab` reel with the bracketing values and ask for a letter:
      ```
@@ -188,7 +225,8 @@ it in the editor).
 4. **Failures become handoff, not dead ends.** A validator refusal prints the
    field + fix — relay it and apply the fix; never bypass validation.
 5. **The closing ritual.** On "好了" / "done": one full-quality master render,
-   reveal it, and print the ready line — nothing else:
+   reveal it, and print the ready line — nothing else. In the draft-first loop
+   this is the ONE place the 60fps + motion-blur master gets paid for:
    ```
    npx open-take render demo.mp4 --reveal
    ready: /abs/path/demo.mp4 · 17.3s · 1920×1080@60 · 8.4 MB
@@ -218,8 +256,10 @@ value (bbox-derived precision is ground truth):
 ```
 npx open-take inspect <url> [--viewport 1920x1080]
 ```
-Returns `{ url, viewport, elements: [{name, tag, role, href, inView, x,y,w,h}] }`
-— elements with an **accessible name**. Target these by `text` (the locator).
+Returns `{ url, finalUrl, title, viewport, elements: [{name, tag, role, href,
+inView, x,y,w,h}] }` — elements with an **accessible name**. Target these by
+`text` (the locator). **Check `title`/`finalUrl` first** — one glance catches
+a stale port serving a different project before any exploration is wasted.
 
 **`inspect` only sees accessibly-named `button/a/[role]/input` elements.** Many
 real controls are unlabeled icon-buttons or `<div>`s with click handlers (app
@@ -311,11 +351,19 @@ page changed).
 
 ### make (render)
 ```
-npx open-take make --plan plan.json --out demo.mp4            # 60fps (default)
-npx open-take make --plan plan.json --out demo.mp4 --fps 30   # fast-draft
+npx open-take make --plan plan.json --out demo.mp4 --draft    # the default loop
+npx open-take make --plan plan.json --out demo.mp4            # master up front
+npx open-take make --plan plan.json --out demo.mp4 --fps 30   # capture at 30
 ```
 Produces `demo.mp4` (1920×1080 @ **60fps default**) and
 `demo.composition.json` (editable).
+
+**`--draft` renders the initial mp4 at draft quality** (30fps cap + motion blur
+off — several times faster) while the capture still records at the full fps and
+the composition sibling keeps the full-quality settings; the closing `render`
+masters the same take with no re-shoot. Use it by default — the first cut
+exists to be verified and refined, not posted. (`--fps 30` is different: it
+halves the CAPTURE grid too, capping the master at 30fps.)
 
 **fps (default 60).** Capture is always a pure-CDP screencast (drives AND
 records over a self-launched headless Chrome); `--fps` sets both the capture
