@@ -16,7 +16,7 @@
 // action needs a re-capture, not a JSON edit. Pass the capture log to enforce
 // this; without it the check is skipped (we can't know the ground truth).
 
-import { restStageScale } from "./math";
+import { buildStageKeyframes, restStageScale } from "./math";
 import type { CaptureLog, TakeComposition } from "./types";
 
 export type CompositionIssue = {
@@ -154,11 +154,13 @@ export function validateComposition(
           `scale ${z.scale.toFixed(3)} is below rest ${rest.toFixed(3)} — that zooms OUT past the frame (dead space)`,
           `raise to ≥ ${rest.toFixed(2)}, or set zoom.enabled=false for a full-view beat`,
         );
-      else if (z.scale <= rest + 1e-6)
+      else if (z.scale < rest * 1.2)
+        // the whole dead band, not just ≈rest exactly: a 1.03× "zoom" renders
+        // an enabled move the eye can't see (issue #1 — it shipped silently).
         warn(
           `${p}.zoom.scale`,
-          `scale ${z.scale.toFixed(3)} ≈ rest — zoom is enabled but does nothing visible`,
-          "raise scale to actually zoom, or set enabled=false",
+          `scale ${z.scale.toFixed(3)} is within 20% of rest ${rest.toFixed(3)} — an imperceptible zoom (enabled but invisible)`,
+          "raise scale to ≥ ~1.25 to actually zoom, or set enabled=false",
         );
       if (z.scale > maxScale)
         warn(
@@ -205,6 +207,30 @@ export function validateComposition(
       );
   }
 
+  // asymptotic settle: the residual left to creep out after the action instant.
+  // Beyond ~0.15 the camera visibly hasn't arrived when the action fires.
+  const settleFrac = comp.cursor.zoomSettleFrac;
+  if (settleFrac != null && !(settleFrac >= 0 && settleFrac <= 0.15))
+    err(
+      "cursor.zoomSettleFrac",
+      `zoomSettleFrac ${settleFrac} outside [0, 0.15]`,
+      "~0.04 = the reference-measured tail; 0 = legacy cut spring",
+    );
+  else if (settleFrac != null && settleFrac > 0 && (comp.cursor.zoomEase || spring != null))
+    warn(
+      "cursor.zoomSettleFrac",
+      `zoomSettleFrac is IGNORED while cursor.${comp.cursor.zoomEase ? "zoomEase" : "zoomSpring"} is set — the render is byte-identical to not setting it`,
+      "delete cursor.zoomEase / cursor.zoomSpring (a pace preset clears zoomEase) to activate the settle tail",
+    );
+
+  const dwell = comp.cursor.pullOutDwellMs;
+  if (dwell != null && !(dwell >= 0 && dwell <= 5000))
+    err(
+      "cursor.pullOutDwellMs",
+      `pullOutDwellMs ${dwell} outside [0, 5000]`,
+      "600-1000 reads as a natural beat; 0 = legacy (depart as soon as the action ends)",
+    );
+
   // tail: the composition must outlast the last action (+ a little settle)
   if (comp.durationMs < lastEnd)
     err(
@@ -218,6 +244,48 @@ export function validateComposition(
       `only ${comp.durationMs - lastEnd}ms after the last action — the final zoom-out may be cut`,
       `allow ≥ ${comp.cursor.zoomOutMs}ms (cursor.zoomOutMs) of tail`,
     );
+
+  // A dwell-delayed final pull-out can land LATER than the legacy tail math
+  // above assumes — check the actual schedule, not the formula. (Guarded: the
+  // schedule needs a structurally sound composition; earlier errors mean this
+  // check would throw, and its absence is already explained by them.)
+  if ((comp.cursor.pullOutDwellMs ?? 0) > 0 && issues.every((i) => i.severity !== "error")) {
+    try {
+      const kfs = buildStageKeyframes(comp).r;
+      let motionEndS = 0;
+      for (let i = 0; i < kfs.length - 1; i++) {
+        const [, a] = kfs[i]!;
+        const [t1, b] = kfs[i + 1]!;
+        if (a.cx !== b.cx || a.cy !== b.cy || a.w !== b.w) motionEndS = t1;
+      }
+      if (motionEndS * 1000 > comp.durationMs + 1)
+        warn(
+          "durationMs",
+          `the camera is still mid-motion at durationMs (dwell-delayed landing ends ~${Math.round(motionEndS * 1000)}ms)`,
+          `raise durationMs to ≥ ${Math.round(motionEndS * 1000)}`,
+        );
+    } catch {
+      /* never let a diagnostics pass throw */
+    }
+  }
+
+  // head trim: cut dead pre-paint frames, never a beat. The trim only moves
+  // the delivered head — tMs values stay on the capture timeline.
+  const startMs = comp.startMs;
+  if (startMs != null) {
+    if (!(startMs >= 0) || startMs >= comp.durationMs)
+      err(
+        "startMs",
+        `startMs ${startMs} outside [0, durationMs ${comp.durationMs})`,
+        "the head trim must leave a video",
+      );
+    else if (comp.events[0] && startMs > comp.events[0].zoom.inAtMs)
+      warn(
+        "startMs",
+        `startMs ${startMs} cuts into the first beat (camera/cursor already moving at ${comp.events[0].zoom.inAtMs}ms)`,
+        `keep the trim ≤ ${comp.events[0].zoom.inAtMs} so the delivered video opens at rest`,
+      );
+  }
 
   // --- CAPTURE-LOCKED: action tMs must match the recording ---
   // The video is temporal: a beat's tMs is WHEN it is visible in the capture.

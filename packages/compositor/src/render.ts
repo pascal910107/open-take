@@ -286,6 +286,17 @@ async function renderTakeExclusive(
       );
   }
 
+  // Head trim (composition.startMs): deliver the timeline from startMs on,
+  // through the SAME range mechanism the A/B windows use — the composition
+  // timeline (tMs, badges, keyframes) is untouched; only the delivered head
+  // moves. An explicit rangeSec (an A/B clip window) wins: those windows are
+  // authored on the composition timeline and already judged as clips.
+  const rangeSec =
+    opts.rangeSec ??
+    (composition.startMs && composition.startMs > 0
+      ? ([composition.startMs / 1000, composition.durationMs / 1000 + 120] as [number, number])
+      : undefined);
+
   // Revideo spawns its bundled ffprobe directly. Repair installer permissions
   // here so published consumers are protected even though they do not run the
   // monorepo root's postinstall script.
@@ -309,7 +320,7 @@ async function renderTakeExclusive(
           outFile: "take.mp4",
           outDir: RENDER_OUT,
           workers: 1,
-          ...(opts.rangeSec ? { projectSettings: { range: opts.rangeSec } } : {}),
+          ...(rangeSec ? { projectSettings: { range: rangeSec } } : {}),
           logProgress: opts.logProgress ?? false,
           ...(opts.onProgress
             ? {

@@ -40,17 +40,41 @@ export function zoomLevelName(scale: number, tol = 0.07): ZoomLevelName | null {
 // default state speakable.
 export type MotionPreset = Pick<
   CursorConfig,
-  "travelWidthsPerSec" | "holdMs" | "zoomInMs" | "zoomOutMs"
+  "travelWidthsPerSec" | "holdMs" | "zoomInMs" | "zoomOutMs" | "pullOutDwellMs"
 > & { zoomEase?: undefined };
 // zoomIn/zoomOut anchored to the measured reference springs (730/1340 —
 // see DEFAULT_CURSOR); calm/brisk scale both while keeping out ≈ 1.8× in.
-// Each preset also CLEARS a legacy zoomEase (spread leaves the key undefined;
-// JSON drops it) so applying a pace migrates an old composition onto the
-// default measured-SS spring curve instead of silently keeping the old bezier.
+// pullOutDwellMs (the minimum stay on a payoff before a squeezed pull-out may
+// flee) scales with the same feel: a calm cut breathes longer, a brisk one
+// tolerates a shorter beat. Each preset also CLEARS a legacy zoomEase (spread
+// leaves the key undefined; JSON drops it) so applying a pace migrates an old
+// composition onto the default measured-SS spring curve instead of silently
+// keeping the old bezier.
 export const MOTION: Record<"calm" | "natural" | "brisk", MotionPreset> = {
-  calm: { travelWidthsPerSec: 0.28, holdMs: 1500, zoomInMs: 900, zoomOutMs: 1650, zoomEase: undefined },
-  natural: { travelWidthsPerSec: 0.35, holdMs: 1100, zoomInMs: 730, zoomOutMs: 1340, zoomEase: undefined },
-  brisk: { travelWidthsPerSec: 0.45, holdMs: 750, zoomInMs: 550, zoomOutMs: 1000, zoomEase: undefined },
+  calm: {
+    travelWidthsPerSec: 0.28,
+    holdMs: 1500,
+    zoomInMs: 900,
+    zoomOutMs: 1650,
+    pullOutDwellMs: 1000,
+    zoomEase: undefined,
+  },
+  natural: {
+    travelWidthsPerSec: 0.35,
+    holdMs: 1100,
+    zoomInMs: 730,
+    zoomOutMs: 1340,
+    pullOutDwellMs: 800,
+    zoomEase: undefined,
+  },
+  brisk: {
+    travelWidthsPerSec: 0.45,
+    holdMs: 750,
+    zoomInMs: 550,
+    zoomOutMs: 1000,
+    pullOutDwellMs: 600,
+    zoomEase: undefined,
+  },
 };
 export type MotionName = keyof typeof MOTION;
 
@@ -60,7 +84,11 @@ export function motionName(cursor: CursorConfig): MotionName | null {
       Math.abs(cursor.travelWidthsPerSec - m.travelWidthsPerSec) < 0.015 &&
       Math.abs(cursor.holdMs - m.holdMs) < 60 &&
       Math.abs(cursor.zoomInMs - m.zoomInMs) < 60 &&
-      Math.abs(cursor.zoomOutMs - m.zoomOutMs) < 60
+      Math.abs(cursor.zoomOutMs - m.zoomOutMs) < 60 &&
+      // absent = a pre-dwell composition — still nameable by its four legacy
+      // knobs; only an explicit different value makes the pace "custom".
+      (cursor.pullOutDwellMs == null ||
+        Math.abs(cursor.pullOutDwellMs - (m.pullOutDwellMs ?? 0)) < 60)
     )
       return name;
   }

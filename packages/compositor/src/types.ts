@@ -117,6 +117,11 @@ export type CaptureLog = {
   /** the ordered ground-truth actions (click / type / drag) */
   events: CaptureEvent[];
   tEndMs?: number;
+  /** Steps the capture DROPPED (target not found / endpoint unresolved) — the
+   *  take still completes, but a missing beat must reach the end-of-run
+   *  summary and (with --strict) the exit code, not just an early stderr line
+   *  buried under render progress. `step` is the plan's 0-based step index. */
+  skipped?: { step: number; action: string; target?: string; reason: string }[];
 };
 
 // --- the composition (editable) ----------------------------------------
@@ -223,6 +228,28 @@ export type CursorConfig = {
    *  shapes the curve. Bounce > 0 overshoots the RECT (a touch past the target
    *  frame, then settle) — keep it small. */
   zoomSpring?: number;
+  /** Fraction of a camera ramp still UNfinished at its keyframe end (the action
+   *  instant), left to settle as an asymptotic overdamped tail that continues
+   *  INTO the hold — so a move tapers out like a physical camera instead of
+   *  stopping on a velocity cliff at the keyframe. Frame-tracked on the
+   *  reference export: its moves keep sub-threshold motion ~0.5s past the
+   *  visible end (tail τ ≈ 220ms in / ≈ 370ms out), while the cut spring's
+   *  τ = duration/6.9 ends 2-3× harder. ~0.04 (the shipped default) reproduces
+   *  the reference tails over the default zoomInMs/zoomOutMs. 0 = legacy
+   *  cut+normalized spring (absent falls back to the default on NEW plans; an
+   *  old composition without the field renders as it always did). Ignored when
+   *  zoomSpring or zoomEase is set (those keep their exact legacy curves). */
+  zoomSettleFrac?: number;
+  /** Minimum stay (ms) after the previous action's visible end before a
+   *  PULL-OUT ramp may begin. When the beat gap is too tight the pull-out now
+   *  departs late and LANDS late (after its own action instant) instead of
+   *  fleeing a frame the viewer is still reading — the reference recorder's
+   *  reactive pattern (payoff plays while the camera is still arriving).
+   *  ~800 (the shipped default) reads as a natural beat; pace presets scale it.
+   *  0/absent = legacy (a squeezed pull-out departs the instant the previous
+   *  action ends and lands exactly on its action). Named pullOut- because
+   *  holdMs already covers the ordinary post-action dwell. */
+  pullOutDwellMs?: number;
   /** ms to delay the synthetic cursor along a DRAG stroke, compensating for the
    *  capture pipeline latency: the captured ink appears ~this long after the pen
    *  actually moved, so without the delay the (exact-time) cursor leads the ink.
@@ -338,6 +365,14 @@ export type TakeComposition = {
   start: Pt;
   events: CompEvent[];
   durationMs: number;
+  /** Head trim (ms of the composition timeline cut from the delivered mp4).
+   *  Capture starts at navigation, so the first frames show the app before it
+   *  painted (plus any cold-cache font swap) — trim them here instead of
+   *  post-processing with ffmpeg, so the refine loop keeps applying to the file
+   *  actually shipped. Event tMs values stay on the untrimmed timeline (the
+   *  capture is the ground truth); only the delivered head moves. 0/absent =
+   *  no trim. */
+  startMs?: number;
   /** render-time review decoration (badges/watermark/label); never persisted */
   review?: ReviewDecor;
 };
@@ -397,6 +432,14 @@ export const DEFAULT_CURSOR: CursorConfig = {
   // critically-damped spring that IS the measured SS curve over these windows.
   zoomOutMs: 1340,
   zoomInMs: 730,
+  // Asymptotic settle + pull-out dwell — the A/B "C variant" Pascal signed off
+  // (2026-07-26): each camera move keeps a ~4% residual settling INTO the hold
+  // (no velocity cliff at the keyframe — the frame-tracked reference tail), and
+  // a squeezed pull-out stays ≥800ms on the payoff, landing late instead of
+  // fleeing a frame the viewer is still reading. Old compositions without the
+  // fields keep the legacy cut/squeeze schedule byte-identically.
+  zoomSettleFrac: 0.04,
+  pullOutDwellMs: 800,
   // The captured ink trails the pen by the screencast/encode pipeline latency τ;
   // delay the cursor by τ so its tip rides the ink front. Set to τ EXACTLY and
   // the cursor locks to the ink at ALL stroke speeds (both are the same time-

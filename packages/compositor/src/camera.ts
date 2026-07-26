@@ -84,6 +84,15 @@ function growDown(box: BBox, video: { w: number; h: number }): BBox {
  *  field-anchored and height-capped (its reveal is open-ended); every other
  *  kind trusts the captured effect region, else shapes one from the bbox. */
 function roiForBeat(b: Beat, video: { w: number; h: number }): BBox | undefined {
+  // A press with an EXPLICIT zoom=always + a located reveal element: the
+  // author named exactly what to frame — that box outranks the frame-diff
+  // effectBox. A press payoff behind a scrim (modal / command palette) diffs
+  // as a full-frame repaint, which would flatten the punch to ~1× (issue #3);
+  // and a tiny incidental effectBox (a save indicator) would yank the frame
+  // somewhere else entirely (issue #8). click/hover keep effectBox preference:
+  // there the payoff usually lands AWAY from the element, which is the whole
+  // point of the frame-diff seam.
+  if (b.kind === "press" && b.intent === "always" && b.box) return b.box;
   if (b.kind === "type" && b.box) {
     // Bound the frame to "field + top of results": keep the effectBox's real
     // reveal WIDTH, but cap the HEIGHT to growDown's result-sized window so an
@@ -163,17 +172,25 @@ export function directCamera(
         boundary: true,
         reason: "plan: zoom=never → full view",
       };
-    if (b.intent === "always")
+    if (b.intent === "always") {
+      // An explicit "always" must never ship a no-op: a wide ROI can fit-scale
+      // into the imperceptible band (rest…~1.1×) and render an enabled zoom
+      // the eye can't see (issue #1). Floor at minZoomScale — the author asked
+      // for a punch, so give the smallest one that reads as one.
+      const floored = roi ? Math.max(scale, cam.minZoomScale) : scale;
       return {
         roi,
-        scale,
+        scale: floored,
         forceFull: false,
         forcePunch: true,
         boundary: true,
         reason: roi
-          ? `plan: zoom=always → ${scale.toFixed(2)}× (framing from ROI)`
+          ? floored > scale
+            ? `plan: zoom=always → ROI fit ${scale.toFixed(2)}× is imperceptible — floored to ${floored.toFixed(2)}×`
+            : `plan: zoom=always → ${floored.toFixed(2)}× (framing from ROI)`
           : "plan: zoom=always but no bbox to frame → full view",
       };
+    }
 
     // a scroll is a pan beat: content moves, the frame stays full-view.
     if (b.kind === "scroll")
@@ -214,7 +231,11 @@ export function directCamera(
 
     // the opening beat orients: open on the whole app (Q3 — falls out of "the
     // camera opens full", no zoomFirst flag). A cold-open uses zoom=always.
-    if (i === 0)
+    // Only when the beat actually opens the video, though: a first action ≥2s
+    // in (a leading `wait`, a slow warmup) already gave the viewer the full
+    // view — forcing it wide again just robs the hero moment (issue #2; the
+    // default warmup alone puts an immediate first action at ~1s).
+    if (i === 0 && b.tMs < 2000)
       return {
         roi,
         scale,

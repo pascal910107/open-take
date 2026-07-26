@@ -229,12 +229,35 @@ export function keyvalR(t: number, kfs: KF<CamRect>[], ease: (u: number) => numb
   return kfs[kfs.length - 1]![1];
 }
 
-export function buildStageKeyframes(comp: TakeComposition): StageKeyframes {
+// The camera schedule shared by buildStageKeyframes (the render path) and
+// cameraRampSchedule (the refine surfaces — A/B windows, review badges): which
+// events anchor a camera move, when each ramp departs, and when it lands.
+// One computation so the badge/window timing can never drift from the render.
+type CameraSchedule = {
+  anchors: {
+    evIdx: number;
+    tMs: number;
+    durationMs: number;
+    inAtMs: number;
+    scale: number;
+    center: Pt;
+    glide?: Pt;
+  }[];
+  targets: CamRect[];
+  restR: CamRect;
+  /** per-anchor ramp window, SECONDS */
+  ramps: { start: number; end: number }[];
+  /** per-anchor landing time, SECONDS (≥ ramp start + a minimal real ramp;
+   *  == tMs for every on-time ramp, later for a dwell-delayed pull-out) */
+  landTs: number[];
+  rectFor: (center: Pt, scale: number) => CamRect;
+};
+
+function buildCameraSchedule(comp: TakeComposition): CameraSchedule {
   const { videoWidth: vW, videoHeight: vH } = comp.source;
   const { width: oW, height: oH } = comp.output;
   const rest = restStageScale(vW, vH, oW, oH, comp.framing.insetFrac);
   const restC: Pt = { x: vW / 2, y: vH / 2 };
-  const HOLD = comp.cursor.holdMs / 1000;
   const ZOUT_MS = comp.cursor.zoomOutMs;
 
   // A framing target is clamped ONCE, here at build time (the viewport crop
@@ -260,23 +283,15 @@ export function buildStageKeyframes(comp: TakeComposition): StageKeyframes {
   // global) ramp back to REST so the frame is full-view through them — without
   // these, a prior zoom would persist across the scroll/keypress. Other
   // disabled beats (a "never" click) keep holding the prior framing, unchanged.
-  type Anchor = {
-    tMs: number;
-    durationMs: number;
-    inAtMs: number;
-    scale: number;
-    center: Pt;
-    glide?: Pt;
-  };
-  const anchors: Anchor[] = [];
-  for (const e of comp.events) {
-    const base = { tMs: e.tMs, durationMs: e.durationMs ?? 0, inAtMs: e.zoom.inAtMs };
+  const anchors: CameraSchedule["anchors"] = [];
+  comp.events.forEach((e, evIdx) => {
+    const base = { evIdx, tMs: e.tMs, durationMs: e.durationMs ?? 0, inAtMs: e.zoom.inAtMs };
     if (e.kind === "scroll" || (e.kind === "press" && !e.zoom.enabled)) {
       anchors.push({ ...base, scale: rest, center: restC });
     } else if (e.zoom.enabled) {
       anchors.push({ ...base, scale: e.zoom.scale, center: e.zoom.center, glide: e.zoom.glide });
     }
-  }
+  });
 
   const targets = anchors.map((e) => rectFor(e.center, e.scale));
 
@@ -291,17 +306,93 @@ export function buildStageKeyframes(comp: TakeComposition): StageKeyframes {
   // ramp: a pull-out with no window is a jump cut, which is strictly worse
   // than leaving a payoff a little early.
   const ZIN_MS = comp.cursor.zoomInMs;
-  const rampStartS = anchors.map((e, i) => {
+  const DWELL_MS = comp.cursor.pullOutDwellMs ?? 0;
+  const ramps = anchors.map((e, i) => {
     const from = i > 0 ? targets[i - 1]! : restR;
     const pullOut = targets[i]!.w > from.w + 1e-6;
     const isDefaultInAt = Math.abs(e.inAtMs - Math.max(0, e.tMs - ZIN_MS)) < 1;
-    if (!pullOut || !isDefaultInAt) return e.inAtMs / 1000;
+    if (!pullOut || !isDefaultInAt) return { start: e.inAtMs / 1000, end: e.tMs / 1000 };
     const desired = e.tMs - ZOUT_MS;
     const prevEndMs = i > 0 ? anchors[i - 1]!.tMs + anchors[i - 1]!.durationMs : 0;
-    const start =
-      desired >= prevEndMs ? desired : Math.min(prevEndMs, e.tMs - Math.min(ZOUT_MS, ZIN_MS));
-    return Math.max(start, 0) / 1000;
+    const floor = prevEndMs + DWELL_MS;
+    if (desired >= floor) return { start: Math.max(desired, 0) / 1000, end: e.tMs / 1000 };
+    if (DWELL_MS > 0) {
+      // The dwell floor pushes the departure past the on-time window: keep the
+      // full pull-out ramp and LAND LATE (after the action instant) rather than
+      // flee a frame the viewer is still reading. The landing is capped at the
+      // next anchor's ramp start at push time.
+      return { start: floor / 1000, end: (floor + ZOUT_MS) / 1000 };
+    }
+    const start = Math.min(prevEndMs, e.tMs - Math.min(ZOUT_MS, ZIN_MS));
+    return { start: Math.max(start, 0) / 1000, end: e.tMs / 1000 };
   });
+  // Second pass: a dwell-floored ramp must still FIT a real ramp before the
+  // next anchor departs — otherwise the landT cap would invert it into a
+  // 1ms jump cut (push()'s monotone clamp collapses it). Give up dwell time
+  // before ramp time: shrink the dwell so at least min(zoomOutMs, zoomInMs)
+  // of real ramp survives, and when even zero dwell has no room fall back to
+  // the exact legacy squeeze. (Anchor starts never depend on earlier ramps'
+  // ends, so one forward pass over pass-1 values is complete.)
+  if (DWELL_MS > 0) {
+    const minRamp = Math.min(ZOUT_MS, ZIN_MS);
+    for (let i = 0; i < ramps.length - 1; i++) {
+      const r = ramps[i]!;
+      const e = anchors[i]!;
+      if (r.end <= e.tMs / 1000 + 1e-9) continue; // on-time ramp — not dwell-late
+      const latestStart = ramps[i + 1]!.start - 0.01 - minRamp / 1000;
+      if (r.start <= latestStart) continue; // the late landing fits
+      const prevEndMs = i > 0 ? anchors[i - 1]!.tMs + anchors[i - 1]!.durationMs : 0;
+      if (latestStart * 1000 >= prevEndMs) {
+        r.start = latestStart;
+        r.end = Math.min(r.start + ZOUT_MS / 1000, ramps[i + 1]!.start - 0.01);
+      } else {
+        const start = Math.min(prevEndMs, e.tMs - minRamp);
+        r.start = Math.max(start, 0) / 1000;
+        r.end = e.tMs / 1000;
+      }
+    }
+  }
+
+  // A dwell-delayed pull-out lands after its own action instant; cap the
+  // landing so it can never run into the next anchor's ramp (floored at a
+  // minimal real ramp — the fits-check in the dwell pass guarantees room).
+  // An on-time ramp (end === tMs, every legacy entry) keeps the exact old
+  // landing; a pass-2-shrunk ramp may deliberately land BEFORE its tMs.
+  const landTs = anchors.map((e, i) => {
+    const nextStart = anchors[i + 1] ? ramps[i + 1]!.start : Number.POSITIVE_INFINITY;
+    const rampEnd = ramps[i]!.end;
+    return rampEnd === e.tMs / 1000
+      ? rampEnd
+      : Math.max(
+          ramps[i]!.start + Math.min(ZOUT_MS, ZIN_MS) / 1000,
+          Math.min(rampEnd, nextStart - 0.01),
+        );
+  });
+
+  return { anchors, targets, restR, ramps, landTs, rectFor };
+}
+
+/** Per-EVENT camera ramp timing (ms), for the refine surfaces (A/B windows,
+ *  review badges): when the camera actually departs toward a beat and when it
+ *  lands. `null` for a beat the camera holds through (no anchor). Derived from
+ *  the same schedule the render uses, so a dwell-delayed pull-out (which
+ *  departs after the stored inAtMs and can land after its own tMs) is
+ *  reflected instead of approximated from inAtMs. */
+export function cameraRampSchedule(
+  comp: TakeComposition,
+): ({ startMs: number; landMs: number } | null)[] {
+  const { anchors, ramps, landTs } = buildCameraSchedule(comp);
+  const out: ({ startMs: number; landMs: number } | null)[] = comp.events.map(() => null);
+  anchors.forEach((a, i) => {
+    out[a.evIdx] = { startMs: ramps[i]!.start * 1000, landMs: landTs[i]! * 1000 };
+  });
+  return out;
+}
+
+export function buildStageKeyframes(comp: TakeComposition): StageKeyframes {
+  const { anchors, targets, restR, ramps, landTs, rectFor } = buildCameraSchedule(comp);
+  const HOLD = comp.cursor.holdMs / 1000;
+  const ZOUT_MS = comp.cursor.zoomOutMs;
 
   const rf: { t: number; r: CamRect }[] = [{ t: 0, r: restR }];
   const push = (t: number, r: CamRect) => {
@@ -310,21 +401,22 @@ export function buildStageKeyframes(comp: TakeComposition): StageKeyframes {
 
   let cur = restR;
   anchors.forEach((e, i) => {
-    const clickT = e.tMs / 1000;
     // the action plays out (typing/drawing/scrolling) for durationMs after tMs
     // — hold the target framing through it (a point click has duration 0).
     const actionEnd = (e.tMs + e.durationMs) / 1000;
     const next = anchors[i + 1];
-    const holdEndT = next ? rampStartS[i + 1]! : actionEnd + HOLD;
-    push(rampStartS[i]!, cur); // hold current until ramp begins
-    push(clickT, targets[i]!); // ONE eased rect segment lands at the action
+    const nextStart = next ? ramps[i + 1]!.start : Number.POSITIVE_INFINITY;
+    const landT = landTs[i]!;
+    const holdEndT = Math.max(next ? nextStart : actionEnd + HOLD, landT);
+    push(ramps[i]!.start, cur); // hold current until ramp begins
+    push(landT, targets[i]!); // ONE eased rect segment lands at the action
     cur = targets[i]!;
     // glide: drift the held centre across the hold window (velocity px/s ·
     // holdSeconds), so a held zoom slowly pans instead of sitting dead-static.
     // Clamped like any target so the drift can't leave the recording.
     let holdR = cur;
     if (e.glide && (e.glide.x !== 0 || e.glide.y !== 0)) {
-      const holdDur = Math.max(0, holdEndT - clickT);
+      const holdDur = Math.max(0, holdEndT - landT);
       holdR = rectFor(
         { x: e.center.x + e.glide.x * holdDur, y: e.center.y + e.glide.y * holdDur },
         e.scale,
@@ -345,6 +437,70 @@ export function buildStageKeyframes(comp: TakeComposition): StageKeyframes {
   return { r: rf.map((f) => [f.t, f.r]), T };
 }
 
+// --- asymptotic settle (zoomSettleFrac) --------------------------------
+
+/** Residual (1 − progress) of an overdamped spring's unit step response, on
+ *  NORMALISED segment time u = (t − t0)/(t1 − t0). ω0 is solved so the
+ *  residual at u=1 (the action instant) equals `frac`; past u=1 the same
+ *  curve keeps decaying — the tail that replaces the legacy cut. ζ=1.2 gives
+ *  the reference-measured shape: a fast main ramp (peak velocity ~14% in)
+ *  plus a slow settle pole; at frac 0.04 the tail τ ≈ duration/3.6 (730ms →
+ *  ~205ms, 1340ms → ~375ms — the frame-tracked reference tails; a different
+ *  frac shifts ω0 and with it τ). */
+function settleDecay(frac: number): (u: number) => number {
+  const zeta = 1.2;
+  const s = Math.sqrt(zeta * zeta - 1);
+  const l1 = zeta + s;
+  const l2 = zeta - s;
+  const resid = (x: number) => (l1 * Math.exp(-l2 * x) - l2 * Math.exp(-l1 * x)) / (l1 - l2);
+  let lo = 0.1;
+  let hi = 60;
+  for (let i = 0; i < 60; i++) {
+    const mid = (lo + hi) / 2;
+    if (resid(mid) > frac) lo = mid;
+    else hi = mid;
+  }
+  const w0T = (lo + hi) / 2;
+  return (u: number) => (u <= 0 ? 1 : resid(w0T * u));
+}
+
+/** Evaluate the rect track with moves that settle ASYMPTOTICALLY: each ramp
+ *  covers 1−frac of its distance by its keyframe end, then keeps creeping
+ *  toward the target through the following hold (never a velocity cliff). A
+ *  ramp launches from wherever the previous tail actually is (position-
+ *  continuous chaining); every emitted rect is a convex combination of
+ *  build-time-clamped rects, and the valid-rect set is convex (linear
+ *  half-plane bounds in cx,cy,w), so in-between rects stay valid exactly as
+ *  in the lerped path. */
+function settleRectAt(kfs: KF<CamRect>[], decay: (u: number) => number, t: number): CamRect {
+  let from = kfs[0]![1];
+  for (let i = 0; i < kfs.length - 1; i++) {
+    const [t0, r0] = kfs[i]!;
+    const [t1, r1] = kfs[i + 1]!;
+    if (r0.cx === r1.cx && r0.cy === r1.cy && r0.w === r1.w) continue; // hold — the active tail keeps running
+    if (t < t0) break;
+    // find when the NEXT move begins — this move's tail runs until then
+    let handoff = Number.POSITIVE_INFINITY;
+    for (let j = i + 1; j < kfs.length - 1; j++) {
+      const [ta, ra] = kfs[j]!;
+      const [, rb] = kfs[j + 1]!;
+      if (ra.cx !== rb.cx || ra.cy !== rb.cy || ra.w !== rb.w) {
+        handoff = ta;
+        break;
+      }
+    }
+    const evalT = Math.min(t, handoff);
+    const d = decay((evalT - t0) / Math.max(t1 - t0, 1e-6));
+    from = {
+      cx: r1.cx + (from.cx - r1.cx) * d,
+      cy: r1.cy + (from.cy - r1.cy) * d,
+      w: r1.w + (from.w - r1.w) * d,
+    };
+    if (t < handoff) return from;
+  }
+  return from;
+}
+
 /** The one camera evaluator — scene.tsx (render) and the editor preview both
  *  consume THIS, so preview and export can never drift. */
 export function stageCamera(comp: TakeComposition): {
@@ -363,8 +519,13 @@ export function stageCamera(comp: TakeComposition): {
     comp.output.height,
     comp.framing.insetFrac,
   );
+  // zoomSettleFrac swaps the segment-lerped track for the asymptotic-settle
+  // evaluator; explicit zoomSpring/zoomEase keep their exact legacy curves.
+  const frac = comp.cursor.zoomSettleFrac ?? 0;
+  const useSettle = frac > 0 && comp.cursor.zoomSpring == null && !comp.cursor.zoomEase;
+  const decay = useSettle ? settleDecay(frac) : undefined;
   const at = (t: number) => {
-    const r = keyvalR(t, stage.r, ease);
+    const r = decay ? settleRectAt(stage.r, decay, t) : keyvalR(t, stage.r, ease);
     return { scale: oW / r.w, center: { x: r.cx, y: r.cy } };
   };
   // Peak by sampling (not just keyframe extremes): a spring ease overshoots

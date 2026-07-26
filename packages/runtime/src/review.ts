@@ -30,6 +30,7 @@ import {
   finishName,
   formatIssues,
   lookName,
+  math,
   motionName,
   renderTake,
   resolveFfmpeg,
@@ -91,8 +92,9 @@ export function buildBeatSheet(comp: TakeComposition, name: string): string {
   const look = lookName(comp.framing) ?? "custom";
   const pace = motionName(comp.cursor) ?? "custom";
   const finish = finishName(comp.motionBlur) ?? "custom";
+  const trim = comp.startMs ?? 0;
   const lines: string[] = [
-    `${name} · ${(comp.durationMs / 1000).toFixed(1)}s · ${n} beat${n === 1 ? "" : "s"} · look ${look} · pace ${pace} · finish ${finish}`,
+    `${name} · ${((comp.durationMs - trim) / 1000).toFixed(1)}s · ${n} beat${n === 1 ? "" : "s"} · look ${look} · pace ${pace} · finish ${finish}${trim ? ` · head −${(trim / 1000).toFixed(1)}s` : ""}`,
   ];
   const first = comp.events[0];
   if (!first || first.zoom.inAtMs > 400) lines.push(`  in   0:00  full view, cursor glides in`);
@@ -125,14 +127,19 @@ export const SAY_IT_CARD = `SAY IT, I'LL CUT IT
 
 // --- review copy -------------------------------------------------------------
 
-/** Badge windows: each beat owns [its zoom.inAtMs, the next beat's) — the pill
- *  swaps as the camera starts moving toward the beat. INTRO/TAIL bracket them. */
+/** Badge windows: each beat owns [its camera-ramp start, the next beat's) —
+ *  the pill swaps as the camera actually starts moving toward the beat.
+ *  Timing comes from the REAL schedule (cameraRampSchedule), so a
+ *  dwell-delayed pull-out (departing after its stored inAtMs) badges when it
+ *  moves, not when the formula guessed; beats the camera holds through fall
+ *  back to inAtMs. INTRO/TAIL bracket them. */
 export function buildBadges(comp: TakeComposition): ReviewBadge[] {
   const n = comp.events.length;
   const badges: ReviewBadge[] = [];
+  const ramps = math.cameraRampSchedule(comp);
   let prevStart = 0;
-  const starts = comp.events.map((e) => {
-    const s = Math.max(e.zoom.inAtMs, prevStart + 1);
+  const starts = comp.events.map((e, i) => {
+    const s = Math.max(ramps[i]?.startMs ?? e.zoom.inAtMs, prevStart + 1);
     prevStart = s;
     return s;
   });
@@ -140,7 +147,10 @@ export function buildBadges(comp: TakeComposition): ReviewBadge[] {
     badges.push({ fromMs: 0, toMs: starts[0] ?? comp.durationMs, text: "INTRO" });
   comp.events.forEach((e, i) => {
     const last = i === n - 1;
-    const endOwn = e.tMs + (e.durationMs ?? 0) + comp.cursor.holdMs;
+    // a dwell-delayed landing can put the arrival after tMs — own the badge
+    // window until the action AND the camera have both settled.
+    const arrived = Math.max(e.tMs, ramps[i]?.landMs ?? e.tMs);
+    const endOwn = arrived + (e.durationMs ?? 0) + comp.cursor.holdMs;
     const to = last ? Math.min(endOwn, comp.durationMs) : starts[i + 1]!;
     badges.push({
       fromMs: starts[i]!,
@@ -347,16 +357,29 @@ export function abWindow(
   for (const c of comps) {
     const e = c.events[i];
     if (!e) continue;
-    // A PULL-OUT beat's camera ramp can start up to zoomOutMs before its tMs
-    // (math.ts pull-out pacing — earlier than the stored inAtMs); open the
-    // window on whichever is earlier so the clip keeps a static lead-in.
-    const rampFrom = Math.min(e.zoom.inAtMs, e.tMs - c.cursor.zoomOutMs);
+    // The REAL camera schedule (cameraRampSchedule): a pull-out ramp can start
+    // up to zoomOutMs before its tMs, or — dwell-delayed — depart later and
+    // LAND after its own tMs. Open on the actual departure so the clip keeps a
+    // static lead-in, and close when the framing is actually released (the
+    // next anchor's actual departure), so a late landing is never cut
+    // mid-settle — the settle is exactly what the reel exists to judge.
+    const ramps = math.cameraRampSchedule(c);
+    const ramp = ramps[i];
+    const rampFrom = ramp ? ramp.startMs : Math.min(e.zoom.inAtMs, e.tMs - c.cursor.zoomOutMs);
     from = Math.min(from, Math.max(0, rampFrom - 1200));
-    const next = c.events[i + 1];
-    const ownEnd = e.tMs + (e.durationMs ?? 0) + c.cursor.holdMs + c.cursor.zoomOutMs;
+    let nextStart: number | undefined;
+    for (let j = i + 1; j < c.events.length; j++) {
+      const r = ramps[j];
+      if (r) {
+        nextStart = r.startMs;
+        break;
+      }
+    }
+    const landMs = Math.max(e.tMs, ramp?.landMs ?? e.tMs);
+    const ownEnd = landMs + (e.durationMs ?? 0) + c.cursor.holdMs + c.cursor.zoomOutMs;
     // no durationMs clamp: the scene runs to its last keyframe + tail, and a
     // range end past the scene's end just stops at the end.
-    to = Math.max(to, (next ? next.zoom.inAtMs : ownEnd) + 400);
+    to = Math.max(to, (nextStart ?? ownEnd) + 400);
   }
   if (!Number.isFinite(from)) return undefined;
   return [from, Math.max(to, from + 1500)];
@@ -476,7 +499,13 @@ export async function renderBeforeAfter(
   if (!(await stat(take.prevPath).catch(() => null)))
     throw new Error(`ab --before-after: no ${take.prevPath} yet (it appears after a re-render)`);
   const comp = JSON.parse(await readFile(take.compositionPath, "utf8")) as TakeComposition;
-  const win = abWindow([comp], opts.beat, opts.full ?? false);
+  const winComp = abWindow([comp], opts.beat, opts.full ?? false);
+  // the masters are delivered files: a composition startMs head-trim already
+  // removed their head, so composition-timeline windows shift back by it.
+  const trim = comp.startMs ?? 0;
+  const win = winComp
+    ? ([Math.max(0, winComp[0] - trim), Math.max(0, winComp[1] - trim)] as [number, number])
+    : undefined;
   const cut = async (src: string, out: string) => {
     const args = ["-y", "-loglevel", "error", "-i", src];
     if (win) args.push("-ss", String(win[0] / 1000), "-t", String((win[1] - win[0]) / 1000));

@@ -104,6 +104,10 @@ test("final zoom-out: one eased rect — centre and viewport travel in lockstep"
       { kind: "click", x: 300, y: 200, box: { x: 290, y: 190, w: 20, h: 20 }, tMs: 3000 },
     ]),
   );
+  // This test pins the LERPED rect-track geometry (exact keyframe landings).
+  // The shipped default settle tail lands asymptotically — its own contract is
+  // pinned in settle.test.ts; here it would blur the endpoint equalities.
+  comp.cursor = { ...comp.cursor, zoomSettleFrac: 0 };
   const zoomed = comp.events.some((e) => e.kind === "click" && e.zoom.enabled && e.tMs === 3000);
   assert.ok(zoomed, "second click zooms (off-centre target)");
   const cam = stageCamera(comp);
