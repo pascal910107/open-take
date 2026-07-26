@@ -136,6 +136,21 @@ export function focusSelectorJs(selector: string): string {
   );
 }
 
+// Select the focused element's ENTIRE current value (input/textarea via
+// select(); contenteditable via a DOM range) so the next Input.insertText
+// REPLACES it — the `type` step's `clear: true`. Chrome's editing commands
+// don't run off dispatched key events (a "Meta+a" press registers nothing),
+// so the selection is made in-page instead.
+export function selectAllInFocusedJs(): string {
+  return (
+    `(function(){var el=document.activeElement;if(!el)return 'NOFOCUS';` +
+    `if(typeof el.select==='function'&&typeof el.value==='string'){el.select();return 'SEL';}` +
+    `if(el.isContentEditable){var r=document.createRange();r.selectNodeContents(el);` +
+    `var s=window.getSelection();s.removeAllRanges();s.addRange(r);return 'SEL';}` +
+    `return 'NOSEL';})()`
+  );
+}
+
 // bbox-only resolvers for drag endpoints — never click/focus (a drag must
 // not deselect a tool or shift the canvas before the stroke).
 export function boxSelectorJs(selector: string): string {

@@ -28,6 +28,7 @@ import {
   sampleAlong,
   scrollDeltaByTextJs,
   scrollDeltaSelectorJs,
+  selectAllInFocusedJs,
 } from "./capture";
 import {
   type Browser,
@@ -236,6 +237,22 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
 
     await navigate(cdp, plan.url);
 
+    // Fonts before frames: the fresh profile means a fresh HTTP cache, so
+    // third-party webfonts otherwise FOUT in the recording's first ~700ms —
+    // the one place a viewer's eye is guaranteed to be. Wait (bounded) for the
+    // document's fonts before the recording clock starts; a page with no
+    // webfonts resolves immediately.
+    await Promise.race([
+      cdp
+        .send("Runtime.evaluate", {
+          expression: "document.fonts.ready.then(() => true)",
+          awaitPromise: true,
+          returnByValue: true,
+        })
+        .catch(() => {}),
+      sleep(3000),
+    ]);
+
     const screencast = new Screencast(cdp, frameDir);
     const t0 = Date.now();
     // max dims in PHYSICAL px — at deviceScaleFactor 2 the surface is 2× the
@@ -294,7 +311,16 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
     };
 
     const events: CaptureLog["events"] = [];
-    for (const step of plan.steps) {
+    // Dropped steps are collected onto the log (and echoed to stderr at the
+    // moment they happen) so the end-of-run summary and --strict can see them
+    // — an early stderr line alone gets buried under render progress.
+    const skipped: NonNullable<CaptureLog["skipped"]> = [];
+    for (let stepIdx = 0; stepIdx < plan.steps.length; stepIdx++) {
+      const step = plan.steps[stepIdx]!;
+      const skip = (action: string, target: string | undefined, reason: string) => {
+        skipped.push({ step: stepIdx, action, ...(target ? { target } : {}), reason });
+        console.error(`captureTakeCDP: ${action} ${reason}, skipped: ${JSON.stringify(target)}`);
+      };
       if (step.action === "wait") {
         await sleep(step.ms);
         continue;
@@ -309,14 +335,29 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
             ? await evalBox(cdp, focusSelectorJs(step.selector))
             : null;
         if (!box) {
-          console.error(`captureTakeCDP: type target not found, skipped: ${JSON.stringify(label)}`);
+          skip("type", label, "target not found");
           await sleep(step.settleMs ?? 600);
           continue;
         }
+        // Replace-not-append: select the field's existing value in-page so the
+        // first inserted character replaces it (dispatched "Meta+a" key events
+        // never run Chrome's editing commands — see selectAllInFocusedJs).
+        if (step.clear) await evalAny(cdp, selectAllInFocusedJs());
         // progressive char-by-char so the recording shows text appear; paced
         // by us (insertText fires `input` events React/inputs honour).
         const chars = [...step.value];
-        const perChar = Math.min(60, Math.max(28, Math.round(1100 / Math.max(1, chars.length))));
+        // ~1.1s per beat, clamped 28–90ms/char. The cap used to be 60ms, which
+        // made SHORT strings the FASTEST typing in the video (inverted feel);
+        // 90 lets a short hero string read deliberate while long strings keep
+        // their genre-normal pace. Mostly-CJK strings slow ~1.4× (every glyph
+        // is a word — the viewer reads, not skims). perCharMs overrides.
+        const cjk = chars.filter((c) =>
+          /[\u2E80-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF\uFF66-\uFF9F]/.test(c),
+        ).length;
+        const auto =
+          Math.min(90, Math.max(28, Math.round(1100 / Math.max(1, chars.length)))) *
+          (cjk * 2 > chars.length ? 1.4 : 1);
+        const perChar = Math.round(step.perCharMs ?? auto);
         const tType = Date.now();
         for (const ch of chars) {
           await cdp.send("Input.insertText", { text: ch });
@@ -354,9 +395,7 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
           null;
         const label = step.note ?? step.text ?? step.selector;
         if (!from || !to) {
-          console.error(
-            `captureTakeCDP: drag endpoint not found, skipped: ${JSON.stringify(label)}`,
-          );
+          skip("drag", label, "endpoint not found");
           await sleep(step.settleMs ?? 600);
           continue;
         }
@@ -442,9 +481,7 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
           if (r && typeof r.dy === "number") {
             dy = r.dy;
           } else {
-            console.error(
-              `captureTakeCDP: scroll target not found, skipped: ${JSON.stringify(step.toText ?? step.toSelector)}`,
-            );
+            skip("scroll", step.toText ?? step.toSelector, "target not found");
             await sleep(step.settleMs ?? 600);
             continue;
           }
@@ -495,9 +532,7 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
             ? await evalBox(cdp, boxSelectorJs(step.selector))
             : null;
         if (!box) {
-          console.error(
-            `captureTakeCDP: hover target not found, skipped: ${JSON.stringify(label)}`,
-          );
+          skip("hover", label, "target not found");
           await sleep(step.settleMs ?? 600);
           continue;
         }
@@ -579,7 +614,7 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
           ...(step.zoom ? { zoom: step.zoom } : {}),
         });
       } else {
-        console.error(`captureTakeCDP: target not found, skipped: ${JSON.stringify(label)}`);
+        skip("click", label, "target not found");
       }
       await sleep(step.settleMs ?? 1300);
     }

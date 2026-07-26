@@ -33,7 +33,10 @@ export async function resolveTakePaths(input: string): Promise<TakePaths> {
   let p = resolve(input);
   const s = await stat(p).catch(() => null);
   if (s?.isDirectory()) {
-    const comps = (await readdir(p)).filter((e) => /\.composition\.json$/i.test(e));
+    // `<base>.prev.composition.json` is a pre-re-make snapshot, never a take.
+    const comps = (await readdir(p)).filter(
+      (e) => /\.composition\.json$/i.test(e) && !/\.prev\.composition\.json$/i.test(e),
+    );
     if (comps.length === 0) throw new Error(`no *.composition.json found in ${p}`);
     let pick = comps[0]!;
     for (const c of comps) {
@@ -46,6 +49,7 @@ export async function resolveTakePaths(input: string): Promise<TakePaths> {
     p = join(p, pick);
   }
   const base = p
+    .replace(/\.prev\.composition\.json$/i, "")
     .replace(/\.composition\.json$/i, "")
     .replace(/\.capture\.json$/i, "")
     .replace(/\.capture\.mp4$/i, "")

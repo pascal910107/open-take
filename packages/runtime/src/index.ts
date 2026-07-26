@@ -81,6 +81,10 @@ export type MakeTakeOpts = {
    *  failures never fail the take. */
   frameDiff?: boolean;
   logProgress?: boolean;
+  /** print per-event diagnostics (the frame-diff lines). Default false — they
+   *  are useful when debugging framing, but on a normal run they bury the
+   *  warnings an author must act on (a skipped step). */
+  verbose?: boolean;
 };
 
 export type MakeTakeResult = {
@@ -95,6 +99,9 @@ export type MakeTakeResult = {
    *  makeTake. */
   captureLogPath: string;
   composition: TakeComposition;
+  /** steps the capture dropped (target not found) — surface these in the
+   *  end-of-run summary; `--strict` turns them into a non-zero exit. */
+  skipped: NonNullable<CaptureLog["skipped"]>;
 };
 
 /** `<out>.mp4` → `<out>.capture.mp4` — the raw recording kept beside the
@@ -138,7 +145,7 @@ export async function makeTake(plan: TakePlan, opts: MakeTakeOpts): Promise<Make
   const log =
     opts.frameDiff === false
       ? raw
-      : await annotateCaptureLog(raw, tmpVideo, { logProgress: opts.logProgress });
+      : await annotateCaptureLog(raw, tmpVideo, { logProgress: opts.verbose === true });
 
   // KEEP the capture beside the output so refinement can re-render over it
   // without re-driving the app (the refine loop's whole point). Keep the LOG
@@ -169,7 +176,14 @@ export async function makeTake(plan: TakePlan, opts: MakeTakeOpts): Promise<Make
     captureLog: log,
   });
 
-  return { mp4Path, compositionPath, capturePath, captureLogPath, composition };
+  return {
+    mp4Path,
+    compositionPath,
+    capturePath,
+    captureLogPath,
+    composition,
+    skipped: log.skipped ?? [],
+  };
 }
 
 export type RenderCompositionOpts = {

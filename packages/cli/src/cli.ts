@@ -45,6 +45,8 @@ const BOOL_FLAGS = new Set([
   "--draft",
   "--no-open",
   "--before-after",
+  "--strict",
+  "--verbose",
 ]);
 
 const argv = process.argv.slice(2);
@@ -129,6 +131,10 @@ Usage:
               fast drafts while iterating.
   --capture-scale <n>   (make only) capture pixel density (default 2 — Retina;
               keeps zooms sharp). Drop to 1 if a heavy page can't hold fps.
+  --strict    (make only) exit non-zero when any plan step was skipped (target
+              not found) — the summary lists them either way.
+  --verbose   show per-event diagnostics (frame-diff lines, renderer console
+              passthrough). Hidden by default so real warnings stay visible.
 `;
 
 const fmtBytes = (n: number): string =>
@@ -138,13 +144,19 @@ async function readyLine(mp4Path: string): Promise<string> {
   const take = await resolveTakePaths(mp4Path);
   const comp = JSON.parse(await readFile(take.compositionPath, "utf8")) as {
     durationMs: number;
+    startMs?: number;
     output: { width: number; height: number; fps: number };
   };
   const size = (await fsStat(mp4Path)).size;
-  return `${mp4Path} · ${(comp.durationMs / 1000).toFixed(1)}s · ${comp.output.width}×${comp.output.height}@${comp.output.fps} · ${fmtBytes(size)}`;
+  const seconds = (comp.durationMs - (comp.startMs ?? 0)) / 1000;
+  return `${mp4Path} · ${seconds.toFixed(1)}s · ${comp.output.width}×${comp.output.height}@${comp.output.fps} · ${fmtBytes(size)}`;
 }
 
 async function main() {
+  // The vendored renderer forwards page-console noise ("Worker 0: JSHandle:…")
+  // only when this is set (see revideo-renderer/scripts/build.mjs).
+  if (has("--verbose")) process.env.OPEN_TAKE_VERBOSE = "1";
+
   const bundledSkill = async (): Promise<string> => {
     // packaged copy (skill/SKILL.md beside dist/) first, monorepo source second
     const here = dirname(fileURLToPath(import.meta.url)); // dist/ or src/
@@ -193,26 +205,34 @@ async function main() {
     const scaleFlag = flag("--capture-scale");
     const captureScale = scaleFlag ? Number(scaleFlag) : undefined;
     // a re-make (re-shoot) is a new generation: keep the old master as prev so
-    // --before-after compares against the take the user just reacted to.
+    // --before-after compares against the take the user just reacted to — and
+    // keep the old COMPOSITION too: a re-make re-plans from the new capture, so
+    // any hand-edited zoom overrides in the old one would silently vanish
+    // (issue #10). `<base>.prev.composition.json` preserves them for re-apply.
     const takePre = await resolveTakePaths(out).catch(() => null);
-    const staged = takePre
-      ? await stagePrev(takePre.mp4Path, takePre.prevPath)
-      : { commit: async () => {}, abort: async () => {} };
+    const noStage = { commit: async () => {}, abort: async () => {} };
+    const staged = takePre ? await stagePrev(takePre.mp4Path, takePre.prevPath) : noStage;
+    const stagedComp = takePre
+      ? await stagePrev(takePre.compositionPath, `${takePre.base}.prev.composition.json`)
+      : noStage;
     let made: Awaited<ReturnType<typeof makeTake>>;
     try {
       made = await makeTake(plan, {
         outPath: out,
         logProgress: true,
+        verbose: has("--verbose"),
         ...(fps || captureScale
           ? { capture: { ...(fps ? { fps } : {}), ...(captureScale ? { captureScale } : {}) } }
           : {}),
       });
       await staged.commit();
+      await stagedComp.commit();
     } catch (e) {
       await staged.abort();
+      await stagedComp.abort();
       throw e;
     }
-    const { mp4Path, compositionPath, capturePath, captureLogPath } = made;
+    const { mp4Path, compositionPath, capturePath, captureLogPath, skipped } = made;
     process.stdout.write(
       `\nmp4:         ${mp4Path}\ncomposition: ${compositionPath}\n` +
         `capture:     ${capturePath}\ncapture log: ${captureLogPath}\n` +
@@ -221,6 +241,21 @@ async function main() {
         `  ${INVOKE} beats  ${mp4Path}            (the numbered beat sheet)\n` +
         `  ${INVOKE} ab     ${mp4Path} --set zoom=light,tight --beat 2   (taste A/B)\n`,
     );
+    // dropped steps reach the SUMMARY (not just an early stderr line buried
+    // under render progress), and --strict turns them into the exit code.
+    if (skipped.length) {
+      process.stdout.write(
+        `\n⚠ ${skipped.length} step${skipped.length === 1 ? "" : "s"} skipped:\n` +
+          skipped
+            .map(
+              (s) =>
+                `  step ${s.step + 1}: ${s.action} ${JSON.stringify(s.target ?? "")} (${s.reason})\n`,
+            )
+            .join("") +
+          `the video is missing ${skipped.length === 1 ? "this beat" : "these beats"} — fix the plan targets and re-make\n`,
+      );
+      if (has("--strict")) process.exit(2);
+    }
     return;
   }
 

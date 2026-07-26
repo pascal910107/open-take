@@ -40,6 +40,14 @@ export type TakeStep =
       text?: string;
       /** the text to type into the focused field */
       value: string;
+      /** select the field's EXISTING value first, so the first keystroke
+       *  replaces it — the "rename / edit a setting / correct text" beat.
+       *  Without it, typing always appends at the caret. */
+      clear?: boolean;
+      /** ms per typed character on screen. Default auto-paces ~1.1s per beat
+       *  (clamped 28–90ms; mostly-CJK strings run ~1.4× slower) — override for
+       *  a deliberately slow reveal or a fast burst. */
+      perCharMs?: number;
       note?: string;
       settleMs?: number;
       zoom?: ZoomIntent;

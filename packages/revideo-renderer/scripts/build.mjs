@@ -36,4 +36,14 @@ await replaceOnce(
   "@revideo/renderer/lib/client/render",
   "@open-take/revideo-renderer/dist/client/render",
 );
+// Page-console passthrough stringifies non-primitive args as "JSHandle:…" —
+// unactionable noise that buries real warnings (open-take issue #9). Forward
+// them only under OPEN_TAKE_VERBOSE; string args (real messages) still pass.
+await replaceOnce(
+  join(out, "server", "render-video.js"),
+  "console.log(`Worker ${id}: ${msg.args()[i]}`);",
+  "if (process.env.OPEN_TAKE_VERBOSE || !String(message).startsWith('JSHandle')) {\n" +
+    "                console.log(`Worker ${id}: ${msg.args()[i]}`);\n" +
+    "            }",
+);
 await rm(join(out, "server", "tsconfig.tsbuildinfo"), { force: true });
