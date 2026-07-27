@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, dirname, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { basename, dirname, relative, resolve } from "node:path";
 
 export type PackageManager = "npm" | "pnpm" | "yarn" | "bun";
 
@@ -18,12 +18,45 @@ const FLAGS: Record<string, PackageManager> = {
   "--use-bun": "bun",
 };
 
+const OTHER_FLAGS = new Set(["--yes", "-y", "--help", "-h"]);
+
+export const DEFAULT_DIRECTORY = "open-take-demo";
+
+/** Asks for one line of input; the default applies when the answer is empty. */
+export type Ask = (question: string, defaultValue: string) => Promise<string>;
+
+export type ParsedArgs = {
+  help: boolean;
+  yes: boolean;
+  directory?: string;
+  packageManager?: PackageManager;
+};
+
 export function requestedPackageManager(args: string[]): PackageManager | undefined {
   const requested = args.filter((arg) => arg in FLAGS);
   if (requested.length > 1) {
     throw new Error("Choose only one of --use-npm, --use-pnpm, --use-yarn, or --use-bun.");
   }
   return requested[0] ? FLAGS[requested[0]] : undefined;
+}
+
+export function parseArgs(args: string[]): ParsedArgs {
+  const unknown = args.find(
+    (arg) => arg.startsWith("-") && !(arg in FLAGS) && !OTHER_FLAGS.has(arg),
+  );
+  if (unknown) throw new Error(`Unknown option ${unknown}. Run with --help to see the usage.`);
+
+  const positional = args.filter((arg) => !arg.startsWith("-"));
+  if (positional.length > 1) {
+    throw new Error(`Pass at most one directory (got ${positional.join(", ")}).`);
+  }
+
+  return {
+    help: args.includes("--help") || args.includes("-h"),
+    yes: args.includes("--yes") || args.includes("-y"),
+    directory: positional[0],
+    packageManager: requestedPackageManager(args),
+  };
 }
 
 export function findPnpmWorkspaceRoot(cwd: string): string | undefined {
@@ -145,8 +178,8 @@ export const spawnRunner: Runner = (command, args, options) =>
     });
   });
 
-export function packageNameFromDirectory(cwd: string): string {
-  const name = basename(resolve(cwd))
+export function packageNameFromDirectory(dir: string): string {
+  const name = basename(resolve(dir))
     .toLowerCase()
     .replace(/[^a-z0-9\-._~]+/g, "-")
     .replace(/^[-._]+/, "")
@@ -155,22 +188,87 @@ export function packageNameFromDirectory(cwd: string): string {
   return name || "open-take-app";
 }
 
-/** `npm create` is also run in empty directories, so scaffold what install needs. */
-export function ensurePackageJson(cwd: string): { created: boolean; name: string } {
-  const packageJsonPath = resolve(cwd, "package.json");
-  if (existsSync(packageJsonPath)) return { created: false, name: "" };
+export const NO_DIRECTORY_MESSAGE =
+  "There is no package.json here, so there is no app to add Open Take to.\n" +
+  `Name a directory to create instead:  npm create open-take@latest <directory>\n` +
+  `(or --yes to accept the default "${DEFAULT_DIRECTORY}", or run it from your app's root)`;
 
-  const name = packageNameFromDirectory(cwd);
+/**
+ * Where the install goes. Writing into whatever directory the user happens to
+ * be standing in is not an option — an initializer that scatters package.json,
+ * node_modules and skill folders across someone's home directory is a mess they
+ * have to clean up. So: an explicit directory wins, an existing package.json
+ * means "add to this app", and otherwise we ask before creating anything.
+ */
+export async function resolveTargetDirectory(options: {
+  cwd: string;
+  directory?: string;
+  yes?: boolean;
+  ask?: Ask;
+}): Promise<{ target: string; chosenByUser: boolean }> {
+  if (options.directory) {
+    return { target: resolve(options.cwd, options.directory), chosenByUser: true };
+  }
+  if (existsSync(resolve(options.cwd, "package.json"))) {
+    return { target: options.cwd, chosenByUser: true };
+  }
+  if (options.yes || !options.ask) {
+    if (!options.yes) throw new Error(NO_DIRECTORY_MESSAGE);
+    return { target: resolve(options.cwd, DEFAULT_DIRECTORY), chosenByUser: false };
+  }
+  const answer = (await options.ask("Project directory", DEFAULT_DIRECTORY)).trim();
+  return { target: resolve(options.cwd, answer || DEFAULT_DIRECTORY), chosenByUser: false };
+}
+
+/** `.git` and `.DS_Store` do not make a directory "occupied". */
+function isEmptyDirectory(dir: string): boolean {
+  return readdirSync(dir).every((entry) => entry === ".git" || entry === ".DS_Store");
+}
+
+export function prepareDirectory(
+  target: string,
+  options: { chosenByUser?: boolean } = {},
+): { createdDirectory: boolean; createdPackageJson: boolean } {
+  let createdDirectory = false;
+  if (!existsSync(target)) {
+    mkdirSync(target, { recursive: true });
+    createdDirectory = true;
+  } else if (!statSync(target).isDirectory()) {
+    throw new Error(`${target} is not a directory.`);
+  }
+
+  const packageJsonPath = resolve(target, "package.json");
+  const hasPackageJson = existsSync(packageJsonPath);
+  if (!hasPackageJson && !createdDirectory && !options.chosenByUser && !isEmptyDirectory(target)) {
+    throw new Error(`${basename(target)} already exists and is not empty — pick another name.`);
+  }
+  if (hasPackageJson) return { createdDirectory, createdPackageJson: false };
+
   writeFileSync(
     packageJsonPath,
-    `${JSON.stringify({ name, version: "0.0.0", private: true }, null, 2)}\n`,
+    `${JSON.stringify({ name: packageNameFromDirectory(target), version: "0.0.0", private: true }, null, 2)}\n`,
   );
-  return { created: true, name };
+  return { createdDirectory, createdPackageJson: true };
+}
+
+const displayPath = (from: string, to: string) => (from === to ? to : `${relative(from, to)}/`);
+
+/** Entry names as a reader would delete them: directories keep their slash. */
+function describeEntries(dir: string, entries: string[]): string {
+  return entries
+    .map((entry) => {
+      const isDir = statSync(resolve(dir, entry), { throwIfNoEntry: false })?.isDirectory();
+      return isDir ? `${entry}/` : entry;
+    })
+    .join(", ");
 }
 
 export async function initializeOpenTake(
   options: {
     cwd?: string;
+    directory?: string;
+    yes?: boolean;
+    ask?: Ask;
     packageManager?: PackageManager;
     packageSpec?: string;
     runner?: Runner;
@@ -181,38 +279,69 @@ export async function initializeOpenTake(
   const runner = options.runner ?? spawnRunner;
   const write = options.write ?? ((message) => process.stdout.write(message));
 
-  const bootstrapped = ensurePackageJson(cwd);
-  if (bootstrapped.created) {
-    write(`No package.json here — created one for "${bootstrapped.name}".\n`);
-  }
+  const { target, chosenByUser } = await resolveTargetDirectory({
+    cwd,
+    directory: options.directory,
+    yes: options.yes,
+    ask: options.ask,
+  });
+  const where = displayPath(cwd, target);
+  // Snapshot first: everything that appears after this line was put there by
+  // this command, and the closing summary names it — nobody should have to
+  // guess what to delete.
+  const before = new Set(existsSync(target) ? readdirSync(target) : []);
+  const { createdDirectory } = prepareDirectory(target, { chosenByUser });
+  write(
+    createdDirectory ? `\nCreating a project in ${where}\n` : `\nAdding Open Take to ${where}\n`,
+  );
 
-  const packageManager = options.packageManager ?? detectPackageManager(cwd);
-
+  const packageManager = options.packageManager ?? detectPackageManager(target);
   write(`Installing open-take with ${packageManager}…\n`);
   const install = installCommand(
     packageManager,
     options.packageSpec ?? process.env.OPEN_TAKE_PACKAGE ?? "open-take@latest",
     {
-      workspaceRoot: packageManager === "pnpm" && isPnpmWorkspaceRoot(cwd),
+      workspaceRoot: packageManager === "pnpm" && isPnpmWorkspaceRoot(target),
     },
   );
-  await runner(install.command, install.args, { cwd, env: process.env });
+  await runner(install.command, install.args, { cwd: target, env: process.env });
 
   const init = initCommand(packageManager);
-  await runner(init.command, init.args, { cwd, env: process.env });
+  await runner(init.command, init.args, { cwd: target, env: process.env });
+
+  const added = readdirSync(target)
+    .filter((entry) => !before.has(entry))
+    .sort();
+  if (added.length) {
+    write(`\nWrote into ${where}: ${describeEntries(target, added)}\n`);
+    write(
+      createdDirectory
+        ? `Delete ${where} to undo this.\n`
+        : `Nothing outside those paths was touched.\n`,
+    );
+  }
+  if (target !== cwd) write(`\n  cd ${relative(cwd, target)}\n`);
   write('\nReady. Ask your agent: "Make a demo of localhost:3000 for Twitter."\n');
 }
 
-export const HELP = `create-open-take — add Open Take to your app
+export const HELP = `create-open-take — start an Open Take project, or add it to your app
 
-Run it from your app's root, or from an empty directory (a minimal
-package.json is created there for you).
+Run from an app root (a directory with package.json) and it installs there.
+Anywhere else it asks for a directory to create, and never writes into the
+directory you are standing in without being told to.
 
 Usage:
-  npm create open-take@latest
-  npm create open-take@latest -- --use-pnpm
+  npm create open-take@latest              asks which directory to create
+  npm create open-take@latest my-demo      creates ./my-demo, no questions
+  npm create open-take@latest .            uses the current directory
+  npm create open-take@latest my-demo -- --use-pnpm
+
+It writes: package.json (only if the directory has none), node_modules/ and a
+lockfile, plus .agents/skills/open-take/ and .claude/skills/open-take/ from
+"open-take init". The closing summary lists exactly what landed.
 
 Options:
+  -y, --yes   skip the question and use ./${DEFAULT_DIRECTORY}
   --use-npm | --use-pnpm | --use-yarn | --use-bun
   -h, --help
 `;

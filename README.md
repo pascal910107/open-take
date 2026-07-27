@@ -7,15 +7,20 @@ composition you refine by asking your agent for changes in plain language.
 ## Start
 
 ```sh
-npm create open-take@latest
+npm create open-take@latest my-demo   # new project in ./my-demo
+npm create open-take@latest           # in your app's root: adds it there
 ```
 
 Then ask your agent:
 
 > Make a demo of localhost:3000 for Twitter.
 
-The initializer adds Open Take and its project skill. On the first demo, Open
-Take downloads and caches its own Chrome for Testing; later runs reuse it.
+The initializer adds Open Take and its project skill — `package.json` (only if
+the directory has none), `node_modules/`, and `.agents/skills/open-take/` plus
+`.claude/skills/open-take/`; it lists what it wrote when it finishes. Outside an
+app root it asks which directory to create rather than writing into the one you
+are standing in. On the first demo, Open Take downloads and caches its own
+Chrome for Testing under `~/.open-take/browsers`; later runs reuse it.
 
 ## Refine
 

@@ -1,21 +1,39 @@
 #!/usr/bin/env node
 
-import { HELP, initializeOpenTake, requestedPackageManager } from "./index";
+import { createInterface } from "node:readline/promises";
+import { type Ask, HELP, initializeOpenTake, parseArgs } from "./index";
 
-const args = process.argv.slice(2);
+// Only ask when there is a human to answer. Piped stdin (CI, `| cat`) gets the
+// error that names the directory argument instead of hanging on a prompt.
+const ask: Ask | undefined = process.stdin.isTTY
+  ? async (question, defaultValue) => {
+      const rl = createInterface({ input: process.stdin, output: process.stdout });
+      try {
+        return await rl.question(`${question} (${defaultValue}): `);
+      } finally {
+        rl.close();
+      }
+    }
+  : undefined;
 
 function fail(error: unknown): never {
   process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
   process.exit(1);
 }
 
-if (args.includes("--help") || args.includes("-h")) {
-  process.stdout.write(HELP);
-} else {
-  try {
-    // Detection happens inside, after any missing package.json is scaffolded.
-    initializeOpenTake({ packageManager: requestedPackageManager(args) }).catch(fail);
-  } catch (error) {
-    fail(error);
+try {
+  const args = parseArgs(process.argv.slice(2));
+  if (args.help) {
+    process.stdout.write(HELP);
+  } else {
+    // Package-manager detection happens inside, against the resolved directory.
+    initializeOpenTake({
+      directory: args.directory,
+      yes: args.yes,
+      packageManager: args.packageManager,
+      ask,
+    }).catch(fail);
   }
+} catch (error) {
+  fail(error);
 }
