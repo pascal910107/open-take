@@ -42,7 +42,18 @@ const die = (m) => {
   process.exit(1);
 };
 
-const chain = publishOrder(readPackages()).filter((p) => WITH_CREATE || !INDEPENDENT.has(p.name));
+// The workflow has no flag to forward, so whether an independently-versioned
+// package ships is decided by the tree: `pnpm release --with-create` bumps
+// create-open-take onto the release version, and "its version equals the tag"
+// IS that signal. Without this, `--with-create` bumped and tagged a package CI
+// then filtered out, and the local wait loop hung forever on a version nobody
+// was uploading. A release that leaves it behind keeps its old version, which
+// never matches the tag, so it stays out.
+const shipsIndependent = (p) =>
+  WITH_CREATE || DRY || (expected !== undefined && p.version === expected);
+const chain = publishOrder(readPackages()).filter(
+  (p) => !INDEPENDENT.has(p.name) || shipsIndependent(p),
+);
 
 log("publishing over OIDC (trusted publishing)\n");
 log("order (from the workspace dependency graph):");
