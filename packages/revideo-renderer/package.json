@@ -1,6 +1,6 @@
 {
   "name": "@open-take/revideo-renderer",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "Open Take's Revideo renderer bridge, using puppeteer-core with the Chrome Open Take already manages.",
   "license": "MIT",
   "main": "./dist/server/index.js",
