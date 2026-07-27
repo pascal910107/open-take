@@ -163,9 +163,14 @@ async function mp4Duration(path: string): Promise<number> {
 
 const fmtS = (ms: number): string => `${(ms / 1000).toFixed(1)}s`;
 
-export function buildFrameSheet(plan: FramePlan, framesPath: string, trimMs: number): string {
+export function buildFrameSheet(
+  plan: FramePlan,
+  framesPath: string,
+  trimMs: number,
+  tileW?: number,
+): string {
   const lines = [
-    `frames: ${framesPath} · ${plan.cols} cols × ${plan.rows.length} rows · times on the composition timeline${trimMs ? ` (head −${(trimMs / 1000).toFixed(1)}s already cut from the mp4)` : ""}`,
+    `frames: ${framesPath} · ${plan.cols} cols × ${plan.rows.length} rows${tileW ? ` · ${tileW}px tiles` : ""} · times on the composition timeline${trimMs ? ` (head −${(trimMs / 1000).toFixed(1)}s already cut from the mp4)` : ""}`,
   ];
   plan.rows.forEach((r, i) => {
     const cells = r.cells
@@ -185,6 +190,10 @@ export type FramesOpts = {
   beat?: number;
   /** which delivered file to sample (default the master mp4) */
   sourcePath?: string;
+  /** tile width in px. Defaults: 480 for the overview, 720 for a --beat strip
+   *  (diagnosis wants detail — a 480px tile of a Retina capture is a 1/8-scale
+   *  thumbnail: enough to suspect a framing bug, not enough to confirm it). */
+  tileWidth?: number;
 };
 
 /** Extract the plan's frames from a delivered take mp4 and tile them into
@@ -206,6 +215,10 @@ export async function renderFrames(
   const durMs = await mp4Duration(src);
   const ffmpeg = await resolveFfmpeg();
   const framesPath = opts.beat != null ? `${take.base}.frames.beat${opts.beat}.png` : `${take.base}.frames.png`;
+  const tileW = Math.round(opts.tileWidth ?? (opts.beat != null ? 720 : 480));
+  if (!Number.isFinite(tileW) || tileW < 120 || tileW > 1920)
+    throw new Error(`frames: tile width ${tileW} out of range (120-1920)`);
+  const tileH = Math.round((tileW * comp.output.height) / comp.output.width);
 
   const work = await mkdtemp(join(tmpdir(), "open-take-frames-"));
   try {
@@ -225,7 +238,7 @@ export async function renderFrames(
         "-frames:v",
         "1",
         "-vf",
-        "scale=480:270",
+        `scale=${tileW}:${tileH}`,
         join(work, `f${String(i).padStart(3, "0")}.png`),
       ]);
     }
@@ -246,5 +259,5 @@ export async function renderFrames(
   } finally {
     await rm(work, { recursive: true, force: true });
   }
-  return { framesPath, sheet: buildFrameSheet(plan, framesPath, trim), plan };
+  return { framesPath, sheet: buildFrameSheet(plan, framesPath, trim, tileW), plan };
 }

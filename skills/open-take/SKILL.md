@@ -53,6 +53,9 @@ elements (name + bbox), and open the URL in any browser to see what the app
   serial search-term probes that one grep would have answered).
 - **Batch UI probes.** Take screenshots / run interaction probes in batches,
   not one round-trip each; lazy-loading apps make serial probing expensive.
+  A screenshot taken DURING a smooth scroll/animation can capture a blank
+  compositing frame that contradicts the DOM — re-shoot once settled before
+  concluding anything is broken.
 - Interaction probing is still irreplaceable for *behavior* (focus races,
   animation timing, what a click actually reveals) — spend the round-trips
   there, not on content questions.
@@ -96,7 +99,9 @@ the app's signature moment; make the wow the hero, not an afterthought.
 - **No zoom** (`"never"`) when the payoff is **global** (theme flip, whole-page
   restyle, navigation) OR **relocated** from the click (you click a button here,
   the result appears elsewhere — the engine zooms to the *clicked element's*
-  bbox, so zooming would frame the wrong place).
+  bbox, so zooming would frame the wrong place). A `never` beat RELEASES any
+  prior zoom — the camera pulls back to full view for it, so a global payoff
+  after a zoomed beat is shown whole.
 - For a **`drag`**, the engine fits the zoom to the **whole stroke's bounding
   box** (a path, not a point). A big cross-canvas stroke fills the frame already
   → `"auto"` keeps it full-view (correct). A small, localized drag → `"auto"`
@@ -500,6 +505,10 @@ capture-lock). Warnings (a no-op zoom, a soft-cap scale) print but don't block.
 - The `open-take` bin resolvable by `npx open-take` — either the npm package
   installed in the project, or (in this monorepo) `pnpm install && pnpm build`
   (the root workspace links the bin, so `npx open-take` works here too).
+  **Always run `npx open-take` from that project's directory** — a bare npx
+  anywhere else silently resolves the REGISTRY copy, which may be older than
+  this document (its CLI errors on flags it doesn't know; if you see that,
+  check `npx open-take --version` and your cwd).
 - A Chrome to drive: open-take auto-downloads **Chrome-for-Testing** on first
   run (cached under `~/.open-take/browsers`), or set `OPEN_TAKE_CHROME` to a
   Chrome binary. (No agent-browser needed — capture is pure CDP.)

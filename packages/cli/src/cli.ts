@@ -71,6 +71,46 @@ for (let i = 1; i < argv.length; i++) {
 const flag = (name: string): string | undefined => flags[name];
 const has = (name: string): boolean => name in flags;
 
+// Per-command flag allowlists. A flag this binary doesn't know (or that
+// belongs to another verb) ERRORS instead of being silently ignored — the
+// field failure this prevents: an older installed CLI accepting `render
+// --draft` (a valid flag elsewhere) and silently rendering a full master.
+const FLAGS_BY_CMD: Record<string, string[]> = {
+  inspect: ["--viewport", "--verbose"],
+  make: ["--plan", "--out", "--fps", "--capture-scale", "--strict", "--draft", "--verbose"],
+  render: [
+    "--review",
+    "--draft",
+    "--open",
+    "--reveal",
+    "--no-open",
+    "--composition",
+    "--video",
+    "--out",
+    "--capture-log",
+    "--verbose",
+  ],
+  beats: ["--card"],
+  frames: ["--beat", "--tile", "--open", "--verbose"],
+  ab: ["--set", "--beat", "--full", "--draft", "--before-after", "--no-open", "--verbose"],
+  edit: ["--port", "--no-open"],
+  init: [],
+  skill: [],
+};
+
+function rejectUnknownFlags(cmd: string): void {
+  const allowed = FLAGS_BY_CMD[cmd];
+  if (!allowed) return;
+  for (const f of Object.keys(flags)) {
+    if (!allowed.includes(f))
+      throw new Error(
+        `${cmd}: unknown flag ${f}${allowed.length ? ` — allowed: ${allowed.join(" ")}` : " — this command takes no flags"}\n` +
+          `(if a newer doc mentions ${f}, this installed open-take predates it: run npx from the project ` +
+          `that has open-take installed, or upgrade — a bare npx elsewhere resolves the registry copy)`,
+      );
+  }
+}
+
 function parseViewport(s?: string): { width: number; height: number } | undefined {
   if (!s) return undefined;
   const [w, h] = s.toLowerCase().split("x").map(Number);
@@ -84,7 +124,7 @@ Usage:
   open-take make   --plan <plan.json> --out <out.mp4> [--fps 60] [--draft]
   open-take render <take> [--review] [--draft] [--open] [--reveal] [--no-open]
   open-take beats  <take> [--card]
-  open-take frames <take> [--beat N]
+  open-take frames <take> [--beat N] [--tile 720]
   open-take ab     <take> --set <knob>=<v1>,<v2>[,<v3>] [--beat N] [--full] [--draft] [--no-open]
   open-take ab     <take> --before-after [--beat N] [--full] [--no-open]
   open-take edit   <take> [--port 4178] [--no-open]
@@ -116,8 +156,10 @@ Usage:
           schedule), a tail row. --beat N densifies one beat into a 10-cell
           strip with per-cell phase labels. Pass <base>.draft.mp4 or
           <base>.review.mp4 as <take> to sample that copy instead of the
-          master. Seconds (pure ffmpeg, no render) — this is the verification
-          step: judge framing on HOLD cells, never mid-ramp.
+          master. --tile <px> sets tile width (default 480; a --beat strip
+          defaults 720 — thumbnails suspect a framing bug, bigger tiles
+          confirm it). Seconds (pure ffmpeg, no render) — this is the
+          verification step: judge framing on HOLD cells, never mid-ramp.
   ab      answer a taste question by eye: ONE knob, up to 3 candidate values
           (the current state is always variant A), rendered as a labeled reel —
           each variant plays twice. Auto-opens (--no-open to skip).
@@ -167,6 +209,7 @@ async function readyLine(mp4Path: string): Promise<string> {
 }
 
 async function main() {
+  if (cmd) rejectUnknownFlags(cmd);
   // The vendored renderer forwards page-console noise ("Worker 0: JSHandle:…")
   // only when this is set (see revideo-renderer/scripts/build.mjs).
   if (has("--verbose")) process.env.OPEN_TAKE_VERBOSE = "1";
@@ -365,9 +408,11 @@ async function main() {
         ? take.draftPath
         : take.reviewPath
       : undefined;
+    const tileFlag = flag("--tile");
     const { framesPath, sheet } = await renderFrames(take, {
       ...(beat != null ? { beat } : {}),
       ...(sourcePath ? { sourcePath } : {}),
+      ...(tileFlag ? { tileWidth: Number(tileFlag) } : {}),
     });
     process.stdout.write(`${sheet}\n`);
     if (has("--open")) openPath(framesPath);

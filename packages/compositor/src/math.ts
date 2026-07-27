@@ -281,12 +281,27 @@ function buildCameraSchedule(comp: TakeComposition): CameraSchedule {
   // Framing anchors over time. A zoom-enabled beat ramps to its target; a
   // scroll (content pans) and a zoom-less press (Escape/Enter whose effect is
   // global) ramp back to REST so the frame is full-view through them — without
-  // these, a prior zoom would persist across the scroll/keypress. Other
-  // disabled beats (a "never" click) keep holding the prior framing, unchanged.
+  // these, a prior zoom would persist across the scroll/keypress. Every OTHER
+  // disabled beat (a "never" click/hover/type/drag) means the same thing —
+  // the director only ever disables a beat to show it FULL-VIEW — so it too
+  // anchors to rest, but only while the camera is actually away from rest: a
+  // disabled beat over an already-resting camera adds no anchor, keeping
+  // legacy compositions (and their badge/A/B windows) byte-identical. The old
+  // hold-prior-framing behavior left a `zoom:"never"` GLOBAL payoff cropped
+  // inside the previous beat's punch (the 2026-07-27 interlinear field run).
   const anchors: CameraSchedule["anchors"] = [];
+  const awayFromRest = (): boolean => {
+    const a = anchors[anchors.length - 1];
+    if (!a) return false;
+    return (
+      Math.abs(a.scale - rest) > 1e-6 ||
+      Math.abs(a.center.x - restC.x) > 0.5 ||
+      Math.abs(a.center.y - restC.y) > 0.5
+    );
+  };
   comp.events.forEach((e, evIdx) => {
     const base = { evIdx, tMs: e.tMs, durationMs: e.durationMs ?? 0, inAtMs: e.zoom.inAtMs };
-    if (e.kind === "scroll" || (e.kind === "press" && !e.zoom.enabled)) {
+    if (e.kind === "scroll" || (!e.zoom.enabled && (e.kind === "press" || awayFromRest()))) {
       anchors.push({ ...base, scale: rest, center: restC });
     } else if (e.zoom.enabled) {
       anchors.push({ ...base, scale: e.zoom.scale, center: e.zoom.center, glide: e.zoom.glide });

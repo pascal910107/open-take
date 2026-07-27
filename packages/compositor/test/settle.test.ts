@@ -282,14 +282,19 @@ test("cameraRampSchedule: real departures/landings per event, incl. dwell-late",
   const legacy = cameraRampSchedule(legacyComp(squeezedEvents()));
   assert.equal(Math.round(legacy[1]!.startMs), 6157);
   assert.equal(Math.round(legacy[1]!.landMs), 7067);
-  // a beat the camera holds through (disabled non-scroll/press) is null
+  // a disabled beat AFTER a zoom is a release anchor (it means full view —
+  // the old null here pinned the hold-prior-framing defect that cropped a
+  // zoom:"never" global payoff); a disabled beat over a resting camera is
+  // still held through (null) so legacy schedules stay byte-identical.
   const held = comp([
     beat(2000, 2.0, { x: 800, y: 600 }),
     beat(4000, 0.8, { x: 900, y: 500 }), // enabled=false (scale ≤ 1 in beat())
+    beat(6500, 0.8, { x: 400, y: 300 }), // still disabled — camera already at rest
   ]);
   const heldSched = cameraRampSchedule(held);
   assert.ok(heldSched[0], "anchor beat has a ramp");
-  assert.equal(heldSched[1], null, "held-through beat has none");
+  assert.ok(heldSched[1], "disabled beat after a zoom releases to rest");
+  assert.equal(heldSched[2], null, "disabled beat over a resting camera has none");
 });
 
 test("startMs: range-checked; trimming into the first beat warns", () => {
