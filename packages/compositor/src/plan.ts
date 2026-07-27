@@ -151,7 +151,16 @@ export function planComposition(log: CaptureLog, opts: PlanOpts = {}): TakeCompo
       center: f.center,
       // zoom-in ramp starts zoomInMs before the action (decoupled from cursor
       // travelMs so the zoom can be slower/gentler — a more cinematic feel).
-      inAtMs: Math.max(0, s.beat.tMs - cursor.zoomInMs),
+      // EXCEPT a zoom-enabled press: its payoff (palette / modal / result)
+      // exists only AFTER the keypress, and a keypress has no on-screen
+      // antecedent to anticipate — a lead-in punches into empty space and the
+      // reveal then pops inside an already-committed frame. The camera departs
+      // AT the action and rides the reveal in (buildCameraSchedule gives a
+      // late-departing ramp its full window after the departure).
+      inAtMs:
+        f.enabled && s.beat.kind === "press"
+          ? s.beat.tMs
+          : Math.max(0, s.beat.tMs - cursor.zoomInMs),
       reason: f.reason,
     };
     return { ...s.ev, zoom };

@@ -248,7 +248,8 @@ type CameraSchedule = {
   /** per-anchor ramp window, SECONDS */
   ramps: { start: number; end: number }[];
   /** per-anchor landing time, SECONDS (≥ ramp start + a minimal real ramp;
-   *  == tMs for every on-time ramp, later for a dwell-delayed pull-out) */
+   *  == tMs for every on-time ramp, later for a dwell-delayed pull-out or a
+   *  reveal-timed press whose ramp departs AT the action) */
   landTs: number[];
   rectFor: (center: Pt, scale: number) => CamRect;
 };
@@ -322,9 +323,17 @@ function buildCameraSchedule(comp: TakeComposition): CameraSchedule {
   // than leaving a payoff a little early.
   const ZIN_MS = comp.cursor.zoomInMs;
   const DWELL_MS = comp.cursor.pullOutDwellMs ?? 0;
+  // A ramp whose departure sits AT/after its own action is REVEAL-timed: the
+  // planner pins a zoom-enabled press there (its payoff exists only after the
+  // keypress — a lead-in would punch into empty space), and a hand-set late
+  // inAtMs means the same thing. Landing at tMs would make start === end (a
+  // jump cut), so these get a full ramp window AFTER the departure instead.
+  const revealTimed = (e: { inAtMs: number; tMs: number }): boolean => e.inAtMs >= e.tMs;
   const ramps = anchors.map((e, i) => {
     const from = i > 0 ? targets[i - 1]! : restR;
     const pullOut = targets[i]!.w > from.w + 1e-6;
+    if (revealTimed(e))
+      return { start: e.inAtMs / 1000, end: (e.inAtMs + (pullOut ? ZOUT_MS : ZIN_MS)) / 1000 };
     const isDefaultInAt = Math.abs(e.inAtMs - Math.max(0, e.tMs - ZIN_MS)) < 1;
     if (!pullOut || !isDefaultInAt) return { start: e.inAtMs / 1000, end: e.tMs / 1000 };
     const desired = e.tMs - ZOUT_MS;
@@ -353,6 +362,7 @@ function buildCameraSchedule(comp: TakeComposition): CameraSchedule {
     for (let i = 0; i < ramps.length - 1; i++) {
       const r = ramps[i]!;
       const e = anchors[i]!;
+      if (revealTimed(e)) continue; // fitted in the reveal pass below (departure is pinned)
       if (r.end <= e.tMs / 1000 + 1e-9) continue; // on-time ramp — not dwell-late
       const latestStart = ramps[i + 1]!.start - 0.01 - minRamp / 1000;
       if (r.start <= latestStart) continue; // the late landing fits
@@ -368,14 +378,30 @@ function buildCameraSchedule(comp: TakeComposition): CameraSchedule {
     }
   }
 
+  // Reveal fit pass: a reveal-timed ramp's departure is PINNED at the action —
+  // moving it earlier would re-create the exact artifact this timing removes
+  // (zooming into a reveal that doesn't exist yet). When the full window would
+  // run into the next anchor's departure, shrink the ramp (a faster punch)
+  // instead, floored at half a window so it still reads as a move; anything
+  // tighter falls to push()'s monotone clamp like any other crowding.
+  const REVEAL_MIN_S = Math.min(ZOUT_MS, ZIN_MS) / 2000;
+  for (let i = 0; i < ramps.length; i++) {
+    if (!revealTimed(anchors[i]!)) continue;
+    const r = ramps[i]!;
+    const nextStart = i + 1 < ramps.length ? ramps[i + 1]!.start : Number.POSITIVE_INFINITY;
+    r.end = Math.max(r.start + REVEAL_MIN_S, Math.min(r.end, nextStart - 0.01));
+  }
+
   // A dwell-delayed pull-out lands after its own action instant; cap the
   // landing so it can never run into the next anchor's ramp (floored at a
   // minimal real ramp — the fits-check in the dwell pass guarantees room).
   // An on-time ramp (end === tMs, every legacy entry) keeps the exact old
-  // landing; a pass-2-shrunk ramp may deliberately land BEFORE its tMs.
+  // landing; a pass-2-shrunk ramp may deliberately land BEFORE its tMs. A
+  // reveal-timed ramp was already fitted above — it lands exactly at its end.
   const landTs = anchors.map((e, i) => {
     const nextStart = anchors[i + 1] ? ramps[i + 1]!.start : Number.POSITIVE_INFINITY;
     const rampEnd = ramps[i]!.end;
+    if (revealTimed(e)) return rampEnd;
     return rampEnd === e.tMs / 1000
       ? rampEnd
       : Math.max(

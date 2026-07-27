@@ -370,7 +370,9 @@ page changed).
   lands on whatever has focus (e.g. a field a prior `type` filled → `Enter`
   submits) or the document (⌘K-style listeners). To zoom on what it reveals, name
   that element via `selector`/`text` (it's located *after* the press, then
-  framed). A bare press (no reveal) holds **full-view** for `durationMs`.
+  framed). The camera departs **at the keypress** and rides the reveal in — it
+  never pre-zooms into the empty space where a palette/modal is about to appear.
+  A bare press (no reveal) holds **full-view** for `durationMs`.
 - `settleMs`: hold after the action so its result is visible (~1200–2600ms).
   Give big reveals a longer hold. **Pacing matters for cursor silk:** the cursor
   travels to the next target during the gap BEFORE it, so a tight gap forces a

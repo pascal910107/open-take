@@ -136,13 +136,22 @@ export function validateComposition(
       );
       continue;
     }
-    // inAtMs must precede the action (the zoom-in ramps in before the beat lands)
+    // inAtMs must precede the action (the zoom-in ramps in before the beat
+    // lands) — EXCEPT a press: its reveal exists only after the keypress, so
+    // its zoom departs AT the action (inAtMs === tMs; the schedule then runs
+    // the ramp after the departure instead of landing at tMs).
     if (z.inAtMs < 0) err(`${p}.zoom.inAtMs`, `negative inAtMs ${z.inAtMs}`, "clamp to 0");
-    if (z.inAtMs > e.tMs)
+    if (z.inAtMs > e.tMs && e.kind !== "press")
       err(
         `${p}.zoom.inAtMs`,
         `inAtMs ${z.inAtMs} is AFTER the action at tMs ${e.tMs} — the zoom would arrive late`,
         `set inAtMs = tMs − cursor.zoomInMs (= ${Math.max(0, e.tMs - comp.cursor.zoomInMs)})`,
+      );
+    if (e.kind === "press" && z.enabled && z.inAtMs < e.tMs)
+      warn(
+        `${p}.zoom.inAtMs`,
+        `press zoom departs ${e.tMs - z.inAtMs}ms BEFORE the keypress — its reveal doesn't exist yet, so the camera punches into empty space`,
+        `set inAtMs = tMs (${e.tMs}) so the zoom rides the reveal in`,
       );
 
     if (z.enabled) {

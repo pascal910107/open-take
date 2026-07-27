@@ -6,7 +6,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildLegs, cursorPos, keyvalN, stageCamera } from "../src/math.js";
+import { buildLegs, cameraRampSchedule, cursorPos, keyvalN, stageCamera } from "../src/math.js";
 import { planComposition } from "../src/plan.js";
 import type { CaptureLog } from "../src/types.js";
 
@@ -206,6 +206,78 @@ test("press with a reveal bbox frames it (zoom enabled)", () => {
   const press = comp.events.find((e) => e.kind === "press")!;
   assert.equal(press.zoom.enabled, true, "reveal bbox → zoom in");
   assert.ok(press.zoom.scale > 1, "scale above rest");
+});
+
+test("press zoom departs AT the keypress and lands after it (reveal timing)", () => {
+  // A ⌘K palette exists only AFTER the keypress: the camera must not commit
+  // its punch into the reveal's future rect before anything is on screen.
+  const comp = planComposition(
+    log([
+      { kind: "click", x: 100, y: 100, box: { x: 80, y: 80, w: 40, h: 40 }, tMs: 1000 },
+      {
+        kind: "press",
+        x: 960,
+        y: 400,
+        keys: "Meta+k",
+        box: { x: 760, y: 300, w: 400, h: 200 },
+        tMs: 3000,
+        durationMs: 1400,
+      },
+    ]),
+  );
+  const press = comp.events.find((e) => e.kind === "press")!;
+  assert.equal(press.zoom.inAtMs, press.tMs, "departure pinned at the keypress, not before");
+  const ramp = cameraRampSchedule(comp)[comp.events.indexOf(press)]!;
+  assert.ok(Math.abs(ramp.startMs - press.tMs) < 1, "schedule departs at tMs");
+  assert.ok(
+    Math.abs(ramp.landMs - (press.tMs + comp.cursor.zoomInMs)) < 1,
+    `full ramp runs AFTER the departure (landed ${ramp.landMs})`,
+  );
+  const cam = stageCamera(comp);
+  const atKey = cam.at(press.tMs / 1000).scale;
+  assert.ok(
+    Math.abs(atKey - cam.rest) < 0.02,
+    `frame still at rest when the key goes down (got ${atKey} vs rest ${cam.rest})`,
+  );
+  const landed = cam.at((press.tMs + comp.cursor.zoomInMs + 300) / 1000).scale;
+  assert.ok(landed > cam.rest + 0.2, `zoomed once the reveal ramp lands (got ${landed})`);
+});
+
+test("crowded reveal ramp shrinks — never departs before the keypress", () => {
+  const comp = planComposition(
+    log([
+      { kind: "click", x: 100, y: 100, box: { x: 80, y: 80, w: 40, h: 40 }, tMs: 1000 },
+      {
+        kind: "press",
+        x: 960,
+        y: 400,
+        keys: "Meta+k",
+        box: { x: 760, y: 300, w: 400, h: 200 },
+        tMs: 3000,
+      },
+      // next punch departs at 4300 − zoomInMs = 3570 — inside the press's full
+      // 730ms window, so the press ramp must shrink toward it, not start early.
+      {
+        kind: "click",
+        x: 900,
+        y: 380,
+        box: { x: 880, y: 360, w: 40, h: 40 },
+        tMs: 4300,
+        zoom: "always",
+      },
+    ]),
+  );
+  const ramps = cameraRampSchedule(comp);
+  const i = comp.events.findIndex((e) => e.kind === "press");
+  const press = comp.events[i]!;
+  const ramp = ramps[i]!;
+  const nextStart = ramps[i + 1]!.startMs;
+  assert.ok(Math.abs(ramp.startMs - press.tMs) < 1, "departure stays pinned at the keypress");
+  assert.ok(
+    ramp.landMs <= nextStart,
+    `landing ${ramp.landMs} yields to the next departure ${nextStart}`,
+  );
+  assert.ok(ramp.landMs - ramp.startMs > 200, "still a real ramp, not a jump cut");
 });
 
 test("press with no reveal does not zoom", () => {
