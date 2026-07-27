@@ -1,6 +1,6 @@
 {
   "name": "@open-take/compositor",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Polish compositor (D3) — event log + captured frames -> polished mp4 + editable revideo composition.",
   "license": "MIT",
   "type": "module",

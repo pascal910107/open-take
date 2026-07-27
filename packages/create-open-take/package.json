@@ -1,6 +1,6 @@
 {
   "name": "create-open-take",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Add Open Take and its agent skill to your app in one command.",
   "license": "MIT",
   "type": "module",
