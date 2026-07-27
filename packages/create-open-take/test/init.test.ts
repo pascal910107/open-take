@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -10,6 +10,7 @@ import {
   initializeOpenTake,
   installCommand,
   isPnpmWorkspaceRoot,
+  packageNameFromDirectory,
   requestedPackageManager,
   type Runner,
 } from "../src/index";
@@ -88,6 +89,50 @@ test("initializer explicitly installs into a pnpm workspace root", async () => {
     command: "pnpm",
     args: ["exec", "open-take", "init"],
   });
+});
+
+test("initializer scaffolds a package.json when the directory is empty", async () => {
+  const parent = await mkdtemp(join(tmpdir(), "create-open-take-empty-"));
+  const cwd = join(parent, "My Sandbox!");
+  await mkdir(cwd);
+  const calls: Array<{ command: string; args: string[] }> = [];
+  const runner: Runner = async (command, args) => {
+    calls.push({ command, args });
+  };
+  const messages: string[] = [];
+
+  await initializeOpenTake({
+    cwd,
+    packageManager: "npm",
+    packageSpec: "open-take@0.1.3",
+    runner,
+    write: (message) => messages.push(message),
+  });
+
+  assert.deepEqual(JSON.parse(await readFile(join(cwd, "package.json"), "utf8")), {
+    name: "my-sandbox",
+    version: "0.0.0",
+    private: true,
+  });
+  assert.match(messages.join(""), /created one for "my-sandbox"/);
+  assert.deepEqual(calls[0], {
+    command: "npm",
+    args: ["install", "--save-dev", "open-take@0.1.3"],
+  });
+  assert.equal(packageNameFromDirectory("/tmp/_Weird.Name_"), "weird.name");
+});
+
+test("initializer leaves an existing package.json untouched", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "create-open-take-existing-"));
+  await writeFile(join(cwd, "package.json"), '{ "name": "my-app" }');
+  await initializeOpenTake({
+    cwd,
+    packageManager: "npm",
+    packageSpec: "open-take@0.1.3",
+    runner: async () => {},
+    write: () => {},
+  });
+  assert.equal(await readFile(join(cwd, "package.json"), "utf8"), '{ "name": "my-app" }');
 });
 
 test("initializer installs the package and runs its local init", async () => {

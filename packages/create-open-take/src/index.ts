@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { basename, dirname, resolve } from "node:path";
 
 export type PackageManager = "npm" | "pnpm" | "yarn" | "bun";
 
@@ -145,6 +145,29 @@ export const spawnRunner: Runner = (command, args, options) =>
     });
   });
 
+export function packageNameFromDirectory(cwd: string): string {
+  const name = basename(resolve(cwd))
+    .toLowerCase()
+    .replace(/[^a-z0-9\-._~]+/g, "-")
+    .replace(/^[-._]+/, "")
+    .replace(/[-._]+$/, "")
+    .slice(0, 214);
+  return name || "open-take-app";
+}
+
+/** `npm create` is also run in empty directories, so scaffold what install needs. */
+export function ensurePackageJson(cwd: string): { created: boolean; name: string } {
+  const packageJsonPath = resolve(cwd, "package.json");
+  if (existsSync(packageJsonPath)) return { created: false, name: "" };
+
+  const name = packageNameFromDirectory(cwd);
+  writeFileSync(
+    packageJsonPath,
+    `${JSON.stringify({ name, version: "0.0.0", private: true }, null, 2)}\n`,
+  );
+  return { created: true, name };
+}
+
 export async function initializeOpenTake(
   options: {
     cwd?: string;
@@ -155,13 +178,15 @@ export async function initializeOpenTake(
   } = {},
 ): Promise<void> {
   const cwd = resolve(options.cwd ?? process.cwd());
-  if (!existsSync(resolve(cwd, "package.json"))) {
-    throw new Error("Run this command from your app's root (package.json was not found).");
+  const runner = options.runner ?? spawnRunner;
+  const write = options.write ?? ((message) => process.stdout.write(message));
+
+  const bootstrapped = ensurePackageJson(cwd);
+  if (bootstrapped.created) {
+    write(`No package.json here — created one for "${bootstrapped.name}".\n`);
   }
 
   const packageManager = options.packageManager ?? detectPackageManager(cwd);
-  const runner = options.runner ?? spawnRunner;
-  const write = options.write ?? ((message) => process.stdout.write(message));
 
   write(`Installing open-take with ${packageManager}…\n`);
   const install = installCommand(
@@ -178,7 +203,10 @@ export async function initializeOpenTake(
   write('\nReady. Ask your agent: "Make a demo of localhost:3000 for Twitter."\n');
 }
 
-export const HELP = `create-open-take — add Open Take to an existing app
+export const HELP = `create-open-take — add Open Take to your app
+
+Run it from your app's root, or from an empty directory (a minimal
+package.json is created there for you).
 
 Usage:
   npm create open-take@latest
