@@ -77,7 +77,16 @@ const has = (name: string): boolean => name in flags;
 // --draft` (a valid flag elsewhere) and silently rendering a full master.
 const FLAGS_BY_CMD: Record<string, string[]> = {
   inspect: ["--viewport", "--verbose"],
-  make: ["--plan", "--out", "--fps", "--capture-scale", "--strict", "--draft", "--verbose"],
+  make: [
+    "--plan",
+    "--out",
+    "--fps",
+    "--capture-scale",
+    "--strict",
+    "--draft",
+    "--no-open",
+    "--verbose",
+  ],
   render: [
     "--review",
     "--draft",
@@ -121,7 +130,7 @@ const USAGE = `open-take — agent-native demo recorder
 
 Usage:
   open-take inspect <url> [--viewport 1920x1080]
-  open-take make   --plan <plan.json> --out <out.mp4> [--fps 60] [--draft]
+  open-take make   --plan <plan.json> --out <out.mp4> [--fps 60] [--draft] [--no-open]
   open-take render <take> [--review] [--draft] [--open] [--reveal] [--no-open]
   open-take beats  <take> [--card]
   open-take frames <take> [--beat N] [--tile 720]
@@ -136,6 +145,9 @@ Usage:
 
   make    drive the app (real-time) → polished <out>.mp4 + editable
           <out>.composition.json + KEPT <out>.capture.mp4 + <out>.capture.json.
+          The raw capture auto-opens the moment it lands (minutes before the
+          polished render finishes) so the wait is spent watching raw footage —
+          --no-open to skip.
   render  re-render the (edited) composition over the kept capture — NO app
           drive, deterministic. The previous master is kept as <base>.prev.mp4
           so "keep the old one" is a mechanical revert.
@@ -279,6 +291,15 @@ async function main() {
         logProgress: true,
         verbose: has("--verbose"),
         draft: has("--draft"),
+        // progressive reveal: the capture exists minutes before the polished
+        // mp4 — show the raw footage the moment it lands so the wait is spent
+        // watching, not staring at a spinner.
+        onCaptureReady: (p) => {
+          process.stdout.write(
+            `\ncapture landed: ${p}\n  raw footage (unpolished) — the polished render is still cooking\n`,
+          );
+          if (!has("--no-open")) openPath(p);
+        },
         ...(fps || captureScale
           ? { capture: { ...(fps ? { fps } : {}), ...(captureScale ? { captureScale } : {}) } }
           : {}),
@@ -294,9 +315,19 @@ async function main() {
     const draftNote = has("--draft")
       ? ` (DRAFT quality — \`${INVOKE} render ${mp4Path}\` masters it)`
       : "";
+    // the dossier is the agent's exploration harvest — nudge for it here so
+    // the NEXT demo of this app skips cold exploration even when the agent
+    // isn't following the skill to the letter.
+    const { dossierPath } = await resolveTakePaths(mp4Path);
+    const dossierLine = (await fsStat(dossierPath).catch(() => null))?.isFile()
+      ? `dossier:     ${dossierPath}      ← read this before re-exploring the app\n`
+      : `dossier:     ${dossierPath}      ← missing — write the exploration harvest\n` +
+        `             (app thesis · hero candidates tried/rejected · selector map ·\n` +
+        `             content answers · hazards) so the next demo skips cold exploration\n`;
     process.stdout.write(
       `\nmp4:         ${mp4Path}${draftNote}\ncomposition: ${compositionPath}\n` +
         `capture:     ${capturePath}\ncapture log: ${captureLogPath}\n` +
+        dossierLine +
         `\nrefine by asking your agent for changes — or directly:\n` +
         `  ${INVOKE} frames ${mp4Path}            (beat-aware contact sheet — verify first)\n` +
         `  ${INVOKE} render ${mp4Path} --review   (draft copy with beat badges, auto-opens)\n` +

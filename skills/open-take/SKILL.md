@@ -38,6 +38,14 @@ elements (name + bbox), and open the URL in any browser to see what the app
 *is* and what its interactions *do*.
 
 **Explore efficiently — the measured time sink is HERE, not the renders:**
+- **Read the dossier FIRST.** A previous demo of this app left
+  `<base>.dossier.md` beside its take — the last run's exploration harvest
+  (what the app is + audience, hero candidates tried AND rejected, the
+  verified selector map, content answers, hazards). If one exists, read it
+  before touching the app, and re-verify only what could be stale: one
+  `inspect` diffed against its selector map + a spot-probe of the hero
+  interaction. Founders iterate on ONE app — every demo after the first
+  should skip cold exploration, not re-pay it.
 - **Confirm the target first.** `inspect` returns the page `title` + `finalUrl`
   — check they name the app you were asked to demo before exploring anything
   (dev servers auto-increment ports; a stale URL silently serves a different
@@ -67,12 +75,17 @@ Answer, in writing:
   moment.)
 - **What ONE story should a ~25s demo tell** — one sentence.
 
-**Alignment gate — MUST confirm the thesis before DIRECT.** After exploring,
-use the host's structured question tool (Claude Code: `AskUserQuestion`; other
-agents: the equivalent) to ask which story the demo should prove. Skip only
-when the user already gave an unambiguous audience/purpose **and** hero outcome,
-or explicitly said to use your judgment; when skipping, restate the brief so
-they can correct it.
+**Alignment gate — ask EARLY, confirm before DIRECT.** Use the host's
+structured question tool (Claude Code: `AskUserQuestion`; other agents: the
+equivalent) to ask which story the demo should prove — and ask it **the moment
+you have 2–3 credible hero candidates**, not when exploration feels finished.
+The human's answer takes minutes to arrive; exploration and the question must
+overlap, never serialize (explore → ask → idle wait is the measured
+anti-pattern). While the answer is pending, keep working on the parts that
+don't depend on it: verify selectors, answer content questions from source,
+map hazards. Skip the question only when the user already gave an unambiguous
+audience/purpose **and** hero outcome, or explicitly said to use your
+judgment; when skipping, restate the brief so they can correct it.
 
 - Ask **one question by default, two maximum**. Do not make the user restate
   facts you can observe in the app.
@@ -114,6 +127,13 @@ the app's signature moment; make the wow the hero, not an afterthought.
   reads as "going deeper." Use this for reveal→detail arcs; it only zooms back
   out at the end (or for a `scroll`/full-view beat). Still selective — 2–3
   chained zooms max, each earning it.
+- **Fits ≠ legible.** The auto-camera frames the payoff region so it FITS the
+  frame; it has no notion of type size. When the payoff's *meaning* lives in
+  small text (code, terminal output, an inspector panel, dense tables), a fit
+  that technically shows the whole region can still be unreadable at a glance
+  — a measured run's hero beat read as a pointless pull-back until its zoom
+  was hand-set to 1.75×. For fine-text payoffs, hand-set that beat's
+  `zoom.scale` toward medium/tight (1.5–1.8) so the text itself reads.
 - Restraint reads as intentional. Reserve zoom for the beats that earn it; many
   great demos are 0-zoom. Don't add a zoom for "variety."
 
@@ -128,7 +148,15 @@ the ideal onto the capture vocabulary (next section) and decide your downgrades.
 
 ### 4. CAPTURE & RENDER (through the runtime)
 Write the plan (schema below), then `make --draft`. The runtime drives the live
-app and composites the polish. **Draft-first is the default loop:** the first
+app and composites the polish.
+
+**Post the thesis + beat plan to the user BEFORE running `make`** — one line
+of thesis, then the 3–5 beats with what each shows. The shoot + render takes
+minutes; the user spends them reading your editorial instead of watching a
+spinner. `make` auto-opens the raw capture the moment it lands (minutes before
+the polished mp4): tell the user that's the **unpolished footage** — real
+pixels, no camera work yet — and that the polish is still rendering
+(`--no-open` suppresses it). **Draft-first is the default loop:** the first
 render and every mid-refine re-render are drafts (30fps cap, no motion blur —
 several times faster); the full-quality master is rendered ONCE, at the closing
 ritual. The capture itself still records at the full fps and the composition
@@ -378,12 +406,13 @@ cursor. **`--fps 30` halves render time + file size** — use it for fast drafts
 while iterating, or for pure click/type demos where the gain is marginal. Needs
 a Chrome (auto-downloaded on first run — see Prerequisites).
 
-`make` prints all four artifacts and the exact `render` command to refine:
+`make` prints the artifact family and the exact `render` command to refine:
 ```
 mp4:         demo.mp4
 composition: demo.composition.json   ← edit this
 capture:     demo.capture.mp4        ← render reads this (the frozen recording)
 capture log: demo.capture.json       ← render auto-loads this (capture-lock ground truth)
+dossier:     demo.dossier.md         ← the exploration harvest (you write this — see below)
 ```
 
 After the capture, `make` frame-diffs the recording around every action and
@@ -392,6 +421,19 @@ region; `changeCoverage` — how much of the frame it touched). The auto-camera
 frames the PAYOFF region rather than just the clicked control (a search's
 results, a preview that swaps elsewhere) and pulls out to full view on global
 repaints (nav / restyle). Fully automatic; you never write these fields.
+**`changeCoverage: 0` (or a missing `effectBox`) does NOT mean the beat did
+nothing** — a subtle effect (a 1px outline, a low-opacity highlight) diffs
+below the threshold and is often visually fine. The annotation steers the
+camera; the frames (step 5) are the ground truth for "did it work".
+
+**After the first successful `make`, write the dossier** — `<base>.dossier.md`
+beside the take, the exploration harvest the NEXT demo of this app reads
+instead of re-exploring: what the app is + audience · hero candidates you kept
+AND rejected (with why) · the verified selector map · content answers (search
+terms with hits, seeded data) · hazards (autofocus races, saves that write
+files, lazy-load waits). Keep it human-readable — it doubles as your
+UNDERSTAND notes — and update it whenever refine or a re-make teaches you
+something new about the app.
 
 ### refine (re-render edits — no app drive)
 ```
@@ -471,6 +513,13 @@ capture-lock). Warnings (a no-op zoom, a soft-cap scale) print but don't block.
 - **Target unlabeled controls by CSS `selector`** (see inspect note). The
   selector path is atomic (resolve-bbox-and-click in one page eval), so it's as
   robust as the text path.
+- **A beat that saves/exports can write REAL files into the user's project.**
+  The app under demo is the user's actual app — a "save" or "export" beat may
+  write into their working tree (measured runs did exactly this, to an
+  UNTRACKED file `git status` alone wouldn't flag). Before planning one, find
+  out what it writes; prefer a scratch target, or back the file up first and
+  restore it after the shoot — leave the user's repo byte-identical to how you
+  found it, and say you did.
 
 ## Editorial guidance (what makes a good draft)
 - Lead with an orienting beat so the viewer sees the app whole; the
@@ -484,6 +533,12 @@ capture-lock). Warnings (a no-op zoom, a soft-cap scale) print but don't block.
   break the demo.
 
 ## Known limits (don't be surprised; flag when they bite the story)
+- **Hover-TRACKING effects aren't capturable.** The synthetic cursor dispatches
+  input at each beat's target, not continuously along its travel — an effect
+  that FOLLOWS the mouse (an outline tracking the pointer, a magnetic hover, a
+  spotlight under the cursor) never fires mid-flight. Hover-DWELL reveals (a
+  tooltip/dropdown at a target) work fine. Show a tracking effect as dwells at
+  1–2 representative targets and flag the downgrade out loud.
 - **Vocabulary edges to flag when they bite the story:** a hover-reveal whose menu
   has no accessible name *and* no stable selector; multi-key sequences within one
   beat (chain separate `press` steps); precise inner-scroller targeting (scroll

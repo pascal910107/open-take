@@ -186,7 +186,7 @@ export function directCamera(
         boundary: true,
         reason: roi
           ? floored > scale
-            ? `plan: zoom=always → ROI fit ${scale.toFixed(2)}× is imperceptible — floored to ${floored.toFixed(2)}×`
+            ? `plan: zoom=always → ROI fit ${scale.toFixed(2)}× is imperceptible — floored to ${floored.toFixed(2)}× (fits ≠ legible: raise zoom.scale if the payoff is fine text)`
             : `plan: zoom=always → ${floored.toFixed(2)}× (framing from ROI)`
           : "plan: zoom=always but no bbox to frame → full view",
       };

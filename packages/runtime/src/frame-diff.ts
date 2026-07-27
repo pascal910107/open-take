@@ -268,10 +268,17 @@ export async function annotateCaptureLog(
       };
       if (opts.logProgress) {
         const eb = events[i]!.effectBox;
+        // coverage 0 is sub-THRESHOLD, not proof of a dead beat: a 1px outline
+        // or low-opacity highlight diffs below the noise floor and is often
+        // visually fine — point the reader at the frames, not the number.
+        const subThreshold =
+          events[i]!.changeCoverage === 0 && !eb
+            ? " (sub-threshold — a subtle effect can score 0; judge by frames)"
+            : "";
         process.stderr.write(
           `frame-diff [${i}] ${e.kind ?? "click"}@${e.tMs}ms coverage=${events[i]!.changeCoverage}${
             eb ? ` effect=(${eb.x},${eb.y} ${eb.w}x${eb.h})` : ""
-          }\n`,
+          }${subThreshold}\n`,
         );
       }
     }

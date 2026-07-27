@@ -24,6 +24,10 @@ export type TakePaths = {
   abPath: string;
   /** `<base>.prev.mp4` — the previous master, kept so "A" can mean revert */
   prevPath: string;
+  /** `<base>.dossier.md` — the agent's persisted exploration harvest (app
+   *  thesis, hero candidates tried/rejected, selector map, content answers,
+   *  hazards). Read it before re-exploring; it survives re-makes. */
+  dossierPath: string;
 };
 
 async function isFile(p: string): Promise<boolean> {
@@ -52,6 +56,7 @@ export async function resolveTakePaths(input: string): Promise<TakePaths> {
     p = join(p, pick);
   }
   const base = p
+    .replace(/\.dossier\.md$/i, "")
     .replace(/\.prev\.composition\.json$/i, "")
     .replace(/\.composition\.json$/i, "")
     .replace(/\.capture\.json$/i, "")
@@ -72,6 +77,7 @@ export async function resolveTakePaths(input: string): Promise<TakePaths> {
     draftPath: `${base}.draft.mp4`,
     abPath: `${base}.ab.mp4`,
     prevPath: `${base}.prev.mp4`,
+    dossierPath: `${base}.dossier.md`,
   };
 }
 

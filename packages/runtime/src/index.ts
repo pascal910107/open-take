@@ -104,6 +104,11 @@ export type MakeTakeOpts = {
    *  full fps and the composition sibling keeps the full-quality settings, so
    *  the closing `render` produces the real master from the same take. */
   draft?: boolean;
+  /** called the moment the raw capture lands beside the output — BEFORE the
+   *  frame-diff + render minutes. The progressive-reveal hook: the CLI prints
+   *  and auto-opens the raw footage so the user watches it while the polish
+   *  renders. A throwing callback never fails the take. */
+  onCaptureReady?: (capturePath: string) => void;
 };
 
 export type MakeTakeResult = {
@@ -157,6 +162,21 @@ export async function makeTake(plan: TakePlan, opts: MakeTakeOpts): Promise<Make
 
   const raw = await captureTake(plan, { ...opts.capture, chromePath, videoPath: tmpVideo });
 
+  // KEEP the capture beside the output the moment it exists — BEFORE the
+  // frame-diff + render minutes — so the caller can reveal the raw footage
+  // while the polish is still cooking (perceived latency: the user sees
+  // nothing for ~10 minutes otherwise). Refinement re-renders over this copy
+  // without re-driving the app (the refine loop's whole point).
+  const capturePath = capturePathFor(opts.outPath);
+  const captureLogPath = captureLogPathFor(capturePath);
+  await mkdir(dirname(capturePath), { recursive: true });
+  await copyFile(tmpVideo, capturePath);
+  try {
+    opts.onCaptureReady?.(capturePath);
+  } catch {
+    // a reveal hook must never fail the take
+  }
+
   // Tier-2 annotation: diff the recording around each action so the log
   // carries what each action actually changed (effectBox/changeCoverage) —
   // the director's ground truth for payoff-framing and nav pull-outs. The
@@ -166,14 +186,8 @@ export async function makeTake(plan: TakePlan, opts: MakeTakeOpts): Promise<Make
       ? raw
       : await annotateCaptureLog(raw, tmpVideo, { logProgress: opts.verbose === true });
 
-  // KEEP the capture beside the output so refinement can re-render over it
-  // without re-driving the app (the refine loop's whole point). Keep the LOG
-  // too — it's the ground-truth action timing the capture-lock check needs in
-  // the refine loop (the composition is editable; the log is not).
-  const capturePath = capturePathFor(opts.outPath);
-  const captureLogPath = captureLogPathFor(capturePath);
-  await mkdir(dirname(capturePath), { recursive: true });
-  await copyFile(tmpVideo, capturePath);
+  // Keep the LOG too — it's the ground-truth action timing the capture-lock
+  // check needs in the refine loop (the composition is editable; the log is not).
   await writeFile(captureLogPath, JSON.stringify(log, null, 2));
 
   // One knob: the render grid follows the capture fps (default 60) unless the
