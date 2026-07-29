@@ -19,8 +19,10 @@ import {
   authProfile,
   buildBeatSheet,
   formatIssues,
+  formatNotes,
   inspectPage,
   makeTake,
+  readNotes,
   profileDir,
   openPath,
   renderAbReel,
@@ -33,6 +35,7 @@ import {
   resolveTakePaths,
   revealPath,
   stagePrev,
+  waitForNotes,
 } from "@open-take/runtime";
 import { installAgentSkill } from "./init";
 
@@ -109,6 +112,8 @@ const FLAGS_BY_CMD: Record<string, string[]> = {
   frames: ["--beat", "--tile", "--open", "--verbose"],
   ab: ["--set", "--beat", "--full", "--draft", "--before-after", "--no-open", "--verbose"],
   edit: ["--port", "--no-open"],
+  notes: ["--wait", "--timeout", "--all", "--quiet"],
+  auth: ["--url"],
   init: [],
   skill: [],
 };
@@ -143,6 +148,8 @@ Usage:
   open-take ab     <take> --set <knob>=<v1>,<v2>[,<v3>] [--beat N] [--full] [--draft] [--no-open]
   open-take ab     <take> --before-after [--beat N] [--full] [--no-open]
   open-take edit   <take> [--port 4178] [--no-open]
+  open-take notes  [<take>] [--wait [--timeout 1800]] [--all] [--quiet]
+  open-take auth   <name> [--url <login-url>]
   open-take init
   open-take skill  [install]
 
@@ -195,6 +202,23 @@ Usage:
           the real mp4 — all on 127.0.0.1, nothing uploaded. Hands off anything
           it can't do (reorder, re-record) to your agent via the Agent panel
           (notes land in <base>.notes.md + this terminal).
+
+  notes   read the director's notes the editor's Agent panel left for you —
+          the notes you have NOT already read, then remembered as read (the
+          position lives in <base>.notes.cursor; --all re-reads everything).
+          <take> defaults to the current directory. --quiet prints nothing
+          when there is nothing new (for hooks).
+          --wait BLOCKS until a note lands and then exits — start it in the
+          background when you open the editor and its exit IS your wake-up.
+          --timeout <seconds> caps the wait (default 1800 = 30min); a burst of
+          notes typed together arrives as one batch.
+
+  auth    one-time interactive login on a persistent profile: opens a normal
+          (headed) Chrome on ~/.open-take/profiles/<name> at --url, you log in
+          by hand, then press Enter here (or quit Chrome). Later captures reuse
+          the session via \`make --profile <name>\` — still headless, no
+          credentials ever touch a plan. One profile per site keeps logins
+          isolated (e.g. \`auth vercel --url https://vercel.com/login\`).
 
   init    install the Open Take skill into this project for coding agents.
 
@@ -644,7 +668,52 @@ async function main() {
       ...(portFlag ? { port: Number(portFlag) } : {}),
       open: !has("--no-open"),
     });
+    // Tell whoever started this how the notes come back out: the editor is a
+    // one-way door otherwise (the user types a note and nothing reads it).
+    process.stdout.write(
+      `\nAgent-panel notes append to ${take.notesPath}\n` +
+        `  ${INVOKE} notes ${takePath} --wait   # blocks in another shell, exits on the next note\n`,
+    );
     await new Promise(() => {}); // keep alive until Ctrl-C
+    return;
+  }
+
+  if (cmd === "notes") {
+    const quiet = has("--quiet");
+    // No <take> = "the take in this directory", so a hook can run this from a
+    // project root without knowing the name. A directory with no take is not
+    // an error in --quiet mode: hooks fire everywhere, notes exist in one place.
+    let take: Awaited<ReturnType<typeof resolveTakePaths>>;
+    try {
+      take = await resolveTakePaths(positional[0] ?? process.cwd());
+    } catch (e) {
+      if (quiet) return;
+      throw e;
+    }
+    const wait = has("--wait");
+    const timeoutFlag = flag("--timeout");
+    const timeoutS = timeoutFlag ? Number(timeoutFlag) : undefined;
+    if (timeoutFlag != null && (!Number.isFinite(timeoutS) || timeoutS! <= 0))
+      throw new Error(`notes: --timeout expects seconds (got "${timeoutFlag}")`);
+    const opts = { all: has("--all") };
+
+    if (!wait) {
+      const res = await readNotes(take, opts);
+      if (res.notes.length || !quiet) process.stdout.write(formatNotes(take, res));
+      return;
+    }
+    // The wake-up: this process EXITS when a note lands, which is the signal
+    // every agent harness already understands. Announce first so a user (or an
+    // agent tailing the background job) can see it is armed.
+    process.stderr.write(
+      `watching ${take.notesPath} for editor notes — exits on the first one ` +
+        `(timeout ${fmtDuration(timeoutS ?? 1800)})\n`,
+    );
+    const res = await waitForNotes(take, {
+      ...opts,
+      ...(timeoutS != null ? { timeoutMs: timeoutS * 1000 } : {}),
+    });
+    if (res.notes.length || !quiet) process.stdout.write(formatNotes(take, res, { waited: true }));
     return;
   }
 

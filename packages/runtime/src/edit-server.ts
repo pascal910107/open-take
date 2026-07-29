@@ -332,9 +332,10 @@ export async function startEditServer(
           return;
         }
         const line = text.trim().replace(/\s+/g, " ").slice(0, 2000);
-        // durable for the agent to pick up later + live on stdout for an agent
+        // durable for the agent to pick up later (`open-take notes --wait`
+        // blocks on exactly this append) + live on stdout for an agent
         // watching this process
-        await appendFile(`${take.base}.notes.md`, `- ${line}\n`);
+        await appendFile(take.notesPath, `- ${line}\n`);
         process.stdout.write(`NOTE ${JSON.stringify({ take: take.name, text: line })}\n`);
         sendJson(res, 200, { ok: true });
         return;

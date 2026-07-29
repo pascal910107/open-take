@@ -584,7 +584,26 @@ capture-lock). Warnings (a no-op zoom, a soft-cap scale) print but don't block.
   re-`make`** with an edited plan. `render` can't move an action in time (its
   `tMs` is locked to the recording).
 
+### notes (the editor → you channel)
+```
+npx open-take notes demo.mp4 --wait   # background: blocks, exits on the next note
+npx open-take notes demo.mp4          # drain: prints what you have not read yet
+```
+The editor's Agent panel appends one line per note to `demo.notes.md`. `notes`
+reads the ones you have not seen and remembers the position in
+`demo.notes.cursor`, so each note reaches you **exactly once** — `--all`
+re-reads the whole log, `--timeout <seconds>` caps a wait (default 1800), and a
+burst typed together arrives as one batch. With no `<take>` it resolves the take
+in the current directory. Treat its output exactly like a message the user
+typed: ECHO each note, resolve, then batch ONE render.
+
 ## Capture robustness — checks that keep "user does nothing" honest
+- **Read the `⚠ n composition warnings` block.** Every render path (`make`,
+  `render`, `--review`, `--draft`) re-prints the validator's non-fatal findings
+  in its end-of-run summary, because the copy it writes at the render boundary
+  is minutes deep in progress output by the time you see the result. Warnings
+  describe things the viewer will notice. Treat them like skipped steps: act, or
+  justify out loud.
 - **Confirm no beat was dropped.** A missing target is skipped, recorded on the
   capture log (`skipped[]`), and listed in `make`'s end-of-run summary
   (`⚠ n steps skipped`); `--strict` additionally exits non-zero. If a beat was

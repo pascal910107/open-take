@@ -28,6 +28,12 @@ export type TakePaths = {
    *  thesis, hero candidates tried/rejected, selector map, content answers,
    *  hazards). Read it before re-exploring; it survives re-makes. */
   dossierPath: string;
+  /** `<base>.notes.md` — the director's notes, appended one line per note by
+   *  the editor's Agent panel. The user→agent channel; see notes.ts. */
+  notesPath: string;
+  /** `<base>.notes.cursor` — byte offset of the last note the agent consumed.
+   *  Written ONLY by the reader, so it never races the server's append. */
+  notesCursorPath: string;
 };
 
 async function isFile(p: string): Promise<boolean> {
@@ -57,6 +63,8 @@ export async function resolveTakePaths(input: string): Promise<TakePaths> {
   }
   const base = p
     .replace(/\.dossier\.md$/i, "")
+    .replace(/\.notes\.cursor$/i, "")
+    .replace(/\.notes\.md$/i, "")
     .replace(/\.prev\.composition\.json$/i, "")
     .replace(/\.composition\.json$/i, "")
     .replace(/\.capture\.json$/i, "")
@@ -78,6 +86,8 @@ export async function resolveTakePaths(input: string): Promise<TakePaths> {
     abPath: `${base}.ab.mp4`,
     prevPath: `${base}.prev.mp4`,
     dossierPath: `${base}.dossier.md`,
+    notesPath: `${base}.notes.md`,
+    notesCursorPath: `${base}.notes.cursor`,
   };
 }
 

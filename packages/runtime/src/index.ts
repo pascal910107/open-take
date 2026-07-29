@@ -60,6 +60,15 @@ export {
   type TakePaths,
 } from "./take";
 export {
+  formatNotes,
+  readNotes,
+  waitForNotes,
+  type NotesRead,
+  type ReadNotesOpts,
+  type WaitNotesOpts,
+  type WaitNotesResult,
+} from "./notes";
+export {
   buildBeatSheet,
   buildBadges,
   beatLabel,
