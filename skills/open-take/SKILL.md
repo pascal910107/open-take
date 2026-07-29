@@ -163,7 +163,7 @@ ritual. The capture itself still records at the full fps and the composition
 keeps the full-quality settings, so nothing is lost — only deferred.
 
 **The capture vocabulary is `click` · `type` · `drag` · `scroll` · `hover` ·
-`press` · `wait`.** It covers most product wows directly:
+`press` · `navigate` · `wait`.** It covers most product wows directly:
 - **click** — trigger UI / orient / navigate.
 - **type** — search boxes, AI prompts, forms (real keystrokes).
 - **drag** — sketch / draw / move on a canvas (a *path*, not a point).
@@ -171,6 +171,25 @@ keeps the full-quality settings, so nothing is lost — only deferred.
   name, or a fixed amount); the frame stays full-view as the content moves.
 - **hover** — dwell on an element to reveal a tooltip / dropdown / hover-state.
 - **press** — a key or shortcut (Enter to submit, Escape, ⌘K palette, arrows).
+- **navigate** — go to another page mid-take, in the same tab, without breaking
+  the recording. Emits no beat (a navigation is global — show it full-view), and
+  the new document gets the same font wait the take's first page gets.
+
+**`navigate` destinations are LATE-BOUND — that is the point.** A plan is
+written *before* the capture runs, so the second page's URL is often something
+only the run itself produces. Say where to read it from:
+```jsonc
+{ "action": "navigate", "url": "/pricing" }                         // relative to the current page
+{ "action": "navigate", "hrefFrom": { "text": "Visit" } }           // whatever the app just linked to
+{ "action": "navigate", "hrefFrom": { "text": "Visit" },
+  "query": { "speed": "3" } }                                       // ...plus params no click could add
+{ "action": "navigate", "query": { "demo": "1" } }                  // this same page, parameterised
+```
+Precedence is `hrefFrom` > `url` > the current page. `hrefFrom` is also the
+answer to a `target="_blank"` link: the screencast is bound to one page target
+and cannot follow a new tab, but it CAN go to that same href in the tab it is
+already recording. A `hrefFrom` that matches nothing is a *skipped step* (it
+shows up in the summary, and `--strict` fails the run) — never a silent jump.
 
 **Use the real mechanic.** If the wow is drawing, *drag to draw it*; if it's
 search, *type the query then `press` Enter*; if it's a hover-reveal, *hover*; if

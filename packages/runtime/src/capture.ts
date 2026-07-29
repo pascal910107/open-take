@@ -176,6 +176,34 @@ export function boxByTextJs(text: string): string {
   );
 }
 
+// --- href resolvers -----------------------------------------------------
+// Read a link's DESTINATION without clicking it — the late-bound half of the
+// `navigate` step. Returns the browser-resolved absolute URL (`.href`), never
+// the raw attribute, so a relative or protocol-relative link comes back usable.
+// Neither of these scrolls or clicks: nothing on screen may change, because
+// this runs mid-recording and the beat is the navigation itself.
+const CLOSEST_ANCHOR_JS =
+  // The named element may BE the link or sit inside one — closest() covers both
+  // (it tests the element itself first) — or WRAP one, which it does not.
+  `var a=m.closest('a[href]')||m.querySelector('a[href]');` +
+  `if(!a||!a.href)return 'NOTFOUND';return a.href;`;
+
+export function hrefSelectorJs(selector: string): string {
+  const s = JSON.stringify(selector);
+  return `(function(){var m=document.querySelector(${s});if(!m)return 'NOTFOUND';${CLOSEST_ANCHOR_JS}})()`;
+}
+
+export function hrefByTextJs(text: string): string {
+  const t = JSON.stringify(text);
+  return (
+    `(function(){var t=${t};` +
+    `var els=Array.prototype.slice.call(document.querySelectorAll('a,button,[role=link],[role=button],[aria-label],[title]'));` +
+    `function name(e){return (e.getAttribute('aria-label')||e.getAttribute('title')||e.textContent||'').replace(/\\s+/g,' ').trim();}` +
+    `var m=els.filter(function(e){return name(e)===t;})[0]||els.filter(function(e){return name(e).indexOf(t)!==-1;})[0];` +
+    `if(!m)return 'NOTFOUND';${CLOSEST_ANCHOR_JS}})()`
+  );
+}
+
 // --- scroll-to-element delta -------------------------------------------
 // How far (signed px, + = down) to scroll so the element's centre lands at
 // viewport centre. Measures the CURRENT rect WITHOUT scrollIntoView (a jump

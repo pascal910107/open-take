@@ -200,10 +200,18 @@ Usage:
   --capture-scale <n>   (make only) capture pixel density (default 2 — Retina;
               keeps zooms sharp). Drop to 1 if a heavy page can't hold fps.
   --strict    (make only) exit non-zero when any plan step was skipped (target
-              not found) — the summary lists them either way.
+              not found, or a navigate destination that didn't resolve) — the
+              summary lists them either way.
+  --profile <name>   (make/inspect) drive an authenticated session: reuse the
+              persistent profile created by \`open-take auth <name>\`.
+  --headed    (make/inspect) drive a visible Chrome window instead of headless —
+              the escape hatch for sites that gate on a real window. The
+              screencast records the page either way.
   --verbose   show per-event diagnostics (frame-diff lines, renderer console
               passthrough). Hidden by default so real warnings stay visible.
 `;
+
+const fmtDuration = (s: number): string => (s >= 120 ? `${Math.round(s / 60)}m` : `${s}s`);
 
 const fmtBytes = (n: number): string =>
   n > 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.round(n / 1024)} KB`;

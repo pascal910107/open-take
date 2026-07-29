@@ -127,6 +127,38 @@ export type TakeStep =
       settleMs?: number;
       zoom?: ZoomIntent;
     }
+  | {
+      // Go to another page WITHOUT leaving the recording — the multi-page demo
+      // in ONE take. Same tab, so the screencast never breaks; the activity
+      // probe reinstalls itself on the new document, and the fonts/warm-up the
+      // take's first page gets is repeated here (a mid-take page is as
+      // cold-cache as the first one, and a FOUT mid-shot is just as visible).
+      //
+      // Emits NO beat: a navigation is a global change, and the editorial rule
+      // is to show one full-view rather than punch into it. The camera stays at
+      // rest across the seam by construction.
+      //
+      // The destination is LATE-BOUND, which is the point — a plan is authored
+      // before the capture runs, so the second page's URL frequently does not
+      // exist yet (a deploy's generated domain, a new record's permalink). Give
+      // `hrefFrom` and the demo follows whatever the app actually linked to.
+      // Precedence: hrefFrom > url > the current page. See nav.ts.
+      action: "navigate";
+      /** explicit destination — absolute, or relative to the current page */
+      url?: string;
+      /** read the destination off a link on the page instead (located the same
+       *  way every other step locates: CSS `selector` or accessible `text`).
+       *  Also the answer to a `target="_blank"` link: the screencast is bound
+       *  to one page target and cannot follow a new tab, but it CAN go to the
+       *  same href in the tab it is already recording. */
+      hrefFrom?: { selector?: string; text?: string };
+      /** params merged onto the resolved URL. The page links to the bare
+       *  thing; the demo often needs it parameterised (`?speed=3` to fit a
+       *  long animation in the shot) — which no click could ever produce. */
+      query?: Record<string, string>;
+      note?: string;
+      settleMs?: number;
+    }
   | { action: "wait"; ms: number };
 
 export type TakePlan = {

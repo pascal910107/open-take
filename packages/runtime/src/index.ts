@@ -41,6 +41,7 @@ export {
   type InspectElement,
 } from "./capture";
 export { captureTakeCDP } from "./cdp-capture";
+export { resolveNavigateUrl, type NavigateTarget } from "./nav";
 export {
   annotateCaptureLog,
   diffFrames,

@@ -25,6 +25,8 @@ import {
   findBox,
   focusFieldByTextJs,
   focusSelectorJs,
+  hrefByTextJs,
+  hrefSelectorJs,
   sampleAlong,
   scrollDeltaByTextJs,
   scrollDeltaSelectorJs,
@@ -39,6 +41,7 @@ import {
   launchBrowser,
   makeFrameDir,
 } from "./cdp";
+import { resolveNavigateUrl } from "./nav";
 import {
   DEFAULT_SETTLE_BUDGET_MS,
   PAINT_BLIND_FRAC,
@@ -90,6 +93,38 @@ async function evalAny(cdp: CDP, js: string): Promise<unknown> {
   const v = r.result?.value;
   if (v == null || v === "NOTFOUND") return null;
   return evalValue(typeof v === "string" ? v : JSON.stringify(v));
+}
+
+// Run a locator JS string and return its STRING result (a URL), or null for a
+// NOTFOUND/empty one. Deliberately NOT evalAny: a URL is not JSON, and the
+// deep-parse that unwraps box payloads would mangle it.
+async function evalString(cdp: CDP, js: string): Promise<string | null> {
+  const r = await cdp.send<{ result?: { value?: unknown } }>("Runtime.evaluate", {
+    expression: js,
+    returnByValue: true,
+    awaitPromise: true,
+  });
+  const v = r.result?.value;
+  return typeof v === "string" && v !== "NOTFOUND" && v !== "" ? v : null;
+}
+
+// Wait (bounded) for the document's webfonts. A capture runs on a fresh temp
+// profile, so the HTTP cache is cold and third-party webfonts otherwise FOUT in
+// the first ~700ms the document is on screen. Runs before the recording clock
+// starts AND after every mid-take `navigate` — the second document is exactly
+// as cold as the first, and a FOUT mid-shot is just as visible as one at the
+// head. A page with no webfonts resolves immediately.
+async function awaitFonts(cdp: CDP): Promise<void> {
+  await Promise.race([
+    cdp
+      .send("Runtime.evaluate", {
+        expression: "document.fonts.ready.then(() => true)",
+        awaitPromise: true,
+        returnByValue: true,
+      })
+      .catch(() => {}),
+    sleep(3000),
+  ]);
 }
 
 const center = (b: Box): Pt => ({ x: Math.round(b.x + b.w / 2), y: Math.round(b.y + b.h / 2) });
@@ -255,21 +290,9 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
     await navigate(cdp, plan.url);
     await installActivityProbe(cdp);
 
-    // Fonts before frames: the fresh profile means a fresh HTTP cache, so
-    // third-party webfonts otherwise FOUT in the recording's first ~700ms —
-    // the one place a viewer's eye is guaranteed to be. Wait (bounded) for the
-    // document's fonts before the recording clock starts; a page with no
-    // webfonts resolves immediately.
-    await Promise.race([
-      cdp
-        .send("Runtime.evaluate", {
-          expression: "document.fonts.ready.then(() => true)",
-          awaitPromise: true,
-          returnByValue: true,
-        })
-        .catch(() => {}),
-      sleep(3000),
-    ]);
+    // Fonts before frames — the recording's first ~700ms is the one place a
+    // viewer's eye is guaranteed to be. Every mid-take `navigate` repeats this.
+    await awaitFonts(cdp);
 
     const screencast = new Screencast(cdp, frameDir);
     const t0 = Date.now();
@@ -384,6 +407,45 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
       };
       if (step.action === "wait") {
         await sleep(step.ms);
+        continue;
+      }
+
+      if (step.action === "navigate") {
+        // Late-bind the destination FIRST — reading a link's href is the whole
+        // reason this step can reach a page the plan's author could not name
+        // (a deploy's generated domain, a permalink the run just created).
+        const spec = step.hrefFrom;
+        let href: string | null = null;
+        if (spec) {
+          const target = spec.text ?? spec.selector;
+          if (!target) {
+            skip("navigate", undefined, "hrefFrom has neither `selector` nor `text`");
+            continue;
+          }
+          href = spec.selector
+            ? await evalString(cdp, hrefSelectorJs(spec.selector))
+            : await evalString(cdp, hrefByTextJs(spec.text!));
+          if (!href) {
+            skip("navigate", target, "no link with an href found");
+            continue;
+          }
+        }
+        const current = (await evalString(cdp, "location.href")) ?? plan.url;
+        const dest = resolveNavigateUrl({ current, url: step.url, href, query: step.query });
+        if (!dest) {
+          skip("navigate", step.url ?? href ?? current, "destination is not a resolvable URL");
+          continue;
+        }
+        // Same tab ⇒ same page target ⇒ the screencast never breaks. The
+        // activity probe reinstalls itself on the new document (it is an
+        // addScriptToEvaluateOnNewDocument), so the hold below can still tell
+        // "finished" from "still working".
+        await navigate(cdp, dest);
+        await awaitFonts(cdp);
+        // Then the ordinary settle. A navigate with no hold cuts to a
+        // half-painted screen — this is the beat where the new page arrives,
+        // even though it emits no event.
+        await hold(1200);
         continue;
       }
 
