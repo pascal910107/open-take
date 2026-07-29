@@ -18,6 +18,17 @@ import type {
   ZoomDecision,
 } from "./compositor";
 
+/** Do these two compositions describe the SAME cut? Reference equality is the
+ *  fast path (structural sharing makes it true for an untouched draft), but it
+ *  is not sufficient: undo/redo and a re-seed from disk both produce fresh
+ *  objects with identical contents, and hold-to-compare must go quiet for
+ *  those instead of offering a comparison with nothing to see. */
+export function sameComposition(a: TakeComposition | null, b: TakeComposition | null): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
 // --- framing -----------------------------------------------------------------
 
 /** Top-level framing fields (insetFrac, cornerRadius). */

@@ -18,6 +18,7 @@ import {
   validateComposition,
 } from "../lib/compositor";
 import { type Derived, derive } from "../lib/derive";
+import { sameComposition } from "../lib/edit";
 
 export type CompSetter = (c: TakeComposition) => TakeComposition;
 
@@ -30,10 +31,16 @@ export type UseComposition = {
   warns: CompositionIssue[];
   canSave: boolean;
   dirty: boolean;
-  /** the last-saved comp — for transient hold-to-compare previews */
-  baseline: TakeComposition | null;
+  /** the comp as it was when this session adopted it (load, or an agent write
+   *  we picked up) — the "original" of hold-to-compare. NOT the last-saved comp:
+   *  autosave commits ~700ms after every edit, so comparing against that shows
+   *  nothing, which is what made the button look broken. */
+  origin: TakeComposition | null;
+  /** whether the draft actually differs from `origin` — compares by VALUE, so
+   *  undoing back to where you started correctly disables the comparison. */
+  changedFromOrigin: boolean;
   selectedBeat: number;
-  /** load a fresh take (resets baseline + history); pushes it to the engine. */
+  /** load a fresh take (resets origin + history); pushes it to the engine. */
   seed: (comp: TakeComposition, captureLog?: CaptureLog | null) => void;
   /** apply an editable mutation; coalesceKey merges consecutive edits (a drag). */
   update: (setter: CompSetter, coalesceKey?: string) => void;
@@ -42,7 +49,8 @@ export type UseComposition = {
   beginGesture: () => void;
   selectBeat: (i: number) => void;
   reset: () => void;
-  /** mark the current (or given) comp as saved — clears dirty. */
+  /** mark the current (or given) comp as saved — clears dirty. Does NOT move
+   *  `origin`: what "saved" means and what "original" means are different things. */
   commitSaved: (comp?: TakeComposition) => void;
   undo: () => void;
   redo: () => void;
@@ -52,7 +60,11 @@ export type UseComposition = {
 
 export function useComposition(engine: PreviewEngine | null): UseComposition {
   const [comp, setComp] = useState<TakeComposition | null>(null);
-  const [baseline, setBaseline] = useState<TakeComposition | null>(null);
+  // two different anchors, deliberately: `saved` answers "is there anything to
+  // write?" (autosave moves it constantly), `origin` answers "what did this
+  // session start from?" (only a seed moves it).
+  const [saved, setSaved] = useState<TakeComposition | null>(null);
+  const [origin, setOrigin] = useState<TakeComposition | null>(null);
   const [captureLog, setCaptureLog] = useState<CaptureLog | null>(null);
   const [selectedBeat, setSelectedBeat] = useState(-1);
 
@@ -78,7 +90,8 @@ export function useComposition(engine: PreviewEngine | null): UseComposition {
       past.current = [];
       future.current = [];
       lastKey.current = null;
-      setBaseline(c);
+      setSaved(c);
+      setOrigin(c);
       setCaptureLog(log);
       setSelectedBeat(-1);
       push(c);
@@ -126,16 +139,16 @@ export function useComposition(engine: PreviewEngine | null): UseComposition {
   }, [push]);
 
   const reset = useCallback(() => {
-    if (!baseline) return;
+    if (!origin) return;
     past.current = [];
     future.current = [];
     lastKey.current = null;
-    push(baseline);
+    push(origin);
     bumpHist((v) => v + 1);
-  }, [baseline, push]);
+  }, [origin, push]);
 
   const commitSaved = useCallback((c?: TakeComposition) => {
-    setBaseline(c ?? compRef.current);
+    setSaved(c ?? compRef.current);
   }, []);
 
   const beginGesture = useCallback(() => {
@@ -151,6 +164,10 @@ export function useComposition(engine: PreviewEngine | null): UseComposition {
   );
   const errors = useMemo(() => issues.filter((i) => i.severity === "error"), [issues]);
   const warns = useMemo(() => issues.filter((i) => i.severity === "warn"), [issues]);
+  const changedFromOrigin = useMemo(
+    () => comp != null && origin != null && !sameComposition(comp, origin),
+    [comp, origin],
+  );
 
   return {
     comp,
@@ -160,8 +177,9 @@ export function useComposition(engine: PreviewEngine | null): UseComposition {
     errors,
     warns,
     canSave: comp != null && errors.length === 0,
-    dirty: comp != null && comp !== baseline,
-    baseline,
+    dirty: comp != null && comp !== saved,
+    origin,
+    changedFromOrigin,
     selectedBeat,
     seed,
     update,

@@ -151,6 +151,17 @@ button {
   color: var(--ink);
   border-color: var(--line-hi);
 }
+/* hold-to-compare is disabled until the draft differs from the loaded version —
+   a button that visibly can't do anything beats one that silently does nothing */
+.ghost:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.ghost:disabled:hover {
+  background: transparent;
+  color: var(--ink2);
+  border-color: var(--line);
+}
 .export {
   display: flex;
   align-items: center;

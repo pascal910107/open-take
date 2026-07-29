@@ -222,15 +222,22 @@ export function App() {
     [conflict, resolvingConflict, reloadFromDisk, persistDraft, c.comp, exportCurrent],
   );
 
-  // hold-to-compare: transient engine push of the last-saved baseline
+  // hold-to-compare: a transient engine push of the SESSION ORIGIN (what this
+  // editor loaded), never the last-saved comp — autosave commits ~700ms after
+  // every edit, so "last saved" is the same thing you are already looking at.
+  // React state is untouched, so autosave keeps writing the real draft while
+  // the frame on screen shows the old one.
   const compare = useCallback(
     (on: boolean) => {
       const eng = p.engine;
-      if (!eng || !c.baseline || !c.comp) return;
+      if (!eng || !c.comp) return;
+      // Release ALWAYS restores the draft, even if the comparison stopped
+      // being available mid-hold (an undo back to origin, a re-seed).
+      if (on && (!c.origin || !c.changedFromOrigin)) return;
       setComparing(on);
-      eng.setComposition(on ? c.baseline : c.comp);
+      eng.setComposition(on && c.origin ? c.origin : c.comp);
     },
-    [p.engine, c.baseline, c.comp],
+    [p.engine, c.origin, c.comp, c.changedFromOrigin],
   );
 
   // keyboard: space play/pause · ⌘Z/⇧⌘Z undo/redo · esc deselect
@@ -317,11 +324,19 @@ export function App() {
         <button
           type="button"
           className="ghost"
-          title="按住可對比上次儲存的版本"
+          disabled={!ready || !c.changedFromOrigin}
+          title={
+            c.changedFromOrigin
+              ? "Hold to compare against the version you opened"
+              : "Nothing to compare yet — unchanged since you opened it"
+          }
           onPointerDown={() => compare(true)}
           onPointerUp={() => compare(false)}
+          onPointerCancel={() => compare(false)}
           onPointerLeave={() => comparing && compare(false)}
         >
+          {/* while held, the stage itself shows the ORIGINAL badge (Stage.tsx) —
+              the label stays put so the top bar never reflows mid-hold */}
           <IcCompare /> 對比原版
         </button>
         <button
