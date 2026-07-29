@@ -41,6 +41,7 @@ const reqField: Record<string, string> = {
   type: "text",
   press: "keys",
   drag: "to",
+  dropFiles: "to",
 };
 
 export function validateComposition(
@@ -124,6 +125,18 @@ export function validateComposition(
         `${p}.${need}`,
         `${e.kind} beat is missing "${need}"`,
         `restore ${need} from the capture`,
+      );
+    if (e.kind === "dropFiles" && !e.files?.length)
+      warn(
+        `${p}.files`,
+        `dropFiles beat has no files metadata — the ghost card will show a generic "file"`,
+        "restore files [{name,size}] from the capture",
+      );
+    if (e.kind === "dropFiles" && !dur)
+      warn(
+        `${p}.durationMs`,
+        "dropFiles beat has no carry duration — the cursor teleports to the drop point and the ghost card only flashes",
+        "restore durationMs from the capture",
       );
 
     // --- zoom decision ---

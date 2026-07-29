@@ -76,6 +76,34 @@ export type TakeStep =
       zoom?: ZoomIntent;
     }
   | {
+      // Drag REAL FILES from the OS onto the page and drop them. Driven via
+      // CDP Input.dispatchDragEvent carrying the actual file paths, so the
+      // page's dragenter/dragover state fires on the way in and the drop
+      // delivers real Files (dataTransfer.files) — Vercel-Drop-style dropzones
+      // receive the upload exactly as if a human dragged from the desktop.
+      // The compositor draws a macOS-style "file ghost card" riding the
+      // synthetic cursor for this beat (the page recording itself only shows
+      // the page's reaction). Drop target = toSelector/toText/to (default
+      // viewport centre); the carry starts at `from` (default: swings in from
+      // the top-right edge, like a file dragged in from the desktop).
+      action: "dropFiles";
+      /** paths of the files to drop (resolved against the process cwd) */
+      paths: string[];
+      // drop target
+      toSelector?: string;
+      toText?: string;
+      to?: PlanPoint;
+      /** where the carry enters the viewport (default: top-right edge) */
+      from?: PlanPoint;
+      /** freehand polyline (viewport px); when set, overrides from→to */
+      path?: PlanPoint[];
+      /** how long the carry takes on screen (default 1400ms) */
+      durationMs?: number;
+      note?: string;
+      settleMs?: number;
+      zoom?: ZoomIntent;
+    }
+  | {
       // Scroll the page (or a feed) to reveal content. The synthetic cursor
       // holds where it was — the CONTENT pans underneath, full-view (no zoom),
       // the natural "I'm reading down the page" beat. Either scroll a fixed

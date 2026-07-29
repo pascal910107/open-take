@@ -10,8 +10,8 @@
 // verbatim from capture.ts — same locator JS, run via Runtime.evaluate —
 // so robustness is shared, not re-derived.
 
-import { rmSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, rmSync, statSync } from "node:fs";
+import { basename, resolve } from "node:path";
 import type { CaptureLog } from "@open-take/compositor";
 import type { CaptureOpts } from "./capture";
 import {
@@ -586,6 +586,126 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
           ...(step.zoom ? { zoom: step.zoom } : {}),
         });
         await hold(1100);
+        continue;
+      }
+
+      if (step.action === "dropFiles") {
+        // Synthesize an OS-level file drag-and-drop: CDP Input.dispatchDragEvent
+        // carries REAL file paths, so the page's dragenter/dragover state fires
+        // on the way in and the drop delivers actual Files (dataTransfer.files).
+        // The DragData must ride EVERY dispatch (enter, each over, drop), not
+        // just the drop (spiked: baseline {items:[], files, mask:1} works in
+        // --headless=new with no focus requirement).
+        const label = step.note ?? step.paths.map((p) => basename(p)).join(", ");
+        if (!step.paths.length) {
+          skip("dropFiles", label, "no files given (empty paths)");
+          await hold(600);
+          continue;
+        }
+        const absPaths = step.paths.map((p) => resolve(p));
+        const missing = absPaths.filter((p) => !existsSync(p));
+        if (missing.length) {
+          skip("dropFiles", label, `file not found: ${missing.join(", ")}`);
+          await hold(600);
+          continue;
+        }
+        const files = absPaths.map((p) => {
+          const st = statSync(p);
+          return { name: basename(p), size: st.size };
+        });
+        // Drop target: locator when given (a FAILED lookup skips — dropping real
+        // files "somewhere in the middle" would fabricate the beat, and Chrome's
+        // default drop action could even navigate the tab to the file). The
+        // viewport-centre default applies only when the plan names NO target.
+        let to: Pt;
+        if (step.to || step.toSelector || step.toText) {
+          const found = await resolvePoint({
+            point: step.to,
+            selector: step.toSelector,
+            text: step.toText,
+          });
+          if (!found) {
+            skip("dropFiles", label, "drop target not found");
+            await hold(600);
+            continue;
+          }
+          to = found;
+        } else {
+          to = { x: Math.round(inner[0] / 2), y: Math.round(inner[1] / 2) };
+        }
+        // default entry: swing in from the top-right edge, like a file dragged
+        // in from the desktop; deterministic so re-makes reproduce the take.
+        const from: Pt = step.from
+          ? { x: Math.round(step.from.x), y: Math.round(step.from.y) }
+          : { x: inner[0] - 28, y: Math.round(inner[1] * 0.18) };
+        const pathPts: Pt[] = (step.path ?? []).map((p) => ({
+          x: Math.round(p.x),
+          y: Math.round(p.y),
+        }));
+        const path: Pt[] = pathPts.length ? pathPts : [from, to];
+        const target = step.durationMs ?? 1400;
+        const dragEase = opts.dragEasing ?? "smooth";
+        const easeParam = dragEase === "smooth" ? smoother : (u: number) => u;
+        const data = { items: [], files: absPaths, dragOperationsMask: 1 };
+        const dragEvt = (type: "dragEnter" | "dragOver" | "drop", p: Pt) =>
+          cdp.send("Input.dispatchDragEvent", {
+            type,
+            x: Math.round(p.x),
+            y: Math.round(p.y),
+            data,
+          });
+        const n = Math.max(12, Math.round(target / 16));
+        const tMs = Date.now() - t0;
+        // Pause the raster pump for the carry (mirroring drag): a mid-drag
+        // captureScreenshot could stall the CDP session; the page's dragover
+        // reaction (dropzone morph) self-rasters, so nothing is lost.
+        pumpPaused = true;
+        await sleep(160);
+        const tCarry = Date.now();
+        const last = path[path.length - 1]!;
+        let carriedMs: number;
+        try {
+          // dragEnter and the final drop are load-bearing (the page's drag
+          // state, then the actual file delivery) — a rejection there means the
+          // beat did NOT happen, so it must SKIP, not fabricate a success.
+          // The mid-march dragOvers stay fire-and-forget: they only pace the
+          // carry, and awaiting each ack would stall the stroke (see drag).
+          await dragEvt("dragEnter", path[0]!);
+          for (let k = 1; k <= n; k++) {
+            const p = sampleAlong(path, easeParam(k / n));
+            dragEvt("dragOver", p).catch(() => {});
+            const due = tCarry + (target * k) / n;
+            const slack = due - Date.now();
+            if (slack > 0) await sleep(slack);
+          }
+          await dragEvt("dragOver", last).catch(() => {});
+          await dragEvt("drop", last);
+          carriedMs = Date.now() - tCarry;
+        } catch (e) {
+          pumpPaused = false;
+          skip("dropFiles", label, `drag dispatch failed: ${(e as Error).message}`);
+          await hold(600);
+          continue;
+        }
+        await sleep(120);
+        pumpPaused = false;
+        events.push({
+          kind: "dropFiles",
+          x: path[0]!.x,
+          y: path[0]!.y,
+          to: last,
+          path,
+          tMs,
+          sel: label,
+          note: step.note,
+          durationMs: carriedMs,
+          ease: dragEase,
+          files,
+          ...(step.zoom ? { zoom: step.zoom } : {}),
+        });
+        // dropzones usually kick off real work (parse / upload UI) — default a
+        // longer settle than a click so the payoff is on screen.
+        await hold(1600);
         continue;
       }
 

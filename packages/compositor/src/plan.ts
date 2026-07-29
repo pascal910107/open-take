@@ -86,17 +86,17 @@ export function planComposition(log: CaptureLog, opts: PlanOpts = {}): TakeCompo
     const intent = c.zoom ?? "auto";
     const durationMs = "durationMs" in c ? c.durationMs : 0;
 
-    // drag: cursor path + the region we frame is the path's bbox
-    const to = kind === "drag" ? mapPt((c as { to: Pt }).to) : undefined;
-    const rawPath =
-      kind === "drag"
-        ? ((c as { path?: Pt[] }).path ?? [{ x: c.x, y: c.y }, (c as { to: Pt }).to])
-        : undefined;
+    // drag / dropFiles: cursor path + the region we frame is the path's bbox
+    const carries = kind === "drag" || kind === "dropFiles";
+    const to = carries ? mapPt((c as { to: Pt }).to) : undefined;
+    const rawPath = carries
+      ? ((c as { path?: Pt[] }).path ?? [{ x: c.x, y: c.y }, (c as { to: Pt }).to])
+      : undefined;
     const path = rawPath?.map(mapPt);
-    const ease = kind === "drag" ? (c as { ease?: "linear" | "smooth" }).ease : undefined;
+    const ease = carries ? (c as { ease?: "linear" | "smooth" }).ease : undefined;
 
-    // the element bbox (ground truth): drag → path bbox, else the captured box
-    const bbox = kind === "drag" && path ? pathBBox(path) : c.box ? mapBox(c.box) : undefined;
+    // the element bbox (ground truth): a carry → path bbox, else the captured box
+    const bbox = carries && path ? pathBBox(path) : c.box ? mapBox(c.box) : undefined;
     const effectBox = c.effectBox ? mapBox(c.effectBox) : undefined;
     const label = c.sel ?? c.note;
 
@@ -125,6 +125,9 @@ export function planComposition(log: CaptureLog, opts: PlanOpts = {}): TakeCompo
       ...(to ? { to } : {}),
       ...(path ? { path } : {}),
       ...(ease ? { ease } : {}),
+      ...(kind === "dropFiles"
+        ? { files: (c as { files: { name: string; size?: number }[] }).files }
+        : {}),
     };
     return { beat, ev };
   });

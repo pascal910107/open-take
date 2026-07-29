@@ -16,6 +16,8 @@ export {
   buildLegs,
   cursorPos,
   isDragging,
+  carryWindow,
+  ghostCardLines,
   gradientEndpoints,
 } from "@compositor/math";
 

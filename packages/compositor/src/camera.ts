@@ -28,7 +28,7 @@ import type { BBox, CameraConfig, Pt, ZoomIntent } from "./types";
 
 /** One action, already mapped into video-px, handed to the director. */
 export type Beat = {
-  kind: "click" | "type" | "drag" | "scroll" | "hover" | "press";
+  kind: "click" | "type" | "drag" | "scroll" | "hover" | "press" | "dropFiles";
   tMs: number;
   durationMs: number;
   /** element bbox (for a drag: the path's bbox), video-px — or undefined for a

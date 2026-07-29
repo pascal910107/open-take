@@ -10,6 +10,8 @@ import {
   isDragging,
   gradientEndpoints,
   smoother,
+  carryWindow,
+  ghostCardLines,
 } from "../math";
 import comp from "./.composition.json";
 
@@ -112,19 +114,25 @@ export default makeScene2D("take", function* (view) {
         </Rect>
 
         {/* click ripples — pointer-landing beats only (scroll/press have no
-          spatial click point, so they get no ripple) */}
+          spatial click point). A dropFiles ripples at its DROP point on
+          RELEASE — not at the off-content carry entry — and stays on even when
+          the ghost card is disabled (parity with the editor preview). */}
         {comp.events
           .filter((e) => e.kind !== "scroll" && e.kind !== "press")
           .map((e, index) => {
             const ms = comp.cursor.rippleMs / 1000;
+            const at =
+              e.kind === "dropFiles"
+                ? { t0: carryWindow(e, comp).t1, p: e.to ?? e.point }
+                : { t0: e.tMs / 1000, p: e.point };
             const prog = () => {
-              const dt = t() - e.tMs / 1000;
+              const dt = t() - at.t0;
               return dt >= 0 && dt <= ms ? dt / ms : -1;
             };
             return (
               <Circle
                 key={`${e.kind}-${e.tMs}-${index}`}
-                position={[lx(e.point.x), ly(e.point.y)]}
+                position={[lx(at.p.x), ly(at.p.y)]}
                 size={() => {
                   const p = prog();
                   return p < 0 ? 0 : (12 + 60 * smoother(p)) * 2;
@@ -136,6 +144,81 @@ export default makeScene2D("take", function* (view) {
                   return p < 0 ? 0 : (150 * (1 - p)) / 255;
                 }}
               />
+            );
+          })}
+
+        {/* file ghost card — a macOS-style translucent file card riding the
+          cursor through a dropFiles carry, popping/fading on release. Drawn
+          UNDER the cursor node so the pointer stays on top. Mirrored in the
+          editor preview (preview.ts) — keep cosmetics in step. */}
+        {comp.events
+          .filter((e) => e.kind === "dropFiles" && e.ghostCard?.enabled !== false)
+          .map((e, index) => {
+            const gk = vW / 1920; // card is authored for a 1920-wide video
+            const gc = e.ghostCard ?? {};
+            const off = gc.offset ?? { x: 26 * gk, y: 30 * gk };
+            const win = carryWindow(e, comp);
+            const releaseS = (gc.releaseMs ?? 280) / 1000;
+            const fadeS = 0.15;
+            const lines = ghostCardLines(e.files ?? []);
+            const vis = () => {
+              const tt = t();
+              if (tt < win.t0 - fadeS || tt > win.t1 + releaseS) return 0;
+              if (tt < win.t0) return (tt - (win.t0 - fadeS)) / fadeS;
+              if (tt <= win.t1) return 1;
+              return 1 - (tt - win.t1) / releaseS;
+            };
+            // the release pop: a slight grow as the card lets go of the file
+            const pop = () => {
+              const tt = t();
+              const z =
+                tt <= win.t1 ? 1 : 1 + 0.08 * smoother(Math.min(1, (tt - win.t1) / releaseS));
+              return [z, z];
+            };
+            return (
+              <Node key={`ghostCard-${e.tMs}-${index}`}>
+                <Node
+                  position={() => {
+                    const c = cursorPos(t(), legs, comp);
+                    return [lx(c.x) + off.x, ly(c.y) + off.y];
+                  }}
+                  opacity={vis}
+                  scale={pop}
+                >
+                  <Rect
+                    layout
+                    direction={"column"}
+                    alignItems={"start"}
+                    padding={[11 * gk, 16 * gk]}
+                    gap={3 * gk}
+                    radius={10 * gk}
+                    offset={[-1, -1]}
+                    fill={"rgba(24,24,27,0.86)"}
+                    stroke={"rgba(255,255,255,0.22)"}
+                    lineWidth={1}
+                    shadowColor={"rgba(0,0,0,0.45)"}
+                    shadowBlur={26 * gk}
+                    shadowOffset={[0, 8 * gk]}
+                  >
+                    <Txt
+                      text={lines.title}
+                      fontFamily={"ui-monospace, 'SF Mono', Menlo, Consolas, monospace"}
+                      fontSize={21 * gk}
+                      fontWeight={600}
+                      fill={"rgba(255,255,255,0.95)"}
+                    />
+                    {lines.meta ? (
+                      <Txt
+                        text={lines.meta}
+                        fontFamily={"system-ui, -apple-system, 'Segoe UI', 'Noto Sans', sans-serif"}
+                        fontSize={16 * gk}
+                        fontWeight={500}
+                        fill={"rgba(255,255,255,0.55)"}
+                      />
+                    ) : null}
+                  </Rect>
+                </Node>
+              </Node>
             );
           })}
 

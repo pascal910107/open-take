@@ -102,13 +102,33 @@ export type CapturePress = CaptureEventBase & {
   durationMs: number;
 };
 
+/** A file drag-and-drop (OS-level, synthesized via CDP Input.dispatchDragEvent
+ *  with real file paths): the cursor carries the file(s) from the anchor
+ *  (`x,y`) along `path` to `to`, where the drop lands and the page receives
+ *  actual Files. The compositor draws a "file ghost card" riding the cursor
+ *  for this beat — the recording itself shows only the page's reaction. */
+export type CaptureDropFiles = CaptureEventBase & {
+  kind: "dropFiles";
+  /** drop point, viewport CSS px */
+  to: { x: number; y: number };
+  /** full polyline incl. ends, viewport CSS px */
+  path?: { x: number; y: number }[];
+  /** ms the carry occupies on screen (ground-truth wall time) */
+  durationMs: number;
+  /** carry pacing baked into the dispatched dragOver march (see CaptureDrag) */
+  ease?: "linear" | "smooth";
+  /** dropped files' display metadata (basename + bytes) for the ghost card */
+  files: { name: string; size?: number }[];
+};
+
 export type CaptureEvent =
   | CaptureClick
   | CaptureType
   | CaptureDrag
   | CaptureScroll
   | CaptureHover
-  | CapturePress;
+  | CapturePress
+  | CaptureDropFiles;
 
 export type CaptureLog = {
   video: { width: number; height: number; fps?: number | string; durationS?: number };
@@ -166,8 +186,18 @@ export type ZoomDecision = {
   reason: string;
 };
 
+/** Ghost-card knobs for a dropFiles beat (editable): the macOS-style file
+ *  card riding the cursor during the carry. */
+export type GhostCardConfig = {
+  enabled: boolean;
+  /** card offset from the cursor tip, video-px (default ~{x:26,y:30}) */
+  offset?: Pt;
+  /** ms of the release pop after the drop (fade + settle; default 280) */
+  releaseMs?: number;
+};
+
 export type CompEvent = {
-  kind: "click" | "type" | "drag" | "scroll" | "hover" | "press";
+  kind: "click" | "type" | "drag" | "scroll" | "hover" | "press" | "dropFiles";
   tMs: number;
   /** anchor point (click / focus / drag start / hover) in video-px. For a
    *  scroll/press the cursor does not move; this is its resting point. */
@@ -190,6 +220,10 @@ export type CompEvent = {
   /** drag stroke easing baked into the ink (kind=drag): "smooth" or "linear".
    *  The cursor replays it so it stays locked to the ink. Absent ⇒ linear. */
   ease?: "linear" | "smooth";
+  /** dropped files' display metadata (kind=dropFiles), for the ghost card */
+  files?: { name: string; size?: number }[];
+  /** ghost-card rendering knobs (kind=dropFiles); absent ⇒ enabled defaults */
+  ghostCard?: GhostCardConfig;
 };
 
 export type FramingConfig = {

@@ -16,7 +16,14 @@
 //   • Scrubbing seeks the video; rapid seeks are coalesced (only the latest
 //     target is honoured) so dragging the playhead stays responsive.
 
-import { buildLegs, cursorPos, gradientEndpoints, isDragging } from "../lib/compositor";
+import {
+  buildLegs,
+  carryWindow,
+  cursorPos,
+  ghostCardLines,
+  gradientEndpoints,
+  isDragging,
+} from "../lib/compositor";
 import type { TakeComposition } from "../lib/compositor";
 import { type Derived, derive } from "../lib/derive";
 
@@ -389,16 +396,21 @@ export class PreviewEngine {
     }
     ctx.restore();
 
-    // click ripples (scroll/press have no spatial point — skipped, as in scene)
+    // click ripples (scroll/press have no spatial point — skipped, as in scene;
+    // dropFiles ripples at its DROP point on release, with the ghost card below)
     for (const e of comp.events) {
       if (e.kind === "scroll" || e.kind === "press") continue;
       const ms = comp.cursor.rippleMs / 1000;
-      const dt = t - e.tMs / 1000;
+      const at =
+        e.kind === "dropFiles"
+          ? { t0: carryWindow(e, comp).t1, p: e.to ?? e.point }
+          : { t0: e.tMs / 1000, p: e.point };
+      const dt = t - at.t0;
       if (dt < 0 || dt > ms) continue;
       const p = dt / ms;
       const rad = 12 + 60 * smoothstep(p);
-      const sx = oW / 2 + s * (e.point.x - c.x);
-      const sy = oH / 2 + s * (e.point.y - c.y);
+      const sx = oW / 2 + s * (at.p.x - c.x);
+      const sy = oH / 2 + s * (at.p.y - c.y);
       ctx.save();
       ctx.globalAlpha = (150 * (1 - p)) / 255;
       ctx.strokeStyle = "white";
@@ -406,6 +418,64 @@ export class PreviewEngine {
       ctx.beginPath();
       ctx.arc(sx, sy, rad * s, 0, Math.PI * 2);
       ctx.stroke();
+      ctx.restore();
+    }
+
+    // file ghost card — the macOS-style file card riding the cursor through a
+    // dropFiles carry (fade in → carry → release pop). Mirrors scene.tsx.
+    for (const e of comp.events) {
+      if (e.kind !== "dropFiles" || e.ghostCard?.enabled === false) continue;
+      const gk = vW / 1920; // card is authored for a 1920-wide video
+      const gc: NonNullable<typeof e.ghostCard> | Record<string, never> = e.ghostCard ?? {};
+      const off = gc.offset ?? { x: 26 * gk, y: 30 * gk };
+      const win = carryWindow(e, comp);
+      const releaseS = (gc.releaseMs ?? 280) / 1000;
+      const fadeS = 0.15;
+      if (t < win.t0 - fadeS || t > win.t1 + releaseS) continue;
+      const alpha =
+        t < win.t0 ? (t - (win.t0 - fadeS)) / fadeS : t <= win.t1 ? 1 : 1 - (t - win.t1) / releaseS;
+      const pop = t <= win.t1 ? 1 : 1 + 0.08 * smoothstep(Math.min(1, (t - win.t1) / releaseS));
+      const cur2 = cursorPos(t, this.legs, comp);
+      const ax = oW / 2 + s * (cur2.x + off.x - c.x);
+      const ay = oH / 2 + s * (cur2.y + off.y - c.y);
+      const lines = ghostCardLines(e.files ?? []);
+      ctx.save();
+      ctx.translate(ax, ay);
+      ctx.scale(pop * s, pop * s);
+      ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+      const MONO = "ui-monospace, 'SF Mono', Menlo, Consolas, monospace";
+      const SANS = "system-ui, -apple-system, 'Segoe UI', 'Noto Sans', sans-serif";
+      ctx.font = `600 ${21 * gk}px ${MONO}`;
+      const titleW = ctx.measureText(lines.title).width;
+      ctx.font = `500 ${16 * gk}px ${SANS}`;
+      const metaW = lines.meta ? ctx.measureText(lines.meta).width : 0;
+      const padX = 16 * gk,
+        padY = 11 * gk,
+        gap = 3 * gk;
+      const w = Math.max(titleW, metaW) + padX * 2;
+      const h = padY * 2 + 21 * gk + (lines.meta ? gap + 16 * gk : 0);
+      // canvas shadow attrs ignore the CTM (device px) — scale them by hand so
+      // the card's shadow rides the camera zoom exactly as Revideo's does
+      ctx.shadowColor = "rgba(0,0,0,0.45)";
+      ctx.shadowBlur = 26 * gk * pop * s;
+      ctx.shadowOffsetY = 8 * gk * pop * s;
+      ctx.fillStyle = "rgba(24,24,27,0.86)";
+      this.roundRect(ctx, 0, 0, w, h, 10 * gk);
+      ctx.fill();
+      ctx.shadowColor = "transparent";
+      ctx.strokeStyle = "rgba(255,255,255,0.22)";
+      ctx.lineWidth = 1;
+      this.roundRect(ctx, 0, 0, w, h, 10 * gk);
+      ctx.stroke();
+      ctx.textBaseline = "top";
+      ctx.fillStyle = "rgba(255,255,255,0.95)";
+      ctx.font = `600 ${21 * gk}px ${MONO}`;
+      ctx.fillText(lines.title, padX, padY);
+      if (lines.meta) {
+        ctx.fillStyle = "rgba(255,255,255,0.55)";
+        ctx.font = `500 ${16 * gk}px ${SANS}`;
+        ctx.fillText(lines.meta, padX, padY + 21 * gk + gap);
+      }
       ctx.restore();
     }
 

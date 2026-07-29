@@ -6,7 +6,16 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildLegs, cameraRampSchedule, cursorPos, keyvalN, stageCamera } from "../src/math.js";
+import {
+  buildLegs,
+  cameraRampSchedule,
+  carryWindow,
+  cursorPos,
+  ghostCardLines,
+  isDragging,
+  keyvalN,
+  stageCamera,
+} from "../src/math.js";
 import { planComposition } from "../src/plan.js";
 import type { CaptureLog } from "../src/types.js";
 
@@ -506,4 +515,125 @@ test("durations flow into total composition length (scroll/hover/press)", () => 
   );
   // last press ends at 6000ms; total must exceed it (+ hold + zoomout + pad).
   assert.ok(comp.durationMs > 6000, `expected > 6000ms, got ${comp.durationMs}`);
+});
+
+test("dropFiles: to/path/ease/files flow into the CompEvent; carry framed like a drag", () => {
+  // A click opens the take so the dropFiles is NOT the opening beat — the
+  // full-view assertion below must come from the carry-bbox ≈ rest demotion,
+  // not from the director's opening-beat (<2s) rule.
+  const comp = planComposition(
+    log([
+      { kind: "click", x: 300, y: 800, box: { x: 280, y: 780, w: 40, h: 40 }, tMs: 900 },
+      {
+        kind: "dropFiles",
+        x: 1892,
+        y: 194,
+        to: { x: 960, y: 540 },
+        path: [
+          { x: 1892, y: 194 },
+          { x: 960, y: 540 },
+        ],
+        tMs: 3200,
+        durationMs: 1400,
+        ease: "smooth",
+        files: [{ name: "index.html", size: 1258291 }],
+      },
+    ]),
+  );
+  const drop = comp.events.find((e) => e.kind === "dropFiles");
+  assert.ok(drop, "dropFiles event present");
+  assert.deepEqual(drop!.to, { x: 960, y: 540 }, "drop point carried through");
+  assert.equal(drop!.path?.length, 2, "carry polyline carried through");
+  assert.equal(drop!.ease, "smooth", "carry pacing carried through");
+  assert.deepEqual(
+    drop!.files,
+    [{ name: "index.html", size: 1258291 }],
+    "files metadata carried through (the ghost card's content)",
+  );
+  assert.equal(drop!.durationMs, 1400, "carry duration carried through");
+  // the beat frames the WHOLE carry (path bbox), exactly like a drag stroke —
+  // a cross-screen carry fit-scales ≈ rest, so the director holds full view.
+  assert.equal(drop!.zoom.enabled, false, "cross-screen carry holds full view");
+  assert.ok(drop!.bbox, "carry bbox present");
+  assert.ok(drop!.bbox!.w > 900, `bbox spans the carry (got w=${drop!.bbox!.w})`);
+});
+
+test("dropFiles: cursor rides the carry and the NEXT leg launches from the drop point", () => {
+  const comp = planComposition(
+    log([
+      {
+        kind: "dropFiles",
+        x: 100,
+        y: 500,
+        to: { x: 1100, y: 500 },
+        path: [
+          { x: 100, y: 500 },
+          { x: 1100, y: 500 },
+        ],
+        tMs: 1000,
+        durationMs: 1000,
+        ease: "linear",
+        files: [{ name: "demo.zip", size: 2048 }],
+      },
+      { kind: "click", x: 1100, y: 900, box: { x: 1080, y: 880, w: 40, h: 40 }, tMs: 4000 },
+    ]),
+  );
+  comp.cursor.dragLagMs = 0; // carry leg = [1.0, 2.0]
+  const legs = buildLegs(comp);
+  // travel → carry → travel: the carry leg replays the path with the button held
+  const carry = legs.find((lg) => (lg as { drag?: boolean }).drag);
+  assert.ok(carry, "carry leg present");
+  const mid = cursorPos(1.5, legs, comp);
+  assert.ok(Math.abs(mid.x - 600) < 1, `linear carry at midpoint (got ${mid.x})`);
+  assert.ok(isDragging(1.5, legs), "pressed state during the carry");
+  // the click's travel leg starts where the drop landed, not at the carry start
+  const last = legs[legs.length - 1]!;
+  assert.deepEqual(last.a, { x: 1100, y: 500 }, "next travel launches from the drop point");
+  // carryWindow mirrors the leg's on-screen window (the ghost card's timing)
+  const win = carryWindow(comp.events.find((e) => e.kind === "dropFiles")!, comp);
+  assert.equal(win.t0, 1.0);
+  assert.equal(win.t1, 2.0);
+});
+
+test("ghostCardLines: filename + meta caption", () => {
+  assert.deepEqual(ghostCardLines([{ name: "index.html", size: 1258291 }]), {
+    title: "index.html",
+    meta: "1.2 MB",
+  });
+  assert.deepEqual(
+    ghostCardLines([
+      { name: "a.js", size: 512 },
+      { name: "b.css", size: 512 },
+      { name: "c.html", size: 1024 },
+    ]),
+    { title: "a.js", meta: "3 files · 2 KB" },
+  );
+  assert.deepEqual(ghostCardLines([]), { title: "file", meta: "" });
+});
+
+test("ghostCardLines: a long filename is ellipsed, not left to outgrow the card", () => {
+  // neither render surface clamps the card's width, so the ONLY thing keeping
+  // it inside the frame is this budget — a generated name (a build artifact, a
+  // download) blows past it easily
+  const long = "a-very-long-generated-filename-that-keeps-going.tar.gz";
+  const { title } = ghostCardLines([{ name: long, size: 100 }]);
+  assert.ok(title.length <= 34, `title is bounded (got ${title.length}: ${title})`);
+  assert.ok(title.includes("…"), "shows it was shortened");
+  // the tail is what identifies the file — a card reading "…keeps-going" and
+  // one reading "…tar.gz" are answering different questions
+  assert.ok(title.endsWith("tar.gz"), `keeps the extension (got ${title})`);
+  assert.ok(long.startsWith(title.split("…")[0]!), "the head is the real prefix");
+  // exactly at the budget is NOT shortened — an off-by-one here would ellipse
+  // every ordinary name one character early
+  const exact = "b".repeat(34);
+  assert.equal(ghostCardLines([{ name: exact }]).title, exact);
+  assert.ok(ghostCardLines([{ name: `${exact}c` }]).title.includes("…"));
+});
+
+test("ghostCardLines: a sub-kilobyte file reads as 1 KB, never 0 KB", () => {
+  // "0 KB" beside a file the page just accepted reads as a failed drop
+  assert.equal(ghostCardLines([{ name: "tiny.txt", size: 100 }]).meta, "1 KB");
+  // no size at all (metadata the capture could not stat) drops the caption
+  // rather than inventing one
+  assert.equal(ghostCardLines([{ name: "unknown.bin" }]).meta, "");
 });

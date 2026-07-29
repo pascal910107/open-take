@@ -61,6 +61,7 @@ const KIND_GLYPH: Record<CompEvent["kind"], string> = {
   click: "click",
   type: "type",
   drag: "drag",
+  dropFiles: "drop",
   scroll: "scroll",
   hover: "hover",
   press: "key",

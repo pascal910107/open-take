@@ -617,11 +617,13 @@ export function buildLegs(comp: TakeComposition): Leg[] {
     const t0 = Math.max(arrive - travelDur(cur, e.point), prevEnd, 0);
     legs.push({ t0, t1: arrive, a: cur, b: e.point }); // travel to anchor
     cur = e.point;
-    if (e.kind === "drag" && e.to) {
+    if ((e.kind === "drag" || e.kind === "dropFiles") && e.to) {
       // Delay the stroke by dragLagMs so the cursor rides the captured ink front
       // (the ink trails the pen by the capture-pipeline latency). The cursor
       // holds at the start point during the gap [arrive, arrive+lag], then traces
-      // — matching when the ink actually appears on screen.
+      // — matching when the ink actually appears on screen. A dropFiles carry
+      // has no ink, but the page's dragover reaction rode the same capture
+      // pipeline, so the same lag keeps cursor and reaction in step.
       const lag = comp.cursor.dragLagMs / 1000;
       const start = arrive + lag;
       const dEnd = (e.tMs + (e.durationMs ?? 0)) / 1000 + lag;
@@ -690,4 +692,43 @@ export function cursorPos(t: number, legs: Leg[], comp: TakeComposition): Pt {
 /** True while a drag is mid-stroke (button held) — for the pressed cursor. */
 export function isDragging(t: number, legs: Leg[]): boolean {
   return legs.some((lg) => lg.drag === true && lg.t0 <= t && t <= lg.t1);
+}
+
+// --- file ghost card (dropFiles) ----------------------------------------
+
+/** A dropFiles carry's on-screen window [start, end] in SECONDS — when the
+ *  ghost card rides the cursor. Same dragLagMs shift as the carry leg in
+ *  buildLegs, so card and cursor cannot drift apart. Shared by the Revideo
+ *  scene and the editor preview (the no-drift invariant). */
+export function carryWindow(
+  e: { tMs: number; durationMs?: number },
+  comp: TakeComposition,
+): { t0: number; t1: number } {
+  const lag = comp.cursor.dragLagMs / 1000;
+  const t0 = e.tMs / 1000 + lag;
+  return { t0, t1: t0 + (e.durationMs ?? 0) / 1000 };
+}
+
+/** "1.2 MB" / "412 KB" — the ghost card's size caption (scene + preview). */
+export function fmtBytes(n: number): string {
+  return n >= 1024 * 1024
+    ? `${(n / 1024 / 1024).toFixed(1)} MB`
+    : `${Math.max(1, Math.round(n / 1024))} KB`;
+}
+
+/** The ghost card's two text lines for a dropFiles beat: the (first) filename,
+ *  and a meta caption ("3 files · 1.8 MB" / "1.2 MB"). Shared scene/preview.
+ *  Long filenames middle-ellipse (extension kept) so the card can't outgrow
+ *  the frame — neither render surface clamps its width. */
+export function ghostCardLines(files: { name: string; size?: number }[]): {
+  title: string;
+  meta: string;
+} {
+  const raw = files[0]?.name ?? "file";
+  const MAX = 34;
+  const title = raw.length <= MAX ? raw : `${raw.slice(0, MAX - 12)}…${raw.slice(raw.length - 11)}`;
+  const total = files.reduce((s, f) => s + (f.size ?? 0), 0);
+  const size = total > 0 ? fmtBytes(total) : "";
+  const count = files.length > 1 ? `${files.length} files` : "";
+  return { title, meta: [count, size].filter(Boolean).join(" · ") };
 }
