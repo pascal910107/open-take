@@ -1,7 +1,8 @@
 // The auto-camera acceptance: a capture log with NO `zoom` field on any event
 // must still come out with sensible framing — type framed (not the thin strip),
 // a cluster held as one frame, nav/scroll pulled to full view, no flicker.
-// These are the "換個 agent 就漏 zoom" cases, decided by the tool from the log.
+// These are the "a different agent would have dropped the zoom" cases — decided
+// by the tool from the log, not left to whoever authored the plan.
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

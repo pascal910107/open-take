@@ -137,7 +137,7 @@ test("a save over an unseen agent write is refused with 409 — and the agent's 
   assert.equal(onDisk.durationMs, 12345, "the refused write did not land");
 });
 
-test("保留我的: re-sending with the mtime from the 409 goes through", async () => {
+test("keep mine: re-sending with the mtime from the 409 goes through", async () => {
   const take = await getTake();
   const conflicting = { ...(take.composition as object), durationMs: 4321 };
   await agentWrites((c) => {

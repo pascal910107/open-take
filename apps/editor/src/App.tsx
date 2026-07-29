@@ -133,11 +133,11 @@ export function App() {
     [c.commitSaved],
   );
 
-  // debounced autosave over the bridge (the v4 top bar promises 已自動儲存).
-  // Invalid edits show 設定無效 instead of silently freezing the save; failures
-  // retry with a longer backoff (the effect re-runs on saveState changes). A
-  // pending conflict parks the loop — retrying would just 409 again, and the
-  // decision is the user's.
+  // debounced autosave over the bridge (the v4 top bar promises "Saved
+  // automatically"). Invalid edits show "Invalid settings" instead of silently
+  // freezing the save; failures retry with a longer backoff (the effect re-runs
+  // on saveState changes). A pending conflict parks the loop — retrying would
+  // just 409 again, and the decision is the user's.
   useEffect(() => {
     if (!b.bridge || b.busy || !c.dirty || !c.comp || conflict || saveState === "saving") {
       return;
@@ -177,7 +177,7 @@ export function App() {
     return () => clearInterval(t);
   }, [b.bridge, c.dirty, saveState, b.busy, conflict, reloadFromDisk]);
 
-  // 保留我的 / 採用對方 — the whole point of the 409: the loser of a
+  // Keep mine / Take theirs — the whole point of the 409: the loser of a
   // dual-write is a person who gets asked, not an edit that vanishes.
   const exportCurrent = useCallback(async (): Promise<OperationResult> => {
     const result = await b.exportNow();
@@ -265,16 +265,16 @@ export function App() {
   const pct = Math.round(b.ex.progress * 100);
   const saveLabel =
     saveState === "saving"
-      ? "儲存中…"
+      ? "Saving…"
       : saveState === "error"
-        ? "儲存失敗，重試中…"
+        ? "Save failed, retrying…"
         : saveState === "export-error"
-          ? "Export 失敗 — 請重試"
+          ? "Export failed — try again"
           : saveState === "invalid"
-            ? "設定無效 — 未儲存"
+            ? "Invalid settings — not saved"
             : saveState === "conflict"
-              ? "有衝突 — 未儲存"
-              : "已自動儲存";
+              ? "Conflict — not saved"
+              : "Saved automatically";
 
   return (
     <div className="app">
@@ -298,7 +298,7 @@ export function App() {
                 {saveLabel}
               </span>
             ) : (
-              "本機檔案"
+              "Local file"
             )}
           </span>
         )}
@@ -306,7 +306,7 @@ export function App() {
         <button
           type="button"
           className="iconbtn"
-          title="復原 (⌘Z)"
+          title="Undo (⌘Z)"
           disabled={!c.canUndo}
           onClick={c.undo}
         >
@@ -315,7 +315,7 @@ export function App() {
         <button
           type="button"
           className="iconbtn"
-          title="重做 (⇧⌘Z)"
+          title="Redo (⇧⌘Z)"
           disabled={!c.canRedo}
           onClick={c.redo}
         >
@@ -337,7 +337,7 @@ export function App() {
         >
           {/* while held, the stage itself shows the ORIGINAL badge (Stage.tsx) —
               the label stays put so the top bar never reflows mid-hold */}
-          <IcCompare /> 對比原版
+          <IcCompare /> Compare
         </button>
         <button
           type="button"
@@ -347,25 +347,25 @@ export function App() {
           }
           title={
             conflict
-              ? "請先處理編輯衝突"
+              ? "Resolve the edit conflict first"
               : saveState === "saving"
-                ? "請等待目前的儲存完成"
+                ? "Wait for the current save to finish"
                 : b.bridge && !c.canSave
-                  ? "先修正無效的設定"
+                  ? "Fix the invalid settings first"
                   : undefined
           }
           onClick={b.bridge ? () => void exportCurrent() : b.downloadComposition}
         >
           <IcExport />
-          {b.ex.phase === "rendering" ? `${pct}%` : b.bridge ? "Export" : "下載 JSON"}
+          {b.ex.phase === "rendering" ? `${pct}%` : b.bridge ? "Export" : "Download JSON"}
         </button>
       </div>
 
       {conflict && (
         <div className="conflict">
           <span>
-            Agent 在你編輯的同時改了這個 take。要保留哪一邊？
-            {c.dirty && <em>「採用對方」會丟掉你目前未儲存的修改。</em>}
+            The agent changed this take while you were editing. Which side do you want to keep?
+            {c.dirty && <em>“Take theirs” discards the edits you haven't saved yet.</em>}
           </span>
           <span className="spacer" />
           <button
@@ -374,7 +374,7 @@ export function App() {
             disabled={resolvingConflict}
             onClick={() => void resolveConflict("theirs")}
           >
-            採用對方
+            Take theirs
           </button>
           <button
             type="button"
@@ -382,7 +382,7 @@ export function App() {
             disabled={resolvingConflict}
             onClick={() => void resolveConflict("mine")}
           >
-            保留我的
+            Keep mine
           </button>
         </div>
       )}
@@ -449,19 +449,19 @@ export function App() {
           <div className="ocard">
             <h1>open-take editor</h1>
             <p>
-              打開一個 take，直接在畫面上調整每一段 Zoom、背景與節奏 — 全部即時預覽，Export
-              才真正輸出。
+              Open a take and adjust every zoom, the background and the pace right on the frame — it
+              all previews live, and only Export renders.
             </p>
             <div className="cta">
               <button type="button" className="export" onClick={p.loadSample}>
-                {p.status === "loading" ? "載入中…" : "載入範例 take"}
+                {p.status === "loading" ? "Loading…" : "Load a sample take"}
               </button>
               <button type="button" className="ghost" onClick={() => fileInput.current?.click()}>
-                開啟檔案…
+                Open files…
               </button>
             </div>
             <p className="hintline">
-              或把 <code>composition.json</code> + <code>capture.mp4</code> 拖進來
+              or drop a <code>composition.json</code> + <code>capture.mp4</code> here
             </p>
             {p.error && <p className="err">{p.error}</p>}
             <input

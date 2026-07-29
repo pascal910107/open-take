@@ -29,7 +29,7 @@ export class BridgeError extends Error {
  *  landed on top of one we never saw — the caller must ask the user. */
 export class ConflictError extends Error {
   /** the file's mtime as of the refusal: the base to re-send with when the
-   *  user chooses 保留我的. */
+   *  user chooses "Keep mine". */
   mtime: number;
   constructor(mtime: number) {
     super("composition.json changed on disk");

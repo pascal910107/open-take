@@ -252,18 +252,34 @@ with one hint line — the whole vocabulary a first-timer needs:
 
 ### 6. REFINE (the dailies loop — the user reacts, you cut)
 The user is the director watching dailies; you are the editor. They give notes
-in plain language ("開頭太慢", "beat 3 不用 zoom", "背景深一點"); you resolve,
-cut, and show.
+in plain language ("the opening is too slow", "no zoom on beat 3", "darker
+background"); you resolve, cut, and show. **Notes arrive in whatever language
+the user is speaking — answer in that language, but keep every file you write
+(plans, notes files, composition fields) in English.**
 
 **The visual editor is the user's other door.** `npx open-take edit demo.mp4`
 opens a local editor (preview + icon-rail settings + timeline with zoom
 blocks); the user can drag zoom regions, switch looks, and tune motion there —
 edits autosave into the SAME `demo.composition.json` you edit. Offer it when
 the user wants to fine-tune many things by hand. Its Agent panel appends notes
-to `demo.notes.md` and prints `NOTE {...}` lines on the `edit` process stdout —
-**check `demo.notes.md` when the user says they left you notes**, and re-read
-`demo.composition.json` before editing it yourself (the user may have changed
-it in the editor).
+to `demo.notes.md` and prints `NOTE {...}` lines on the `edit` process stdout.
+Always re-read `demo.composition.json` before editing it yourself — the user
+may have changed it in the editor.
+
+**Get woken when they leave you a note.** The editor is in the browser; you are
+in a terminal. Start ONE waiter in the background right after you open it:
+
+```
+npx open-take edit  demo.mp4          # background: the editor server (stays up)
+npx open-take notes demo.mp4 --wait   # background: EXITS on the first note
+```
+
+The waiter prints the new notes and exits — that exit is your wake-up. Handle
+the batch (ECHO → resolve → render), then start a fresh waiter for the next
+one; each waiter delivers one batch. Notes left while no waiter was running are
+not lost: `npx open-take notes demo.mp4` drains whatever you have not read yet
+(the read position lives in `demo.notes.cursor`; `--all` re-reads everything).
+Run that drain whenever the user says they left notes, or before you render.
 
 **Hard rules, in order:**
 
@@ -272,8 +288,8 @@ it in the editor).
    so a misread costs a sentence, not a render. Resolve referents against the
    ground truth: beat numbers → `events[n-1]`; "at 0:07" → the beat whose window
    covers it; element words → fuzzy-match `events[].label`, then bboxes in
-   `demo.capture.json`; 開頭/intro → `start` + first beat; 結尾/tail →
-   `durationMs`.
+   `demo.capture.json`; "the opening"/intro → `start` + first beat; "the
+   ending"/tail → `durationMs`.
 2. **Triage each note by cost, and say the cost:**
    - **Instant (~10s draft):** anything in the cinematic layer — zoom on/off/
      tightness/center, pacing, look, finish, intro, tail. Edit
@@ -282,7 +298,7 @@ it in the editor).
      stale. To verify an edit YOURSELF before showing it, `render --draft`
      (clean `<base>.draft.mp4`, no badges) then `frames demo.draft.mp4` —
      seconds, and the master is never touched mid-refine.
-   - **A taste question ("how tight? 深一點? 快一點?"):** never guess twice —
+   - **A taste question ("how tight? tighter? faster?"):** never guess twice —
      run an `ab` reel with the bracketing values and ask for a letter:
      ```
      npx open-take ab demo.mp4 --set zoom=medium,close --beat 2

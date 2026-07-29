@@ -1,5 +1,5 @@
 // The seven layered settings panes behind the icon rail. Plain words, few
-// controls per pane, advanced knobs behind 進階 — never a dense numeric wall.
+// controls per pane, advanced knobs behind Advanced — never a dense numeric wall.
 import { useState } from "react";
 import type { UseComposition } from "../hooks/useComposition";
 import { sendNote } from "../lib/bridge";
@@ -58,7 +58,10 @@ export function ZoomPane({ c }: P) {
       <h2>
         <IcZoom /> Zoom
       </h2>
-      <p className="desc">每一段 Zoom 對應影片中的一個動作。點下方時間軸的藍色區塊來編輯。</p>
+      <p className="desc">
+        Each zoom belongs to one action in the video. Click a blue block in the timeline below to
+        edit it.
+      </p>
       {comp && e ? (
         <Card
           head={`Beat ${sel + 1} · ${title}`}
@@ -71,7 +74,7 @@ export function ZoomPane({ c }: P) {
         >
           {e.zoom.enabled && (
             <>
-              <Row label="深度" value={`${e.zoom.scale.toFixed(1)}×`}>
+              <Row label="Depth" value={`${e.zoom.scale.toFixed(1)}×`}>
                 <Slider
                   min={scaleMin}
                   max={2.4}
@@ -83,7 +86,7 @@ export function ZoomPane({ c }: P) {
                   }
                 />
               </Row>
-              <Row label="進入時機" value={`−${((e.tMs - e.zoom.inAtMs) / 1000).toFixed(1)}s`}>
+              <Row label="Lead-in" value={`−${((e.tMs - e.zoom.inAtMs) / 1000).toFixed(1)}s`}>
                 <Slider
                   min={0}
                   max={1600}
@@ -101,7 +104,11 @@ export function ZoomPane({ c }: P) {
               <div className="row" style={{ justifyContent: "flex-start" }}>
                 <MiniBtn
                   disabled={!e.bbox}
-                  title={e.bbox ? "把畫面框對準這個動作的元素" : "這個動作沒有元素框"}
+                  title={
+                    e.bbox
+                      ? "Line the frame up with this action's element"
+                      : "This action has no element box"
+                  }
                   onClick={() => {
                     const b = e.bbox;
                     if (!b) return;
@@ -110,14 +117,14 @@ export function ZoomPane({ c }: P) {
                     );
                   }}
                 >
-                  <IcTarget size={13} /> 貼齊元素
+                  <IcTarget size={13} /> Snap to element
                 </MiniBtn>
                 <span className="hint" style={{ marginTop: 0 }}>
-                  或直接拖畫面上的框
+                  or just drag the box on the stage
                 </span>
               </div>
               <Adv>
-                <Row label="漂移 X" value={`${e.zoom.glide?.x ?? 0}px/s`}>
+                <Row label="Glide X" value={`${e.zoom.glide?.x ?? 0}px/s`}>
                   <Slider
                     min={-60}
                     max={60}
@@ -128,7 +135,7 @@ export function ZoomPane({ c }: P) {
                     }
                   />
                 </Row>
-                <Row label="漂移 Y" value={`${e.zoom.glide?.y ?? 0}px/s`}>
+                <Row label="Glide Y" value={`${e.zoom.glide?.y ?? 0}px/s`}>
                   <Slider
                     min={-60}
                     max={60}
@@ -139,7 +146,7 @@ export function ZoomPane({ c }: P) {
                     }
                   />
                 </Row>
-                <p className="hint">漂移＝Zoom 停留時鏡頭緩慢滑動（即 glide）。</p>
+                <p className="hint">Glide = the camera drifts slowly while the zoom holds.</p>
               </Adv>
             </>
           )}
@@ -147,7 +154,8 @@ export function ZoomPane({ c }: P) {
       ) : (
         <Card>
           <p className="hint" style={{ marginTop: 0 }}>
-            尚未選取 — 點時間軸上的<b>藍色區塊</b>編輯該段 Zoom，或把虛線區塊按成 Zoom。
+            Nothing selected — click a <b>blue block</b> in the timeline to edit its zoom, or click
+            a dashed one to add a zoom there.
           </p>
         </Card>
       )}
@@ -169,7 +177,10 @@ export function BgPane({ c }: P) {
       <h2>
         <IcBg /> Background
       </h2>
-      <p className="desc">影片後方的背景。Look 一鍵套用整套（顏色＋圓角＋陰影）。</p>
+      <p className="desc">
+        The backdrop behind the video. A Look applies the whole set at once (colour + corners +
+        shadow).
+      </p>
       <div className="sect">
         <h3>Look</h3>
         <Thumbs
@@ -185,16 +196,16 @@ export function BgPane({ c }: P) {
         />
       </div>
       <div className="sect">
-        <h3>自訂</h3>
+        <h3>Custom</h3>
         <OptionCards
           options={[
-            { key: "gradient", label: "漸層", icon: <IcGradient /> },
-            { key: "solid", label: "單色", icon: <IcSolid /> },
+            { key: "gradient", label: "Gradient", icon: <IcGradient /> },
+            { key: "solid", label: "Solid", icon: <IcSolid /> },
           ]}
           value={type}
           onChange={(k) => c.update((cc) => setBackground(cc, { type: k as "gradient" | "solid" }))}
         />
-        <Row label="顏色">
+        <Row label="Colour">
           <input
             type="color"
             value={toHex(bg.from)}
@@ -211,7 +222,7 @@ export function BgPane({ c }: P) {
           )}
         </Row>
         {type === "gradient" && (
-          <Row label="角度" value={`${bg.angle ?? 135}°`}>
+          <Row label="Angle" value={`${bg.angle ?? 135}°`}>
             <Slider
               min={0}
               max={360}
@@ -244,9 +255,9 @@ export function FramePane({ c }: P) {
       <h2>
         <IcFrame /> Frame
       </h2>
-      <p className="desc">螢幕畫面在背景上的呈現：留邊、圓角與陰影。</p>
+      <p className="desc">How the screen sits on the background: padding, corners and shadow.</p>
       <Card>
-        <Row label="留邊" value={`${pad}%`}>
+        <Row label="Padding" value={`${pad}%`}>
           <Slider
             min={0}
             max={30}
@@ -269,7 +280,7 @@ export function FramePane({ c }: P) {
             }
           />
         </Row>
-        <Row label="圓角" value={`${fr.cornerRadius}`}>
+        <Row label="Corners" value={`${fr.cornerRadius}`}>
           <Slider
             min={0}
             max={48}
@@ -279,8 +290,8 @@ export function FramePane({ c }: P) {
           />
         </Row>
       </Card>
-      <Card head="陰影">
-        <Row label="強度" value={`${Math.round(alpha * 100)}%`}>
+      <Card head="Shadow">
+        <Row label="Strength" value={`${Math.round(alpha * 100)}%`}>
           <Slider
             min={0}
             max={100}
@@ -294,7 +305,7 @@ export function FramePane({ c }: P) {
             }
           />
         </Row>
-        <Row label="柔度" value={`${fr.shadow.blur}`}>
+        <Row label="Softness" value={`${fr.shadow.blur}`}>
           <Slider
             min={0}
             max={120}
@@ -303,7 +314,7 @@ export function FramePane({ c }: P) {
             onChange={(v) => c.update((cc) => setShadow(cc, { blur: v }), "shblur")}
           />
         </Row>
-        <Row label="方向" value={`${(angle + 360) % 360}°`}>
+        <Row label="Direction" value={`${(angle + 360) % 360}°`}>
           <Slider
             min={0}
             max={360}
@@ -343,9 +354,9 @@ export function CursorPane({ c }: P) {
       <h2>
         <IcCursor /> Cursor
       </h2>
-      <p className="desc">合成游標的樣子與移動手感。</p>
+      <p className="desc">How the synthetic cursor looks and how it moves.</p>
       <Card>
-        <Row label="大小" value={`${cur.scale.toFixed(1)}×`}>
+        <Row label="Size" value={`${cur.scale.toFixed(1)}×`}>
           <Slider
             min={1}
             max={3}
@@ -355,7 +366,7 @@ export function CursorPane({ c }: P) {
             onChange={(v) => c.update((cc) => setCursor(cc, { scale: v }), "cscale")}
           />
         </Row>
-        <Row label="移動速度" value={cur.travelWidthsPerSec.toFixed(2)}>
+        <Row label="Travel speed" value={cur.travelWidthsPerSec.toFixed(2)}>
           <Slider
             min={0.2}
             max={0.6}
@@ -365,7 +376,7 @@ export function CursorPane({ c }: P) {
             onChange={(v) => c.update((cc) => setCursor(cc, { travelWidthsPerSec: v }), "cspeed")}
           />
         </Row>
-        <Row label="路徑彎度" value={`${Math.round(cur.arcFrac * 100)}%`}>
+        <Row label="Path curve" value={`${Math.round(cur.arcFrac * 100)}%`}>
           <Slider
             min={0}
             max={20}
@@ -374,7 +385,7 @@ export function CursorPane({ c }: P) {
             onChange={(v) => c.update((cc) => setCursor(cc, { arcFrac: v / 100 }), "carc")}
           />
         </Row>
-        <Row label="點擊漣漪">
+        <Row label="Click ripple">
           <Toggle
             on={cur.rippleMs > 0}
             onChange={(on) => c.update((cc) => setCursor(cc, { rippleMs: on ? 450 : 0 }))}
@@ -382,7 +393,7 @@ export function CursorPane({ c }: P) {
         </Row>
       </Card>
       <Adv>
-        <Row label="最短移動" value={`${(cur.travelMinMs / 1000).toFixed(1)}s`}>
+        <Row label="Min travel" value={`${(cur.travelMinMs / 1000).toFixed(1)}s`}>
           <Slider
             min={100}
             max={600}
@@ -392,7 +403,7 @@ export function CursorPane({ c }: P) {
             onChange={(v) => c.update((cc) => setCursor(cc, { travelMinMs: v }), "cmin")}
           />
         </Row>
-        <Row label="最長移動" value={`${(cur.travelMaxMs / 1000).toFixed(2)}s`}>
+        <Row label="Max travel" value={`${(cur.travelMaxMs / 1000).toFixed(2)}s`}>
           <Slider
             min={400}
             max={1400}
@@ -402,7 +413,7 @@ export function CursorPane({ c }: P) {
             onChange={(v) => c.update((cc) => setCursor(cc, { travelMaxMs: v }), "cmax")}
           />
         </Row>
-        <Row label="筆跡延遲" value={`${cur.dragLagMs}ms`}>
+        <Row label="Drag lag" value={`${cur.dragLagMs}ms`}>
           <Slider
             min={0}
             max={400}
@@ -434,9 +445,11 @@ export function MotionPane({ c }: P) {
       <h2>
         <IcMotion /> Motion
       </h2>
-      <p className="desc">鏡頭的節奏與質感。選一種節奏，或展開微調每個時長。</p>
+      <p className="desc">
+        The camera's pace and texture. Pick a pace, or expand to fine-tune each duration.
+      </p>
       <div className="sect">
-        <h3>節奏</h3>
+        <h3>Pace</h3>
         <OptionCards
           options={[
             { key: "calm", label: "Calm", icon: <IcCalm /> },
@@ -460,7 +473,7 @@ export function MotionPane({ c }: P) {
       >
         {blurOn && mb && (
           <>
-            <Row label="強度" value={mb.shutter.toFixed(1)}>
+            <Row label="Strength" value={mb.shutter.toFixed(1)}>
               <Slider
                 min={0.1}
                 max={1}
@@ -472,27 +485,32 @@ export function MotionPane({ c }: P) {
                 }
               />
             </Row>
-            <Row label="品質">
+            <Row label="Quality">
               <OptionCards
                 compact
                 options={[
-                  { key: "3", label: "快" },
-                  { key: "6", label: "平衡" },
-                  { key: "9", label: "最細" },
+                  { key: "3", label: "Fast" },
+                  { key: "6", label: "Balanced" },
+                  { key: "9", label: "Finest" },
                 ]}
                 value={["3", "6", "9"].includes(String(mb.samples)) ? String(mb.samples) : null}
                 onChange={(k) => c.update((cc) => setMotionBlur(cc, { ...mb, samples: Number(k) }))}
               />
             </Row>
             {!["3", "6", "9"].includes(String(mb.samples)) && (
-              <p className="hint">目前為自訂品質（{mb.samples}×）— 點選任一檔位會覆蓋。</p>
+              <p className="hint">
+                Custom quality right now ({mb.samples}×) — picking a preset overrides it.
+              </p>
             )}
-            <p className="hint">品質越高輸出越慢（渲染張數 = fps × 品質）。預覽不受影響。</p>
+            <p className="hint">
+              Higher quality means a slower export (frames rendered = fps × quality). The preview is
+              unaffected.
+            </p>
           </>
         )}
       </Card>
-      <Adv label="微調時長">
-        <Row label="放大 進入" value={`${(cur.zoomInMs / 1000).toFixed(2)}s`}>
+      <Adv label="Fine-tune durations">
+        <Row label="Zoom in" value={`${(cur.zoomInMs / 1000).toFixed(2)}s`}>
           <Slider
             min={300}
             max={1400}
@@ -502,7 +520,7 @@ export function MotionPane({ c }: P) {
             onChange={(v) => c.update((cc) => setCursorRebased(cc, { zoomInMs: v }), "zin")}
           />
         </Row>
-        <Row label="放大 退出" value={`${(cur.zoomOutMs / 1000).toFixed(2)}s`}>
+        <Row label="Zoom out" value={`${(cur.zoomOutMs / 1000).toFixed(2)}s`}>
           <Slider
             min={300}
             max={1800}
@@ -512,7 +530,7 @@ export function MotionPane({ c }: P) {
             onChange={(v) => c.update((cc) => setCursor(cc, { zoomOutMs: v }), "zout")}
           />
         </Row>
-        <Row label="停留" value={`${(cur.holdMs / 1000).toFixed(1)}s`}>
+        <Row label="Hold" value={`${(cur.holdMs / 1000).toFixed(1)}s`}>
           <Slider
             min={400}
             max={2400}
@@ -522,12 +540,16 @@ export function MotionPane({ c }: P) {
             onChange={(v) => c.update((cc) => setCursor(cc, { holdMs: v }), "hold")}
           />
         </Row>
-        {/* 0 = 預設臨界阻尼彈簧。舊 composition 若帶 zoomEase（貝茲），彈簧
-            未設時貝茲會生效 — 如實顯示，拖任一下滑桿（或套用節奏預設）即改用彈簧。 */}
+        {/* 0 = the default critically-damped spring. An older composition may carry
+            a zoomEase (bezier), which wins while no spring is set — show that
+            honestly; moving the slider (or applying a pace preset) switches to the
+            spring. */}
         <Row
-          label="彈性"
+          label="Springiness"
           value={
-            cur.zoomSpring == null && cur.zoomEase ? "貝茲(舊)" : (cur.zoomSpring ?? 0).toFixed(2)
+            cur.zoomSpring == null && cur.zoomEase
+              ? "bezier (legacy)"
+              : (cur.zoomSpring ?? 0).toFixed(2)
           }
         >
           <Slider
@@ -573,9 +595,9 @@ export function ClipPane({
       <h2>
         <IcClip /> Clip
       </h2>
-      <p className="desc">整支影片的長度與開場。</p>
+      <p className="desc">The whole video's length and where it opens.</p>
       <Card>
-        <Row label="結尾停留" value={`${(tail / 1000).toFixed(1)}s`}>
+        <Row label="Tail hold" value={`${(tail / 1000).toFixed(1)}s`}>
           <Slider
             min={0}
             max={3000}
@@ -587,16 +609,16 @@ export function ClipPane({
         </Row>
         <div className="row" style={{ justifyContent: "flex-start" }}>
           <MiniBtn onClick={onArmPickStart}>
-            <IcCursor size={13} /> {pickingStart ? "點畫面設定起點…" : "設定游標起點"}
+            <IcCursor size={13} /> {pickingStart ? "Click the stage…" : "Set cursor start"}
           </MiniBtn>
         </div>
       </Card>
       <Card>
         <p className="hint" style={{ marginTop: 0 }}>
-          輸出 {comp.output.width}×{comp.output.height} · {comp.output.fps}fps ·{" "}
+          Output {comp.output.width}×{comp.output.height} · {comp.output.fps}fps ·{" "}
           {comp.events.length} beats
           <br />
-          總長 {(comp.durationMs / 1000).toFixed(1)}s
+          Total {(comp.durationMs / 1000).toFixed(1)}s
         </p>
       </Card>
     </div>
@@ -614,14 +636,14 @@ export function AgentPane({ bridge }: { bridge: boolean }) {
     if (bridge) {
       try {
         await sendNote(t.trim());
-        setSent("已送給 agent — 它會處理並告訴你成本");
+        setSent("Sent to the agent — it will handle this and tell you the cost");
       } catch {
         await navigator.clipboard.writeText(t.trim()).catch(() => {});
-        setSent("橋接不可用 — 已複製，貼給你的 agent");
+        setSent("Bridge unavailable — copied instead, paste it to your agent");
       }
     } else {
       await navigator.clipboard.writeText(t.trim()).catch(() => {});
-      setSent("已複製 — 貼給你的 agent");
+      setSent("Copied — paste it to your agent");
     }
     setText("");
     setTimeout(() => setSent(null), 4000);
@@ -633,12 +655,13 @@ export function AgentPane({ bridge }: { bridge: boolean }) {
         <IcAgent /> Agent
       </h2>
       <p className="desc">
-        介面改不動的 — 換順序、改點擊內容、重新錄 — 用說的，agent 會處理並告訴你成本。
+        Anything this UI can't change — beat order, what gets clicked, a re-shoot — just say it. The
+        agent handles it and tells you the cost. Write in any language.
       </p>
       <div className="agent-input">
         <input
           value={text}
-          placeholder="例如「把 beat 4、5 對調」"
+          placeholder={'e.g. "swap beats 4 and 5"'}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
             // ignore the Enter that commits an IME composition (Chrome/Firefox:
@@ -647,10 +670,10 @@ export function AgentPane({ bridge }: { bridge: boolean }) {
               void send(text);
           }}
         />
-        <MiniBtn onClick={() => void send(text)}>送出</MiniBtn>
+        <MiniBtn onClick={() => void send(text)}>Send</MiniBtn>
       </div>
       <div className="chiplist">
-        {["開頭再快一點", "結尾太長", "換一個結尾畫面"].map((q) => (
+        {["Faster opening", "Tail is too long", "Different closing shot"].map((q) => (
           <button type="button" key={q} onClick={() => void send(q)}>
             {q}
           </button>

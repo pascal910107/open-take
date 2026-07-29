@@ -144,18 +144,18 @@ export function Timeline({
         <span className="time mono">
           <b>{fmt(t)}</b> / {fmt(derived.T)}
         </span>
-        <button type="button" className="tbtn" onClick={seekPrev} aria-label="上一個 beat">
+        <button type="button" className="tbtn" onClick={seekPrev} aria-label="Previous beat">
           <IcPrev />
         </button>
         <button
           type="button"
           className="tbtn play"
           onClick={() => engine.toggle()}
-          aria-label="播放/暫停"
+          aria-label="Play / pause"
         >
           {isPlaying ? <IcPause /> : <IcPlay />}
         </button>
-        <button type="button" className="tbtn" onClick={seekNext} aria-label="下一個 beat">
+        <button type="button" className="tbtn" onClick={seekNext} aria-label="Next beat">
           <IcNext />
         </button>
       </div>
@@ -203,7 +203,9 @@ export function Timeline({
                 width: `${(Math.max(600, b.t1 - b.t0) / totalMs) * 100}%`,
               }}
               title={
-                b.ghost ? `在「${beatTitle(comp, b.i)}」加入 Zoom` : `Beat ${b.i + 1} · ×${b.scale}`
+                b.ghost
+                  ? `Add a zoom to "${beatTitle(comp, b.i)}"`
+                  : `Beat ${b.i + 1} · ×${b.scale}`
               }
               onClick={() => (b.ghost ? onEnableZoom(b.i) : onSelectBeat(b.i))}
             >
@@ -231,7 +233,7 @@ export function Timeline({
       </div>
       <div className="tlhint">
         <IcZoom size={12} />
-        藍色是 Zoom 區塊 — 點擊調整；虛線位置可加入 Zoom
+        Blue blocks are zooms — click one to adjust it; a dashed slot can take a new one
       </div>
     </div>
   );

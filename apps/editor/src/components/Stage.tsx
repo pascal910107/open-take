@@ -144,7 +144,7 @@ export function Stage({
         {/* the engine draws this hidden video onto the canvas */}
         <video ref={videoRef} muted playsInline preload="auto" crossOrigin="anonymous" />
         <div className="dimmer" />
-        <span className="origbadge">ORIGINAL — 放開回到編輯版</span>
+        <span className="origbadge">ORIGINAL — release to return to your edit</span>
         {rect && (
           <div
             ref={boxRef}

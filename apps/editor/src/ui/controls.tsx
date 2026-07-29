@@ -136,7 +136,7 @@ export function MiniBtn({
   );
 }
 
-export function Adv({ label = "進階", children }: { label?: string; children: ReactNode }) {
+export function Adv({ label = "Advanced", children }: { label?: string; children: ReactNode }) {
   const id = useId();
   return (
     <details className="adv" id={id}>

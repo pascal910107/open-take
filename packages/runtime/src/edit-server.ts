@@ -207,7 +207,7 @@ export async function startEditServer(
   };
 
   /** Persist unless someone else wrote first. `baseMtime` is the mtime the
-   *  client last read. Every API write must provide it; 保留我的 re-bases to
+   *  client last read. Every API write must provide it; "Keep mine" re-bases to
    *  the 409's mtime and remains guarded against an even newer write.
    *
    *  We check once before writing the temp file and again immediately before
