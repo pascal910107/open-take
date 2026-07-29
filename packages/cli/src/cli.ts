@@ -55,20 +55,33 @@ const BOOL_FLAGS = new Set([
   "--no-open",
   "--before-after",
   "--strict",
+  "--headed",
   "--verbose",
+  "--wait",
+  "--all",
+  "--quiet",
 ]);
 
 const argv = process.argv.slice(2);
 const cmd = argv[0];
 const positional: string[] = [];
 const flags: Record<string, string> = {};
+let parseError: string | undefined;
 for (let i = 1; i < argv.length; i++) {
   const a = argv[i]!;
   if (a.startsWith("--")) {
     if (BOOL_FLAGS.has(a)) {
       flags[a] = "true";
     } else {
-      flags[a] = argv[i + 1] ?? "";
+      // a value flag with its value missing must ERROR, not swallow the next
+      // flag (a bare `--profile --draft` would otherwise run UNauthenticated
+      // with "--draft" as the profile name — or worse, silently drop both).
+      const v = argv[i + 1];
+      if (v == null || v.startsWith("--")) {
+        parseError = `${a} requires a value`;
+        break;
+      }
+      flags[a] = v;
       i++;
     }
   } else {
@@ -273,6 +286,7 @@ function printWarnings(warnings: CompositionIssue[] | undefined): void {
 }
 
 async function main() {
+  if (parseError) throw new Error(`${cmd ?? ""}: ${parseError}`.trim());
   if (cmd) rejectUnknownFlags(cmd);
   // The vendored renderer forwards page-console noise ("Worker 0: JSHandle:…")
   // only when this is set (see revideo-renderer/scripts/build.mjs).
