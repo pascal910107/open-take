@@ -39,9 +39,9 @@ jobs:
       contents: read
       id-token: write # mints the OIDC token; without it npm falls back to looking for a token
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4 # version comes from packageManager in package.json
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6 # version comes from packageManager in package.json
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: pnpm
