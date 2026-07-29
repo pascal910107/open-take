@@ -42,6 +42,7 @@ export {
 } from "./capture";
 export { captureTakeCDP } from "./cdp-capture";
 export { resolveNavigateUrl, type NavigateTarget } from "./nav";
+export { authProfile, profileDir, type AuthOpts, type AuthResult } from "./auth";
 export {
   annotateCaptureLog,
   diffFrames,

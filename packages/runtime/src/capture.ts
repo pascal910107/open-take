@@ -331,6 +331,13 @@ export type CaptureOpts = {
    *  (constant speed). Recorded on each drag event so the compositor cursor
    *  replays the same easing and stays locked to the ink. */
   dragEasing?: "linear" | "smooth";
+  /** Persistent Chrome profile dir (an authenticated capture — pair with
+   *  `open-take auth`). Default: a throwaway temp profile, removed on close. */
+  userDataDir?: string;
+  /** false ⇒ drive a visible (headed) window instead of headless. The
+   *  screencast records either way — the escape hatch for sites that gate on
+   *  a real window. Default true. */
+  headless?: boolean;
   /** Extra ms a beat's hold may spend waiting for the PAGE when `settleMs`
    *  expires while it is still working (network in flight, DOM mutating, a
    *  reveal animating). Never shortens a hold — see runtime/src/settle.ts.
@@ -391,6 +398,10 @@ export type InspectOpts = {
   warmupMs?: number;
   /** explicit Chrome binary (else auto-resolved / auto-downloaded) */
   chromePath?: string;
+  /** persistent Chrome profile dir (inspect an authenticated page) */
+  userDataDir?: string;
+  /** false ⇒ inspect via a visible (headed) window. Default true. */
+  headless?: boolean;
 };
 
 /** Open `url`, return its interactive elements (accessible name + bbox) —
@@ -399,7 +410,13 @@ export type InspectOpts = {
 export async function inspectPage(url: string, opts: InspectOpts = {}): Promise<InspectResult> {
   const vw = opts.viewport?.width ?? 1920;
   const vh = opts.viewport?.height ?? 1080;
-  const browser = await launchBrowser({ width: vw, height: vh, chromePath: opts.chromePath });
+  const browser = await launchBrowser({
+    width: vw,
+    height: vh,
+    chromePath: opts.chromePath,
+    ...(opts.userDataDir ? { userDataDir: opts.userDataDir } : {}),
+    ...(opts.headless === false ? { headless: false } : {}),
+  });
   try {
     const { cdp } = browser;
     await cdp.send("Page.enable");

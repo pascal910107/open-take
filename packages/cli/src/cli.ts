@@ -15,9 +15,11 @@ import { fileURLToPath } from "node:url";
 import {
   SAY_IT_CARD,
   type TakePlan,
+  authProfile,
   buildBeatSheet,
   inspectPage,
   makeTake,
+  profileDir,
   openPath,
   renderAbReel,
   renderBeforeAfter,
@@ -76,7 +78,7 @@ const has = (name: string): boolean => name in flags;
 // field failure this prevents: an older installed CLI accepting `render
 // --draft` (a valid flag elsewhere) and silently rendering a full master.
 const FLAGS_BY_CMD: Record<string, string[]> = {
-  inspect: ["--viewport", "--verbose"],
+  inspect: ["--viewport", "--profile", "--headed", "--verbose"],
   make: [
     "--plan",
     "--out",
@@ -85,6 +87,8 @@ const FLAGS_BY_CMD: Record<string, string[]> = {
     "--strict",
     "--draft",
     "--no-open",
+    "--profile",
+    "--headed",
     "--verbose",
   ],
   render: [
@@ -260,10 +264,29 @@ async function main() {
     return;
   }
 
+  if (cmd === "auth") {
+    const name = positional[0];
+    if (!name)
+      throw new Error(`auth: missing <name> — e.g. ${INVOKE} auth vercel --url <login-url>`);
+    process.stdout.write(
+      `opening Chrome on the "${name}" profile — log in there, then press Enter here (or quit Chrome)…\n`,
+    );
+    const { dir } = await authProfile({ name, url: flag("--url") });
+    process.stdout.write(
+      `profile saved: ${dir}\nauthenticated captures: ${INVOKE} make --plan <plan.json> --out <out.mp4> --profile ${name}\n`,
+    );
+    return;
+  }
+
   if (cmd === "inspect") {
     const url = positional[0];
     if (!url) throw new Error("inspect: missing <url>");
-    const res = await inspectPage(url, { viewport: parseViewport(flag("--viewport")) });
+    const profile = flag("--profile");
+    const res = await inspectPage(url, {
+      viewport: parseViewport(flag("--viewport")),
+      ...(profile ? { userDataDir: profileDir(profile) } : {}),
+      ...(has("--headed") ? { headless: false } : {}),
+    });
     process.stdout.write(`${JSON.stringify(res, null, 2)}\n`);
     return;
   }
@@ -281,6 +304,8 @@ async function main() {
     const fps = fpsFlag ? Number(fpsFlag) : undefined;
     const scaleFlag = flag("--capture-scale");
     const captureScale = scaleFlag ? Number(scaleFlag) : undefined;
+    const profile = flag("--profile");
+    const headed = has("--headed");
     // a re-make (re-shoot) is a new generation: keep the old master as prev so
     // --before-after compares against the take the user just reacted to — and
     // keep the old COMPOSITION too: a re-make re-plans from the new capture, so
@@ -308,8 +333,15 @@ async function main() {
           );
           if (!has("--no-open")) openPath(p);
         },
-        ...(fps || captureScale
-          ? { capture: { ...(fps ? { fps } : {}), ...(captureScale ? { captureScale } : {}) } }
+        ...(fps || captureScale || profile || headed
+          ? {
+              capture: {
+                ...(fps ? { fps } : {}),
+                ...(captureScale ? { captureScale } : {}),
+                ...(profile ? { userDataDir: profileDir(profile) } : {}),
+                ...(headed ? { headless: false } : {}),
+              },
+            }
           : {}),
       });
       await staged.commit();

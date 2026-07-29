@@ -17,6 +17,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  readlinkSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -218,9 +219,41 @@ export async function launchBrowser(opts: {
    *  consistent: events remain CSS px, the window surface (what the
    *  screencast captures) is exactly `deviceScaleFactor`× that. */
   deviceScaleFactor?: number;
+  /** Persistent profile dir (an authenticated capture — see `open-take auth`).
+   *  Kept on close, unlike the default throwaway temp profile. The SAME
+   *  keychain flags are used for auth and capture (mock keychain), so cookies
+   *  written during a headed login decrypt in the later headless capture. */
+  userDataDir?: string;
+  /** false ⇒ launch a visible (headed) window. Default true (headless).
+   *  The screencast records either way — headed is the escape hatch for
+   *  sites that gate on a real window. */
+  headless?: boolean;
 }): Promise<Browser> {
   const chrome = await ensureChrome(opts.chromePath);
-  const userDir = mkdtempSync(join(tmpdir(), "open-take-cdp-"));
+  const ephemeral = !opts.userDataDir;
+  if (opts.userDataDir) mkdirSync(opts.userDataDir, { recursive: true });
+  const userDir = opts.userDataDir ?? mkdtempSync(join(tmpdir(), "open-take-cdp-"));
+  // A REUSED profile keeps the previous session's DevToolsActivePort on disk;
+  // readDevtoolsPort would trust that stale (dead) port on its first poll and
+  // then time out on "no page target appeared". Clear it so the only port we
+  // can ever read is the one THIS launch writes. (Fresh temp profiles have
+  // nothing to clear.)
+  if (!ephemeral) rmSync(join(userDir, "DevToolsActivePort"), { force: true });
+  // ProcessSingleton preflight for a reused profile: if a LIVE Chrome holds it
+  // (the auth window still open, or a concurrent capture), our spawn would hand
+  // off to that instance and never open a debug port — fail with the real story
+  // instead. A DEAD holder (SIGKILLed capture, crashed auth) leaves stale lock
+  // files behind; clear them so Chrome doesn't stall on takeover.
+  if (!ephemeral) {
+    const holder = singletonHolderPid(userDir);
+    if (holder != null && pidAlive(holder))
+      throw new Error(
+        `profile in use: a Chrome (pid ${holder}) is already running on ${userDir} — ` +
+          `quit it first (e.g. the \`open-take auth\` window)`,
+      );
+    for (const f of ["SingletonLock", "SingletonCookie", "SingletonSocket"])
+      rmSync(join(userDir, f), { force: true });
+  }
   const dsf = opts.deviceScaleFactor ?? 1;
   const proc: ChildProcess = spawn(
     chrome,
@@ -229,7 +262,7 @@ export async function launchBrowser(opts: {
       `--user-data-dir=${userDir}`,
       `--window-size=${opts.width},${opts.height}`,
       ...(dsf !== 1 ? [`--force-device-scale-factor=${dsf}`] : []),
-      "--headless=new",
+      ...(opts.headless === false ? [] : ["--headless=new"]),
       // automation browser (throwaway profile, loads the user's own target app);
       // without this the launch hangs — never writes DevToolsActivePort — in
       // sandboxed/containerised/CI contexts where Chrome's own sandbox can't init.
@@ -256,19 +289,35 @@ export async function launchBrowser(opts: {
   });
 
   const close = async () => {
-    const exited = new Promise<void>((res) => {
-      if (proc.exitCode != null) return res();
-      proc.once("exit", () => res());
-      setTimeout(res, 2000); // don't hang if exit never fires
-    });
+    // Throwaway profile: SIGKILL is fine (the dir is deleted anyway). A
+    // PERSISTENT profile needs a graceful shutdown first — Chrome flushes
+    // cookies/localStorage (session tokens refreshed DURING the capture) and
+    // records a clean exit only then; a bare SIGKILL would slowly log the
+    // saved profile out and leave crash-restore state behind.
+    const exitWithin = (ms: number) =>
+      new Promise<boolean>((res) => {
+        if (proc.exitCode != null) return res(true);
+        const tm = setTimeout(() => res(false), ms);
+        proc.once("exit", () => {
+          clearTimeout(tm);
+          res(true);
+        });
+      });
     try {
-      proc.kill("SIGKILL");
+      if (!ephemeral) {
+        proc.kill("SIGTERM");
+        if (!(await exitWithin(4000))) proc.kill("SIGKILL");
+      } else {
+        proc.kill("SIGKILL");
+      }
     } catch {
       /* already gone */
     }
-    await exited;
+    await exitWithin(2000); // don't hang if exit never fires
     // Chrome may still be flushing its profile; retry the rm rather than throw.
-    rmSync(userDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    // A user-supplied (persistent, authenticated) profile is KEPT.
+    if (ephemeral)
+      rmSync(userDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   };
 
   try {
@@ -281,6 +330,27 @@ export async function launchBrowser(opts: {
     throw new Error(
       `open-take(hi-fps): browser launch failed: ${(e as Error).message}\n${stderr.slice(-600)}`,
     );
+  }
+}
+
+// Chrome's ProcessSingleton lock is a symlink named SingletonLock pointing at
+// "<hostname>-<pid>". Resolve the holder's pid (null when absent/unreadable).
+function singletonHolderPid(userDir: string): number | null {
+  try {
+    const target = readlinkSync(join(userDir, "SingletonLock"));
+    const pid = Number(target.split("-").pop());
+    return Number.isFinite(pid) && pid > 0 ? pid : null;
+  } catch {
+    return null; // no lock, or not a symlink (non-POSIX layout)
+  }
+}
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
   }
 }
 

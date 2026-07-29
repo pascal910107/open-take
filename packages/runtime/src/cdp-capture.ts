@@ -272,6 +272,8 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
       height: vh,
       chromePath: opts.chromePath,
       deviceScaleFactor: scale,
+      ...(opts.userDataDir ? { userDataDir: opts.userDataDir } : {}),
+      ...(opts.headless === false ? { headless: false } : {}),
     });
     const { cdp } = browser;
     await cdp.send("Page.enable");
