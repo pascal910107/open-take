@@ -16,8 +16,36 @@
 // action needs a re-capture, not a JSON edit. Pass the capture log to enforce
 // this; without it the check is skipped (we can't know the ground truth).
 
-import { buildStageKeyframes, restStageScale } from "./math";
+import { buildLegs, buildStageKeyframes, cameraRampSchedule, restStageScale } from "./math";
+import { CLAMP_TOL_MS, MOTION, motionName } from "./presets";
+import { DEFAULT_CURSOR } from "./types";
 import type { CaptureLog, TakeComposition } from "./types";
+
+/** Tail past the last beat's settle that still reads as "the shot breathing".
+ *  Beyond it the delivered mp4 is a frozen screen — the padded-to-25s failure. */
+const DEAD_TAIL_MS = 2500;
+/** A dwell-delayed pull-out lands a little after its own action BY DESIGN, and
+ *  a tail of a few frames is invisible (the spring has all but arrived). The
+ *  artifact is a camera that has barely LEFT when the action fires — so gate on
+ *  both an absolute floor and the fraction of the ramp still to run. */
+const MOVING_AT_ACTION_MS = 150;
+const MOVING_AT_ACTION_FRAC = 0.25;
+/** How far past the SLOWEST shipped pace a camera window may run before it is
+ *  worth a word. Anchored on the preset vocabulary rather than a number
+ *  invented here, so the ceiling tracks the presets if they are ever retuned. */
+const RAMP_SLACK = 2;
+/** A travel clamp binding on the odd short hop is the point of having clamps;
+ *  binding on more than this share of the legs means the speed law (and the
+ *  whole `pace` preset) is not what paces the take. Under CLAMPED_LEGS_MIN legs
+ *  the share says nothing — two clamped legs out of two is a fixture, not a
+ *  finding. */
+const CLAMPED_LEGS_FRAC = 0.5;
+const CLAMPED_LEGS_MIN = 3;
+/** A travel squeezed under this share of what the speed law asked for reads as
+ *  a dart rather than a glide. Paired with an absolute floor so a few-frame
+ *  shortfall on an already-short hop stays quiet. */
+const SQUEEZE_FRAC = 0.7;
+const SQUEEZE_MIN_MS = 200;
 
 export type CompositionIssue = {
   severity: "error" | "warn";
@@ -211,6 +239,87 @@ export function validateComposition(
     }
   }
 
+  // --- cursor motion knobs ---------------------------------------------------
+  // These are plain numbers in the schema and, until here, NOTHING bounded them:
+  // a hand edit (or an agent reaching for "start the zoom earlier" and stretching
+  // the wrong knob) could put the whole take on a crawl with every other check
+  // still passing.
+  //
+  // PRESENT-but-nonsensical is an error: the schedule arithmetic turns it into
+  // NaN keyframes. ABSENT is usually the LEGACY shape — compositions predate
+  // travelWidthsPerSec / travelMin/MaxMs / zoomInMs and the schedule has a
+  // documented fallback for each — so absence is an error only where nothing
+  // can stand in. (A validator that refused to render yesterday's composition
+  // would be a worse bug than the one it catches.)
+  const cur = comp.cursor;
+  type MsKnob =
+    | "travelMs"
+    | "travelMinMs"
+    | "travelMaxMs"
+    | "holdMs"
+    | "zoomInMs"
+    | "zoomOutMs"
+    | "travelWidthsPerSec";
+  const knob = (k: MsKnob, positive: boolean, required: boolean) => {
+    const v: number | undefined = cur[k];
+    if (v == null) {
+      if (required)
+        err(
+          `cursor.${k}`,
+          `${k} is missing and the schedule has no fallback for it`,
+          `set cursor.${k} to the shipped default (${DEFAULT_CURSOR[k]})`,
+        );
+      return;
+    }
+    if (typeof v !== "number" || !Number.isFinite(v) || (positive ? v <= 0 : v < 0))
+      err(
+        `cursor.${k}`,
+        `${k} must be a ${positive ? "positive" : "non-negative"} number (got ${JSON.stringify(v)})`,
+        `restore the shipped default (${DEFAULT_CURSOR[k]})`,
+      );
+  };
+  // The speed law is live only with a positive travelWidthsPerSec; without it
+  // the cursor runs on the fixed travelMs and the clamps are never consulted.
+  const speedLaw = typeof cur.travelWidthsPerSec === "number" && cur.travelWidthsPerSec > 0;
+  knob("holdMs", false, true);
+  knob("zoomOutMs", true, true);
+  knob("zoomInMs", true, false); // absent ⇒ the legacy inAtMs→tMs window
+  knob("travelWidthsPerSec", false, false); // absent/0 ⇒ the documented travelMs fallback
+  knob("travelMs", true, !speedLaw);
+  knob("travelMinMs", false, speedLaw);
+  knob("travelMaxMs", true, speedLaw);
+  if (
+    Number.isFinite(cur.travelMinMs) &&
+    Number.isFinite(cur.travelMaxMs) &&
+    cur.travelMaxMs < cur.travelMinMs
+  )
+    // An inverted band has no coherent answer, and the clamps are applied in
+    // order (floor first — see math.ts travelDur), so every leg lands on one
+    // bound or the other and the ordering INVERTS: a short hop takes the
+    // 800ms floor while a full-frame sweep takes the 400ms ceiling.
+    err(
+      "cursor.travelMaxMs",
+      `travelMaxMs ${cur.travelMaxMs} is below travelMinMs ${cur.travelMinMs} — an inverted band, so every leg is pinned to one bound or the other and SHORT hops (${cur.travelMinMs}ms) end up slower than full-frame sweeps (${cur.travelMaxMs}ms)`,
+      `raise travelMaxMs above travelMinMs (defaults ${DEFAULT_CURSOR.travelMinMs}/${DEFAULT_CURSOR.travelMaxMs})`,
+    );
+  // A punch-in's ramp END is pinned to the action instant, so a LONGER window
+  // means departing EARLIER and creeping — never landing later. Past roughly
+  // twice the slowest shipped pace the settle curve reads as a drift, and
+  // nothing else here catches it (the crowded-release check below only fires on
+  // a ramp that lands LATE).
+  if (cur.zoomInMs > MOTION.calm.zoomInMs * RAMP_SLACK)
+    warn(
+      "cursor.zoomInMs",
+      `zoomInMs ${cur.zoomInMs} is over ${RAMP_SLACK}× the slowest shipped pace (calm = ${MOTION.calm.zoomInMs}) — a punch-in lands ON the action, so this departs that much earlier and creeps in`,
+      `${DEFAULT_CURSOR.zoomInMs} is the frame-measured default; use pace "calm" (${MOTION.calm.zoomInMs}) for a gentler punch`,
+    );
+  if (cur.zoomOutMs > MOTION.calm.zoomOutMs * RAMP_SLACK)
+    warn(
+      "cursor.zoomOutMs",
+      `zoomOutMs ${cur.zoomOutMs} is over ${RAMP_SLACK}× the slowest shipped pace (calm = ${MOTION.calm.zoomOutMs}) — every release drifts out for that long, and the tail must outlast it`,
+      `${DEFAULT_CURSOR.zoomOutMs} is the frame-measured default; use pace "calm" (${MOTION.calm.zoomOutMs}) for a slower release`,
+    );
+
   // camera-rect spring: bounce shapes the ONE ease driving centre+size, so an
   // out-of-range value corrupts every camera move (see math.ts springEase).
   const spring = comp.cursor.zoomSpring;
@@ -253,6 +362,70 @@ export function validateComposition(
       "600-1000 reads as a natural beat; 0 = legacy (depart as soon as the action ends)",
     );
 
+  // SILENT PACE OVERRIDE: travelMinMs/travelMaxMs are applied AFTER the speed
+  // law (math.ts buildLegs), so on the legs they bind it is the clamp — not
+  // travelWidthsPerSec — that sets the duration. travelWidthsPerSec is what a
+  // `pace` preset moves and travelMin/MaxMs are NOT in the preset, so a take
+  // whose legs are mostly clamped answers a pace change with a shrug. Nothing
+  // in the JSON shows this; only the legs do.
+  if (cur.travelWidthsPerSec > 0 && issues.every((i) => i.severity !== "error")) {
+    try {
+      const travels = buildLegs(comp).filter((l) => !l.drag);
+      const pace = motionName(cur);
+      // RUSHED TRAVEL: a leg is bounded on the left by the previous beat's
+      // action end, so a beat that runs late (or a settleMs too short to hold
+      // the glide that follows it) squeezes the move into whatever is left and
+      // the cursor darts. This is the cursor's twin of the crowded-release
+      // check below, and like it the fix is in the RECORDING: nothing in the
+      // composition can widen a gap the capture never left.
+      const shortfall = (l: (typeof travels)[number]) => (l.wantSec ?? 0) - (l.t1 - l.t0);
+      const squeezed = travels
+        .filter(
+          (l) =>
+            l.wantSec != null &&
+            l.t1 - l.t0 < l.wantSec * SQUEEZE_FRAC &&
+            shortfall(l) > SQUEEZE_MIN_MS / 1000,
+        )
+        .sort((a, b) => shortfall(b) - shortfall(a));
+      const worst = squeezed[0];
+      if (worst) {
+        const got = Math.round((worst.t1 - worst.t0) * 1000);
+        const want = Math.round((worst.wantSec ?? 0) * 1000);
+        const prev = worst.evIdx != null ? events[worst.evIdx - 1] : undefined;
+        warn(
+          `events[${worst.evIdx}]`,
+          `${squeezed.length === 1 ? "this beat's" : `${squeezed.length} beats' travel is rushed; the worst`} approach gets ${got}ms of the ${want}ms the speed law asks for — the cursor darts in${prev ? ` because events[${worst.evIdx! - 1}] (${prev.kind}) is still running until ${prev.tMs + (prev.durationMs ?? 0)}ms` : " because the take starts too close to it"}`,
+          prev
+            ? `raise the previous step's settleMs by ≥ ${want - got}ms and re-\`make\` — the gap is in the CAPTURE, no cursor knob can widen it`
+            : `add a leading \`wait\` (or move \`start\` closer) and re-\`make\` — the opening sweep has no room`,
+        );
+      }
+      for (const which of ["min", "max"] as const) {
+        const n = travels.filter((l) => l.clamped === which).length;
+        if (travels.length < CLAMPED_LEGS_MIN || n <= travels.length * CLAMPED_LEGS_FRAC) continue;
+        const field = which === "min" ? "travelMinMs" : "travelMaxMs";
+        // A clamp at ITS PACE'S value is not an override — it IS the pace, it
+        // was tuned with the rest of the bundle, and re-pacing moves those legs
+        // like any other. Only a clamp somebody HAND-SET away from the pace
+        // overrides it, and only then is there anything to say. (Before the
+        // clamps joined MOTION every clamped leg really was deaf to the pace,
+        // and this warning said so; saying it now would be false.)
+        const shipped = pace ? MOTION[pace] : DEFAULT_CURSOR;
+        // Same tolerance motionName uses, so the two can never disagree: a
+        // value near enough to keep the pace's NAME is near enough to be the
+        // pace, and must not be reported as overriding it.
+        if (Math.abs(cur[field] - shipped[field]) < CLAMP_TOL_MS) continue;
+        warn(
+          `cursor.${field}`,
+          `${n} of ${travels.length} travel legs are ${which === "min" ? "floored at" : "capped at"} a hand-set cursor.${field} of ${cur[field]}ms — on those the clamp sets the duration, not cursor.travelWidthsPerSec${pace ? `, so they no longer move with the "${pace}" pace (which ships ${shipped[field]}ms)` : ""}`,
+          `restore cursor.${field} to ${shipped[field]}${pace ? ` (the "${pace}" pace's own value)` : " (the shipped default)"} to put those legs back under the speed law — or keep it, if they are meant to read as ${which === "min" ? "darts" : "one steady sweep"}`,
+        );
+      }
+    } catch {
+      /* never let a diagnostics pass throw */
+    }
+  }
+
   // tail: the composition must outlast the last action (+ a little settle)
   if (comp.durationMs < lastEnd)
     err(
@@ -266,6 +439,80 @@ export function validateComposition(
       `only ${comp.durationMs - lastEnd}ms after the last action — the final zoom-out may be cut`,
       `allow ≥ ${comp.cursor.zoomOutMs}ms (cursor.zoomOutMs) of tail`,
     );
+  // …and the mirror image: a tail so long the delivered mp4 ends on a frozen
+  // screen. The classic cause is padding a plan with trailing `wait`s to hit a
+  // "~25s" target — the capture keeps rolling long after the last payoff has
+  // settled and nothing on screen changes again. Cheap to fix (durationMs is
+  // render-only), invisible to an agent that never watches the tail.
+  else if (events.length) {
+    const settledEnd = lastEnd + comp.cursor.holdMs + comp.cursor.zoomOutMs;
+    if (comp.durationMs > settledEnd + DEAD_TAIL_MS)
+      warn(
+        "durationMs",
+        `${((comp.durationMs - settledEnd) / 1000).toFixed(1)}s of tail after the last beat settles — the delivered video ends on a frozen screen`,
+        `trim durationMs to ≈ ${Math.round(settledEnd)}, or add a beat that earns the time`,
+      );
+  }
+
+  // CROWDED RELEASE: the camera should be PARKED at the instant an action
+  // fires. A release (a zoomed beat followed by a full-view one) needs
+  // pullOutDwellMs + zoomOutMs of room after the previous beat's payoff
+  // settles; when the gap is tighter the schedule keeps the ramp and lands it
+  // LATE — deliberately, because fleeing a frame the viewer is still reading is
+  // worse — and the frame slides out from under the next click. That trade is
+  // right given the recording, but the recording is the thing to fix, so say
+  // so. (A zoom-enabled `press` is reveal-timed by construction: it departs AT
+  // the keypress and rides the reveal in, so its late landing is the design.)
+  if (issues.every((i) => i.severity !== "error")) {
+    try {
+      const sched = cameraRampSchedule(comp);
+      const room = (comp.cursor.pullOutDwellMs ?? 0) + comp.cursor.zoomOutMs;
+      for (let i = 0; i < events.length; i++) {
+        const e = events[i]!;
+        const r = sched[i];
+        if (!r) continue;
+        const rampMs = r.landMs - r.startMs;
+        // OVER-LONG WINDOW: the ramp a beat actually gets is inAtMs → its
+        // landing, so a hand-set inAtMs — not cursor.zoomInMs — is what makes a
+        // multi-second creep. The usual cause is reading "start the zoom
+        // earlier" as "start it much earlier": the landing is pinned to the
+        // action, so the only thing that moves is how slowly it gets there.
+        // Only HAND-SET windows are flagged; the planner's own default is
+        // clamped at 0 for an early first beat and that is by design.
+        const nominal = r.pullOut ? comp.cursor.zoomOutMs : comp.cursor.zoomInMs;
+        const handSet = Math.abs(e.zoom.inAtMs - Math.max(0, e.tMs - comp.cursor.zoomInMs)) >= 1;
+        if (handSet && nominal > 0 && rampMs > nominal * RAMP_SLACK)
+          warn(
+            `events[${i}].zoom.inAtMs`,
+            `this beat's camera window runs ${Math.round(rampMs)}ms — ${(rampMs / nominal).toFixed(1)}× cursor.${r.pullOut ? "zoomOutMs" : "zoomInMs"} (${nominal}ms) — so the camera departs at ${Math.round(r.startMs)}ms and creeps to the action instead of moving at the take's pace`,
+            `set inAtMs = ${Math.max(0, e.tMs - comp.cursor.zoomInMs)} (tMs − cursor.zoomInMs) and change cursor.${r.pullOut ? "zoomOutMs" : "zoomInMs"} if the RAMP itself should be slower`,
+          );
+        if (e.kind === "press") continue;
+        const lateMs = Math.round(r.landMs - e.tMs);
+        if (lateMs <= MOVING_AT_ACTION_MS) continue;
+        if (!(rampMs > 0) || lateMs / rampMs <= MOVING_AT_ACTION_FRAC) continue;
+        const prev = events[i - 1];
+        const prevEnd = prev ? prev.tMs + (prev.durationMs ?? 0) : 0;
+        // The dwell floor can push the departure past the action entirely, and
+        // then "% of the move done" is negative — a fraction that cannot
+        // describe a camera which has not left yet. Say the stronger thing.
+        const doneFrac = 1 - lateMs / rampMs;
+        const progress =
+          doneFrac > 0
+            ? `has only ${Math.round(doneFrac * 100)}% of its move done`
+            : "has not even departed";
+        warn(
+          `events[${i}].zoom`,
+          `the camera ${progress} when this beat's action fires (departs ${Math.round(r.startMs)}ms, lands ${Math.round(r.landMs)}ms, action ${e.tMs}ms) — the frame slides out from under it${prev ? `; the previous beat settles only ${Math.round(e.tMs - prevEnd)}ms earlier` : ""}`,
+          prev
+            ? `hold the frame — copy events[${i - 1}].zoom onto this beat so the camera never moves at the action; or re-capture with ≥ ${room}ms of settle on events[${i - 1}] (cursor.pullOutDwellMs + cursor.zoomOutMs)`
+            : `re-capture with more lead-in before this beat, or set zoom.enabled=false`,
+        );
+      }
+    } catch {
+      /* never let a diagnostics pass throw */
+    }
+  }
 
   // A dwell-delayed final pull-out can land LATER than the legacy tail math
   // above assumes — check the actual schedule, not the formula. (Guarded: the

@@ -115,6 +115,19 @@ the app's signature moment; make the wow the hero, not an afterthought.
   bbox, so zooming would frame the wrong place). A `never` beat RELEASES any
   prior zoom — the camera pulls back to full view for it, so a global payoff
   after a zoomed beat is shown whole.
+- **HOLD THE FRAME when a beat CONFIRMS the one before it.** Type a project
+  name → click Deploy. Type a query → click Search. Fill a field → click Save.
+  The click's payoff is global, so `"never"` looks right — but `never` releases
+  the camera *at the instant of the click*, and the frame slides out from under
+  the very action the viewer came to see. It reads as panicky, and it is the
+  most common camera mistake in a form demo. Instead, give the confirming beat
+  the SAME framing as the setup beat: copy `events[n-1].zoom`'s `center` and
+  `scale` onto it in the composition (leave `inAtMs` at the planner default).
+  Identical framings mean **no camera move at all** — the shot is dead still
+  through the click, which is exactly what the product launch videos this
+  imitates do. Release to full view on the NEXT beat, once the global payoff
+  has actually appeared on screen. The validator flags the unheld case:
+  *"the camera has only N% of its move done when this beat's action fires"*.
 - For a **`drag`**, the engine fits the zoom to the **whole stroke's bounding
   box** (a path, not a point). A big cross-canvas stroke fills the frame already
   → `"auto"` keeps it full-view (correct). A small, localized drag → `"auto"`
@@ -134,6 +147,18 @@ the app's signature moment; make the wow the hero, not an afterthought.
   — a measured run's hero beat read as a pointless pull-back until its zoom
   was hand-set to 1.75×. For fine-text payoffs, hand-set that beat's
   `zoom.scale` toward medium/tight (1.5–1.8) so the text itself reads.
+- **Frame the CONTAINER, not the control.** The auto-camera fits the changed
+  region — for a `type` beat that's the input and the text appearing in it. A
+  field sitting in the right half of a dialog therefore yields a frame centred
+  on the field, with the card's other edge *cropped off* and empty page on the
+  opposite side. Whenever the beat's meaning includes its surroundings (the
+  form's label, its primary button, the dialog it lives in), hand-set that
+  beat's `zoom.center`/`scale` to the CONTAINER's box instead:
+  `center = {x: box.x+box.w/2, y: box.y+box.h/2}`, `scale =
+  min(1920/(box.w·1.15), 1080/(box.h·1.15))`. Read the container's box off a
+  full-res capture frame (`ffmpeg -ss <t> -i <base>.capture.mp4 -frames:v 1
+  -vf scale=<viewportW>:<viewportH> f.png`) — that frame is in viewport px, the
+  same space `zoom.center` uses.
 - Restraint reads as intentional. Reserve zoom for the beats that earn it; many
   great demos are 0-zoom. Don't add a zoom for "variety."
 
@@ -513,7 +538,9 @@ capture-lock). Warnings (a no-op zoom, a soft-cap scale) print but don't block.
   the first beat's `zoom.inAtMs` (the validator warns past that).
 - *"gentler / faster zoom"* → `cursor.zoomInMs` / `zoomOutMs` (bigger = slower
   ramp; defaults 730/1340 are frame-measured off a reference recorder — pull-outs are
-  deliberately ~1.8× slower). The default CURVE is a critically-damped spring
+  deliberately ~1.8× slower). Past **2× the slowest pace** (`calm` = 900/1650)
+  these warn: a ramp LANDS on its action, so a longer window only moves the
+  departure earlier and the camera creeps. The default CURVE is a critically-damped spring
   (the measured premium feel); `cursor.zoomSpring: 0.05–0.3` adds a touch of
   overshoot/snap. A composition carrying the legacy `cursor.zoomEase` (bezier)
   keeps it until you delete the key, set `zoomSpring`, or apply a pace preset —
@@ -597,10 +624,44 @@ capture-lock). Warnings (a no-op zoom, a soft-cap scale) print but don't block.
 - One strong closer (a result, a completed action, a striking page/state).
 - **~25s is a target, not a floor.** A tight, all-signal 12–18s draft beats a
   padded 25s. Snappy beats read better than long holds.
-- Don't click things that navigate away from the app (external links) — they
-  break the demo.
+- **Never pad to length with trailing `wait`s.** A long wait after the last
+  payoff delivers a frozen screen, not a closer — and it is invisible unless
+  you watch the tail (the contact sheet's last row exists for exactly this).
+  If a beat has to wait on a slow backend, the wait is *capture* (so the
+  recording has real pixels to show), but the delivered length is *composition*:
+  trim `durationMs` back to about the last beat's settle. The validator warns
+  (`Xs of tail after the last beat settles — the delivered video ends on a
+  frozen screen`). If the wait is genuinely long, put a BEAT in it — a camera
+  move onto whatever the app is doing meanwhile beats a static hold.
+- **A demo that spans two pages is ONE take — use `navigate`.** Same tab, so the
+  recording is continuous, the camera is at rest across the seam by
+  construction, and you get one `composition.json` to refine instead of two
+  plus a concat. Use it whenever the second page is reachable as a URL, even if
+  you can't know that URL when you write the plan (`hrefFrom` reads it off the
+  page at capture time).
+- **Two takes only when one browser genuinely cannot do it.** The real case is
+  a change of IDENTITY: take A runs `--profile me` (logged in) and take B must
+  be anonymous to prove the thing is publicly live. One take = one browser
+  launch = one profile, so that one is a real split. Then: shoot each, join them
+  (`ffmpeg concat`), and cut on two FULL-VIEW frames — cutting into a *zoomed*
+  frame reads as a glitch, not an edit, because the viewer has no way to tell a
+  new scene from a camera jump. Trim the outgoing take to just after its payoff
+  settles and let the incoming take open at rest.
+- Don't click things that navigate away from the app (external links). If you
+  *want* to go somewhere, say so with `navigate` — an accidental jump mid-beat
+  leaves the rest of the plan pointing at a page that no longer exists.
 
 ## Known limits (don't be surprised; flag when they bite the story)
+- **A new tab/window is invisible to the recording.** The screencast is bound to
+  ONE page target, so a `target="_blank"` link, a popup, or an OAuth window is
+  simply not filmed — the video keeps showing the old page while the action
+  happens somewhere you can't see. Don't click those. When the destination is
+  what you want, take the same href in the tab you're already recording:
+  `{ "action": "navigate", "hrefFrom": { "text": "<the link>" } }`.
+- **One take = one browser = one auth profile.** `--profile` is chosen at
+  launch, so a demo that must be logged in for one half and anonymous for the
+  other is genuinely two takes (see the editorial note above). Everything else
+  about "spanning two pages" is `navigate`, not a split.
 - **Hover-TRACKING effects aren't capturable.** The synthetic cursor dispatches
   input at each beat's target, not continuously along its travel — an effect
   that FOLLOWS the mouse (an outline tracking the pointer, a magnetic hover, a
