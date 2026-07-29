@@ -17,6 +17,7 @@ import { dirname, resolve } from "node:path";
 import {
   type CaptureLog,
   type CompEvent,
+  type CompositionIssue,
   FINISH,
   type FinishName,
   LOOKS,
@@ -187,7 +188,7 @@ export type ReviewOpts = {
 export async function renderReview(
   take: TakePaths,
   opts: ReviewOpts = {},
-): Promise<{ reviewPath: string; sheet: string }> {
+): Promise<{ reviewPath: string; sheet: string; warnings: CompositionIssue[] }> {
   await requireTakeFiles(take, { capture: true });
   const comp = JSON.parse(await readFile(take.compositionPath, "utf8")) as TakeComposition;
   const captureLog = await loadLogSibling(take.capturePath);
@@ -196,7 +197,7 @@ export async function renderReview(
     ...toDraft(comp),
     review: { watermark: "REVIEW", badges: buildBadges(comp) },
   };
-  await renderTake({
+  const { warnings } = await renderTake({
     composition: decorated,
     videoPath: take.capturePath,
     outPath: take.reviewPath,
@@ -205,7 +206,7 @@ export async function renderReview(
     chromePath,
     writeCompositionSibling: false,
   });
-  return { reviewPath: take.reviewPath, sheet: buildBeatSheet(comp, take.name) };
+  return { reviewPath: take.reviewPath, sheet: buildBeatSheet(comp, take.name), warnings };
 }
 
 /** Draft-quality re-render of the CURRENT composition to `<base>.draft.mp4` —
@@ -215,12 +216,12 @@ export async function renderReview(
 export async function renderDraft(
   take: TakePaths,
   opts: ReviewOpts = {},
-): Promise<{ draftPath: string }> {
+): Promise<{ draftPath: string; warnings: CompositionIssue[] }> {
   await requireTakeFiles(take, { capture: true });
   const comp = JSON.parse(await readFile(take.compositionPath, "utf8")) as TakeComposition;
   const captureLog = await loadLogSibling(take.capturePath);
   const chromePath = await ensureChrome(opts.chromePath);
-  await renderTake({
+  const { warnings } = await renderTake({
     composition: toDraft(comp),
     videoPath: take.capturePath,
     outPath: take.draftPath,
@@ -229,7 +230,7 @@ export async function renderDraft(
     chromePath,
     writeCompositionSibling: false,
   });
-  return { draftPath: take.draftPath };
+  return { draftPath: take.draftPath, warnings };
 }
 
 // --- A/B variant reels -------------------------------------------------------

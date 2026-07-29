@@ -20,6 +20,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
   type CaptureLog,
+  type CompositionIssue,
   type PlanOpts,
   type TakeComposition,
   planComposition,
@@ -137,6 +138,11 @@ export type MakeTakeResult = {
   /** set when a `<canvas>`/`<video>` dominated the frame — the settle probe
    *  is blind inside one, so a quiet run proves nothing about those beats. */
   paintedFrac?: number;
+  /** non-fatal validator findings on the rendered composition. Printed at the
+   *  render boundary too, but that line is minutes deep in the progress output
+   *  by the time the run ends — surface these in the end-of-run summary the
+   *  same way `skipped` is, or they get scrolled past and ship. */
+  warnings: CompositionIssue[];
 };
 
 /** `<out>.mp4` → `<out>.capture.mp4` — the raw recording kept beside the
@@ -211,7 +217,7 @@ export async function makeTake(plan: TakePlan, opts: MakeTakeOpts): Promise<Make
       ? { ...opts.planOpts, output: { ...opts.planOpts?.output, fps: captureFps } }
       : opts.planOpts;
   const composition = planComposition(log, planOpts);
-  const { mp4Path, compositionPath } = await renderTake({
+  const { mp4Path, compositionPath, warnings } = await renderTake({
     // A draft take renders fast (30fps cap + no blur) but PLANS at full
     // quality: the sibling written below keeps the real settings, so the
     // closing `render` masters this same take without a re-make.
@@ -234,6 +240,7 @@ export async function makeTake(plan: TakePlan, opts: MakeTakeOpts): Promise<Make
     skipped: log.skipped ?? [],
     settleWaits: log.settleWaits ?? [],
     ...(log.paintedFrac != null ? { paintedFrac: log.paintedFrac } : {}),
+    warnings,
   };
 }
 
@@ -265,7 +272,7 @@ export type RenderCompositionOpts = {
  *  capture-locked tMs drift when `captureLog` is supplied. */
 export async function renderComposition(
   opts: RenderCompositionOpts,
-): Promise<{ mp4Path: string; compositionPath: string }> {
+): Promise<{ mp4Path: string; compositionPath: string; warnings: CompositionIssue[] }> {
   const chromePath = await ensureChrome(opts.chromePath);
   return renderTake({
     composition: opts.composition,
@@ -293,7 +300,7 @@ export async function renderCompositionFile(opts: {
   logProgress?: boolean;
   chromePath?: string;
   onProgress?: (progress: number) => void;
-}): Promise<{ mp4Path: string; compositionPath: string }> {
+}): Promise<{ mp4Path: string; compositionPath: string; warnings: CompositionIssue[] }> {
   const composition = JSON.parse(
     await readFile(resolve(opts.compositionPath), "utf8"),
   ) as TakeComposition;

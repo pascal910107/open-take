@@ -12,7 +12,7 @@ export * from "./presets";
 export { resolveFfmpeg, resolveFfprobe } from "./ffmpeg";
 export { planComposition, type PlanOpts } from "./plan";
 export { directCamera, type Beat, type Framing } from "./camera";
-export { renderTake, type RenderTakeOpts } from "./render";
+export { renderTake, type RenderTakeOpts, type RenderTakeResult } from "./render";
 export {
   validateComposition,
   formatIssues,

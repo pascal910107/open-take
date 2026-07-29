@@ -78,6 +78,16 @@ export type RenderTakeOpts = {
   writeCompositionSibling?: boolean;
 };
 
+export type RenderTakeResult = {
+  mp4Path: string;
+  compositionPath: string;
+  /** non-fatal validator findings for this composition. The render went ahead,
+   *  but each one is something the author has to look at — a zoom that punches
+   *  into empty space, a press whose zoom departs before the keypress, a tail
+   *  that delivers a frozen screen. Empty when `skipValidate` is set. */
+  warnings: CompositionIssue[];
+};
+
 function run(cmd: string, args: string[]): Promise<void> {
   return new Promise((res, rej) => {
     const c = spawn(cmd, args, { stdio: ["ignore", "ignore", "pipe"] });
@@ -240,9 +250,7 @@ async function prepareScratch(composition: TakeComposition, videoPath: string): 
 // needs the renderer off cwd, or one child process per render.)
 let renderQueue: Promise<unknown> = Promise.resolve();
 
-export async function renderTake(
-  opts: RenderTakeOpts,
-): Promise<{ mp4Path: string; compositionPath: string }> {
+export async function renderTake(opts: RenderTakeOpts): Promise<RenderTakeResult> {
   const run = renderQueue.then(
     () => renderTakeExclusive(opts),
     () => renderTakeExclusive(opts),
@@ -251,9 +259,7 @@ export async function renderTake(
   return run;
 }
 
-async function renderTakeExclusive(
-  opts: RenderTakeOpts,
-): Promise<{ mp4Path: string; compositionPath: string }> {
+async function renderTakeExclusive(opts: RenderTakeOpts): Promise<RenderTakeResult> {
   if (!opts.chromePath) {
     throw new Error(
       "renderTake: `chromePath` is required; use @open-take/runtime to resolve managed Chrome automatically",
@@ -272,14 +278,19 @@ async function renderTakeExclusive(
   // 0. validate BEFORE the expensive render. A hand-edited composition (the
   //    refine loop) can carry a malformed zoom or a capture-locked tMs drift;
   //    catch it in milliseconds rather than after a multi-second render.
+  //    Warnings are RETURNED as well as printed: this stderr line lands minutes
+  //    before the render finishes, so on its own it is scrolled past — the
+  //    caller re-prints them in the end-of-run summary, exactly as it already
+  //    does for skipped capture steps.
+  const warnings: CompositionIssue[] = [];
   if (!opts.skipValidate) {
     const issues: CompositionIssue[] = validateComposition(composition, {
       captureLog: opts.captureLog ?? opts.log,
     });
     const errors = issues.filter((i) => i.severity === "error");
-    const warns = issues.filter((i) => i.severity === "warn");
-    if (opts.logProgress && warns.length)
-      process.stderr.write(`composition warnings:\n${formatIssues(warns)}\n`);
+    warnings.push(...issues.filter((i) => i.severity === "warn"));
+    if (opts.logProgress && warnings.length)
+      process.stderr.write(`composition warnings:\n${formatIssues(warnings)}\n`);
     if (errors.length)
       throw new Error(
         `composition has ${errors.length} error(s) — refusing to render:\n${formatIssues(errors)}`,
@@ -375,7 +386,7 @@ async function renderTakeExclusive(
       await writeFile(compositionPath, JSON.stringify(persisted, null, 2));
     }
 
-    return { mp4Path: resolve(opts.outPath), compositionPath };
+    return { mp4Path: resolve(opts.outPath), compositionPath, warnings };
   } finally {
     await cleanupScratch(scratch);
   }

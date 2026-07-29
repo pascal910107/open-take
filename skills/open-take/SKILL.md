@@ -300,8 +300,16 @@ it in the editor).
    `npx open-take ab demo.mp4 --before-after` replays
    BEFORE then AFTER (twice) straight from the two files, no render.
 4. **Failures become handoff, not dead ends.** A validator refusal prints the
-   field + fix — relay it and apply the fix; never bypass validation.
-5. **The closing ritual.** On "好了" / "done": one full-quality master render,
+   field + fix — relay it and apply the fix; never bypass validation. **A
+   validator *warning* is not a refusal, and it is not noise.** Every render
+   ends with `⚠ n composition warnings` in the summary when there are any —
+   read them. A zoom that "punches into empty space", a press zoom that departs
+   before the keypress, a tail that delivers a frozen screen: each one is a
+   defect a viewer will see, and each has shipped before because the warning
+   was printed at the START of a multi-minute render and got scrolled past.
+   Fix it or say out loud why you're keeping it. Never post over one silently.
+5. **The closing ritual.** On "done" / "ship it" (in any language): one
+   full-quality master render,
    reveal it, and print the ready line — nothing else. In the draft-first loop
    this is the ONE place the 60fps + motion-blur master gets paid for:
    ```

@@ -14,9 +14,11 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   SAY_IT_CARD,
+  type CompositionIssue,
   type TakePlan,
   authProfile,
   buildBeatSheet,
+  formatIssues,
   inspectPage,
   makeTake,
   profileDir,
@@ -232,6 +234,20 @@ async function readyLine(mp4Path: string): Promise<string> {
   return `${mp4Path} · ${seconds.toFixed(1)}s · ${comp.output.width}×${comp.output.height}@${comp.output.fps} · ${fmtBytes(size)}`;
 }
 
+/** Re-print the validator's non-fatal findings in the SUMMARY. renderTake
+ *  already writes them to stderr, but that happens BEFORE the render — by the
+ *  time the run ends they are minutes deep under progress output and get
+ *  scrolled past, which is how a "punches into empty space" warning once
+ *  shipped a finale that cropped the app. Same treatment as skipped steps. */
+function printWarnings(warnings: CompositionIssue[] | undefined): void {
+  if (!warnings?.length) return;
+  process.stdout.write(
+    `\n⚠ ${warnings.length} composition warning${warnings.length === 1 ? "" : "s"}:\n` +
+      `${formatIssues(warnings)}\n` +
+      `the render went ahead — but look at each one before you post this\n`,
+  );
+}
+
 async function main() {
   if (cmd) rejectUnknownFlags(cmd);
   // The vendored renderer forwards page-console noise ("Worker 0: JSHandle:…")
@@ -359,6 +375,7 @@ async function main() {
       skipped,
       settleWaits,
       paintedFrac,
+      warnings,
     } = made;
     const draftNote = has("--draft")
       ? ` (DRAFT quality — \`${INVOKE} render ${mp4Path}\` masters it)`
@@ -382,6 +399,7 @@ async function main() {
         `  ${INVOKE} beats  ${mp4Path}            (the numbered beat sheet)\n` +
         `  ${INVOKE} ab     ${mp4Path} --set zoom=light,tight --beat 2   (taste A/B)\n`,
     );
+    printWarnings(warnings);
     // dropped steps reach the SUMMARY (not just an early stderr line buried
     // under render progress), and --strict turns them into the exit code.
     if (skipped.length) {
@@ -450,7 +468,7 @@ async function main() {
         ? await stagePrev(take.mp4Path, take.prevPath)
         : { commit: async () => {}, abort: async () => {} };
       try {
-        const { mp4Path } = await renderCompositionFile({
+        const { mp4Path, warnings } = await renderCompositionFile({
           compositionPath,
           capturePath: video,
           outPath: out,
@@ -459,6 +477,7 @@ async function main() {
         });
         await staged.commit();
         process.stdout.write(`\nmp4: ${mp4Path}\n`);
+        printWarnings(warnings);
         if (has("--open")) openPath(mp4Path);
         if (has("--reveal")) revealPath(mp4Path);
       } catch (e) {
@@ -473,18 +492,18 @@ async function main() {
     const take = await resolveTakePaths(takeArg);
 
     if (has("--review")) {
-      const { reviewPath, sheet } = await renderReview(take, { logProgress: true });
+      const { reviewPath, sheet, warnings } = await renderReview(take, { logProgress: true });
       process.stdout.write(`\n${sheet}\n\nreview copy: ${reviewPath}\n`);
+      printWarnings(warnings);
       if (has("--reveal")) revealPath(reviewPath);
       else if (!has("--no-open")) openPath(reviewPath);
       return;
     }
 
     if (has("--draft")) {
-      const { draftPath } = await renderDraft(take, { logProgress: true });
-      process.stdout.write(
-        `\ndraft: ${draftPath}\n  check it: ${INVOKE} frames ${draftPath}\n`,
-      );
+      const { draftPath, warnings } = await renderDraft(take, { logProgress: true });
+      process.stdout.write(`\ndraft: ${draftPath}\n  check it: ${INVOKE} frames ${draftPath}\n`);
+      printWarnings(warnings);
       if (has("--reveal")) revealPath(draftPath);
       else if (has("--open")) openPath(draftPath);
       return;
@@ -493,7 +512,7 @@ async function main() {
     await requireTakeFiles(take, { capture: true });
     const staged = await stagePrev(take.mp4Path, take.prevPath);
     try {
-      const { mp4Path } = await renderCompositionFile({
+      const { mp4Path, warnings } = await renderCompositionFile({
         compositionPath: take.compositionPath,
         capturePath: take.capturePath,
         outPath: take.mp4Path,
@@ -501,6 +520,7 @@ async function main() {
       });
       await staged.commit();
       process.stdout.write(`\nready: ${await readyLine(mp4Path)}\n`);
+      printWarnings(warnings);
       if (has("--open")) openPath(mp4Path);
       if (has("--reveal")) revealPath(mp4Path);
     } catch (e) {
