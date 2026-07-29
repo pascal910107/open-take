@@ -40,7 +40,13 @@ export function zoomLevelName(scale: number, tol = 0.07): ZoomLevelName | null {
 // default state speakable.
 export type MotionPreset = Pick<
   CursorConfig,
-  "travelWidthsPerSec" | "holdMs" | "zoomInMs" | "zoomOutMs" | "pullOutDwellMs"
+  | "travelWidthsPerSec"
+  | "travelMinMs"
+  | "travelMaxMs"
+  | "holdMs"
+  | "zoomInMs"
+  | "zoomOutMs"
+  | "pullOutDwellMs"
 > & { zoomEase?: undefined };
 // zoomIn/zoomOut anchored to the measured reference springs (730/1340 —
 // see DEFAULT_CURSOR); calm/brisk scale both while keeping out ≈ 1.8× in.
@@ -50,9 +56,19 @@ export type MotionPreset = Pick<
 // leaves the key undefined; JSON drops it) so applying a pace migrates an old
 // composition onto the default measured-SS spring curve instead of silently
 // keeping the old bezier.
+//
+// The TRAVEL CLAMPS ride along too, and they have to. They are applied AFTER
+// travelWidthsPerSec, so a preset that moved only the speed left every clamped
+// leg exactly where it was: below ~202px and above ~571px of a 1920 frame,
+// "calm" and "brisk" rendered IDENTICALLY and nothing said so. Each clamp
+// scales by the pace's own speed ratio against natural (300·0.35/0.28 = 375,
+// 850·0.35/0.45 = 661…), so a leg on a clamp keeps the same relationship to
+// the legs that aren't.
 export const MOTION: Record<"calm" | "natural" | "brisk", MotionPreset> = {
   calm: {
     travelWidthsPerSec: 0.28,
+    travelMinMs: 375,
+    travelMaxMs: 1060,
     holdMs: 1500,
     zoomInMs: 900,
     zoomOutMs: 1650,
@@ -61,6 +77,8 @@ export const MOTION: Record<"calm" | "natural" | "brisk", MotionPreset> = {
   },
   natural: {
     travelWidthsPerSec: 0.35,
+    travelMinMs: 300,
+    travelMaxMs: 850,
     holdMs: 1100,
     zoomInMs: 730,
     zoomOutMs: 1340,
@@ -69,6 +87,8 @@ export const MOTION: Record<"calm" | "natural" | "brisk", MotionPreset> = {
   },
   brisk: {
     travelWidthsPerSec: 0.45,
+    travelMinMs: 235,
+    travelMaxMs: 660,
     holdMs: 750,
     zoomInMs: 550,
     zoomOutMs: 1000,
@@ -78,6 +98,15 @@ export const MOTION: Record<"calm" | "natural" | "brisk", MotionPreset> = {
 };
 export type MotionName = keyof typeof MOTION;
 
+/** A clamp matches its preset — or the LEGACY value every composition carried
+ *  before the clamps joined the presets. Without that second door, applying
+ *  "brisk" to an old take and re-reading it would report "custom" purely
+ *  because the take predates clamp-aware presets. Same escape hatch
+ *  pullOutDwellMs already has. */
+export const CLAMP_TOL_MS = 20;
+const clampMatches = (v: number | undefined, want: number, legacy: number): boolean =>
+  v == null || Math.abs(v - want) < CLAMP_TOL_MS || Math.abs(v - legacy) < 1;
+
 export function motionName(cursor: CursorConfig): MotionName | null {
   for (const [name, m] of Object.entries(MOTION) as [MotionName, MotionPreset][]) {
     if (
@@ -85,6 +114,8 @@ export function motionName(cursor: CursorConfig): MotionName | null {
       Math.abs(cursor.holdMs - m.holdMs) < 60 &&
       Math.abs(cursor.zoomInMs - m.zoomInMs) < 60 &&
       Math.abs(cursor.zoomOutMs - m.zoomOutMs) < 60 &&
+      clampMatches(cursor.travelMinMs, m.travelMinMs, MOTION.natural.travelMinMs) &&
+      clampMatches(cursor.travelMaxMs, m.travelMaxMs, MOTION.natural.travelMaxMs) &&
       // absent = a pre-dwell composition — still nameable by its four legacy
       // knobs; only an explicit different value makes the pace "custom".
       (cursor.pullOutDwellMs == null ||

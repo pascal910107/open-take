@@ -58,6 +58,10 @@ test("travel is distance-aware: speed held ~constant, clamped to [min,max]", () 
   );
   // Pin the cursor model so the test is independent of DEFAULT_CURSOR tuning.
   Object.assign(comp.cursor, { travelWidthsPerSec: 0.3, travelMinMs: 300, travelMaxMs: 1400 });
+  // ...and hold the camera at REST so this test covers the DISTANCE law alone.
+  // Travel is also zoom-aware (a punched-in camera stretches the same video-px
+  // move over more of the delivered frame) — that factor gets its own test below.
+  for (const e of comp.events) e.zoom.enabled = false;
   const legs = buildLegs(comp);
   const dur = (i: number) => legs[i]!.t1 - legs[i]!.t0;
   assert.ok(Math.abs(dur(0) - 0.3) < 0.02, `short hop floored to min (got ${dur(0).toFixed(3)}s)`);
@@ -68,6 +72,228 @@ test("travel is distance-aware: speed held ~constant, clamped to [min,max]", () 
     `mid travel scales with distance (got ${dur(2).toFixed(3)}s)`,
   );
   assert.ok(dur(0) < dur(2) && dur(2) < dur(1), "duration grows with distance");
+});
+
+test("travel is zoom-aware: a punched-in camera stretches the same move", () => {
+  // "On-screen speed" is what the VIEWER reads, and the viewer reads the
+  // DELIVERED frame — not the raw recording. The same hop, twice: camera at
+  // rest, then punched in. The invariant is the on-screen DISTANCE, so the two
+  // legs must cover the same amount of delivered frame — else a 2x punch-in
+  // reads ~2x too fast precisely where the viewer is looking closest.
+  const mk = (zoomed: boolean) => {
+    const comp = planComposition(
+      log([{ kind: "click", x: 200, y: 260, box: { x: 180, y: 240, w: 40, h: 40 }, tMs: 6000 }]),
+    );
+    // Cap out of the way — this test is about the speed law, not the clamps.
+    Object.assign(comp.cursor, { travelWidthsPerSec: 0.3, travelMinMs: 300, travelMaxMs: 5000 });
+    const e = comp.events[0]!;
+    e.zoom = zoomed
+      ? { ...e.zoom, enabled: true, scale: 2, center: { x: 200, y: 260 } }
+      : { ...e.zoom, enabled: false };
+    return comp;
+  };
+  const rest = mk(false);
+  const zoom = mk(true);
+  const leg = (c: ReturnType<typeof mk>) => buildLegs(c)[0]!;
+  const dur = (c: ReturnType<typeof mk>) => leg(c).t1 - leg(c).t0;
+  const cam = stageCamera(zoom);
+  const scaleAtArrival = cam.at(6).scale;
+  assert.ok(scaleAtArrival > 1.8, `the camera really is punched in (${scaleAtArrival.toFixed(2)})`);
+  assert.ok(dur(zoom) > dur(rest) * 1.2, "a punch-in visibly stretches the move");
+
+  // THE CONTRACT: integrate the camera's magnification (relative to rest) over
+  // the leg the model actually produced — that integral IS the delivered-frame
+  // distance in rest-equivalent seconds, so it must equal the rest leg's plain
+  // duration. Sampling the camera at ONE instant cannot satisfy this whenever
+  // the camera moves during the travel.
+  const lg = leg(zoom);
+  const N = 20000;
+  let onScreen = 0;
+  for (let i = 0; i < N; i++) {
+    const t = lg.t0 + ((i + 0.5) / N) * (lg.t1 - lg.t0);
+    onScreen += (cam.rest / cam.at(t).scale) * ((lg.t1 - lg.t0) / N);
+  }
+  assert.ok(
+    Math.abs(onScreen - dur(rest)) < 0.005,
+    `the zoomed leg covers the same on-screen distance (${onScreen.toFixed(3)}s-equivalent vs ${dur(rest).toFixed(3)}s at rest)`,
+  );
+
+  // …and specifically NOT the arrival-priced duration: the camera is still wide
+  // for the first part of this leg (it departs before the zoom-in ramp does),
+  // so pricing the whole move at its landing magnification over-slows it.
+  const arrivalPriced = dur(rest) / (cam.rest / scaleAtArrival);
+  assert.ok(
+    dur(zoom) < arrivalPriced * 0.97,
+    `not priced at the landing frame alone (got ${dur(zoom).toFixed(3)}s, arrival-priced would be ${arrivalPriced.toFixed(3)}s)`,
+  );
+
+  // A composition the camera never leaves rest on is bit-identical to the
+  // pre-zoom-aware model — 640px / (0.3·1920) px/ms.
+  assert.ok(Math.abs(dur(rest) - 1.111) < 0.01, `rest travel unchanged (got ${dur(rest)})`);
+});
+
+test("a held frame prices like the frame it holds (no ramp during the leg)", () => {
+  // The mirror of the test above: when the camera does NOT move across the
+  // travel — a zoomed beat followed by another beat at the SAME framing — the
+  // integral degenerates to that one constant magnification, so the leg is
+  // exactly restScale/cameraScale slower. The integrated model must not
+  // "correct" a leg that has nothing to correct.
+  const comp = planComposition(
+    log(
+      [
+        { kind: "click", x: 1500, y: 300, box: { x: 1480, y: 280, w: 40, h: 40 }, tMs: 2000 },
+        { kind: "click", x: 1560, y: 420, box: { x: 1540, y: 400, w: 40, h: 40 }, tMs: 6000 },
+      ],
+      9000,
+    ),
+  );
+  Object.assign(comp.cursor, { travelWidthsPerSec: 0.3, travelMinMs: 300, travelMaxMs: 5000 });
+  // Both beats framed identically → one ramp in, then a long hold across leg 1.
+  const frame = { enabled: true, scale: 2, center: { x: 1530, y: 360 } };
+  comp.events[0]!.zoom = { ...comp.events[0]!.zoom, ...frame };
+  comp.events[1]!.zoom = { ...comp.events[1]!.zoom, ...frame };
+  const lg = buildLegs(comp)[1]!;
+  const cam = stageCamera(comp);
+  const held = cam.rest / cam.at(lg.t1).scale;
+  const dist = Math.hypot(
+    comp.events[1]!.point.x - comp.events[0]!.point.x,
+    comp.events[1]!.point.y - comp.events[0]!.point.y,
+  );
+  const want = dist / (comp.cursor.travelWidthsPerSec * comp.source.videoWidth) / held;
+  assert.ok(cam.at(lg.t0).scale > 1.8, "the camera is already punched in when the leg departs");
+  assert.ok(
+    Math.abs(lg.t1 - lg.t0 - want) < 0.01,
+    `a held frame is priced at that frame (got ${(lg.t1 - lg.t0).toFixed(3)}s, want ${want.toFixed(3)}s)`,
+  );
+});
+
+test("a scroll's pan parks the cursor for its whole duration", () => {
+  // A scroll contributes no leg (the content moves, not the pointer) — but its
+  // durationMs IS the pan, and a travel departing into it puts two motions on
+  // screen at once: content sliding under a cursor crossing it. The pointer
+  // waits for the page to stop.
+  const comp = planComposition(
+    log(
+      [
+        { kind: "click", x: 200, y: 200, box: { x: 180, y: 180, w: 40, h: 40 }, tMs: 1000 },
+        { kind: "scroll", x: 960, y: 540, dy: 900, tMs: 2000, durationMs: 1500 },
+        { kind: "click", x: 1700, y: 900, box: { x: 1680, y: 880, w: 40, h: 40 }, tMs: 4000 },
+      ],
+      9000,
+    ),
+  );
+  Object.assign(comp.cursor, { travelWidthsPerSec: 0.3, travelMinMs: 300, travelMaxMs: 5000 });
+  for (const e of comp.events) e.zoom.enabled = false; // isolate the timing law
+  const legs = buildLegs(comp);
+  assert.equal(legs.length, 2, "the scroll contributes no travel leg");
+  // ~1655px of wanted travel ≈ 2.87s → an unclamped departure at ~1.13s, i.e.
+  // most of a second INSIDE the pan. Only the scroll's action-end clamp holds it.
+  assert.ok(
+    Math.abs(legs[1]!.t0 - 3.5) < 1e-6,
+    `departure held to the pan's end (got ${legs[1]!.t0.toFixed(3)}s)`,
+  );
+  const mid = cursorPos(2.75, legs, comp);
+  assert.ok(
+    Math.abs(mid.x - 200) < 1 && Math.abs(mid.y - 200) < 1,
+    `mid-pan the cursor is still parked where it clicked (got ${mid.x.toFixed(0)},${mid.y.toFixed(0)})`,
+  );
+});
+
+test("a press's reveal parks the cursor for its whole duration", () => {
+  // Same contract for a keypress: durationMs is the reveal animating in (a
+  // palette, a result list), usually with the camera riding it. A cursor
+  // gliding across that window competes with the payoff.
+  const comp = planComposition(
+    log(
+      [
+        { kind: "click", x: 200, y: 200, box: { x: 180, y: 180, w: 40, h: 40 }, tMs: 1000 },
+        { kind: "press", keys: "Meta+k", x: 960, y: 540, tMs: 2000, durationMs: 1400 },
+        { kind: "click", x: 1700, y: 900, box: { x: 1680, y: 880, w: 40, h: 40 }, tMs: 4000 },
+      ],
+      9000,
+    ),
+  );
+  Object.assign(comp.cursor, { travelWidthsPerSec: 0.3, travelMinMs: 300, travelMaxMs: 5000 });
+  for (const e of comp.events) e.zoom.enabled = false;
+  const legs = buildLegs(comp);
+  assert.equal(legs.length, 2, "the press contributes no travel leg");
+  assert.ok(
+    Math.abs(legs[1]!.t0 - 3.4) < 1e-6,
+    `departure held to the reveal's end (got ${legs[1]!.t0.toFixed(3)}s)`,
+  );
+});
+
+test("a beat landing exactly on the previous action's end still has a cursor", () => {
+  // The action-end barrier can coincide EXACTLY with the next arrival — a type
+  // that runs to 3000ms and a click captured at 3000ms is an ordinary
+  // recording — which builds a zero-span leg. The ease then divides 0/0, and a
+  // NaN position blanks the cursor for that frame (and every drawing that
+  // reads it). The parking fallback must take over instead.
+  const comp = planComposition(
+    log([
+      {
+        kind: "type",
+        x: 300,
+        y: 300,
+        box: { x: 200, y: 280, w: 200, h: 40 },
+        tMs: 1000,
+        text: "hi",
+        durationMs: 2000, // typing runs 1.0s → 3.0s
+      },
+      { kind: "click", x: 1700, y: 800, box: { x: 1680, y: 780, w: 40, h: 40 }, tMs: 3000 },
+    ]),
+  );
+  const legs = buildLegs(comp);
+  const last = legs[legs.length - 1]!;
+  assert.equal(last.t0, last.t1, "the barrier and the arrival coincide — a zero-span leg");
+  for (const t of [2.999, 3.0, 3.001]) {
+    const p = cursorPos(t, legs, comp);
+    assert.ok(
+      Number.isFinite(p.x) && Number.isFinite(p.y),
+      `cursorPos(${t}) is a real point (got ${p.x},${p.y})`,
+    );
+  }
+  const at = cursorPos(3.0, legs, comp);
+  assert.ok(Math.abs(at.x - 1700) < 1 && Math.abs(at.y - 800) < 1, "a zero-span leg has landed");
+});
+
+test("a travel never starts before the previous ACTION ends, only its leg", () => {
+  // A travel leg ENDS at its tMs, but a `type` keeps emitting keystrokes for
+  // durationMs after that. Clamping the next departure to the previous LEG's
+  // arrival would let a long enough glide drag the pointer off the field
+  // mid-word — the cursor must stay parked until the typing is done.
+  const comp = planComposition(
+    log([
+      {
+        kind: "type",
+        x: 300,
+        y: 300,
+        box: { x: 200, y: 280, w: 200, h: 40 },
+        tMs: 2000,
+        text: "a-long-project-name",
+        durationMs: 2000, // typing runs 2.0s → 4.0s
+      },
+      { kind: "click", x: 1700, y: 800, box: { x: 1680, y: 780, w: 40, h: 40 }, tMs: 5000 },
+    ]),
+  );
+  Object.assign(comp.cursor, { travelWidthsPerSec: 0.3, travelMinMs: 300, travelMaxMs: 5000 });
+  for (const e of comp.events) e.zoom.enabled = false; // isolate the timing law
+  const legs = buildLegs(comp);
+  assert.equal(legs.length, 2, "type and click each contribute one travel leg");
+  // 1486px / 0.576 px/ms ≈ 2.58s of wanted travel → an unclamped departure at
+  // 2.42s, i.e. 1.58s INSIDE the typing. The previous leg landed way back at 2.0s,
+  // so only the action-end clamp can hold it.
+  assert.equal(legs[0]!.t1, 2, "the type's own travel lands at its tMs");
+  assert.ok(
+    Math.abs(legs[1]!.t0 - 4) < 1e-6,
+    `departure held to the typing's end (got ${legs[1]!.t0.toFixed(3)}s)`,
+  );
+  // The user-visible contract: mid-word, the cursor is still on the field.
+  const mid = cursorPos(3, legs, comp);
+  assert.ok(
+    Math.abs(mid.x - 300) < 1e-6 && Math.abs(mid.y - 300) < 1e-6,
+    `cursor parked on the field mid-typing (got ${mid.x},${mid.y})`,
+  );
 });
 
 test("drag easing: 'smooth' replays the baked smootherstep, absent ⇒ linear", () => {

@@ -418,14 +418,23 @@ function buildCameraSchedule(comp: TakeComposition): CameraSchedule {
  *  lands. `null` for a beat the camera holds through (no anchor). Derived from
  *  the same schedule the render uses, so a dwell-delayed pull-out (which
  *  departs after the stored inAtMs and can land after its own tMs) is
- *  reflected instead of approximated from inAtMs. */
+ *  reflected instead of approximated from inAtMs. `pullOut` says which pace
+ *  knob the window belongs to (zoomOutMs vs zoomInMs) — the same test the
+ *  schedule itself makes, so a reader can't drift from it. */
 export function cameraRampSchedule(
   comp: TakeComposition,
-): ({ startMs: number; landMs: number } | null)[] {
-  const { anchors, ramps, landTs } = buildCameraSchedule(comp);
-  const out: ({ startMs: number; landMs: number } | null)[] = comp.events.map(() => null);
+): ({ startMs: number; landMs: number; pullOut: boolean } | null)[] {
+  const { anchors, targets, restR, ramps, landTs } = buildCameraSchedule(comp);
+  const out: ({ startMs: number; landMs: number; pullOut: boolean } | null)[] = comp.events.map(
+    () => null,
+  );
   anchors.forEach((a, i) => {
-    out[a.evIdx] = { startMs: ramps[i]!.start * 1000, landMs: landTs[i]! * 1000 };
+    const from = i > 0 ? targets[i - 1]! : restR;
+    out[a.evIdx] = {
+      startMs: ramps[i]!.start * 1000,
+      landMs: landTs[i]! * 1000,
+      pullOut: targets[i]!.w > from.w + 1e-6,
+    };
   });
   return out;
 }
@@ -589,34 +598,158 @@ type Leg = {
   drag?: boolean;
   path?: Pt[];
   ease?: "linear" | "smooth";
+  /** Diagnostics only (never read by the render): which travel clamp, if
+   *  either, set this leg's duration instead of the speed law. The clamps run
+   *  AFTER the speed model, so a clamped leg is one where `travelWidthsPerSec`
+   *  — and therefore the whole `pace` preset — has no say. validate.ts reports
+   *  it when it stops being the exception and becomes the rule. */
+  clamped?: "min" | "max";
+  /** Diagnostics only: the duration (s) the clamped speed law asked for. When
+   *  the delivered `t1 - t0` is shorter, the previous beat's action ran too
+   *  late to leave room and the move is being rushed — a CAPTURE-side gap no
+   *  cursor knob can fix. `evIdx` is the event this leg travels to. */
+  wantSec?: number;
+  evIdx?: number;
 };
+
+/** Cumulative ∫ (rest / cameraScale) dt over the take, on a uniform grid.
+ *
+ *  The integrand is how much of the DELIVERED frame one video-px of movement
+ *  buys, normalised so a camera at rest integrates to 1 — so this converts a
+ *  video-px path into the distance the VIEWER actually sees it cross, and
+ *  INVERTING it answers "when must this move depart to hold a constant
+ *  on-screen speed". Strictly increasing (the integrand is > 0), so the
+ *  inverse is single-valued and a binary search finds it. Outside the sampled
+ *  window the end value extrapolates linearly at the end slope.
+ *
+ *  This is a function of the camera schedule alone (which reads comp.events /
+ *  comp.cursor, never the legs), so pricing a leg with it introduces no cycle. */
+function zoomFracTrack(cam: { T: number; rest: number; at: (t: number) => { scale: number } }) {
+  const STEP = 0.005; // 5ms — ~150× finer than the shortest shipped camera ramp
+  const n = Math.max(2, Math.min(20000, Math.ceil(cam.T / STEP) + 1));
+  const step = cam.T > 0 ? cam.T / (n - 1) : STEP;
+  const zf = (t: number) => cam.rest / Math.max(cam.at(t).scale, 1e-6);
+  const cum = new Float64Array(n);
+  const zf0 = zf(0);
+  let prev = zf0;
+  for (let i = 1; i < n; i++) {
+    const v = zf(i * step);
+    cum[i] = cum[i - 1]! + ((prev + v) / 2) * step; // trapezoid
+    prev = v;
+  }
+  const zfT = prev;
+  const tEnd = (n - 1) * step;
+  const last = cum[n - 1]!;
+  return {
+    at(t: number): number {
+      if (t <= 0) return t * zf0;
+      if (t >= tEnd) return last + (t - tEnd) * zfT;
+      const i = Math.floor(t / step);
+      const f = t / step - i;
+      return cum[i]! + (cum[i + 1]! - cum[i]!) * f;
+    },
+    /** the t at which the cumulative integral equals `y` */
+    invert(y: number): number {
+      if (y <= 0) return zf0 > 0 ? y / zf0 : 0;
+      if (y >= last) return tEnd + (zfT > 0 ? (y - last) / zfT : 0);
+      let lo = 0;
+      let hi = n - 1;
+      while (hi - lo > 1) {
+        const mid = (lo + hi) >> 1;
+        if (cum[mid]! <= y) lo = mid;
+        else hi = mid;
+      }
+      const span = cum[hi]! - cum[lo]!;
+      return (lo + (span > 0 ? (y - cum[lo]!) / span : 0)) * step;
+    },
+  };
+}
 
 export function buildLegs(comp: TakeComposition): Leg[] {
   const legs: Leg[] = [];
   let cur: Pt = comp.start;
+  // When the previous beat's ACTION finishes (tMs + durationMs) — not when its
+  // travel leg landed. See the prevEnd comment below.
+  let freeAt = 0;
   // Distance-aware travel: hold a roughly constant on-screen speed (premium
   // feel) instead of a fixed duration (which makes short moves slow + long
   // moves fast). Falls back to the fixed travelMs when speed is unset/0.
   const { travelWidthsPerSec, travelMinMs, travelMaxMs, travelMs } = comp.cursor;
-  const speedPxPerMs = ((travelWidthsPerSec || 0) * comp.source.videoWidth) / 1000;
-  const travelDur = (a: Pt, b: Pt): number => {
-    if (speedPxPerMs <= 0) return travelMs / 1000;
+  // ON-SCREEN means the DELIVERED frame, not the raw recording. While the
+  // camera is zoomed in, a video-px move covers proportionally more of the
+  // frame — so a zoom-blind duration makes every zoomed move read that many
+  // times too fast, precisely where the viewer is looking closest (a 2x punch
+  // -in doubles the apparent speed).
+  // The magnification is not constant ACROSS a leg, though: a travel typically
+  // departs while the camera is still wide and lands after it has closed in, so
+  // pricing the whole leg at the ARRIVAL magnification (the most punched-in
+  // instant it ever sees) over-slows the departure by as much as it was
+  // previously over-fast. Solve the honest thing instead — depart at the
+  // instant from which the INTEGRATED on-screen distance to the target equals
+  // one leg's worth of travel at the reference speed — which is exactly what
+  // inverting the zoomFrac track does. A camera that never leaves rest
+  // integrates to the identity, so a full-view take keeps its measured-by-eye
+  // calibration bit-for-bit (short-circuited below to keep that exact).
+  // Built lazily: only a composition that actually travels needs the camera,
+  // and a zoom-less take must not pay for the track.
+  let cam: ReturnType<typeof stageCamera> | undefined;
+  let track: ReturnType<typeof zoomFracTrack> | undefined;
+  const travelDur = (a: Pt, b: Pt, arriveSec: number): { sec: number; clamped?: "min" | "max" } => {
+    if (!travelWidthsPerSec) return { sec: travelMs / 1000 };
+    const speedPxPerSec = travelWidthsPerSec * comp.source.videoWidth;
+    if (speedPxPerSec <= 0) return { sec: travelMs / 1000 };
     const dist = Math.hypot(b.x - a.x, b.y - a.y);
-    return Math.min(travelMaxMs, Math.max(travelMinMs, dist / speedPxPerMs)) / 1000;
+    cam ??= stageCamera(comp);
+    let ms: number;
+    if (cam.peakScale <= cam.rest + 1e-9) {
+      ms = (dist / speedPxPerSec) * 1000; // camera never leaves rest — closed form
+    } else {
+      track ??= zoomFracTrack(cam);
+      ms = (arriveSec - track.invert(track.at(arriveSec) - dist / speedPxPerSec)) * 1000;
+    }
+    if (ms < travelMinMs) return { sec: travelMinMs / 1000, clamped: "min" };
+    if (ms > travelMaxMs) return { sec: travelMaxMs / 1000, clamped: "max" };
+    return { sec: ms / 1000 };
   };
-  for (const e of comp.events) {
+  for (const [evIdx, e] of comp.events.entries()) {
     // scroll/press are not pointer-driven — the cursor holds where it was
     // (the content pans / the keyboard acts). No travel leg; `cur` is untouched,
     // so the between-legs parking logic keeps the cursor at its last anchor.
-    if (e.kind === "scroll" || e.kind === "press") continue;
+    // They still OCCUPY the frame for durationMs, though: a scroll's duration IS
+    // the pan, and a press's is the reveal animating in. A travel that departs
+    // into either puts two motions on screen at once — content sliding under a
+    // cursor crossing it — so they push `freeAt` exactly like a pointer beat
+    // even though they contribute no leg.
+    if (e.kind === "scroll" || e.kind === "press") {
+      freeAt = Math.max(freeAt, (e.tMs + (e.durationMs ?? 0)) / 1000);
+      continue;
+    }
     const arrive = e.tMs / 1000;
     // Start travelDur before arrival, but never before the previous leg ended
     // (a long glide into a quick succession would otherwise overlap it — then
-    // the move just runs in the available window, a touch faster than target).
-    const prevEnd = legs.length ? legs[legs.length - 1]!.t1 : 0;
-    const t0 = Math.max(arrive - travelDur(cur, e.point), prevEnd, 0);
-    legs.push({ t0, t1: arrive, a: cur, b: e.point }); // travel to anchor
+    // the move just runs in the available window, a touch faster than target)
+    // and never before the previous beat's ACTION finished. A travel leg ends
+    // at its tMs, but a `type` keeps emitting keystrokes for durationMs after
+    // that — so the leg end alone would let a long enough glide drag the
+    // pointer off the field mid-word.
+    // …and never AFTER the arrival: overlapping action windows (only reachable
+    // by hand — a capture always leaves a settle gap) would otherwise build an
+    // INVERTED leg, which matches no instant at all in cursorPos, so the cursor
+    // would silently jump-cut instead of degrading to a hard landing.
+    const prevEnd = Math.max(legs.length ? legs[legs.length - 1]!.t1 : 0, freeAt);
+    const d = travelDur(cur, e.point, arrive);
+    const t0 = Math.min(arrive, Math.max(arrive - d.sec, prevEnd, 0));
+    legs.push({
+      t0,
+      t1: arrive,
+      a: cur,
+      b: e.point,
+      evIdx,
+      wantSec: d.sec,
+      ...(d.clamped ? { clamped: d.clamped } : {}),
+    });
     cur = e.point;
+    freeAt = Math.max(freeAt, (e.tMs + (e.durationMs ?? 0)) / 1000);
     if ((e.kind === "drag" || e.kind === "dropFiles") && e.to) {
       // Delay the stroke by dragLagMs so the cursor rides the captured ink front
       // (the ink trails the pen by the capture-pipeline latency). The cursor
@@ -664,7 +797,11 @@ function alongPath(path: Pt[], u: number): Pt {
 export function cursorPos(t: number, legs: Leg[], comp: TakeComposition): Pt {
   for (const lg of legs) {
     if (lg.t0 <= t && t <= lg.t1) {
-      const raw = Math.max(0, Math.min(1, (t - lg.t0) / (lg.t1 - lg.t0)));
+      // A ZERO-span leg (a departure clamped all the way to its own arrival —
+      // see buildLegs) has landed by definition; without the guard the 0/0
+      // would put NaN through the ease and blank the cursor for that frame.
+      const span = lg.t1 - lg.t0;
+      const raw = span > 0 ? Math.max(0, Math.min(1, (t - lg.t0) / span)) : 1;
       // A drag replays the captured stroke's pacing so the cursor stays locked
       // to the ink: "smooth" (accel-in / decel-out — a natural hand-draw) or
       // "linear" (constant speed). The capture bakes the SAME curve into the ink

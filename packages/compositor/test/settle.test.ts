@@ -9,9 +9,10 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildStageKeyframes, cameraRampSchedule, stageCamera } from "../src/math.js";
-import { MOTION, motionName } from "../src/presets.js";
-import type { CursorConfig, TakeComposition } from "../src/types.js";
+import { buildLegs, buildStageKeyframes, cameraRampSchedule, stageCamera } from "../src/math.js";
+import { planComposition } from "../src/plan.js";
+import { MOTION, type MotionName, motionName } from "../src/presets.js";
+import type { CaptureLog, CursorConfig, TakeComposition } from "../src/types.js";
 import { DEFAULT_CAMERA, DEFAULT_CURSOR, DEFAULT_FRAMING } from "../src/types.js";
 import { validateComposition } from "../src/validate.js";
 
@@ -316,4 +317,56 @@ test("startMs: range-checked; trimming into the first beat warns", () => {
     validateComposition(intoBeat).some((i) => i.severity === "warn" && i.path === "startMs"),
     "warns when the trim cuts into the first beat's ramp",
   );
+});
+
+// --- pace presets carry the travel clamps ----------------------------------
+
+test("a pace preset now moves the clamped legs too, not just the middle ones", () => {
+  // Before the clamps joined MOTION, a short hop and a long sweep rendered
+  // IDENTICALLY under calm and brisk — the pace only reached the legs that
+  // happened to land between the clamps, which on a real take is a minority.
+  const mk = () =>
+    planComposition({
+      video: { width: 1920, height: 1080, fps: 60 },
+      viewport: { w: 1920, h: 1080 },
+      start: { x: 300, y: 500 },
+      tEndMs: 12000,
+      events: [
+        { kind: "click", x: 380, y: 520, box: { x: 360, y: 500, w: 40, h: 40 }, tMs: 2000 },
+        { kind: "click", x: 1750, y: 980, box: { x: 1730, y: 960, w: 40, h: 40 }, tMs: 9000 },
+      ],
+    } as unknown as CaptureLog);
+  const durs = (pace: MotionName) => {
+    const c = mk();
+    Object.assign(c.cursor, MOTION[pace]);
+    for (const e of c.events) e.zoom.enabled = false;
+    return buildLegs(c)
+      .filter((l) => !l.drag)
+      .map((l) => Math.round((l.t1 - l.t0) * 1000));
+  };
+  const calm = durs("calm");
+  const brisk = durs("brisk");
+  // leg 0 is an 82px hop (floored), leg 1 an 1103px sweep (capped) — BOTH
+  // clamped, and both must now differ between the two paces.
+  assert.notEqual(
+    calm[0],
+    brisk[0],
+    `the floored hop responds to pace (${calm[0]} vs ${brisk[0]})`,
+  );
+  assert.notEqual(
+    calm[1],
+    brisk[1],
+    `the capped sweep responds to pace (${calm[1]} vs ${brisk[1]})`,
+  );
+  assert.ok(calm[0]! > brisk[0]! && calm[1]! > brisk[1]!, "calm is slower than brisk on both");
+});
+
+test("a pace still names itself when the composition predates clamp-aware presets", () => {
+  // Applying "brisk" to an old take leaves the legacy 300/850 clamps in place
+  // until it is re-paced. Reading it back must still say "brisk", not
+  // "custom" — the same escape hatch pullOutDwellMs already has.
+  const cursor = { ...DEFAULT_CURSOR, ...MOTION.brisk, travelMinMs: 300, travelMaxMs: 850 };
+  assert.equal(motionName(cursor), "brisk", "legacy clamps do not make a paced take custom");
+  // …but a value that is neither the preset's nor the legacy default does.
+  assert.equal(motionName({ ...cursor, travelMinMs: 1200 }), null, "a hand-set floor is custom");
 });

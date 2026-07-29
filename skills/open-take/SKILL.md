@@ -377,7 +377,9 @@ page changed).
   element is centred — robust, prefer this) or `dy` (signed pixels, + = down;
   default ~0.8 viewport). The cursor **holds** (content moves underneath) and the
   frame stays **full-view** — a scroll never zooms (and any prior zoom releases
-  to full-view for it). `durationMs` ≈ 900–1400. Use it to reveal sections of a
+  to full-view for it). `durationMs` ≈ 900–1400. The next beat's travel will not
+  depart until the pan finishes, so a long `durationMs` here shortens the glide
+  that follows it — budget the gap accordingly. Use it to reveal sections of a
   landing page / scroll a feed.
 - **`hover`** moves the cursor onto an element (by `text`/`selector`) and
   **dwells** (`durationMs` ≈ 1200–1600) so a tooltip / dropdown / hover-state
@@ -523,7 +525,21 @@ capture-lock). Warnings (a no-op zoom, a soft-cap scale) print but don't block.
 - *"tighter frame / less border"* → raise `framing.insetFrac` (toward 1.0);
   *"more cinematic backdrop"* → `framing.background.from/to`, `cornerRadius`.
 - *"slower / silkier cursor"* → lower `cursor.travelWidthsPerSec` (or raise
-  `travelMaxMs`); *"less curve"* → lower `cursor.arcFrac`/`arcMax`.
+  `travelMaxMs`); *"less curve"* → lower `cursor.arcFrac`/`arcMax`. NB the speed
+  is measured on the DELIVERED frame, so a zoomed beat's travel is automatically
+  stretched by the camera's magnification *averaged over the leg* — never
+  hand-compensate for zoom.
+  The travel clamps **ride the `pace` preset** (calm 375/1060 · natural 300/850 ·
+  brisk 235/660), so re-pacing moves the short hops and long sweeps too, not just
+  the legs that happen to fall between the clamps. A HAND-SET clamp still
+  overrides the pace on the legs it binds, and `make`/`render` warn when one has
+  taken over most of the take.
+- *"it parks, then darts"* → that gap is in the CAPTURE, not the composition. A
+  travel is `travelDur` long and lands ON the action, so a long `settleMs`
+  leaves dead air no cursor knob can fill. Shorten the previous step's
+  `settleMs` and re-`make`. Do NOT stretch `travelMinMs`/`zoom.inAtMs` to cover
+  it: a punch-in ramp's END is pinned to `tMs`, so "start earlier" IS "go
+  slower", and much past `zoomInMs` the settle curve reads as a crawl.
 - *"slower intro"* → move `start` farther from the first target (longer opening
   sweep), or add a leading `wait` **and re-`make`** if you need real dead time
   before the first action (dead time is capture, not composition).

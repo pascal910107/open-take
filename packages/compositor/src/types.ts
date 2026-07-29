@@ -244,15 +244,36 @@ export type CursorConfig = {
   travelMs: number;
   /** Distance-aware travel speed, as a fraction of the source video WIDTH per
    *  second (resolution-independent). A travel leg's duration is
-   *  `clamp(distance / (widthsPerSec·videoWidth), travelMinMs, travelMaxMs)`, so
-   *  the cursor holds a roughly CONSTANT on-screen speed regardless of distance —
+   *  `distance / (widthsPerSec·videoWidth·zoomFrac)`, floored at `travelMinMs` and
+   *  then capped at `travelMaxMs` (in that order — an inverted band pins short hops
+   *  to the floor, not everything to the ceiling), so the cursor holds a roughly
+   *  CONSTANT on-screen speed regardless of distance —
    *  the premium-recorder feel (measured ~0.30 widths/s on the reference). Set 0
-   *  to fall back to the fixed `travelMs`. */
+   *  to fall back to the fixed `travelMs`.
+   *
+   *  `zoomFrac = restScale / camera scale` — exactly 1 for a full-view take, so a
+   *  zoom-less composition is unaffected. While the camera is punched in, the same
+   *  video-px move covers proportionally more of the DELIVERED frame, so without
+   *  this factor a 2× punch-in reads ~2× too fast precisely where the viewer is
+   *  looking closest. zoomFrac is INTEGRATED across the leg, not sampled at one
+   *  instant: a travel usually departs while the camera is still wide and lands
+   *  after it has closed in, and pricing all of it at the landing magnification
+   *  over-slows the departure by as much as a zoom-blind duration over-sped it.
+   *  A leg the camera holds a frame through degenerates to that one frame's
+   *  factor, which is the sampled model's only exactly-right case. */
   travelWidthsPerSec: number;
-  /** Floor for a distance-aware travel (ms) so short hops aren't an instant snap. */
+  /** Floor for a distance-aware travel (ms) so short hops aren't an instant snap.
+   *  NOTE both clamps are applied AFTER the speed model and neither is part of a
+   *  `pace` preset, so on the legs they bind THEY set the duration and re-pacing
+   *  the take does nothing. validate.ts says so once that stops being the
+   *  exception (see CLAMPED_LEGS_FRAC). */
   travelMinMs: number;
   /** Ceiling for a distance-aware travel (ms) so a full-width jump stays a glide,
-   *  not a multi-second crawl. */
+   *  not a multi-second crawl. Binds on any sweep past
+   *  `travelMaxMs · travelWidthsPerSec · videoWidth` — ~571px of a 1920 frame at
+   *  the shipped defaults — which is deliberate (it was eye-tuned on a reference
+   *  recorder's long moves), so it also bounds how much of the zoom correction
+   *  above a long zoomed sweep can actually receive. */
   travelMaxMs: number;
   scale: number;
   arcFrac: number;

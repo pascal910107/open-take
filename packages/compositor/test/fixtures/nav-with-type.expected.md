@@ -44,7 +44,7 @@ Proposed `DEFAULT_CAMERA` used below (these are the tunables — argue here):
 - **E3 type** = ROI-driven medium scale + downward centre — **not** a hard punch on the 638×44 strip (which would frame dead header above and cut the result below).
 - **E3+E4 coalesce** = a `type`→`press(Enter)` that reveals the already-framed result *holds* one frame instead of re-punching.
 - **E4→E5 is NOT coalesced** (720px apart) → a re-frame/travel to a new segment, even though the 300ms gap is tiny. Proximity, not time, gates coalesce.
-- **E5–E7 cluster** = three quick icon hits become one sustained tight frame (the "縮圖列" case), not three punch/pull flickers.
+- **E5–E7 cluster** = three quick icon hits become one sustained tight frame (the "thumbnail rail" case), not three punch/pull flickers.
 - **E5–E7 min-hold** = on-screen span 8600→9400 = 800ms < 1200; Phase 3 extends the hold to the scroll's ramp-in (~9840ms) ⇒ ~1240ms ≥ 1200. Extended into the gap, **not** merged past the scroll break.
 - **E8 scroll** breaks immediately regardless of the rail's min-hold want.
 
