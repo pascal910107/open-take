@@ -126,6 +126,15 @@ export type MakeTakeResult = {
   /** steps the capture dropped (target not found) — surface these in the
    *  end-of-run summary; `--strict` turns them into a non-zero exit. */
   skipped: NonNullable<CaptureLog["skipped"]>;
+  /** beats whose `settleMs` ran out before the PAGE was done. The capture
+   *  waited (see runtime/src/settle.ts) so the take is still correct, but the
+   *  plan is now known to under-budget those beats — the summary prints the
+   *  number to write into `settleMs`, which is the whole point: it stops being
+   *  a guess after the first run. */
+  settleWaits: NonNullable<CaptureLog["settleWaits"]>;
+  /** set when a `<canvas>`/`<video>` dominated the frame — the settle probe
+   *  is blind inside one, so a quiet run proves nothing about those beats. */
+  paintedFrac?: number;
 };
 
 /** `<out>.mp4` → `<out>.capture.mp4` — the raw recording kept beside the
@@ -221,6 +230,8 @@ export async function makeTake(plan: TakePlan, opts: MakeTakeOpts): Promise<Make
     captureLogPath,
     composition,
     skipped: log.skipped ?? [],
+    settleWaits: log.settleWaits ?? [],
+    ...(log.paintedFrac != null ? { paintedFrac: log.paintedFrac } : {}),
   };
 }
 

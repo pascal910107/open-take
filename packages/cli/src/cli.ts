@@ -311,7 +311,15 @@ async function main() {
       await stagedComp.abort();
       throw e;
     }
-    const { mp4Path, compositionPath, capturePath, captureLogPath, skipped } = made;
+    const {
+      mp4Path,
+      compositionPath,
+      capturePath,
+      captureLogPath,
+      skipped,
+      settleWaits,
+      paintedFrac,
+    } = made;
     const draftNote = has("--draft")
       ? ` (DRAFT quality — \`${INVOKE} render ${mp4Path}\` masters it)`
       : "";
@@ -348,6 +356,43 @@ async function main() {
           `the video is missing ${skipped.length === 1 ? "this beat" : "these beats"} — fix the plan targets and re-make\n`,
       );
       if (has("--strict")) process.exit(2);
+    }
+    // Beats the PAGE outlasted. The capture already waited, so nothing is
+    // broken — but the plan under-budgeted them, and now there is a measured
+    // number to write down instead of another guess.
+    if (settleWaits.length) {
+      // Split by REASON: a beat that settled has a number worth copying, but a
+      // beat that spent the whole budget never settled at all — telling its
+      // author to raise settleMs to held+waited is a ratchet that can never be
+      // satisfied, because the page is not going to go quiet at any number.
+      const measured = settleWaits.filter((w) => w.reason === "idle");
+      const restless = settleWaits.filter((w) => w.reason !== "idle");
+      process.stdout.write(
+        `\n⏱ ${settleWaits.length} beat${settleWaits.length === 1 ? "" : "s"} needed longer than planned:\n` +
+          settleWaits
+            .map(
+              (w) =>
+                `  step ${w.step + 1}: ${w.action} held ${w.heldMs}ms, page needed ${w.reason === "idle" ? `~${w.heldMs + w.waitedMs}ms` : "longer than the budget"}\n`,
+            )
+            .join("") +
+          (measured.length
+            ? `set those steps' settleMs to the measured number and re-make for a tighter, surer take\n`
+            : "") +
+          (restless.length
+            ? `${restless.length === settleWaits.length ? "None" : "Some"} of those ever went quiet — this page is always doing something (a clock, a poll, a looping animation), so no settleMs will satisfy it. Set each beat's settleMs by eye, or pass a capture with settleBudgetMs: 0 to switch the waiting off.\n`
+            : ""),
+      );
+    }
+    // A canvas app looks PERFECTLY still to the settle probe no matter what it
+    // is drawing, so the absence of ⏱ lines above says nothing there. Say so,
+    // or the quiet run reads as proof the timings were right.
+    if (paintedFrac != null) {
+      process.stdout.write(
+        `\n🎨 a <canvas>/<video> covers ~${Math.round(paintedFrac * 100)}% of the frame.\n` +
+          `  Whatever is drawn inside one is invisible to the settle check — for beats whose payoff\n` +
+          `  is painted there, settleMs is doing the whole job on its own. Budget those by eye and\n` +
+          `  confirm with \`${INVOKE} frames ${mp4Path}\` rather than a quiet run.\n`,
+      );
     }
     return;
   }

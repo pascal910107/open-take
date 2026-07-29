@@ -303,6 +303,12 @@ export type CaptureOpts = {
    *  (constant speed). Recorded on each drag event so the compositor cursor
    *  replays the same easing and stays locked to the ink. */
   dragEasing?: "linear" | "smooth";
+  /** Extra ms a beat's hold may spend waiting for the PAGE when `settleMs`
+   *  expires while it is still working (network in flight, DOM mutating, a
+   *  reveal animating). Never shortens a hold — see runtime/src/settle.ts.
+   *  Default `DEFAULT_SETTLE_BUDGET_MS`; 0 restores the old fixed sleeps
+   *  exactly. */
+  settleBudgetMs?: number;
 };
 
 /** Drive `plan` against the live app over CDP, return the ground-truth log. */

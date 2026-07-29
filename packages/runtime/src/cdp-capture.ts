@@ -39,9 +39,21 @@ import {
   launchBrowser,
   makeFrameDir,
 } from "./cdp";
+import {
+  DEFAULT_SETTLE_BUDGET_MS,
+  PAINT_BLIND_FRAC,
+  installActivityProbe,
+  makeBudgetGovernor,
+  settle,
+} from "./settle";
 import type { TakePlan } from "./types";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Report a settle wait only past this — a couple of polls is the probe
+ *  confirming quiet, not the page being slow, and a log full of 60ms notes
+ *  would bury the beat that actually needed a second. */
+const SETTLE_NOTE_MS = 150;
 
 // smootherstep — ease-in-out. Used to ease a drag along its path (must match
 // the compositor's drag easing in math.ts exactly so the cursor stays locked
@@ -235,7 +247,13 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
     // frame is exactly `scale`× the CSS event space; see launchBrowser).
     const inner = await fitViewport(cdp, browser.targetId, vw, vh);
 
+    // Watch the page for activity from the very first document (and every
+    // one a mid-take navigation creates) so a hold can tell "finished" from
+    // "still working" instead of betting on settleMs. Diagnostic only — a
+    // failure to install just returns the old fixed-sleep behaviour.
+    await installActivityProbe(cdp);
     await navigate(cdp, plan.url);
+    await installActivityProbe(cdp);
 
     // Fonts before frames: the fresh profile means a fresh HTTP cache, so
     // third-party webfonts otherwise FOUT in the recording's first ~700ms —
@@ -315,11 +333,54 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
     // moment they happen) so the end-of-run summary and --strict can see them
     // — an early stderr line alone gets buried under render progress.
     const skipped: NonNullable<CaptureLog["skipped"]> = [];
+    // Beats whose hold was NOT long enough for the page — the measurement that
+    // turns `settleMs` from a guess into a number the next plan can copy.
+    const settleWaits: NonNullable<CaptureLog["settleWaits"]> = [];
+    // Bounds what a page that never goes quiet can cost the take — see
+    // makeBudgetGovernor.
+    const governor = makeBudgetGovernor(opts.settleBudgetMs ?? DEFAULT_SETTLE_BUDGET_MS);
+    // Biggest paint surface seen. Reported ONCE — an author who sees no ⏱
+    // lines would otherwise read that as "my timings were right", which on a
+    // canvas app is exactly the wrong conclusion.
+    let paintedFrac = 0;
+    let paintNoted = false;
     for (let stepIdx = 0; stepIdx < plan.steps.length; stepIdx++) {
       const step = plan.steps[stepIdx]!;
       const skip = (action: string, target: string | undefined, reason: string) => {
         skipped.push({ step: stepIdx, action, ...(target ? { target } : {}), reason });
         console.error(`captureTakeCDP: ${action} ${reason}, skipped: ${JSON.stringify(target)}`);
+      };
+      // The editorial hold, then — only if the page is still working — the
+      // time it actually needs. `defaultMs` stays the per-action default the
+      // plan author never has to think about; `step.settleMs` still wins.
+      const hold = async (defaultMs: number) => {
+        // `step` is the un-narrowed union here (every action calls this), and
+        // `wait` is the one variant with no settleMs — it IS a hold.
+        const heldMs = ("settleMs" in step ? step.settleMs : undefined) ?? defaultMs;
+        const r = await settle(cdp, heldMs, { budgetMs: governor.budgetMs });
+        paintedFrac = Math.max(paintedFrac, r.paintFrac);
+        if (paintedFrac >= PAINT_BLIND_FRAC && !paintNoted) {
+          paintNoted = true;
+          console.error(
+            `captureTakeCDP: a <canvas>/<video> covers ~${Math.round(paintedFrac * 100)}% of the frame — the settle probe reads page STRUCTURE and cannot see what is painted inside one, so on beats whose payoff is drawn there, settleMs is doing the whole job. Set those by eye and check \`frames\`.`,
+          );
+        }
+        if (governor.record(r.reason))
+          console.error(
+            "captureTakeCDP: this page never goes quiet (consecutive beats spent the whole settle budget) — settle waiting is OFF for the rest of the take; set each beat's settleMs explicitly instead",
+          );
+        if (r.waitedMs < SETTLE_NOTE_MS) return;
+        const waitedMs = Math.round(r.waitedMs);
+        settleWaits.push({
+          step: stepIdx,
+          action: step.action,
+          heldMs,
+          waitedMs,
+          reason: r.reason,
+        });
+        console.error(
+          `captureTakeCDP: step ${stepIdx} (${step.action}) held ${heldMs}ms, then waited ${waitedMs}ms more for the page to settle (${r.reason})`,
+        );
       };
       if (step.action === "wait") {
         await sleep(step.ms);
@@ -336,7 +397,7 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
             : null;
         if (!box) {
           skip("type", label, "target not found");
-          await sleep(step.settleMs ?? 600);
+          await hold(600);
           continue;
         }
         // Replace-not-append: select the field's existing value in-page so the
@@ -374,7 +435,7 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
           durationMs: Date.now() - tType,
           ...(step.zoom ? { zoom: step.zoom } : {}),
         });
-        await sleep(step.settleMs ?? 900);
+        await hold(900);
         continue;
       }
 
@@ -396,7 +457,7 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
         const label = step.note ?? step.text ?? step.selector;
         if (!from || !to) {
           skip("drag", label, "endpoint not found");
-          await sleep(step.settleMs ?? 600);
+          await hold(600);
           continue;
         }
         const path: Pt[] = pathPts.length ? pathPts : [from, to];
@@ -462,7 +523,7 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
           ease: dragEase,
           ...(step.zoom ? { zoom: step.zoom } : {}),
         });
-        await sleep(step.settleMs ?? 1100);
+        await hold(1100);
         continue;
       }
 
@@ -482,7 +543,7 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
             dy = r.dy;
           } else {
             skip("scroll", step.toText ?? step.toSelector, "target not found");
-            await sleep(step.settleMs ?? 600);
+            await hold(600);
             continue;
           }
         } else {
@@ -516,7 +577,7 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
           durationMs: Date.now() - tScroll,
           note: step.note,
         });
-        await sleep(step.settleMs ?? 800);
+        await hold(800);
         continue;
       }
 
@@ -533,7 +594,7 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
             : null;
         if (!box) {
           skip("hover", label, "target not found");
-          await sleep(step.settleMs ?? 600);
+          await hold(600);
           continue;
         }
         const c = center(box);
@@ -550,7 +611,10 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
           ...(step.zoom ? { zoom: step.zoom } : {}),
         });
         await sleep(dwell);
-        await sleep(step.settleMs ?? 300);
+        // A hover DWELLS on its target and the cursor is parked for all of it, so
+        // this settle is the ONLY room the next glide has. 300ms could not fit
+        // one (travelMaxMs is 850 at the shipped pace) and the cursor darted.
+        await hold(900);
         continue;
       }
 
@@ -591,7 +655,9 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
           ...(step.zoom ? { zoom: step.zoom } : {}),
         });
         await sleep(dwell);
-        await sleep(step.settleMs ?? 400);
+        // Same as hover: the cursor is parked through the reveal, so this settle is
+        // the entire window the next travel has to glide in. See hold() above.
+        await hold(900);
         continue;
       }
 
@@ -616,7 +682,7 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
       } else {
         skip("click", label, "target not found");
       }
-      await sleep(step.settleMs ?? 1300);
+      await hold(1300);
     }
 
     const tEndMs = Date.now() - t0;
@@ -638,6 +704,15 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
       start: plan.startCursor ?? { x: Math.round(inner[0] * 0.25), y: Math.round(inner[1] * 0.9) },
       events,
       tEndMs,
+      // Both of these were collected all along but never reached the caller on
+      // this path, so the end-of-run summary and --strict saw an empty list and
+      // a dropped beat lived only in an early stderr line — exactly what the
+      // CaptureLog.skipped contract says must not happen.
+      ...(skipped.length ? { skipped } : {}),
+      ...(settleWaits.length ? { settleWaits } : {}),
+      ...(paintedFrac >= PAINT_BLIND_FRAC
+        ? { paintedFrac: Math.round(paintedFrac * 100) / 100 }
+        : {}),
     };
   } finally {
     await browser?.close();

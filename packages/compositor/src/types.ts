@@ -122,6 +122,26 @@ export type CaptureLog = {
    *  summary and (with --strict) the exit code, not just an early stderr line
    *  buried under render progress. `step` is the plan's 0-based step index. */
   skipped?: { step: number; action: string; target?: string; reason: string }[];
+  /** Beats whose editorial hold ran out before the PAGE had finished — the
+   *  capture kept waiting (see runtime/src/settle.ts) and records how much
+   *  longer it needed. This is the measurement that replaces guessing
+   *  `settleMs`: `heldMs + waitedMs` is what that beat actually wanted, and
+   *  `reason: "budget"` means even the extra wait was not enough. Absent when
+   *  every hold was already long enough. */
+  settleWaits?: {
+    step: number;
+    action: string;
+    heldMs: number;
+    waitedMs: number;
+    reason: "idle" | "budget" | "unavailable";
+  }[];
+  /** Largest share of the frame a `<canvas>`/`<video>` held during the capture.
+   *  It matters because the settle probe reads the page's STRUCTURE, and a
+   *  paint surface never changes structurally no matter what is drawn inside
+   *  it — so on a canvas-driven app "the page settled" is not evidence the
+   *  beat's payoff had appeared, and `settleMs` is doing the whole job alone.
+   *  Absent on an ordinary DOM app. */
+  paintedFrac?: number;
 };
 
 // --- the composition (editable) ----------------------------------------

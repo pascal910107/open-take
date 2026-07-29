@@ -372,14 +372,33 @@ page changed).
   that element via `selector`/`text` (it's located *after* the press, then
   framed). The camera departs **at the keypress** and rides the reveal in — it
   never pre-zooms into the empty space where a palette/modal is about to appear.
-  A bare press (no reveal) holds **full-view** for `durationMs`.
+  A bare press (no reveal) holds **full-view** for `durationMs`. As with `scroll`,
+  the cursor stays parked for the whole `durationMs` — the reveal plays without a
+  pointer crossing it — so the following travel starts only once it is done.
 - `settleMs`: hold after the action so its result is visible (~1200–2600ms).
-  Give big reveals a longer hold. **Pacing matters for cursor silk:** the cursor
+  Give big reveals a longer hold. **It is the EDITORIAL hold only** — you no
+  longer have to also guess how long the app takes. If `settleMs` expires while
+  the page is still working (network in flight, DOM mutating, a reveal
+  animating, a short timer pending), the capture keeps waiting (up to ~1.2s)
+  and then TELLS you what the beat actually needed:
+  `⏱ step 3: click held 600ms, page needed ~1780ms`. Copy that number into
+  `settleMs` and re-`make`. It never shortens a hold, so a snappy app is
+  unaffected — but see the canvas caveat under *Capture robustness* below, which
+  is the one case where a quiet run proves nothing.
+  **Pacing matters for cursor silk:** the cursor
   travels to the next target during the gap BEFORE it, so a tight gap forces a
   fast, snappy move. When you pick a tool then immediately draw (`click` a
   toolbar → `drag` on the canvas), give the click a generous `settleMs`
   (**~1000–1200ms**) so the cursor can glide to the canvas at a calm, constant
   speed instead of darting. Cramped gaps (<800ms) make the travel feel rushed.
+  **The CAMERA needs a bigger gap than the cursor.** When a zoomed beat is
+  followed by a full-view one (`zoom: "never"`, or a `scroll`), the release
+  needs `cursor.pullOutDwellMs + cursor.zoomOutMs` — **~2140ms at the
+  defaults** — between the end of the zoomed beat and the next action. Give it
+  less and the schedule keeps the full ramp and lands it LATE (fleeing a frame
+  the viewer is still reading would be worse), so the camera is still gliding
+  when the next click fires. Budget `settleMs ≥ 2200` on any beat whose
+  successor releases the zoom — or don't release at all (see HOLD THE FRAME).
 - `wait`: paces the video / orients at the start.
 - `startCursor`: where the synthetic cursor begins (viewport px); pick a spot
   that makes the first move to your first target a pleasing sweep.
@@ -507,6 +526,18 @@ capture-lock). Warnings (a no-op zoom, a soft-cap scale) print but don't block.
   surface ignored synthetic input — eyeball the frames mid-stroke. (Select the
   tool with a `click` first; CDP mouse input is trusted, so canvas libs that
   listen for pointer events do respond.)
+- **On a canvas app, a quiet capture proves nothing.** The settle check reads the
+  page's STRUCTURE — elements appearing, text changing, requests in flight. A
+  `<canvas>`/`<video>` never changes structurally no matter what is being drawn
+  inside it, so an editor mid-render (Figma/Excalidraw-style tools, games, WebGL
+  maps, animated charts, video players) looks perfectly still. Measured: a canvas
+  painting for 1.5s reported ZERO beats needing more time. `make` flags it —
+  `🎨 a <canvas>/<video> covers ~91% of the frame` — and when you see that line:
+  (a) the ABSENCE of `⏱` lines is not evidence your timings were right, (b) budget
+  those beats' `settleMs` generously by hand, and (c) prove it with `frames`
+  (step 5), which reads real pixels. This is also why `changeCoverage` in the
+  frame-diff output is the only automatic check that sees a canvas — and it runs
+  AFTER the recording, so it can report a dead beat but never wait for one.
 - **App state starts clean each run.** Capture launches Chrome on a fresh temp
   profile (removed on close), so `localStorage`/cookies do NOT leak between runs
   — a stateful app (canvas tool, editor) opens empty every time. If your demo
