@@ -21,6 +21,24 @@ updates:
         update-types:
           - minor
           - patch
+        # Excluded packages get their own pull request even for a patch. Two
+        # reasons, and both were earned:
+        #
+        # tsdown and turbo are the build. tsdown is 0.x, where a "minor" is a
+        # major with the paperwork skipped — dependabot read 0.9.0 -> 0.22.14 as
+        # a minor, one broken config loader took the build down, and seven
+        # blameless updates were stuck behind it. Build tooling rides alone.
+        #
+        # The render stack is the part CI cannot vouch for. The smoke test
+        # points OPEN_TAKE_E2E_CHROME at a preinstalled Chrome, so the download
+        # and cache paths never run in CI, and a render can get worse without
+        # any test going red. These want a human watching the output.
+        exclude-patterns:
+          - "tsdown"
+          - "turbo"
+          - "@revideo/*"
+          - "puppeteer-core"
+          - "@puppeteer/browsers"
 
   # The workflows pin actions by commit SHA (see .github/workflows/*.yml), which
   # is only safe if something keeps them current. This is that something.
