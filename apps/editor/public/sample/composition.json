@@ -41,19 +41,9 @@
     "holdMs": 1100,
     "zoomOutMs": 800,
     "zoomInMs": 760,
-    "zoomEase": [
-      0.3,
-      0,
-      0.2,
-      1
-    ],
+    "zoomEase": [0.3, 0, 0.2, 1],
     "dragLagMs": 190,
-    "travelEase": [
-      0.3,
-      0,
-      0.2,
-      1
-    ]
+    "travelEase": [0.3, 0, 0.2, 1]
   },
   "start": {
     "x": 520,

@@ -43,8 +43,6 @@ export type EditServerOpts = {
 
 import { resolveTakePaths, stagePrev } from "./take";
 
-type TakePaths = Awaited<ReturnType<typeof resolveTakePaths>>;
-
 type RenderJob = {
   id: string;
   progress: number;

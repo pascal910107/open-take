@@ -128,12 +128,12 @@ const box = (js: string, els: El[]) => {
 
 // The editor's real top bar: Compare carries a why-title, Export does not.
 const COMPARE = () =>
-  el(
-    "button",
-    { title: "Hold to compare against the version you opened" },
-    "Compare",
-    { x: 1690, y: 10, width: 104, height: 32 },
-  );
+  el("button", { title: "Hold to compare against the version you opened" }, "Compare", {
+    x: 1690,
+    y: 10,
+    width: 104,
+    height: 32,
+  });
 const EXPORT = () => el("button", {}, "Export", { x: 1804, y: 9, width: 102, height: 34 });
 // The editor's Look swatches: a title, and nothing else at all.
 const SWATCH = (look: string, x: number) =>
@@ -152,7 +152,10 @@ test("a label + tooltip button resolves by its VISIBLE label from every verb", (
 
 test("...and still resolves by its tooltip text", () => {
   const dom = [EXPORT(), COMPARE()];
-  assert.deepEqual(box(boxByTextJs("Hold to compare against the version you opened"), dom)?.x, 1690);
+  assert.deepEqual(
+    box(boxByTextJs("Hold to compare against the version you opened"), dom)?.x,
+    1690,
+  );
   // a substring of the tooltip works too
   assert.deepEqual(box(boxByTextJs("Hold to compare"), dom)?.x, 1690);
 });

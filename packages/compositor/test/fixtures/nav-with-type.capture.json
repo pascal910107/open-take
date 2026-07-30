@@ -6,7 +6,8 @@
   "events": [
     {
       "kind": "click",
-      "x": 868, "y": 38,
+      "x": 868,
+      "y": 38,
       "box": { "x": 820, "y": 24, "w": 96, "h": 28 },
       "tMs": 1400,
       "sel": "Features",
@@ -15,7 +16,8 @@
     },
     {
       "kind": "click",
-      "x": 972, "y": 38,
+      "x": 972,
+      "y": 38,
       "box": { "x": 930, "y": 24, "w": 84, "h": 28 },
       "tMs": 3200,
       "sel": "Pricing",
@@ -24,7 +26,8 @@
     },
     {
       "kind": "type",
-      "x": 960, "y": 172,
+      "x": 960,
+      "y": 172,
       "box": { "x": 641, "y": 150, "w": 638, "h": 44 },
       "effectBox": { "x": 620, "y": 150, "w": 680, "h": 340 },
       "tMs": 5000,
@@ -32,11 +35,12 @@
       "note": "type a query — results grow DOWN out of the thin field",
       "text": "polished demos",
       "durationMs": 1600,
-      "changeCoverage": 0.30
+      "changeCoverage": 0.3
     },
     {
       "kind": "press",
-      "x": 970, "y": 355,
+      "x": 970,
+      "y": 355,
       "box": { "x": 640, "y": 250, "w": 660, "h": 210 },
       "tMs": 6900,
       "keys": "Enter",
@@ -47,7 +51,8 @@
     },
     {
       "kind": "click",
-      "x": 302, "y": 622,
+      "x": 302,
+      "y": 622,
       "box": { "x": 280, "y": 600, "w": 44, "h": 44 },
       "tMs": 8600,
       "sel": "thumb 1",
@@ -56,7 +61,8 @@
     },
     {
       "kind": "click",
-      "x": 382, "y": 622,
+      "x": 382,
+      "y": 622,
       "box": { "x": 360, "y": 600, "w": 44, "h": 44 },
       "tMs": 9000,
       "sel": "thumb 2",
@@ -65,7 +71,8 @@
     },
     {
       "kind": "click",
-      "x": 462, "y": 622,
+      "x": 462,
+      "y": 622,
       "box": { "x": 440, "y": 600, "w": 44, "h": 44 },
       "tMs": 9400,
       "sel": "thumb 3",
@@ -74,7 +81,8 @@
     },
     {
       "kind": "scroll",
-      "x": 960, "y": 540,
+      "x": 960,
+      "y": 540,
       "tMs": 10600,
       "dy": 1000,
       "durationMs": 1100,

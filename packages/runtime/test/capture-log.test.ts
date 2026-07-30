@@ -26,7 +26,11 @@ test("loadCaptureLogSibling: loads a present sibling, undefined when absent", as
   const dir = await mkdtemp(join(tmpdir(), "open-take-test-"));
   try {
     const video = join(dir, "demo.capture.mp4");
-    const log = { video: { width: 1920, height: 1080 }, viewport: { w: 1920, h: 1080 }, events: [{ tMs: 3000 }] };
+    const log = {
+      video: { width: 1920, height: 1080 },
+      viewport: { w: 1920, h: 1080 },
+      events: [{ tMs: 3000 }],
+    };
 
     // no sibling yet → undefined (capture-lock skipped, not an error)
     assert.equal(await loadCaptureLogSibling(video), undefined);

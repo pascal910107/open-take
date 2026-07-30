@@ -39,10 +39,15 @@ await replaceOnce(
 // Page-console passthrough stringifies non-primitive args as "JSHandle:…" —
 // unactionable noise that buries real warnings (open-take issue #9). Forward
 // them only under OPEN_TAKE_VERBOSE; string args (real messages) still pass.
+// The `${…}` below are not our interpolations — they are the literal source
+// text of the line we are matching and re-emitting inside revideo's build
+// output, so they have to survive as characters.
 await replaceOnce(
   join(out, "server", "render-video.js"),
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: matching revideo's source verbatim
   "console.log(`Worker ${id}: ${msg.args()[i]}`);",
   "if (process.env.OPEN_TAKE_VERBOSE || !String(message).startsWith('JSHandle')) {\n" +
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: re-emitting that same line
     "                console.log(`Worker ${id}: ${msg.args()[i]}`);\n" +
     "            }",
 );

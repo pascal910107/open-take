@@ -7,7 +7,9 @@
   "bin": {
     "create-open-take": "./dist/cli.js"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsdown",
     "typecheck": "tsc --noEmit",
@@ -26,7 +28,13 @@
   "publishConfig": {
     "access": "public"
   },
-  "keywords": ["demo", "screen-recording", "video", "agent", "initializer"],
+  "keywords": [
+    "demo",
+    "screen-recording",
+    "video",
+    "agent",
+    "initializer"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/pascal910107/open-take.git",

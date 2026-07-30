@@ -30,10 +30,14 @@ function probeStream(path: string, sel: "v:0" | "a:0"): Record<string, string> {
   const r = spawnSync(
     "ffprobe",
     [
-      "-v", "error",
-      "-select_streams", sel,
-      "-show_entries", "stream=codec_name,profile,pix_fmt,width,height,sample_rate,channels",
-      "-of", "default=nw=1",
+      "-v",
+      "error",
+      "-select_streams",
+      sel,
+      "-show_entries",
+      "stream=codec_name,profile,pix_fmt,width,height,sample_rate,channels",
+      "-of",
+      "default=nw=1",
       path,
     ],
     { encoding: "utf8" },
@@ -70,11 +74,16 @@ function synthWebm(path: string, durationSec: number, w = 640, h = 360): void {
     "ffmpeg",
     [
       "-y",
-      "-f", "lavfi",
-      "-i", `testsrc=size=${w}x${h}:rate=15:duration=${durationSec}`,
-      "-c:v", "libvpx",
-      "-b:v", "200k",
-      "-pix_fmt", "yuv420p",
+      "-f",
+      "lavfi",
+      "-i",
+      `testsrc=size=${w}x${h}:rate=15:duration=${durationSec}`,
+      "-c:v",
+      "libvpx",
+      "-b:v",
+      "200k",
+      "-pix_fmt",
+      "yuv420p",
       path,
     ],
     { encoding: "utf8" },
@@ -103,7 +112,11 @@ test("transcodeToCanonical: webm → mp4 conforms to D21", async () => {
     assert.equal(p.video.pix_fmt, "yuv420p", `expected yuv420p, got ${p.video.pix_fmt}`);
     assert.equal(p.video.width, String(CANONICAL_WIDTH), `width mismatch`);
     assert.equal(p.video.height, String(CANONICAL_HEIGHT), `height mismatch`);
-    assert.match(p.video.profile ?? "", /Baseline/i, `expected baseline profile, got ${p.video.profile}`);
+    assert.match(
+      p.video.profile ?? "",
+      /Baseline/i,
+      `expected baseline profile, got ${p.video.profile}`,
+    );
     assert.equal(p.audio.codec_name, "aac", `expected aac audio`);
     assert.equal(p.audio.sample_rate, "48000", `audio sample rate must be 48 kHz`);
     assert.equal(p.audio.channels, "2", `audio must be stereo`);
@@ -218,10 +231,14 @@ function synthMp3(path: string, durationSec: number): void {
     "ffmpeg",
     [
       "-y",
-      "-f", "lavfi",
-      "-i", `sine=frequency=440:duration=${durationSec}`,
-      "-c:a", "libmp3lame",
-      "-b:a", "32k",
+      "-f",
+      "lavfi",
+      "-i",
+      `sine=frequency=440:duration=${durationSec}`,
+      "-c:a",
+      "libmp3lame",
+      "-b:a",
+      "32k",
       path,
     ],
     { encoding: "utf8" },
@@ -363,7 +380,17 @@ test("mixAudio: single track is normalized to canonical sample rate", async () =
     assert.ok(existsSync(out));
     const sr = spawnSync(
       "ffprobe",
-      ["-v", "error", "-select_streams", "a:0", "-show_entries", "stream=sample_rate", "-of", "default=nw=1:nk=1", out],
+      [
+        "-v",
+        "error",
+        "-select_streams",
+        "a:0",
+        "-show_entries",
+        "stream=sample_rate",
+        "-of",
+        "default=nw=1:nk=1",
+        out,
+      ],
       { encoding: "utf8" },
     );
     assert.equal(sr.status, 0);
@@ -386,7 +413,17 @@ test("mixAudio: two tracks merge without volume drop (normalize=0)", async () =>
     assert.ok(existsSync(out));
     const sr = spawnSync(
       "ffprobe",
-      ["-v", "error", "-select_streams", "a:0", "-show_entries", "stream=sample_rate,codec_name", "-of", "default=nw=1", out],
+      [
+        "-v",
+        "error",
+        "-select_streams",
+        "a:0",
+        "-show_entries",
+        "stream=sample_rate,codec_name",
+        "-of",
+        "default=nw=1",
+        out,
+      ],
       { encoding: "utf8" },
     );
     assert.equal(sr.status, 0);
@@ -454,10 +491,14 @@ test("transcodeToCanonical: canonical mp4 has fps=30 grid", async () => {
     const r = spawnSync(
       "ffprobe",
       [
-        "-v", "error",
-        "-select_streams", "v:0",
-        "-show_entries", "stream=r_frame_rate",
-        "-of", "default=nw=1:nk=1",
+        "-v",
+        "error",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=r_frame_rate",
+        "-of",
+        "default=nw=1:nk=1",
         mp4,
       ],
       { encoding: "utf8" },

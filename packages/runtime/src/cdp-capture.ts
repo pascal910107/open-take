@@ -808,7 +808,6 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
         // element is named, locate its bbox AFTER the press so the zoom frames
         // what appeared.
         const tMs = Date.now() - t0;
-        const tPress = Date.now();
         try {
           await pressChord(cdp, step.keys);
         } catch (e) {

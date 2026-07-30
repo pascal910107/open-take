@@ -1,17 +1,21 @@
 {
-  "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.5.6/schema.json",
   "files": {
-    "ignore": [
-      "**/dist",
-      "**/.turbo",
-      "**/.next",
-      "**/.source",
-      "**/node_modules",
-      "**/.open-take-cache",
-      ".notes",
-      "out",
-      "spike-revideo",
-      "packages/runtime/editor-dist"
+    "includes": [
+      "**",
+      "!**/dist",
+      "!**/.turbo",
+      "!**/.next",
+      "!**/.source",
+      "!**/node_modules",
+      "!**/.open-take-cache",
+      "!**/.notes",
+      "!**/out",
+      "!**/spike-revideo",
+      "!**/packages/runtime/editor-dist",
+      // Tailwind v4's `@theme` is not in Biome's CSS grammar, so this file is a
+      // parse error rather than a style opinion. Nothing to fix on our side.
+      "!**/apps/docs/app/global.css"
     ]
   },
   "formatter": {
@@ -22,12 +26,18 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": true,
+      "preset": "recommended",
       "style": {
         "noNonNullAssertion": "off",
         "noUnusedTemplateLiteral": "off",
         "useSingleVarDeclarator": "off",
         "useTemplate": "off"
+      },
+      "suspicious": {
+        // Written for bundler-injected env (`import.meta.env`), where an
+        // undeclared name is a silent undefined. Our Node scripts read the real
+        // process.env — `npm_execpath` is a fact about the runtime, not a typo.
+        "noUndeclaredEnvVars": "off"
       }
     }
   },
@@ -39,7 +49,11 @@
   },
   "overrides": [
     {
-      "include": ["apps/editor/src/ui/icons.tsx"],
+      // A standalone .svg is an asset, not inline document markup: it is named
+      // by whatever references it (`<img alt>`, `<link rel="icon">`), so a
+      // <title> inside the file would add a tooltip, not accessibility.
+      // icons.tsx is the editor's icon set, hidden behind labelled controls.
+      "includes": ["**/*.svg", "**/apps/editor/src/ui/icons.tsx"],
       "linter": {
         "rules": {
           "a11y": {
@@ -49,11 +63,49 @@
       }
     },
     {
-      "include": ["apps/editor/src/components/Stage.tsx"],
+      // The editor's stage is a pointer surface — drag, scrub, marquee — not a
+      // list of buttons. Its handlers live on the div that owns the geometry;
+      // the same actions are on real controls in the inspector and the rail.
+      "includes": ["**/apps/editor/src/components/Stage.tsx", "**/apps/editor/src/App.tsx"],
+      "linter": {
+        "rules": {
+          "a11y": {
+            "noStaticElementInteractions": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/apps/editor/src/components/Stage.tsx"],
       "linter": {
         "rules": {
           "a11y": {
             "useKeyWithClickEvents": "off"
+          }
+        }
+      }
+    },
+    {
+      // Both stylesheets were tuned by looking at the result. Re-ordering rules
+      // to satisfy a specificity heuristic is a visual change with no visual
+      // review, which is the one kind of change this repo does not make blind.
+      "includes": ["**/apps/web/src/styles.css", "**/apps/editor/src/styles.css"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noDescendingSpecificity": "off"
+          }
+        }
+      }
+    },
+    {
+      // The hero take has no audio track. A captions file for a silent video
+      // would be an empty promise to anyone who turned captions on.
+      "includes": ["**/apps/web/index.html"],
+      "linter": {
+        "rules": {
+          "a11y": {
+            "useMediaCaption": "off"
           }
         }
       }

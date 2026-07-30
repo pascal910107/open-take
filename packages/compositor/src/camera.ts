@@ -299,7 +299,7 @@ export function directCamera(
       dist(centerOf(n.roi), centerOf(last.roi)) < cam.travelThreshold * video.w &&
       fit(union(last.roi, n.roi)) >= cam.minZoomScale; // union must stay tight enough
 
-    if (canExtend && last && last.roi && n.roi) {
+    if (canExtend && last?.roi && n.roi) {
       const roi = union(last.roi, n.roi);
       last.idx.push(i);
       last.roi = roi;

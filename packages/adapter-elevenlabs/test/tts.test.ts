@@ -140,12 +140,19 @@ test("ElevenLabsDriver: surfaces 4xx errors with status code", async () => {
 });
 
 test("ElevenLabsDriver: missing voiceId throws", async () => {
-  const driver = new ElevenLabsDriver({ apiKey: "k", fetchImpl: (async () => new Response()) as unknown as typeof fetch });
+  const driver = new ElevenLabsDriver({
+    apiKey: "k",
+    fetchImpl: (async () => new Response()) as unknown as typeof fetch,
+  });
   await assert.rejects(() => driver.synthesize("hi", { voiceId: "" }), /voiceId is required/);
 });
 
 test("ElevenLabsDriver.modelVersion: encodes model id", () => {
-  const driver = new ElevenLabsDriver({ apiKey: "k", modelId: "eleven_turbo_v2_5", fetchImpl: fetch });
+  const driver = new ElevenLabsDriver({
+    apiKey: "k",
+    modelId: "eleven_turbo_v2_5",
+    fetchImpl: fetch,
+  });
   assert.equal(driver.modelVersion(), "elevenlabs-eleven_turbo_v2_5");
 });
 
@@ -153,16 +160,14 @@ test("MockTTSDriver.modelVersion is mock-v0", () => {
   assert.equal(new MockTTSDriver().modelVersion(), "mock-v0");
 });
 
-test(
-  "MockTTSDriver.synthesize: produces non-empty MP3 + word-aligned VTT (skipped if no ffmpeg)",
-  { skip: !ffmpegOnPath() },
-  async () => {
-    const driver = new MockTTSDriver();
-    const out = await driver.synthesize("Hello world.", { voiceId: "mock" });
-    assert.ok(out.audio.length > 100, "MP3 bytes should be non-trivial");
-    // MP3 frames usually start with 0xFF or 0x49 ("ID3" header). Either is fine.
-    assert.ok(out.audio[0] === 0xff || out.audio[0] === 0x49, "first byte should be MP3 sync/ID3");
-    assert.match(out.vtt, /^WEBVTT\n\n/);
-    assert.equal((out.vtt.match(/-->/g) ?? []).length, 2);
-  },
-);
+test("MockTTSDriver.synthesize: produces non-empty MP3 + word-aligned VTT (skipped if no ffmpeg)", {
+  skip: !ffmpegOnPath(),
+}, async () => {
+  const driver = new MockTTSDriver();
+  const out = await driver.synthesize("Hello world.", { voiceId: "mock" });
+  assert.ok(out.audio.length > 100, "MP3 bytes should be non-trivial");
+  // MP3 frames usually start with 0xFF or 0x49 ("ID3" header). Either is fine.
+  assert.ok(out.audio[0] === 0xff || out.audio[0] === 0x49, "first byte should be MP3 sync/ID3");
+  assert.match(out.vtt, /^WEBVTT\n\n/);
+  assert.equal((out.vtt.match(/-->/g) ?? []).length, 2);
+});

@@ -174,8 +174,13 @@ button {
   color: #fff;
   padding: 9px 18px;
   background: linear-gradient(180deg, var(--acc-hi), var(--acc));
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.25) inset, 0 6px 18px rgba(110, 110, 247, 0.35);
-  transition: transform 0.15s, box-shadow 0.15s, opacity 0.15s;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.25) inset,
+    0 6px 18px rgba(110, 110, 247, 0.35);
+  transition:
+    transform 0.15s,
+    box-shadow 0.15s,
+    opacity 0.15s;
 }
 .export:hover {
   transform: translateY(-1px);
@@ -210,8 +215,10 @@ button {
   border-radius: var(--r);
   overflow: hidden;
   background: #000;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.07), 0 30px 80px rgba(0, 0, 0, 0.6), 0 8px 24px
-    rgba(0, 0, 0, 0.5);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.07),
+    0 30px 80px rgba(0, 0, 0, 0.6),
+    0 8px 24px rgba(0, 0, 0, 0.5);
 }
 .previewbox canvas {
   width: 100%;
@@ -259,7 +266,9 @@ button {
   touch-action: none;
   z-index: 5;
   outline: 2px solid var(--acc-hi);
-  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.38), 0 0 24px rgba(122, 116, 255, 0.35);
+  box-shadow:
+    0 0 0 9999px rgba(0, 0, 0, 0.38),
+    0 0 24px rgba(122, 116, 255, 0.35);
 }
 .zbox:active {
   cursor: grabbing;
@@ -473,7 +482,9 @@ input[type="range"]::-webkit-slider-thumb {
   margin-top: -5px;
   background: #fff;
   border: 0;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35), 0 2px 6px rgba(0, 0, 0, 0.45);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.35),
+    0 2px 6px rgba(0, 0, 0, 0.45);
 }
 input[type="range"]::-moz-range-track {
   height: 4px;
@@ -818,7 +829,9 @@ details.adv .row > .rowlabel {
 .zb.on {
   background: linear-gradient(180deg, var(--acc-hi), var(--acc));
   color: #fff;
-  box-shadow: 0 4px 16px rgba(110, 110, 247, 0.45), 0 1px 0 rgba(255, 255, 255, 0.25) inset;
+  box-shadow:
+    0 4px 16px rgba(110, 110, 247, 0.45),
+    0 1px 0 rgba(255, 255, 255, 0.25) inset;
 }
 .zb.ghost {
   background: transparent;

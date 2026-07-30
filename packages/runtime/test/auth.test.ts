@@ -49,9 +49,12 @@ test("`..` anywhere is refused, not just at the front", () => {
 
 test("the refusal names the name and says what is allowed", () => {
   // an agent reading this message has to be able to fix it without the source
-  assert.throws(() => profileDir("../evil"), (e: Error) => {
-    assert.match(e.message, /"\.\.\/evil"/, "quotes the offending name");
-    assert.match(e.message, /letters\/digits/, "says what a valid name looks like");
-    return true;
-  });
+  assert.throws(
+    () => profileDir("../evil"),
+    (e: Error) => {
+      assert.match(e.message, /"\.\.\/evil"/, "quotes the offending name");
+      assert.match(e.message, /letters\/digits/, "says what a valid name looks like");
+      return true;
+    },
+  );
 });

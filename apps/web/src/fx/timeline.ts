@@ -24,10 +24,12 @@ export class Timeline {
   private readonly tweens = new Tweens();
   private readonly beats: Beat[];
 
+  // cursor and rig are closed over by the beats built below, never read off
+  // `this` — so they stay plain parameters rather than private fields.
   constructor(
     private readonly app: MockApp,
-    private readonly cursor: Cursor,
-    private readonly rig: Rig,
+    cursor: Cursor,
+    rig: Rig,
     hooks: HudHooks,
   ) {
     const { targets } = app;

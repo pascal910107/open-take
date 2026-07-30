@@ -13,12 +13,7 @@ import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import {
-  type TakeComposition,
-  math,
-  resolveFfmpeg,
-  resolveFfprobe,
-} from "@open-take/compositor";
+import { type TakeComposition, math, resolveFfmpeg, resolveFfprobe } from "@open-take/compositor";
 import { beatLabel } from "./review";
 import { type TakePaths, requireTakeFiles, takeFile } from "./take";
 
@@ -52,8 +47,7 @@ function beatWindows(comp: TakeComposition): {
   return comp.events.map((e, i) => {
     const arrived = Math.max(e.tMs, ramps[i]?.landMs ?? e.tMs);
     const endOwn = arrived + (e.durationMs ?? 0) + comp.cursor.holdMs;
-    const release =
-      i < comp.events.length - 1 ? starts[i + 1]! : Math.min(endOwn, comp.durationMs);
+    const release = i < comp.events.length - 1 ? starts[i + 1]! : Math.min(endOwn, comp.durationMs);
     return { startMs: starts[i]!, arrivedMs: arrived, releaseMs: release };
   });
 }
@@ -142,7 +136,9 @@ function run(cmd: string, args: string[]): Promise<string> {
       err += d;
     });
     c.on("error", rej);
-    c.on("close", (code) => (code === 0 ? res(out) : rej(new Error(`${cmd} exited ${code}: ${err}`))));
+    c.on("close", (code) =>
+      code === 0 ? res(out) : rej(new Error(`${cmd} exited ${code}: ${err}`)),
+    );
   });
 }
 
@@ -174,7 +170,9 @@ export function buildFrameSheet(
   ];
   plan.rows.forEach((r, i) => {
     const cells = r.cells
-      .map((c) => (c.phase === "hold" || c.phase === "intro" ? fmtS(c.tMs) : `${fmtS(c.tMs)}(${c.phase})`))
+      .map((c) =>
+        c.phase === "hold" || c.phase === "intro" ? fmtS(c.tMs) : `${fmtS(c.tMs)}(${c.phase})`,
+      )
       .join(" · ");
     lines.push(`  row ${i + 1}  ${r.label.padEnd(34, " ")} ${cells}`);
   });
@@ -209,7 +207,8 @@ export async function renderFrames(
   if (!(await stat(src).catch(() => null))?.isFile())
     throw new Error(`frames: ${src} not found — render the take first`);
   const plan = buildFramePlan(comp, { beat: opts.beat });
-  if (plan.rows.length === 0) throw new Error("frames: nothing to sample (no beats, no intro/tail)");
+  if (plan.rows.length === 0)
+    throw new Error("frames: nothing to sample (no beats, no intro/tail)");
 
   const trim = comp.startMs ?? 0;
   const durMs = await mp4Duration(src);

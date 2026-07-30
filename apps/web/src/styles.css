@@ -99,7 +99,9 @@ body {
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   overflow-x: hidden;
-  transition: background-color 0.35s, color 0.35s;
+  transition:
+    background-color 0.35s,
+    color 0.35s;
 }
 html[data-theme="light"] body::after {
   opacity: 0.06;
@@ -183,7 +185,10 @@ code {
   justify-content: space-between;
   height: 62px;
   padding: 0 clamp(20px, 4vw, 44px);
-  transition: background 0.35s, border-color 0.35s, backdrop-filter 0.35s;
+  transition:
+    background 0.35s,
+    border-color 0.35s,
+    backdrop-filter 0.35s;
   border-bottom: 1px solid transparent;
 }
 .nav.scrolled {
@@ -282,19 +287,17 @@ html:not([data-theme="light"]) .tb-moon {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background: linear-gradient(
-      to right,
-      rgba(8, 8, 11, 0.62),
-      rgba(8, 8, 11, 0.18) 38%,
-      transparent 56%
-    ), radial-gradient(120% 90% at 50% 42%, transparent 52%, rgba(4, 4, 7, 0.6) 100%),
+  background:
+    linear-gradient(to right, rgba(8, 8, 11, 0.62), rgba(8, 8, 11, 0.18) 38%, transparent 56%),
+    radial-gradient(120% 90% at 50% 42%, transparent 52%, rgba(4, 4, 7, 0.6) 100%),
     linear-gradient(to bottom, rgba(8, 8, 11, 0.55), transparent 24%, transparent 72%, var(--bg));
 }
 /* paper daylight is clean, not misty: ONE steep text-protection wash on the
    left, a whisper of DARK vignette, a bottom fade. No top wash — semi-alpha
    white over the dark window at punch reads as fog. */
 html[data-theme="light"] .hero-veil {
-  background: radial-gradient(120% 90% at 50% 42%, transparent 62%, rgba(30, 27, 20, 0.06) 100%),
+  background:
+    radial-gradient(120% 90% at 50% 42%, transparent 62%, rgba(30, 27, 20, 0.06) 100%),
     linear-gradient(to bottom, transparent 80%, var(--bg));
 }
 /* the fixed nav carries its own paper glass in light instead of a veil wash */
@@ -326,7 +329,9 @@ html[data-theme="light"] .nav {
   font-size: 11px;
   letter-spacing: 0.14em;
   color: var(--ink2);
-  transition: border-color 0.25s, color 0.25s;
+  transition:
+    border-color 0.25s,
+    color 0.25s;
 }
 .announce i {
   width: 6px;
@@ -337,7 +342,9 @@ html[data-theme="light"] .nav {
 }
 .announce span {
   color: var(--ink3);
-  transition: transform 0.25s var(--ease), color 0.25s;
+  transition:
+    transform 0.25s var(--ease),
+    color 0.25s;
 }
 .announce:hover {
   border-color: var(--acc-line);
@@ -411,7 +418,9 @@ html[data-theme="light"] h1 em {
   padding: 6px 12px;
   border-radius: 7px;
   cursor: pointer;
-  transition: color 0.2s, background 0.2s;
+  transition:
+    color 0.2s,
+    background 0.2s;
 }
 .ask-tab:hover {
   color: var(--ink2);
@@ -439,11 +448,16 @@ html[data-theme="light"] h1 em {
   font-size: 13.5px;
   letter-spacing: 0.01em;
   cursor: pointer;
-  transition: border-color 0.25s, box-shadow 0.25s, transform 0.15s;
+  transition:
+    border-color 0.25s,
+    box-shadow 0.25s,
+    transform 0.15s;
 }
 .cmd:hover {
   border-color: var(--acc-line);
-  box-shadow: 0 0 0 1px rgb(var(--acc-hi-rgb) / 0.2), 0 8px 34px rgb(var(--acc-rgb) / 0.17);
+  box-shadow:
+    0 0 0 1px rgb(var(--acc-hi-rgb) / 0.2),
+    0 8px 34px rgb(var(--acc-rgb) / 0.17);
 }
 .cmd:active {
   transform: translateY(1px);
@@ -504,7 +518,11 @@ html[data-theme="light"] h1 em {
   letter-spacing: 0.04em;
   color: var(--ink2);
   cursor: pointer;
-  transition: color 0.2s, border-color 0.25s, box-shadow 0.25s, transform 0.15s;
+  transition:
+    color 0.2s,
+    border-color 0.25s,
+    box-shadow 0.25s,
+    transform 0.15s;
 }
 .btn-ghost svg {
   display: block;
@@ -606,10 +624,15 @@ html[data-theme="light"] h1 em {
   margin: 0 auto;
   height: 26px;
   padding: 0 24px;
-  background-image: repeating-linear-gradient(90deg, var(--line) 0 1px, transparent 1px 18px),
+  background-image:
+    repeating-linear-gradient(90deg, var(--line) 0 1px, transparent 1px 18px),
     repeating-linear-gradient(90deg, var(--line-hi) 0 1px, transparent 1px 126px);
-  background-size: calc(100% - 48px) 9px, calc(100% - 48px) 17px;
-  background-position: 24px bottom, 24px bottom;
+  background-size:
+    calc(100% - 48px) 9px,
+    calc(100% - 48px) 17px;
+  background-position:
+    24px bottom,
+    24px bottom;
   background-repeat: no-repeat;
 }
 
@@ -831,11 +854,9 @@ html[data-theme="light"] h1 em {
   border: 1px solid var(--line);
   border-radius: 10px;
   background-color: #0b0b10;
-  background-image: repeating-linear-gradient(
-      90deg,
-      rgba(255, 255, 255, 0.028) 0 1px,
-      transparent 1px 40px
-    ), repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.028) 0 1px, transparent 1px 40px);
+  background-image:
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.028) 0 1px, transparent 1px 40px),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.028) 0 1px, transparent 1px 40px);
   overflow: hidden;
 }
 .scope-plot svg {
@@ -900,7 +921,9 @@ html[data-theme="light"] h1 em {
   border-radius: 4px 4px 0 0;
   padding: 0 5px;
   cursor: pointer;
-  transition: background 0.2s, color 0.2s;
+  transition:
+    background 0.2s,
+    color 0.2s;
 }
 .j-toggle:hover {
   background: rgb(var(--acc-rgb) / 0.26);
@@ -1070,7 +1093,10 @@ html[data-theme="light"] h1 em {
   display: grid;
   place-items: center;
   cursor: pointer;
-  transition: transform 0.2s var(--ease), border-color 0.2s, opacity 0.3s;
+  transition:
+    transform 0.2s var(--ease),
+    border-color 0.2s,
+    opacity 0.3s;
 }
 .film-play svg {
   margin-left: 4px;
@@ -1101,7 +1127,9 @@ html[data-theme="light"] h1 em {
   border: 1px solid var(--line);
   border-radius: 18px;
   padding: clamp(24px, 3vw, 34px);
-  transition: border-color 0.3s, transform 0.3s var(--ease);
+  transition:
+    border-color 0.3s,
+    transform 0.3s var(--ease);
 }
 .door:hover {
   border-color: var(--line-hi);
@@ -1393,7 +1421,10 @@ html[data-theme="light"] h1 em {
   opacity: 0;
   transform: translateY(16px);
   filter: blur(7px);
-  transition: opacity 0.75s var(--ease), transform 0.75s var(--ease), filter 0.9s var(--ease);
+  transition:
+    opacity 0.75s var(--ease),
+    transform 0.75s var(--ease),
+    filter 0.9s var(--ease);
   transition-delay: var(--d, 0s);
 }
 .js .reveal.in {
@@ -1427,7 +1458,8 @@ html[data-theme="light"] h1 em {
     opacity: 0.44;
   }
   .hero-veil {
-    background: radial-gradient(130% 100% at 50% 40%, transparent 40%, rgba(4, 4, 7, 0.72) 100%),
+    background:
+      radial-gradient(130% 100% at 50% 40%, transparent 40%, rgba(4, 4, 7, 0.72) 100%),
       linear-gradient(
         to bottom,
         rgba(8, 8, 11, 0.5),
@@ -1437,7 +1469,8 @@ html[data-theme="light"] h1 em {
       );
   }
   html[data-theme="light"] .hero-veil {
-    background: radial-gradient(130% 100% at 50% 40%, transparent 55%, rgba(30, 27, 20, 0.07) 100%),
+    background:
+      radial-gradient(130% 100% at 50% 40%, transparent 55%, rgba(30, 27, 20, 0.07) 100%),
       linear-gradient(
         to bottom,
         rgba(244, 242, 236, 0.55),

@@ -26,7 +26,7 @@
       try {
         if (localStorage.getItem("ot-theme") === "light")
           document.documentElement.dataset.theme = "light";
-      } catch (e) {}
+      } catch {}
     </script>
     <script type="module" src="/src/main.ts"></script>
   </head>
@@ -92,8 +92,8 @@
               <button class="cmd mono" id="hero-cmd" type="button" data-copy="npm create open-take@latest">
                 <span class="ps1" id="cmd-prefix" aria-hidden="true">$</span><span id="cmd-text">npm create open-take@latest</span>
                 <span class="cmd-copy" aria-hidden="true">
-                  <svg class="ico-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2.5" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
-                  <svg class="ico-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+                  <svg class="ico-copy" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2.5" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+                  <svg class="ico-check" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
                 </span>
                 <span class="sr-only" data-copy-sr aria-live="polite">Copy to clipboard</span>
               </button>
@@ -117,7 +117,7 @@
               <i class="tl r"></i><i class="tl y"></i><i class="tl g"></i>
               <span class="mono term-title">you × your agent</span>
             </div>
-            <pre class="mono term-body" id="term-body" aria-label="Terminal transcript: one sentence in, a rendered demo out"></pre>
+            <pre class="mono term-body" id="term-body" role="img" aria-label="Terminal transcript: one sentence in, a rendered demo out"></pre>
           </div>
           <div class="ask-side reveal" style="--d: 0.12s">
             <h2>One sentence in.<br />A postable MP4 out.</h2>
@@ -285,7 +285,7 @@
           <article class="door reveal">
             <p class="door-k mono">DOOR A — DAILIES</p>
             <h3>Give notes in plain language.</h3>
-            <div class="notes mono" aria-label="Example notes to the agent">
+            <div class="notes mono">
               <p class="note you">beat 3: no zoom</p>
               <p class="note you">tighter on beat 2</p>
               <p class="note you">look: slate</p>
@@ -370,8 +370,8 @@
           <button class="cmd mono big" type="button" data-copy="npm create open-take@latest">
             <span class="ps1" aria-hidden="true">$</span>npm create open-take@latest
             <span class="cmd-copy" aria-hidden="true">
-              <svg class="ico-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2.5" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
-              <svg class="ico-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+              <svg class="ico-copy" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2.5" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+              <svg class="ico-check" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
             </span>
             <span class="sr-only" data-copy-sr aria-live="polite">Copy to clipboard</span>
           </button>

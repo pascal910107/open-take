@@ -5,7 +5,10 @@
   "license": "MIT",
   "main": "./dist/server/index.js",
   "types": "./dist/server/index.d.ts",
-  "files": ["dist", "LICENSE"],
+  "files": [
+    "dist",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "node scripts/build.mjs",
     "typecheck": "node --check scripts/build.mjs",

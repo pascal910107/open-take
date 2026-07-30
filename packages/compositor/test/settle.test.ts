@@ -13,7 +13,7 @@ import { buildLegs, buildStageKeyframes, cameraRampSchedule, stageCamera } from 
 import { planComposition } from "../src/plan.js";
 import { MOTION, type MotionName, motionName } from "../src/presets.js";
 import type { CaptureLog, CursorConfig, TakeComposition } from "../src/types.js";
-import { DEFAULT_CAMERA, DEFAULT_CURSOR, DEFAULT_FRAMING } from "../src/types.js";
+import { DEFAULT_CURSOR, DEFAULT_FRAMING } from "../src/types.js";
 import { validateComposition } from "../src/validate.js";
 
 const VW = 1920,
