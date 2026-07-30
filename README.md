@@ -24,10 +24,11 @@ Chrome for Testing under `~/.open-take/browsers`; later runs reuse it.
 
 ## What you get
 
-Two things per demo: `demo.mp4` — the one to post — and `demo.take/` beside it,
-holding the editable composition, the kept recording, and every draft copy. Post
-the mp4; ignore, `.gitignore` (`*.take/`) or delete the folder. Deleting it keeps
-the video and gives up re-rendering (the recording is not regenerable).
+Two things per demo, in `demos/`: `myapp.mp4` — the one to post — and
+`myapp.take/` beside it, holding the editable composition, the kept recording,
+and every draft copy. Post the mp4; ignore, `.gitignore` (`*.take/`) or delete
+the folder. Deleting it keeps the video and gives up re-rendering (the recording
+is not regenerable). Demos stay in one folder so their videos sit side by side.
 
 ## Refine
 

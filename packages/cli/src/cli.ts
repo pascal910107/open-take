@@ -175,6 +175,10 @@ Usage:
   review/draft/ab copies, prev.mp4, dossier.md, notes.md. Post the mp4; ignore,
   .gitignore (*.take/) or delete the folder.
 
+  Keep takes together in ONE folder (the default --out is demos/take.mp4) and
+  name each after the app or the cut — demos/myapp.mp4, demos/myapp-pricing.mp4.
+  Their masters then sit side by side, which is how you compare and pick one.
+
   <take> is the master mp4, the <name>.take/ dir, any file inside it, or a
   directory holding exactly one take — the rest resolves by convention.
 
@@ -249,6 +253,9 @@ Usage:
   skill   print the full agent guide (SKILL.md). \`skill install\` remains as a
           backwards-compatible alias for \`init\`.
 
+  --out <path>   (make) where the postable master goes — taken literally, and
+              its <name>.take/ working dir is created beside it. Default
+              demos/take.mp4.
   --fps <n>   (make only) capture AND render fps (default 60). Drop to 30 for
               fast drafts while iterating.
   --capture-scale <n>   (make only) capture pixel density (default 2 — Retina;
@@ -258,7 +265,7 @@ Usage:
               summary lists them either way.
   --force     (make only) overwrite the take at --out even when it was shot from
               a different app. Without it that is refused: two demos in one
-              folder each get their own name (\`--out linear.mp4\`).
+              folder each get their own name (\`--out myapp.mp4\`).
   --profile <name>   (make/inspect) drive an authenticated session: reuse the
               persistent profile created by \`open-take auth <name>\`.
   --headed    (make/inspect) drive a visible Chrome window instead of headless —
@@ -272,6 +279,14 @@ const fmtDuration = (s: number): string => (s >= 120 ? `${Math.round(s / 60)}m` 
 
 const fmtBytes = (n: number): string =>
   n > 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.round(n / 1024)} KB`;
+
+/** Where a take goes when nobody says. Takes belong TOGETHER in one folder —
+ *  their masters then sit side by side, which is how you compare, pick and drag
+ *  them — and that folder should not be the user's project root, which is
+ *  someone else's. This is only the default: `--out` is always taken literally,
+ *  because a tool that writes your video somewhere other than where you pointed
+ *  is worse than any tidiness it buys. */
+const DEFAULT_OUT = "demos/take.mp4";
 
 /** `--out` names the postable master, so it is an mp4 path. A bare name is the
  *  natural thing to type (`--out demo`) and used to produce a file literally
@@ -403,7 +418,7 @@ async function main() {
 
   if (cmd === "make") {
     const planPath = flag("--plan");
-    const out = normalizeOut(flag("--out") ?? "take.mp4");
+    const out = normalizeOut(flag("--out") ?? DEFAULT_OUT);
     if (!planPath) throw new Error("make: missing --plan <plan.json>");
     const plan = JSON.parse(await readFile(planPath, "utf8")) as TakePlan;
     const fpsFlag = flag("--fps");

@@ -65,13 +65,13 @@ test("the working dir, and any file in it, resolve the whole take", async () => 
 test("a directory holding exactly one take resolves it; two speak up", async () => {
   const dir = await mkdtemp(join(tmpdir(), "open-take-family-"));
   try {
-    await mkdir(join(dir, "vercel.take"), { recursive: true });
+    await mkdir(join(dir, "myapp.take"), { recursive: true });
     const one = await resolveTakePaths(dir);
-    assert.equal(one.base, join(dir, "vercel"));
+    assert.equal(one.base, join(dir, "myapp"));
 
     // two demos in one folder: `notes .` must not silently pick one
-    await mkdir(join(dir, "linear.take"), { recursive: true });
-    await assert.rejects(() => resolveTakePaths(dir), /holds 2 takes[\s\S]*linear[\s\S]*vercel/);
+    await mkdir(join(dir, "other.take"), { recursive: true });
+    await assert.rejects(() => resolveTakePaths(dir), /holds 2 takes[\s\S]*myapp[\s\S]*other/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

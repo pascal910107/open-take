@@ -478,22 +478,36 @@ page changed).
 
 ### make (render)
 ```
-npx open-take make --plan plan.json --out linear.mp4 --draft    # the default loop
-npx open-take make --plan plan.json --out linear.mp4            # master up front
-npx open-take make --plan plan.json --out linear.mp4 --fps 30   # capture at 30
+npx open-take make --plan plan.json --out demos/myapp.mp4 --draft    # the default loop
+npx open-take make --plan plan.json --out demos/myapp.mp4            # master up front
+npx open-take make --plan plan.json --out demos/myapp.mp4 --fps 30   # capture at 30
 ```
 Produces `<out>.mp4` (1920×1080 @ **60fps default**) — the one the user posts —
 and a working directory `<out>.take/` beside it holding everything else, starting
 with the editable `<out>.take/composition.json`.
 
-**Name the take after the app, not `demo.mp4`.** Two demos in one folder need two
-names (`vercel.mp4` + `vercel.take/`, `linear.mp4` + `linear.take/`), and `make`
-REFUSES to overwrite a take that was shot from a different app rather than
-destroying a capture that cost minutes of real drive time (`--force` overrides —
-it is the right flag only when the same app moved address). Re-shooting the SAME
-app at the same `--out` is the normal re-make and proceeds, keeping the old
-master + composition as `prev.mp4` / `prev.composition.json` (hand-edited zoom
-overrides survive a re-plan there — re-apply what still applies).
+**Where takes go: `demos/` in the project, never the project root.** All of a
+project's takes live in ONE folder so their masters sit side by side — that is
+how the user compares them, picks one, and drags it into a post. Do not scatter
+takes across the tree and do not drop them in the repo root: `--out` is taken
+literally, so where they land is YOUR choice, and two entries per take in
+someone's source root is rude. `demos/` is the default (`--out` omitted =
+`demos/take.mp4`); follow whatever the project already uses if it has a
+convention.
+
+**Name each take after the app or the cut, never `demo.mp4`.** Two demos in one
+folder need two names — `demos/myapp.mp4` + `demos/myapp.take/`,
+`demos/myapp-pricing.mp4` + `demos/myapp-pricing.take/`. `make` REFUSES to
+overwrite a take that was shot from a different app rather than destroying a
+capture that cost minutes of real drive time (`--force` overrides — it is the
+right flag only when the same app moved address). Re-shooting the SAME app at
+the same `--out` is the normal re-make and proceeds, keeping the old master +
+composition as `prev.mp4` / `prev.composition.json` (hand-edited zoom overrides
+survive a re-plan there — re-apply what still applies).
+
+**Tell the user how to keep it out of git**, once, when you hand over the first
+take of a project: `*.take/` in `.gitignore` ignores every take's working files
+while leaving the mp4s committable. Never edit their `.gitignore` yourself.
 
 **`--draft` renders the initial mp4 at draft quality** (30fps cap + motion blur
 off — several times faster) while the capture still records at the full fps and

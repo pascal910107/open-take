@@ -82,6 +82,31 @@ test("an unknown flag still reports the command's allowed list", async () => {
   assert.match(r.err, /--review/, "lists what render does accept");
 });
 
+// --out names the postable master, and the check runs BEFORE the plan is read
+// (and long before a browser starts) so a mistyped extension costs nothing.
+test("--out must name an mp4 — a bare name is completed, another extension is refused", async () => {
+  const r = await run(["make", "--out", "demo.mov"]);
+  assert.equal(r.code, 1);
+  assert.match(r.err, /--out must be an \.mp4 path/);
+
+  // a bare name is the natural thing to type: it gets the extension, so the
+  // run proceeds to the next missing thing rather than writing a file called
+  // "demo" that no player opens
+  const bare = await run(["make", "--out", "demo"]);
+  assert.equal(bare.code, 1);
+  assert.match(bare.err, /make: missing --plan/);
+});
+
+// The CLI's users are agents reading --help. Where takes go, and which file is
+// the postable one, are the two things a wrong answer to is expensive.
+test("--help states the take layout and where takes go by default", async () => {
+  const r = await run(["--help"]);
+  assert.equal(r.code, 0);
+  assert.match(r.out, /<out>\.take\//, "the working dir is named");
+  assert.match(r.out, /demos\/take\.mp4/, "the default --out is documented");
+  assert.match(r.out, /\.gitignore \(\*\.take\/\)/, "how to keep it out of git");
+});
+
 test("a flag that belongs to another command is refused, not ignored", async () => {
   // --profile is a make/inspect flag; accepting it silently on `render` is how
   // an older CLI pretends to honour a newer doc
