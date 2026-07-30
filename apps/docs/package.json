@@ -16,7 +16,7 @@
     "@fontsource-variable/instrument-sans": "^5.2.8",
     "@fontsource/geist-mono": "^5.2.8",
     "fumadocs-core": "16.8.5",
-    "fumadocs-mdx": "14.3.2",
+    "fumadocs-mdx": "15.2.0",
     "fumadocs-ui": "16.8.5",
     "next": "16.2.10",
     "react": "^19.2.7",
