@@ -2,7 +2,7 @@
   "name": "@open-take/web",
   "version": "0.0.0",
   "private": true,
-  "description": "opentake.dev — the marketing site. A static Vite page with a live WebGL rebuild of the product's camera as the hero. Never published to npm; deploy dist/ anywhere static.",
+  "description": "open-take.dev — the marketing site. A static Vite page with a live WebGL rebuild of the product's camera as the hero. Never published to npm; deploy dist/ anywhere static.",
   "license": "MIT",
   "type": "module",
   "scripts": {
