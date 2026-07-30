@@ -43,7 +43,16 @@ async function tarEntries(archivePath) {
 
 function pack(packageDir, destination) {
   const pnpmEntry = process.env.npm_execpath;
-  assert.ok(pnpmEntry, "npm_execpath must point to pnpm");
+  // Checking that it EXISTS is not enough: run this via `npm run test:package`
+  // and npm_execpath points at npm, so the pack below is npm's — whose --json
+  // output interleaves the prepack log differently and lands as
+  // `SyntaxError: Unexpected token 'b', "bundle-edi"...`. That reads like a
+  // broken artifact rather than a wrong invocation, which is how it cost a
+  // debugging detour. Say so instead.
+  assert.ok(
+    pnpmEntry && /pnpm/.test(pnpmEntry),
+    `this gate packs with pnpm — run it as \`pnpm test:package\` (npm_execpath is ${pnpmEntry || "unset"})`,
+  );
   const output = execFileSync(
     process.execPath,
     [pnpmEntry, "pack", "--pack-destination", destination, "--json"],
