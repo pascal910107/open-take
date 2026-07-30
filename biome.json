@@ -4,6 +4,8 @@
     "ignore": [
       "**/dist",
       "**/.turbo",
+      "**/.next",
+      "**/.source",
       "**/node_modules",
       "**/.open-take-cache",
       ".notes",

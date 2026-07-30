@@ -1,0 +1,39 @@
+---
+title: Introduction
+description: Cinematic product demos, recorded by your agent.
+---
+
+**open-take** is an agent-native demo recorder. You tell your coding agent to
+make a demo of your app; it drives the real thing in a real browser and hands
+you a polished MP4 — smooth synthetic cursor, click-aware zooms, motion blur —
+plus an editable composition you refine by asking for changes in plain
+language.
+
+```txt
+you › Make a demo of localhost:3000 for Twitter.
+```
+
+## Why an agent-driven camera
+
+Screen recorders infer zoom intent from raw cursor motion. An agent-driven
+camera never infers: it knows every click, coordinate and timestamp, because it
+wrote the plan. The cinematic layer is driven by ground truth, and the camera
+itself is measured — a critically-damped spring fitted to a reference export
+(punch-in ≈ 730 ms, release ≈ 1.8× slower).
+
+## The two doors
+
+Refinement is conversational or visual — same file either way:
+
+- **Ask.** Watch the review copy, give notes like `beat 3: no zoom` or
+  `look: slate`. Your agent re-renders from the kept capture; your app is never
+  re-driven.
+- **Drag.** `open-take edit` opens a local visual editor over the live,
+  pixel-faithful preview.
+
+<Cards>
+  <Card href="/docs/getting-started" title="Getting started" description="One command, then one sentence to your agent." />
+  <Card href="/docs/take-layout" title="A take on disk" description="demo.mp4 + demo.take/ — what each file is." />
+  <Card href="/docs/refine" title="Refine" description="Dailies: review copies, beat notes, A/B reels." />
+  <Card href="/docs/cli/overview" title="CLI reference" description="Every command, flag and default." />
+</Cards>

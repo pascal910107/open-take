@@ -1,0 +1,20 @@
+// One palette for the whole miniature — the editor's deep-neutral + iris skin,
+// so the hero reads as the same product the screenshots show.
+export const C = {
+  bg: 0x08080b,
+  window: 0x101015,
+  screen: 0x0c0c10,
+  panel: 0x17171b,
+  card: 0x1c1c23,
+  cardHi: 0x24242b,
+  chip: 0x2e2e38,
+  chipDim: 0x232329,
+  inset: 0x0e0e13,
+  ink: 0xececf1,
+  acc: 0x6e6ef7,
+  accHi: 0x8d86ff,
+  ok: 0x7ec98f,
+  tlRed: 0xff5f57,
+  tlYellow: 0xfebc2e,
+  tlGreen: 0x28c840,
+} as const;

@@ -1,0 +1,26 @@
+{
+  "name": "@open-take/web",
+  "version": "0.0.0",
+  "private": true,
+  "description": "opentake.dev — the marketing site. A static Vite page with a live WebGL rebuild of the product's camera as the hero. Never published to npm; deploy dist/ anywhere static.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@fontsource-variable/instrument-sans": "^5.2.8",
+    "@fontsource/geist-mono": "^5.2.8",
+    "three": "^0.185.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.1",
+    "@types/three": "^0.185.0",
+    "typescript": "^5.6.3",
+    "vite": "^6.3.0"
+  }
+}

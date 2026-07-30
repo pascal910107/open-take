@@ -1,0 +1,33 @@
+---
+title: render
+description: Re-render the edited composition over the kept capture — deterministic, no app drive.
+---
+
+```sh
+open-take render demos/myapp.mp4            # re-render the master
+open-take render demos/myapp.mp4 --review   # badged review copy
+open-take render demos/myapp.mp4 --draft    # clean fast draft
+```
+
+`render` re-renders the (edited) `composition.json` over the kept capture.
+The app is **not** driven — the result is deterministic, and the previous
+master is kept as `prev.mp4` so "keep the old one" is a mechanical revert.
+
+## `--review`
+
+Renders a fast draft to `review.mp4` with **beat badges burned in** — the
+video teaches what "beat 3" refers to — plus a REVIEW watermark. Never
+overwrites the postable master. Review copies auto-open in the player
+(`--no-open` to skip, `--reveal` to reveal the file instead).
+
+## `--draft`
+
+Renders a clean draft to `draft.mp4` — 30 fps cap, motion blur off, no
+badges — the cheap re-render for frame checks mid-refine. Never overwrites
+the master, does not auto-open.
+
+## Warnings land in the summary
+
+The composition validator refuses to hand you a bad take quietly: a camera
+still mid-move at a click, a dead tail, a crowded release — each is flagged in
+the **end-of-run summary** with the fix.

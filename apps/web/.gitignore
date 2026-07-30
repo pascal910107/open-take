@@ -1,0 +1,5 @@
+# The root .gitignore drops *.mp4/*.png as regenerable render artifacts.
+# Site media are shipped assets, not artifacts — re-include them.
+!public/**/*.mp4
+!public/**/*.png
+!public/**/*.jpg

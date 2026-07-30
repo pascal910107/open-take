@@ -1,0 +1,50 @@
+---
+title: beats · frames · ab
+description: The verification kit — a shared beat map, contact sheets in seconds, and A/B reels.
+---
+
+## `beats` — the shared map
+
+```sh
+open-take beats demos/myapp.mp4
+```
+
+Prints the numbered beat sheet — the map that notes like `beat 3: no zoom`
+refer to. `--card` appends the say-it cheat card.
+
+## `frames` — framing checks without a render
+
+```sh
+open-take frames demos/myapp.mp4
+open-take frames demos/myapp.mp4 --beat 3
+```
+
+Extracts a beat-aware contact sheet (`frames.png`) from the delivered mp4: an
+intro row, one row per beat — a mid-travel cell plus four samples across the
+beat's camera **hold**, timed off the real camera schedule — and a tail row.
+Pure ffmpeg, seconds, no render.
+
+`--beat N` densifies one beat into a 10-cell strip with per-cell phase labels.
+`--tile <px>` sets tile width (default 480; a `--beat` strip defaults 720 —
+thumbnails suspect a framing bug, bigger tiles confirm it). Judge framing on
+**hold** cells, never mid-ramp. Pass `draft.mp4` or `review.mp4` as `<take>`
+to sample that copy instead of the master.
+
+## `ab` — taste questions, answered by eye
+
+```sh
+open-take ab demos/myapp.mp4 --set zoom=light,tight --beat 3
+open-take ab demos/myapp.mp4 --set look=slate,midnight
+open-take ab demos/myapp.mp4 --before-after
+```
+
+One knob, up to three candidate values, rendered as a labeled reel — each
+variant plays twice, and variant **A is always the current state**. Knobs:
+`zoom` (per-beat, `off`/`light`/`medium`/`tight`/`close` or a number) ·
+`look` (`midnight`/`ink`/`slate`/`ocean`/`plum`/`ember`/`paper`/`plain`) ·
+`pace` (`calm`/`natural`/`brisk`) · `finish` (`smooth`/`crisp`/`heavy`) · or a
+raw dot-path like `cursor.holdMs=900,1300`.
+
+Reels are windowed to the beat's zoom arc (`--full` for the whole take); feel
+knobs render at full quality — judge motion by eye. `--before-after` replays
+`prev.mp4` vs the current master instead: no render, BEFORE then AFTER, twice.

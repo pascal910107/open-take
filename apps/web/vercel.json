@@ -1,0 +1,9 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [
+    { "source": "/docs", "destination": "https://open-take-docs.vercel.app/docs" },
+    { "source": "/docs/:path*", "destination": "https://open-take-docs.vercel.app/docs/:path*" },
+    { "source": "/llms.txt", "destination": "https://open-take-docs.vercel.app/llms.txt" },
+    { "source": "/llms-full.txt", "destination": "https://open-take-docs.vercel.app/llms-full.txt" }
+  ]
+}

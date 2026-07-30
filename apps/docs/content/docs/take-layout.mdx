@@ -1,0 +1,63 @@
+---
+title: A take on disk
+description: demo.mp4 + demo.take/ — the postable master and its working directory.
+---
+
+A take is **two** things on disk: the postable master at exactly your `--out`
+path, and a working directory beside it holding everything else.
+
+```txt
+demos/
+  myapp.mp4        ← the one you post
+  myapp.take/      ← the working dir
+    composition.json        the whole cinematic layer, editable
+    capture.mp4             the KEPT raw screen capture
+    capture.json            the ground-truth event log of the shoot
+    review.mp4              badged review copy (render --review)
+    draft.mp4               clean fast draft (render --draft)
+    ab.mp4                  the last A/B reel
+    prev.mp4                the master this one replaced — mechanical revert
+    prev.composition.json   the composition that rendered prev.mp4
+    frames.png              beat-aware contact sheet (frames)
+    dossier.md              the exploration harvest — the app, remembered
+    notes.md                director's notes from the editor's Agent panel
+    notes.cursor            how far notes has read
+```
+
+Post the mp4; ignore, `.gitignore` (`*.take/`) or delete the folder. Deleting
+it keeps the video and gives up re-rendering — the recording is not
+regenerable.
+
+## Resolution
+
+Wherever a command takes `<take>`, you can pass the master mp4, the `.take/`
+directory, any file inside it, or a directory holding exactly one take — the
+rest resolves by convention. Two `*.take/` directories in one folder is an
+error rather than a guess.
+
+## Where takes live
+
+The default `--out` is `demos/take.mp4`. Keep takes together in one folder and
+name each after the app or the cut — `demos/myapp.mp4`,
+`demos/myapp-pricing.mp4` — so their masters sit side by side, which is how you
+compare and pick one.
+
+`make` refuses to overwrite a take that was shot from a **different** app; the
+honest case (same app, new dev-server port) is `--force`.
+
+## The composition is the source of truth
+
+`composition.json` holds framing, background look, cursor feel, and every beat
+with its zoom decision — real coordinates, real timings:
+
+```json
+{
+  "kind": "press",
+  "label": "Deploy",
+  "bbox": { "x": 640, "y": 220, "w": 640, "h": 248 },
+  "zoom": { "enabled": true, "scale": 1.8, "center": { "x": 960, "y": 344 } }
+}
+```
+
+The mp4 is a render of this file over the kept capture. Change a value,
+`render` again — the app is never re-driven.

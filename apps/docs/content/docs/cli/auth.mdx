@@ -1,0 +1,24 @@
+---
+title: auth
+description: Logged-in demos on a persistent profile — credentials never touch a plan.
+---
+
+```sh
+open-take auth vercel --url https://vercel.com/login
+```
+
+One-time interactive login on a persistent profile: opens a normal (headed)
+Chrome on `~/.open-take/profiles/<name>` at `--url`, you log in by hand, then
+press Enter in the terminal (or quit Chrome).
+
+Later captures reuse the session:
+
+```sh
+open-take make --plan plan.json --out demos/myapp.mp4 --profile vercel
+```
+
+— still headless, and no credentials ever touch a plan. One profile per site
+keeps logins isolated.
+
+For sites that gate on a real window even with a valid session, `--headed`
+drives a visible Chrome; the screencast records the page either way.

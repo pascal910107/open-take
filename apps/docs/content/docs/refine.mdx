@@ -1,0 +1,72 @@
+---
+title: Refine
+description: Dailies — review copies, beat notes, A/B reels, and a master you can always walk back.
+---
+
+The first render is a strong draft. Refinement is a loop of watching and
+saying what you saw — in plain language, to your agent.
+
+## Watch a review copy
+
+```sh
+open-take render demos/myapp.mp4 --review
+```
+
+Renders a fast draft to `review.mp4` with **beat badges burned in** — the video
+itself teaches what "beat 3" refers to — plus a REVIEW watermark. It never
+overwrites the postable master.
+
+## Give notes
+
+Notes are one line each, aimed at a beat or the whole take:
+
+```txt
+beat 3: no zoom
+tighter on beat 2
+look: slate
+```
+
+Your agent edits `composition.json` and re-renders **from the kept capture** —
+a fix is a re-render, never a re-shoot. That matters when the take involved a
+real deploy you can't repeat.
+
+`open-take beats <take>` prints the numbered beat sheet (the shared map those
+notes refer to); `--card` appends a say-it cheat card.
+
+## Answer taste questions by eye
+
+```sh
+open-take ab demos/myapp.mp4 --set zoom=light,tight --beat 3
+```
+
+One knob, up to three candidate values, rendered as a labeled reel — each
+variant plays twice, and variant **A is always the take you kept**. Knobs:
+
+| knob | values |
+| --- | --- |
+| `zoom` | `off` / `light` / `medium` / `tight` / `close` or a number (with `--beat N`) |
+| `look` | `midnight` / `ink` / `slate` / `ocean` / `plum` / `ember` / `paper` / `plain` |
+| `pace` | `calm` / `natural` / `brisk` |
+| `finish` | `smooth` / `crisp` / `heavy` |
+| raw dot-path | e.g. `cursor.holdMs=900,1300` |
+
+Reels are windowed to the beat's zoom arc by default (`--full` for the whole
+take). `--before-after` replays `prev.mp4` vs the current master instead — no
+render, BEFORE then AFTER, twice.
+
+## Check framing without rendering
+
+```sh
+open-take frames demos/myapp.mp4
+```
+
+Extracts a beat-aware contact sheet (`frames.png`) from the delivered mp4 in
+seconds — an intro row, one row per beat sampled across the camera **hold**,
+a tail row. Judge framing on hold cells, never mid-ramp. `--beat N` densifies
+one beat into a 10-cell strip with per-cell phase labels.
+
+## Keep the old one
+
+Every `render` (and every editor Export) stages the master it replaces as
+`prev.mp4`, so "keep the old one" is a mechanical revert — and
+`ab --before-after` is how you compare the two by eye.

@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>open-take — cinematic product demos, recorded by your agent</title>
+    <meta
+      name="description"
+      content="You say one sentence. Your agent explores the app, writes the shot list, drives a real browser, and renders a polished MP4 — smooth synthetic cursor, click-zooms, motion blur. Open source, MIT."
+    />
+    <meta property="og:title" content="open-take — cinematic product demos, recorded by your agent" />
+    <meta
+      property="og:description"
+      content="One sentence in. A postable MP4 out. Agent-native demo recording: ground-truth clicks drive a measured cinematic camera."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="/og.jpg" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="theme-color" content="#08080b" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <script>
+      document.documentElement.classList.add("js");
+      try {
+        if (localStorage.getItem("ot-theme") === "light")
+          document.documentElement.dataset.theme = "light";
+      } catch (e) {}
+    </script>
+    <script type="module" src="/src/main.ts"></script>
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+
+    <header class="nav" id="nav">
+      <a class="brand" href="#top"><span class="brand-dot" aria-hidden="true"></span>open-take</a>
+      <nav class="nav-links mono" aria-label="Site">
+        <a class="nav-sec" href="#how">How</a>
+        <a class="nav-sec" href="#camera">Camera</a>
+        <a class="nav-sec" href="#take">The take</a>
+        <a class="nav-sec" href="#refine">Refine</a>
+        <a href="/docs">Docs</a>
+        <a href="https://github.com/pascal910107/open-take"
+          >GitHub&nbsp;↗<span class="gh-stars" id="gh-stars" hidden></span></a
+        >
+        <a href="https://www.npmjs.com/package/open-take">npm&nbsp;↗</a>
+        <button class="theme-btn" id="theme-btn" type="button" aria-label="Switch to light theme">
+          <svg class="tb-sun" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="4.4" />
+            <path d="M12 2.5v2.6M12 18.9v2.6M2.5 12h2.6M18.9 12h2.6M5 5l1.8 1.8M17.2 17.2 19 19M19 5l-1.8 1.8M6.8 17.2 5 19" />
+          </svg>
+          <svg class="tb-moon" viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true">
+            <path d="M20.5 14.6A8.7 8.7 0 0 1 9.4 3.5a8.7 8.7 0 1 0 11.1 11.1Z" />
+          </svg>
+        </button>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="hero" id="top">
+        <canvas id="stage" aria-hidden="true"></canvas>
+        <div class="hero-veil" aria-hidden="true"></div>
+        <div class="hud mono" aria-hidden="true">
+          <span class="hud-rec"><i></i>REC</span>
+          <span id="hud-tc">00:00:00</span>
+          <span id="hud-shot">01 WIDE — ESTABLISH</span>
+        </div>
+        <div class="hero-inner">
+          <div class="hero-copy">
+            <a class="announce mono" href="/docs"
+              ><i aria-hidden="true"></i>NEW — Docs are live<span aria-hidden="true">→</span></a
+            >
+            <p class="kicker mono"><span class="kdot" aria-hidden="true"></span>AGENT-NATIVE DEMO RECORDER</p>
+            <h1>Cinematic product demos, recorded by <em>your&nbsp;agent</em>.</h1>
+            <p class="lede">
+              You say one sentence. It explores your app, writes the shot list, drives a real
+              browser, and renders a polished MP4 — smooth synthetic cursor, click-zooms, motion
+              blur. Then you refine by asking.
+            </p>
+            <div class="ask-tabs mono" role="tablist" aria-label="How to start">
+              <button class="ask-tab on" type="button" role="tab" aria-selected="true" data-tab="you">
+                For you
+              </button>
+              <button class="ask-tab" type="button" role="tab" aria-selected="false" data-tab="agent">
+                For your agent
+              </button>
+            </div>
+            <div class="hero-cta">
+              <button class="cmd mono" id="hero-cmd" type="button" data-copy="npm create open-take@latest">
+                <span class="ps1" id="cmd-prefix" aria-hidden="true">$</span><span id="cmd-text">npm create open-take@latest</span>
+                <span class="cmd-copy" data-copy-label>copy</span>
+              </button>
+              <a class="ghost-link" href="#take">Watch a take <span aria-hidden="true">↓</span></a>
+            </div>
+            <p class="hero-fine mono">MIT · open source · Node 22+</p>
+          </div>
+        </div>
+        <div class="scroll-cue mono" aria-hidden="true"><i></i>SCROLL</div>
+      </section>
+
+      <div class="ruler" aria-hidden="true"></div>
+
+      <section class="sec" id="ask">
+        <div class="slate mono reveal"><b>SCENE 01</b><i></i><span>THE ASK</span></div>
+        <div class="ask-grid">
+          <div class="term reveal" id="term">
+            <div class="term-bar">
+              <i class="tl r"></i><i class="tl y"></i><i class="tl g"></i>
+              <span class="mono term-title">you × your agent</span>
+            </div>
+            <pre class="mono term-body" id="term-body" aria-label="Terminal transcript: one sentence in, a rendered demo out"></pre>
+          </div>
+          <div class="ask-side reveal" style="--d: 0.12s">
+            <h2>One sentence in.<br />A postable MP4 out.</h2>
+            <p>
+              There is no timeline to drag and no recorder to operate. Your coding agent is the
+              camera crew: it installs open-take into the project, explores the running app, and
+              shoots it in a real browser.
+            </p>
+            <p>You stay in the conversation you were already having.</p>
+          </div>
+        </div>
+      </section>
+
+      <div class="ruler" aria-hidden="true"></div>
+
+      <section class="sec" id="how">
+        <div class="slate mono reveal"><b>SCENE 02</b><i></i><span>THE SHOT LIST</span></div>
+        <h2 class="sec-h reveal">Editorial before pixels.</h2>
+        <div class="steps">
+          <article class="step reveal">
+            <span class="step-ghost mono" aria-hidden="true">01</span>
+            <p class="step-no mono">01 · EXPLORE</p>
+            <h3>It looks before it shoots.</h3>
+            <p>
+              <code>inspect</code> hands the agent every interactive element with its real bounding
+              box, so the demo is planned against what the page actually is — not a guess.
+            </p>
+          </article>
+          <article class="step reveal" style="--d: 0.1s">
+            <span class="step-ghost mono" aria-hidden="true">02</span>
+            <p class="step-no mono">02 · DIRECT</p>
+            <h3>Thesis first, then beats.</h3>
+            <p>
+              The agent commits to what the demo should say before anything rolls: what is the
+              hero, what earns a zoom, what plays full-view. Competent-but-forgettable is the
+              failure mode it is built to refuse.
+            </p>
+          </article>
+          <article class="step reveal" style="--d: 0.2s">
+            <span class="step-ghost mono" aria-hidden="true">03</span>
+            <p class="step-no mono">03 · RENDER</p>
+            <h3>One take, delivered twice.</h3>
+            <p>
+              A measured camera shoots the plan and renders <code>demo.mp4</code> — the one you
+              post — beside <code>demo.take/</code>, the working dir that keeps the recording and
+              the editable composition.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <div class="ruler" aria-hidden="true"></div>
+
+      <section class="sec" id="camera">
+        <div class="slate mono reveal"><b>SCENE 03</b><i></i><span>CAMERA DEPT.</span></div>
+        <div class="cam-grid">
+          <div class="cam-copy">
+            <h2 class="reveal">Measured, not&nbsp;guessed.</h2>
+            <p class="reveal" style="--d: 0.06s">
+              Screen recorders infer zoom intent from raw cursor motion — and it shows. An
+              agent-driven camera never infers: it knows every click, coordinate and timestamp,
+              because it wrote the plan. The zoom follows ground truth.
+            </p>
+            <p class="reveal" style="--d: 0.12s">
+              The move itself is a critically-damped spring fitted to a reference export: punch-in
+              ≈&nbsp;730&nbsp;ms, release ≈&nbsp;1.8× slower — because a fast release reads like a
+              flinch.
+            </p>
+            <div class="validator mono reveal" style="--d: 0.18s">
+              <span class="v-flag">⚠ VALIDATOR</span>
+              <p>
+                It refuses to hand you a bad take quietly. A camera still mid-move at a click, a
+                dead tail, a crowded release — each is flagged in the render summary, with the fix.
+              </p>
+            </div>
+          </div>
+          <figure class="scope reveal" style="--d: 0.1s">
+            <figcaption class="mono">zoom.scale / t — the shipped curve</figcaption>
+            <div class="scope-plot"><svg id="scope-svg" viewBox="0 0 560 300" role="img" aria-label="The camera's zoom curve: a fast punch-in, a held frame, then a slower release"></svg></div>
+            <div class="scope-read mono">
+              <span>PUNCH-IN ·730 MS</span><span>HOLD</span><span>RELEASE ·×1.8 SLOWER</span>
+            </div>
+          </figure>
+        </div>
+      </section>
+
+      <div class="ruler" aria-hidden="true"></div>
+
+      <section class="sec" id="file">
+        <div class="slate mono reveal"><b>SCENE 04</b><i></i><span>THE NEGATIVE</span></div>
+        <h2 class="sec-h reveal">A take is a file.<br />The mp4 is a render of it.</h2>
+        <div class="file-grid">
+          <figure class="codecard reveal">
+            <div class="term-bar">
+              <i class="tl r"></i><i class="tl y"></i><i class="tl g"></i>
+              <span class="mono term-title">demo.take/composition.json — beat 02</span>
+            </div>
+            <pre class="mono codecard-body">{
+  <i>"kind"</i>: <b>"press"</b>,
+  <i>"label"</i>: <b>"Deploy"</b>,
+  <i>"bbox"</i>: { <i>"x"</i>: <u>640</u>, <i>"y"</i>: <u>220</u>, <i>"w"</i>: <u>640</u>, <i>"h"</i>: <u>248</u> },
+  <i>"zoom"</i>: {
+    <i>"enabled"</i>: <button class="j-toggle" id="json-zoom" type="button" aria-pressed="true">true</button>,
+    <i>"scale"</i>: <u>1.8</u>,
+    <i>"center"</i>: { <i>"x"</i>: <u>960</u>, <i>"y"</i>: <u>344</u> },
+    <i>"inAtMs"</i>: <u>4630</u>
+  },
+  <i>"durationMs"</i>: <u>1400</u>
+}</pre>
+            <figcaption class="mono codecard-note">click <b>"enabled"</b> — the frame re-renders</figcaption>
+          </figure>
+          <figure class="rendercard reveal" style="--d: 0.1s">
+            <figcaption class="mono">RENDERED OUTPUT · <span id="rc-state">zoom 1.8× on “Deploy”</span></figcaption>
+            <div class="rframe punched" id="rframe" aria-hidden="true">
+              <div class="rf-video">
+                <div class="rf-bar"></div>
+                <div class="rf-row"><i class="rf-chip"></i><i class="rf-chip w2"></i></div>
+                <div class="rf-target"><i class="rf-btn"></i><i class="rf-line"></i><i class="rf-line s"></i></div>
+                <div class="rf-row"><i class="rf-chip w3"></i><i class="rf-chip"></i></div>
+                <i class="rf-cursor"></i>
+              </div>
+            </div>
+            <p class="rendercard-note">
+              Every beat, every zoom, every look lives in one readable file beside the kept capture.
+              Change a number, <code>render</code> again — the app is never re-driven. The move you
+              just saw uses the shipped values: 760&nbsp;ms in, ease
+              <span class="mono">(0.3,&nbsp;0,&nbsp;0.2,&nbsp;1)</span>.
+            </p>
+          </figure>
+        </div>
+      </section>
+
+      <div class="ruler" aria-hidden="true"></div>
+
+      <section class="sec" id="take">
+        <div class="slate mono reveal"><b>SCENE 05</b><i></i><span>DAILIES</span></div>
+        <h2 class="sec-h reveal">Watch a take.</h2>
+        <figure class="takefilm reveal" style="--d: 0.08s">
+          <div class="term-bar">
+            <i class="tl r"></i><i class="tl y"></i><i class="tl g"></i>
+            <span class="mono term-title">demos/deploy.mp4 — 23 s, unedited</span>
+          </div>
+          <div class="film-wrap">
+            <video id="film" src="/film/hero-take.mp4" playsinline preload="metadata" aria-label="A demo take produced by open-take: a deploy flow with cinematic zooms"></video>
+            <button class="film-play" id="film-play" type="button" aria-label="Play the demo take">
+              <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path d="M8 5.5v13l11-6.5z" fill="currentColor" /></svg>
+            </button>
+          </div>
+          <figcaption>
+            Shot by an agent in one take and delivered as-is. The editorial is visible: the
+            file-drop is the hero, so it holds the full frame — the name field and Deploy share one
+            held camera frame.
+          </figcaption>
+        </figure>
+      </section>
+
+      <div class="ruler" aria-hidden="true"></div>
+
+      <section class="sec" id="refine">
+        <div class="slate mono reveal"><b>SCENE 06</b><i></i><span>TWO DOORS</span></div>
+        <h2 class="sec-h reveal">Refine by asking.<br />Or by dragging.</h2>
+        <div class="doors">
+          <article class="door reveal">
+            <p class="door-k mono">DOOR A — DAILIES</p>
+            <h3>Give notes in plain language.</h3>
+            <div class="notes mono" aria-label="Example notes to the agent">
+              <p class="note you">beat 3: no zoom</p>
+              <p class="note you">tighter on beat 2</p>
+              <p class="note you">look: slate</p>
+              <p class="note agent">✓ re-rendered from the kept capture</p>
+            </div>
+            <p>
+              A fix is a re-render, never a re-shoot. The raw capture is kept — which matters when
+              the take involved a real deploy you can’t repeat.
+            </p>
+          </article>
+          <article class="door reveal" style="--d: 0.12s">
+            <p class="door-k mono">DOOR B — THE EDITOR</p>
+            <h3><code>open-take edit</code></h3>
+            <div class="editor-mock" aria-hidden="true">
+              <div class="em-top"><i></i><i></i><span class="em-export"></span></div>
+              <div class="em-main">
+                <div class="em-rail"><i class="on"></i><i></i><i></i><i></i><i></i></div>
+                <div class="em-stage">
+                  <div class="em-frame"><div class="em-zoombox"></div></div>
+                </div>
+              </div>
+              <div class="em-tl">
+                <div class="em-play"></div>
+                <div class="em-track">
+                  <span class="em-block b1"></span><span class="em-block b2"></span><i class="em-head"></i>
+                </div>
+              </div>
+            </div>
+            <p>
+              A local editor over the live, pixel-faithful preview: drag the frame on the stage,
+              retime zoom blocks, hold Compare against the original. Same
+              <code>composition.json</code>, either door.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <div class="ruler" aria-hidden="true"></div>
+
+      <section class="sec" id="notes">
+        <div class="slate mono reveal"><b>SCENE 07</b><i></i><span>PRODUCTION NOTES</span></div>
+        <ul class="specs">
+          <li class="reveal">
+            <b class="mono">auth profiles</b>
+            <span>Logged-in demos: <code>open-take auth</code> once. Credentials never touch a plan.</span>
+          </li>
+          <li class="reveal" style="--d: 0.05s">
+            <b class="mono">navigate</b>
+            <span>Cross-page flows are one take — the camera follows a late-bound destination.</span>
+          </li>
+          <li class="reveal" style="--d: 0.1s">
+            <b class="mono">retina capture</b>
+            <span>Shot at device pixels, so the punch-ins stay sharp.</span>
+          </li>
+          <li class="reveal" style="--d: 0.15s">
+            <b class="mono">a/b reels</b>
+            <span>One knob per variant, stitched into a reel. A is always the take you kept.</span>
+          </li>
+          <li class="reveal" style="--d: 0.2s">
+            <b class="mono">motion blur</b>
+            <span>Default on, tuned by eye against reference footage.</span>
+          </li>
+          <li class="reveal" style="--d: 0.25s">
+            <b class="mono">dossier</b>
+            <span>The app is remembered between demos — the second take skips cold exploration.</span>
+          </li>
+          <li class="reveal" style="--d: 0.3s">
+            <b class="mono">composition.json</b>
+            <span>The whole cinematic layer is one readable file. The mp4 is a render of it.</span>
+          </li>
+          <li class="reveal" style="--d: 0.35s">
+            <b class="mono">self-contained</b>
+            <span>MIT, Node 22+. Downloads its own Chrome for Testing on the first demo.</span>
+          </li>
+        </ul>
+      </section>
+
+      <section class="cta">
+        <div class="cta-inner reveal">
+          <p class="kicker mono"><span class="kdot" aria-hidden="true"></span>ROLL CAMERA</p>
+          <h2>Your next demo is<br />one sentence away.</h2>
+          <button class="cmd mono big" type="button" data-copy="npm create open-take@latest">
+            <span class="ps1" aria-hidden="true">$</span>npm create open-take@latest
+            <span class="cmd-copy" data-copy-label>copy</span>
+          </button>
+          <div class="cta-links mono">
+            <a href="https://github.com/pascal910107/open-take">Star on GitHub ↗</a>
+            <a href="https://www.npmjs.com/package/open-take">open-take on npm ↗</a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <div class="foot-brand"><span class="brand-dot" aria-hidden="true"></span>open-take · MIT © 2026</div>
+      <p class="foot-meta mono">
+        The opening shot on this page isn’t a video — it’s the product’s camera, rebuilt live in
+        WebGL.
+      </p>
+      <nav class="foot-links mono" aria-label="Footer">
+        <a href="/docs">Docs</a>
+        <a href="https://github.com/pascal910107/open-take">GitHub</a>
+        <a href="https://www.npmjs.com/package/open-take">npm</a>
+      </nav>
+    </footer>
+  </body>
+</html>

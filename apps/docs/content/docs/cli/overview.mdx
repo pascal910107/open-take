@@ -1,0 +1,59 @@
+---
+title: Overview
+description: Every command at a glance. Run npx open-take --help for the authoritative version.
+---
+
+```txt
+open-take inspect <url> [--viewport 1920x1080]
+open-take make   --plan <plan.json> --out <out.mp4> [--fps 60] [--draft] [--no-open]
+open-take render <take> [--review] [--draft] [--open] [--reveal] [--no-open]
+open-take beats  <take> [--card]
+open-take frames <take> [--beat N] [--tile 720]
+open-take ab     <take> --set <knob>=<v1>,<v2>[,<v3>] [--beat N] [--full] [--draft] [--no-open]
+open-take ab     <take> --before-after [--beat N] [--full] [--no-open]
+open-take edit   <take> [--port 4178] [--no-open]
+open-take notes  [<take>] [--wait [--timeout 1800]] [--all] [--quiet]
+open-take auth   <name> [--url <login-url>]
+open-take init
+open-take skill  [install]
+```
+
+Most of these are run **by your agent**, not by hand — the skill installed by
+`npm create open-take@latest` teaches it when and how. The ones humans reach
+for directly are [`edit`](/docs/cli/edit-notes), [`ab`](/docs/cli/review-tools)
+and [`auth`](/docs/cli/auth).
+
+## `<take>` resolution
+
+Pass the master mp4, the `.take/` directory, any file inside it, or a
+directory holding exactly one take. See
+[A take on disk](/docs/take-layout).
+
+## Shared flags
+
+| flag | applies to | what it does |
+| --- | --- | --- |
+| `--out <path>` | `make` | where the postable master goes — taken literally; default `demos/take.mp4` |
+| `--fps <n>` | `make` | capture **and** render fps (default 60; 30 for fast drafts) |
+| `--capture-scale <n>` | `make` | capture pixel density (default 2 — Retina, keeps zooms sharp) |
+| `--strict` | `make` | exit non-zero when any plan step was skipped |
+| `--force` | `make` | overwrite a take shot from a different app |
+| `--profile <name>` | `make` / `inspect` | reuse the persistent session from `open-take auth <name>` |
+| `--headed` | `make` / `inspect` | drive a visible Chrome window — the escape hatch for sites that gate on a real window |
+| `--verbose` | all | per-event diagnostics, hidden by default so real warnings stay visible |
+
+## `inspect`
+
+```sh
+open-take inspect http://localhost:3000
+```
+
+Lists every interactive element with its name and real bounding box, plus the
+page `title` and `finalUrl` — the ground truth a plan is written against, and
+the first thing the agent checks before exploring anything.
+
+## `init` / `skill`
+
+`init` installs the open-take skill into the current project for coding
+agents. `skill` prints the full agent guide; `skill install` is a
+backwards-compatible alias for `init`.

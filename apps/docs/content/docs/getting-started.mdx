@@ -1,0 +1,49 @@
+---
+title: Getting started
+description: One command, then one sentence to your agent.
+---
+
+## Install
+
+```sh
+npm create open-take@latest my-demo   # new project in ./my-demo
+npm create open-take@latest           # in your app's root: adds it there
+```
+
+The initializer installs open-take **and its agent skill** —
+`node_modules/`, `.agents/skills/open-take/` and `.claude/skills/open-take/`
+(plus a `package.json` only if the directory has none) — and lists what it
+wrote when it finishes. The skill is the editorial half: it is what teaches
+your agent to plan a demo worth posting, not just click things. That is why the
+documented entry point is `npm create`, not a global install.
+
+Outside an app root, the initializer asks which directory to create rather
+than writing into the one you are standing in.
+
+## Shoot
+
+Ask your agent, in your own words:
+
+> Make a demo of localhost:3000 for Twitter.
+
+The agent explores the app first (`inspect` hands it every interactive element
+with its real bounding box), commits to a thesis and a beat plan, drives the
+app in a real browser, and renders the film. On the first demo, open-take
+downloads and caches its own Chrome for Testing under `~/.open-take/browsers`;
+later runs reuse it.
+
+## What you get
+
+Two things per demo, in `demos/`:
+
+- `myapp.mp4` — the postable master. Post this one.
+- `myapp.take/` — the working directory beside it: the editable
+  `composition.json`, the kept capture, and every draft copy. Ignore it,
+  `.gitignore` it (`*.take/`), or delete it.
+
+See [A take on disk](/docs/take-layout) for every member, and
+[Refine](/docs/refine) for what happens after the first watch.
+
+## Requirements
+
+Node.js 22+. Everything runs locally; nothing is uploaded.

@@ -1,0 +1,45 @@
+---
+title: FAQ
+description: Short answers to the questions that come up first.
+---
+
+## Does refining re-record my app?
+
+No. The raw capture is kept in the take's working directory, and every visual
+change is a re-render over it. Your app is driven exactly once per shoot —
+which matters when the demo involved a real deploy you can't repeat.
+
+## Can it demo a logged-in app?
+
+Yes. `open-take auth <name>` opens a headed Chrome on a persistent profile;
+you log in by hand once, then `make --profile <name>` reuses the session —
+still headless. Credentials never touch a plan. See [auth](/docs/cli/auth).
+
+## Why `npm create`, not `npm i -g`?
+
+`npm create open-take@latest` installs the CLI **and the agent skill** into
+the project. A global install gives you the CLI with no skill — and the skill
+is the editorial half: it is what makes the demo worth posting.
+
+## What does it download?
+
+On the first demo, open-take downloads and caches its own Chrome for Testing
+under `~/.open-take/browsers`. Later runs reuse it. Nothing else; nothing is
+uploaded — capture, render and the editor all run locally.
+
+## The demo is good except one moment. Do I start over?
+
+No. `open-take beats` gives you the numbered map, then one note —
+`beat 3: no zoom` — and a re-render fixes that moment. If it's a taste
+question, `ab` renders the candidates side by side so you can pick by eye.
+
+## Can I edit the video in a normal editor?
+
+The mp4 is a normal mp4 — cut it, score it, post it. But the cinematic layer
+(zooms, cursor, look) lives in `composition.json`, so changes at that level
+are cheaper as a re-render than as a video edit.
+
+## License?
+
+MIT. The repository is
+[github.com/pascal910107/open-take](https://github.com/pascal910107/open-take).

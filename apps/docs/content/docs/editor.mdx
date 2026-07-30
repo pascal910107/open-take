@@ -1,0 +1,44 @@
+---
+title: The editor
+description: open-take edit — the visual door into a take's cinematic layer.
+---
+
+```sh
+open-take edit demos/myapp.mp4
+```
+
+Opens a local visual editor on the take: the live, pixel-faithful preview with
+an icon-rail of layered settings and a timeline with zoom blocks. Everything
+runs on `127.0.0.1`; nothing is uploaded.
+
+## What it does
+
+- **Stage** — the preview canvas. Selecting a zoom block enters an inspect
+  view where the zoom region is a draggable, resizable box: drag moves
+  `zoom.center`, corners set `zoom.scale`, aspect locked to the output.
+- **Panels** — Zoom · Background looks · Frame · Cursor · Motion (pace, blur,
+  fine-tune durations) · Clip · Agent. Labels match the `composition.json`
+  field they write, so the GUI, the CLI and your agent share one vocabulary.
+- **Timeline** — transport, ruler, filmstrip thumbnails, iris zoom blocks
+  (dashed ghosts enable a zoom on a beat), synced playhead.
+- **Compare** — hold to see the take as the editor loaded it.
+- **Export** — renders the real mp4 with live progress. The master it replaces
+  is kept as `prev.mp4`.
+
+Edits autosave; there is no Save button. If your agent edits the composition
+while the editor is open, clean drafts adopt the change automatically and
+dirty drafts ask — **Keep mine** or **Take theirs**.
+
+## The Agent panel
+
+Anything the editor can't do (reorder beats, re-record) it hands to your agent:
+notes typed in the panel land in `<base>.take/notes.md` and print on the edit
+server's terminal. On the agent side:
+
+```sh
+open-take notes --wait
+```
+
+blocks until a note lands — start it in the background when you open the
+editor, and its exit is the wake-up. Both doors write the same
+`composition.json`.

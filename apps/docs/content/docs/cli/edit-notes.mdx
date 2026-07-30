@@ -1,0 +1,35 @@
+---
+title: edit · notes
+description: The visual editor, and the notes channel that connects it back to your agent.
+---
+
+## `edit`
+
+```sh
+open-take edit demos/myapp.mp4 [--port 4178] [--no-open]
+```
+
+Opens the [visual editor](/docs/editor) on a take: preview, icon-rail
+settings, timeline with zoom blocks. Every change previews live; Export
+renders the real mp4 — all on `127.0.0.1`, nothing uploaded. Export overwrites
+the master and keeps the replaced one as `prev.mp4`.
+
+Anything the editor can't do (reorder, re-record) it hands to your agent via
+the Agent panel — those notes land in `<base>.take/notes.md` and on the edit
+server's terminal.
+
+## `notes`
+
+```sh
+open-take notes [<take>] [--wait [--timeout 1800]] [--all] [--quiet]
+```
+
+Reads the director's notes the editor's Agent panel left — the ones you have
+**not** already read, then remembers them as read (the position lives in
+`notes.cursor`; `--all` re-reads everything). `<take>` defaults to the current
+directory.
+
+`--wait` blocks until a note lands and then exits — start it in the background
+when you open the editor, and its exit is your wake-up. `--timeout <seconds>`
+caps the wait (default 1800); a burst of notes typed together arrives as one
+batch. `--quiet` prints nothing when there is nothing new (for hooks).

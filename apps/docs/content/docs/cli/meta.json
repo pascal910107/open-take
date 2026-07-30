@@ -1,0 +1,4 @@
+{
+  "title": "CLI",
+  "pages": ["overview", "make", "render", "review-tools", "edit-notes", "auth"]
+}

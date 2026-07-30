@@ -1,0 +1,38 @@
+---
+title: make
+description: Drive the app in real time and deliver the master plus its working directory.
+---
+
+```sh
+open-take make --plan plan.json --out demos/myapp.mp4
+```
+
+`make` drives the app (real time) and delivers the polished master at exactly
+`--out`, with the working directory beside it: the editable
+`composition.json`, plus the **kept** `capture.mp4` and `capture.json` — the
+raw footage and the ground-truth event log every later re-render builds on.
+
+The raw capture auto-opens the moment it lands — minutes before the polished
+render finishes — so the wait is spent watching footage, not a spinner
+(`--no-open` to skip).
+
+In practice the plan is authored by your agent from the skill's editorial
+loop; `--plan` is the contract between that plan and the camera.
+
+## Overwrite safety
+
+`make` refuses to overwrite a take that was shot from a **different** app —
+two demos in one folder each get their own name (`--out myapp.mp4`). The
+honest case, same app on a new dev-server port, is `--force`.
+
+## Flags
+
+| flag | default | notes |
+| --- | --- | --- |
+| `--out <path>` | `demos/take.mp4` | non-mp4 extensions are refused; a bare name is completed |
+| `--fps <n>` | 60 | capture and render fps; 30 for fast drafts |
+| `--capture-scale <n>` | 2 | Retina capture — drop to 1 if a heavy page can't hold fps |
+| `--draft` | — | fast draft render of the delivery |
+| `--strict` | — | exit non-zero if any plan step was skipped (summary lists them either way) |
+| `--profile <name>` | — | authenticated session from [`auth`](/docs/cli/auth) |
+| `--headed` | — | visible Chrome window; the screencast records the page either way |
