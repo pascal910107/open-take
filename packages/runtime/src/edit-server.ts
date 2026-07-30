@@ -74,6 +74,16 @@ const CONTENT_TYPE: Record<string, string> = {
   ".woff2": "font/woff2",
   ".woff": "font/woff",
   ".map": "application/json; charset=utf-8",
+  // The two biggest files this server hands out are videos, and they were the
+  // only ones falling through to application/octet-stream: the take's
+  // capture.mp4 (the editor's <video>) and its rendered .mp4 (Download).
+  // Chrome sniffs and plays an octet-stream anyway, which is why this survived,
+  // but the editor auto-opens in the user's DEFAULT browser and a stricter one
+  // is entitled to refuse a media type it was told is a byte blob.
+  ".mp4": "video/mp4",
+  ".m4v": "video/mp4",
+  ".webm": "video/webm",
+  ".mov": "video/quicktime",
 };
 
 /** Locate the built editor SPA: prefer the live monorepo build during
@@ -123,7 +133,10 @@ async function readBody(req: IncomingMessage, capBytes = 32 * 1024 * 1024): Prom
   return Buffer.concat(chunks).toString("utf8");
 }
 
-/** Stream a file with HTTP Range support (206) — required for <video> seeking. */
+/** Stream a file with HTTP Range support (206) — required for <video> seeking.
+ *  Answers HEAD with the same headers and no body: a media element (or a proxy
+ *  in front of one) may probe with HEAD before it will range-GET, and the route
+ *  table used to let those fall through to the /api/ 404. */
 async function serveFile(req: IncomingMessage, res: ServerResponse, filePath: string) {
   const st = await stat(filePath).catch(() => null);
   if (!st?.isFile()) {
@@ -131,6 +144,15 @@ async function serveFile(req: IncomingMessage, res: ServerResponse, filePath: st
     return;
   }
   const type = CONTENT_TYPE[extname(filePath).toLowerCase()] ?? "application/octet-stream";
+  if (req.method === "HEAD") {
+    res.writeHead(200, {
+      "Content-Length": st.size,
+      "Accept-Ranges": "bytes",
+      "Content-Type": type,
+    });
+    res.end();
+    return;
+  }
   const range = req.headers.range;
   if (range) {
     const m = /bytes=(\d*)-(\d*)/.exec(range);
@@ -317,7 +339,7 @@ export async function startEditServer(
         });
         return;
       }
-      if (path === "/api/take/video" && method === "GET") {
+      if (path === "/api/take/video" && (method === "GET" || method === "HEAD")) {
         await serveFile(req, res, take.capturePath);
         return;
       }
@@ -340,7 +362,7 @@ export async function startEditServer(
         sendJson(res, 200, { ok: true });
         return;
       }
-      if (path === "/api/take/output" && method === "GET") {
+      if (path === "/api/take/output" && (method === "GET" || method === "HEAD")) {
         await serveFile(req, res, take.mp4Path);
         return;
       }
