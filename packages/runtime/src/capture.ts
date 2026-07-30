@@ -65,6 +65,36 @@ export function evalValue(raw: string): unknown {
   return deepParse(top);
 }
 
+// --- one name resolver for every text locator ---------------------------
+// Each locator below used to carry its OWN precedence chain, and they
+// disagreed: `click` matched `aria-label || textContent`, while `drag` /
+// `press` / `scroll` / `hrefFrom` put `title` FIRST, and `inspect` — the
+// planning aid whose output SKILL.md explicitly tells agents to "target these
+// by `text`" — used a third chain. So an element with a visible label AND a
+// tooltip was advertised by `inspect` under its label, clicked fine, and then
+// silently failed to resolve for a drag. The editor's own Compare button is a
+// live example: label "Compare", title "Hold to compare against the version
+// you opened" — `text: "Compare"` resolved for a click and NOTFOUND for a drag.
+// Title-only controls (icon buttons, the editor's Look swatches) were worse:
+// `inspect` skipped them entirely, so nothing advertised them at all.
+//
+// Now every locator matches against ALL of an element's names — exact before
+// substring, DOM order. This is strictly more permissive than any of the old
+// chains, so nothing that resolved before stops resolving, and an exact hit
+// anywhere in the document still beats a substring hit that comes earlier.
+const NAME_JS =
+  `function names(e){var raw=[e.getAttribute('aria-label'),e.textContent,e.getAttribute('title'),e.getAttribute('alt'),e.getAttribute('placeholder')];var out=[];` +
+  `for(var i=0;i<raw.length;i++){var s=(raw[i]||'').replace(/\\s+/g,' ').trim();if(s&&out.indexOf(s)===-1)out.push(s);}return out;}` +
+  // The name to SHOW (inspect). Placeholder is deliberately NOT a display name:
+  // inspect renders a placeholder-only field as "[placeholder]" so a plan
+  // author can see at a glance that the control has no real label.
+  `function dispName(e){var a=[e.getAttribute('aria-label'),e.textContent,e.getAttribute('title'),e.getAttribute('alt')];` +
+  `for(var i=0;i<a.length;i++){var s=(a[i]||'').replace(/\\s+/g,' ').trim();if(s)return s;}return '';}` +
+  `function pick(els,t){var i,n,j;` +
+  `for(i=0;i<els.length;i++){if(names(els[i]).indexOf(t)!==-1)return els[i];}` +
+  `for(i=0;i<els.length;i++){n=names(els[i]);for(j=0;j<n.length;j++){if(n[j].indexOf(t)!==-1)return els[i];}}` +
+  `return null;}`;
+
 // Find a clickable by accessible name (aria-label or text), record its
 // rect (ground-truth bbox), and click it — all in one page eval so the
 // bbox and the action refer to the same element. Robust where CSS hooks
@@ -74,8 +104,8 @@ export function clickByTextJs(text: string): string {
   return (
     `(function(){var t=${t};` +
     `var els=Array.prototype.slice.call(document.querySelectorAll('button,a,[role=button],[role=link],[role=menuitem],input[type=submit],input[type=button]'));` +
-    `function name(e){return (e.getAttribute('aria-label')||e.textContent||'').replace(/\\s+/g,' ').trim();}` +
-    `var m=els.filter(function(e){return name(e)===t;})[0]||els.filter(function(e){return name(e).indexOf(t)!==-1;})[0];` +
+    NAME_JS +
+    `var m=pick(els,t);` +
     `if(!m)return 'NOTFOUND';` +
     // m.click() fires programmatically and never scrolls; below-fold targets
     // would advance state off-screen. Scroll into view ONLY when out of frame
@@ -115,8 +145,8 @@ export function focusFieldByTextJs(text: string): string {
   return (
     `(function(){var t=${t};` +
     `var els=Array.prototype.slice.call(document.querySelectorAll('input,textarea,[contenteditable],[contenteditable=true],[role=textbox],[role=searchbox]'));` +
-    `function name(e){return (e.getAttribute('aria-label')||e.getAttribute('placeholder')||e.textContent||'').replace(/\\s+/g,' ').trim();}` +
-    `var m=els.filter(function(e){return name(e)===t;})[0]||els.filter(function(e){return name(e).indexOf(t)!==-1;})[0];` +
+    NAME_JS +
+    `var m=pick(els,t);` +
     `if(!m)return 'NOTFOUND';` +
     `var r=m.getBoundingClientRect();` +
     `if(r.top<0||r.bottom>window.innerHeight){m.scrollIntoView({block:'center'});r=m.getBoundingClientRect();}` +
@@ -168,8 +198,8 @@ export function boxByTextJs(text: string): string {
   return (
     `(function(){var t=${t};` +
     `var els=Array.prototype.slice.call(document.querySelectorAll('button,a,[role=button],[role=link],[role=menuitem],[aria-label],[title],img[alt],li,[draggable=true]'));` +
-    `function name(e){return (e.getAttribute('aria-label')||e.getAttribute('title')||e.getAttribute('alt')||e.textContent||'').replace(/\\s+/g,' ').trim();}` +
-    `var m=els.filter(function(e){return name(e)===t;})[0]||els.filter(function(e){return name(e).indexOf(t)!==-1;})[0];` +
+    NAME_JS +
+    `var m=pick(els,t);` +
     `if(!m)return 'NOTFOUND';var r=m.getBoundingClientRect();` +
     `if(r.top<0||r.bottom>window.innerHeight){m.scrollIntoView({block:'center'});r=m.getBoundingClientRect();}` +
     `return JSON.stringify({x:Math.round(r.x),y:Math.round(r.y),w:Math.round(r.width),h:Math.round(r.height)});})()`
@@ -198,8 +228,8 @@ export function hrefByTextJs(text: string): string {
   return (
     `(function(){var t=${t};` +
     `var els=Array.prototype.slice.call(document.querySelectorAll('a,button,[role=link],[role=button],[aria-label],[title]'));` +
-    `function name(e){return (e.getAttribute('aria-label')||e.getAttribute('title')||e.textContent||'').replace(/\\s+/g,' ').trim();}` +
-    `var m=els.filter(function(e){return name(e)===t;})[0]||els.filter(function(e){return name(e).indexOf(t)!==-1;})[0];` +
+    NAME_JS +
+    `var m=pick(els,t);` +
     `if(!m)return 'NOTFOUND';${CLOSEST_ANCHOR_JS}})()`
   );
 }
@@ -222,8 +252,8 @@ export function scrollDeltaByTextJs(text: string): string {
   return (
     `(function(){var t=${t};` +
     `var els=Array.prototype.slice.call(document.querySelectorAll('button,a,[role=button],[role=link],[role=heading],[aria-label],[title],h1,h2,h3,li,section,p'));` +
-    `function name(e){return (e.getAttribute('aria-label')||e.getAttribute('title')||e.textContent||'').replace(/\\s+/g,' ').trim();}` +
-    `var m=els.filter(function(e){return name(e)===t;})[0]||els.filter(function(e){return name(e).indexOf(t)!==-1;})[0];` +
+    NAME_JS +
+    `var m=pick(els,t);` +
     `if(!m)return 'NOTFOUND';var r=m.getBoundingClientRect();` +
     `return JSON.stringify({dy:Math.round(r.top+r.height/2-window.innerHeight/2)});})()`
   );
@@ -377,13 +407,15 @@ export type InspectResult = {
   elements: InspectElement[];
 };
 
-function listInteractiveJs(): string {
+// Exported for the locator-name tests: the bug this shares a resolver with
+// lived in the emitted page-JS, so the test evaluates this string directly.
+export function listInteractiveJs(): string {
   return (
     `(function(){` +
-    `function nm(e){return (e.getAttribute('aria-label')||e.textContent||'').replace(/\\s+/g,' ').trim();}` +
+    NAME_JS +
     `var sel='button,a,[role=button],[role=link],[role=menuitem],[role=tab],[role=switch],[role=checkbox],input,select,textarea';` +
     `var els=Array.prototype.slice.call(document.querySelectorAll(sel));var vw=window.innerWidth,vh=window.innerHeight;var out=[];var seen={};` +
-    `for(var i=0;i<els.length;i++){var e=els[i];var n=nm(e);var ph=e.getAttribute('placeholder');var r=e.getBoundingClientRect();` +
+    `for(var i=0;i<els.length;i++){var e=els[i];var n=dispName(e);var ph=e.getAttribute('placeholder');var r=e.getBoundingClientRect();` +
     `if(r.width<6||r.height<6)continue;if(!n&&!ph)continue;` +
     `var label=n||('['+(ph||e.tagName.toLowerCase())+']');var key=label+'@'+Math.round(r.x)+','+Math.round(r.y);if(seen[key])continue;seen[key]=1;` +
     `var iv=r.top<vh&&r.bottom>0&&r.left<vw&&r.right>0;` +
