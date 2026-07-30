@@ -39,6 +39,15 @@ updates:
           - "@revideo/*"
           - "puppeteer-core"
           - "@puppeteer/browsers"
+    ignore:
+      # @types/node's major tracks the Node major it describes, and this repo
+      # runs Node 22: engines.node is ">=22", CI installs 22, and all eleven
+      # manifests pin ^22.10.1. Types for 26 would describe APIs the runtime
+      # does not have — typecheck goes green and the process throws at run time,
+      # which is the worst shape a dependency bump can take. Minors and patches
+      # still come through. Drop this entry when engines.node moves.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   # The workflows pin actions by commit SHA (see .github/workflows/*.yml), which
   # is only safe if something keeps them current. This is that something.
