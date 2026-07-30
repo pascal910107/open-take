@@ -22,7 +22,7 @@
   },
   "dependencies": {
     "@open-take/compositor": "workspace:*",
-    "@puppeteer/browsers": "^2.6.1"
+    "@puppeteer/browsers": "^3.0.6"
   },
   "devDependencies": {
     "@types/node": "^22.10.1",
