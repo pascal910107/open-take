@@ -4,8 +4,11 @@
 #
 # Monthly, and grouped: this repo ships a browser-and-ffmpeg dependency tree,
 # and a weekly ungrouped schedule would produce more PRs than a solo maintainer
-# can watch renders for. Majors stay ungrouped — @revideo and puppeteer majors
-# want their own render smoke run.
+# can watch renders for.
+#
+# npm majors stay ungrouped — a @revideo or puppeteer major wants its own render
+# smoke run. Action majors do NOT: an action's blast radius stops at the runner,
+# and CI either passes on it or does not, so they ride in the group.
 version: 2
 updates:
   - package-ecosystem: npm
