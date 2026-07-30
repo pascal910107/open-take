@@ -27,6 +27,25 @@ import {
 import type { TakeComposition } from "../lib/compositor";
 import { type Derived, derive } from "../lib/derive";
 
+// How long loadVideo waits for a first decodable frame before giving up. A local
+// capture.mp4 over the bridge is readable in milliseconds even at 4K — this only
+// has to be longer than a slow disk, not longer than a download, because
+// `loadeddata` fires on the first frame and not on the last byte.
+const LOAD_STALL_MS = 15_000;
+
+/** MediaError code → something a user can act on. */
+function describeMediaError(v: HTMLVideoElement): string {
+  const e = v.error;
+  if (!e) return "no MediaError reported";
+  const known: Record<number, string> = {
+    1: "aborted",
+    2: "network error",
+    3: "decode error (the browser can read the file but not this codec)",
+    4: "source not supported (wrong URL, or a codec/Content-Type this browser refuses)",
+  };
+  return `${known[e.code] ?? `code ${e.code}`}${e.message ? `: ${e.message}` : ""}`;
+}
+
 // arrow cursor, tip at local (0,0) — identical to scene.tsx CURSOR
 const CURSOR_PTS: [number, number][] = [
   [0, 0],
@@ -123,26 +142,54 @@ export class PreviewEngine {
     this.drawFrame(this.t);
   }
 
-  /** Load a video by URL or object-URL; resolves once a frame is decodable. */
-  loadVideo(src: string): Promise<void> {
+  /** Load a video by URL or object-URL; resolves once a frame is decodable.
+   *
+   *  Rejects if the media never becomes readable. A `<video>` whose request is
+   *  refused or stalled fires NEITHER `loadeddata` NOR `error` — it just sits at
+   *  networkState LOADING — and this promise used to hang on that forever, which
+   *  parked the whole editor on its "Loading…" seed screen with nothing to act
+   *  on. (Seen for real: a browser extension answering 503 for the bridge's
+   *  /api/take/video.) The seed screen already renders `p.error`, so a rejection
+   *  is all it takes to turn a dead spinner into a diagnosis. */
+  loadVideo(src: string, stallMs = LOAD_STALL_MS): Promise<void> {
     return new Promise((resolve, reject) => {
       const v = this.video;
-      const onReady = () => {
+      let settled = false;
+      // `timer` is declared below and read here: a closure body is not a
+      // use-before-declaration, and nothing can call finish() until the
+      // synchronous setup (including that const) has run.
+      const finish = (act: () => void) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        v.removeEventListener("loadeddata", onReady);
         v.removeEventListener("error", onErr);
-        this.vDur = v.duration || (this.comp ? this.comp.durationMs / 1000 : 0);
-        this.t = 0;
-        // first decode → draw frame 0
-        const drawFirst = () => {
-          this.drawFrame(0);
+        act();
+      };
+      const onReady = () =>
+        finish(() => {
+          this.vDur = v.duration || (this.comp ? this.comp.durationMs / 1000 : 0);
+          this.t = 0;
+          this.drawFrame(0); // first decode → frame 0
           this.emitTime();
           resolve();
-        };
-        if (v.readyState >= 2) drawFirst();
-        else v.addEventListener("loadeddata", drawFirst, { once: true });
-      };
-      const onErr = () => reject(new Error("video failed to load"));
-      v.addEventListener("loadeddata", onReady, { once: true });
-      v.addEventListener("error", onErr, { once: true });
+        });
+      const onErr = () =>
+        finish(() => reject(new Error(`video failed to load: ${describeMediaError(v)} — ${src}`)));
+      const timer = setTimeout(
+        () =>
+          finish(() =>
+            reject(
+              new Error(
+                `video stalled: no frame after ${Math.round(stallMs / 1000)}s ` +
+                  `(readyState ${v.readyState}, networkState ${v.networkState}) — ${src}`,
+              ),
+            ),
+          ),
+        stallMs,
+      );
+      v.addEventListener("loadeddata", onReady);
+      v.addEventListener("error", onErr);
       v.src = src;
       v.load();
     });
