@@ -122,6 +122,17 @@ body::after {
   font-variant-numeric: tabular-nums;
 }
 
+/* visually hidden, still announced */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 ::selection {
   background: rgb(var(--acc-rgb) / 0.38);
   color: var(--ink);
@@ -239,6 +250,17 @@ html:not([data-theme="light"]) .tb-moon {
 }
 .nav-links a:hover {
   color: var(--ink);
+}
+.nav-ico {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.nav-ico svg {
+  display: block;
+}
+.nav-ico .gh-stars {
+  margin-left: 0;
 }
 
 /* ═ hero ═ */
@@ -430,13 +452,20 @@ html[data-theme="light"] h1 em {
   color: var(--ink3);
 }
 .cmd-copy {
-  font-size: 10.5px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
   color: var(--ink3);
   border-left: 1px solid var(--line);
   padding-left: 12px;
   transition: color 0.2s;
+}
+.cmd-copy svg {
+  display: block;
+  width: 13px;
+  height: 13px;
+}
+.cmd-copy .ico-check {
+  display: none;
 }
 .cmd:hover .cmd-copy {
   color: var(--acc-hi);
@@ -444,20 +473,50 @@ html[data-theme="light"] h1 em {
 .cmd.did .cmd-copy {
   color: var(--ok);
 }
+.cmd.did .ico-copy {
+  display: none;
+}
+.cmd.did .ico-check {
+  display: block;
+  animation: pop 0.3s var(--ease);
+}
+@keyframes pop {
+  from {
+    transform: scale(0.5);
+  }
+}
 .cmd.big {
   font-size: 15px;
   padding: 16px 22px;
 }
-.ghost-link {
-  font-size: 14.5px;
-  color: var(--ink2);
-  border-bottom: 1px solid var(--line-hi);
-  padding-bottom: 3px;
-  transition: color 0.2s, border-color 0.2s;
+.cmd.big .cmd-copy svg {
+  width: 15px;
+  height: 15px;
 }
-.ghost-link:hover {
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 13px 17px;
+  border: 1px solid var(--line-hi);
+  border-radius: 11px;
+  font-size: 12.5px;
+  letter-spacing: 0.04em;
+  color: var(--ink2);
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.25s, box-shadow 0.25s, transform 0.15s;
+}
+.btn-ghost svg {
+  display: block;
+  flex: none;
+}
+.btn-ghost:hover {
   color: var(--ink);
   border-color: var(--acc-line);
+  box-shadow: 0 0 0 1px rgb(var(--acc-hi-rgb) / 0.14);
+}
+.btn-ghost:active {
+  transform: translateY(1px);
 }
 .hero-fine {
   margin-top: 26px;
@@ -741,9 +800,15 @@ html[data-theme="light"] h1 em {
   gap: 9px;
 }
 .v-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   font-size: 10.5px;
   letter-spacing: 0.18em;
   color: var(--warn);
+}
+.v-flag svg {
+  display: block;
 }
 .validator p {
   font-size: 12.5px;
@@ -1281,13 +1346,12 @@ html[data-theme="light"] h1 em {
 }
 .cta-links {
   display: flex;
-  gap: 30px;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
   font-size: 12px;
   letter-spacing: 0.06em;
   color: var(--ink2);
-}
-.cta-links a:hover {
-  color: var(--acc-hi);
 }
 
 /* ═ footer ═ */
@@ -1390,9 +1454,19 @@ html[data-theme="light"] h1 em {
     gap: 11px;
     font-size: 10px;
   }
+  /* the hud sits at the top here — start the hero copy below it */
+  .hero-inner {
+    padding-top: 140px;
+  }
   .foot {
     flex-direction: column;
     align-items: flex-start;
+  }
+}
+
+@media (max-width: 640px) {
+  #hud-shot {
+    display: none;
   }
 }
 
@@ -1411,7 +1485,8 @@ html[data-theme="light"] h1 em {
   .scroll-cue i,
   .em-zoombox,
   .em-head,
-  .t-caret {
+  .t-caret,
+  .cmd.did .ico-check {
     animation: none;
   }
 }

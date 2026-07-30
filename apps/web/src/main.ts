@@ -101,17 +101,19 @@ if (ghStars) {
   }
 }
 
-/* copy chips */
+/* copy chips — icon flips to a check; the sr span announces it */
 for (const btn of document.querySelectorAll<HTMLButtonElement>("[data-copy]")) {
-  const label = btn.querySelector("[data-copy-label]")!;
+  const sr = btn.querySelector("[data-copy-sr]");
+  let undo = 0;
   btn.addEventListener("click", async () => {
     try {
       await navigator.clipboard.writeText(btn.dataset.copy ?? "");
       btn.classList.add("did");
-      label.textContent = "copied ✓";
-      setTimeout(() => {
+      if (sr) sr.textContent = "Copied";
+      window.clearTimeout(undo);
+      undo = window.setTimeout(() => {
         btn.classList.remove("did");
-        label.textContent = "copy";
+        if (sr) sr.textContent = "Copy to clipboard";
       }, 1600);
     } catch {
       /* clipboard unavailable — the command is right there to select */

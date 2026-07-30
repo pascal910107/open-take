@@ -41,10 +41,12 @@
         <a class="nav-sec" href="#take">The take</a>
         <a class="nav-sec" href="#refine">Refine</a>
         <a href="/docs">Docs</a>
-        <a href="https://github.com/pascal910107/open-take"
-          >GitHub&nbsp;↗<span class="gh-stars" id="gh-stars" hidden></span></a
-        >
-        <a href="https://www.npmjs.com/package/open-take">npm&nbsp;↗</a>
+        <a class="nav-ico" href="https://github.com/pascal910107/open-take" aria-label="open-take on GitHub">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><span class="gh-stars" id="gh-stars" hidden></span>
+        </a>
+        <a class="nav-ico" href="https://www.npmjs.com/package/open-take" aria-label="open-take on npm">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true"><path d="M1.763 0C.786 0 0 .786 0 1.763v20.474C0 23.214.786 24 1.763 24h20.474c.977 0 1.763-.786 1.763-1.763V1.763C24 .786 23.214 0 22.237 0zM5.13 5.323l13.837.019-.009 13.836h-3.464l.01-10.382h-3.456L12.04 19.17H5.113z"/></svg>
+        </a>
         <button class="theme-btn" id="theme-btn" type="button" aria-label="Switch to light theme">
           <svg class="tb-sun" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
             <circle cx="12" cy="12" r="4.4" />
@@ -89,9 +91,15 @@
             <div class="hero-cta">
               <button class="cmd mono" id="hero-cmd" type="button" data-copy="npm create open-take@latest">
                 <span class="ps1" id="cmd-prefix" aria-hidden="true">$</span><span id="cmd-text">npm create open-take@latest</span>
-                <span class="cmd-copy" data-copy-label>copy</span>
+                <span class="cmd-copy" aria-hidden="true">
+                  <svg class="ico-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2.5" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+                  <svg class="ico-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+                </span>
+                <span class="sr-only" data-copy-sr aria-live="polite">Copy to clipboard</span>
               </button>
-              <a class="ghost-link" href="#take">Watch a take <span aria-hidden="true">↓</span></a>
+              <a class="btn-ghost mono" href="#take"
+                ><svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M8 5.5v13l11-6.5z" fill="currentColor" /></svg>Watch a take</a
+              >
             </div>
             <p class="hero-fine mono">MIT · open source · Node 22+</p>
           </div>
@@ -179,7 +187,9 @@
               flinch.
             </p>
             <div class="validator mono reveal" style="--d: 0.18s">
-              <span class="v-flag">⚠ VALIDATOR</span>
+              <span class="v-flag"
+                ><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.73 18-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" /><path d="M12 9v4" /><path d="M12 17h.01" /></svg>VALIDATOR</span
+              >
               <p>
                 It refuses to hand you a bad take quietly. A camera still mid-move at a click, a
                 dead tail, a crowded release — each is flagged in the render summary, with the fix.
@@ -359,11 +369,19 @@
           <h2>Your next demo is<br />one sentence away.</h2>
           <button class="cmd mono big" type="button" data-copy="npm create open-take@latest">
             <span class="ps1" aria-hidden="true">$</span>npm create open-take@latest
-            <span class="cmd-copy" data-copy-label>copy</span>
+            <span class="cmd-copy" aria-hidden="true">
+              <svg class="ico-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2.5" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+              <svg class="ico-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+            </span>
+            <span class="sr-only" data-copy-sr aria-live="polite">Copy to clipboard</span>
           </button>
           <div class="cta-links mono">
-            <a href="https://github.com/pascal910107/open-take">Star on GitHub ↗</a>
-            <a href="https://www.npmjs.com/package/open-take">open-take on npm ↗</a>
+            <a class="btn-ghost" href="https://github.com/pascal910107/open-take"
+              ><svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>Star on GitHub</a
+            >
+            <a class="btn-ghost" href="https://www.npmjs.com/package/open-take"
+              ><svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" aria-hidden="true"><path d="M1.763 0C.786 0 0 .786 0 1.763v20.474C0 23.214.786 24 1.763 24h20.474c.977 0 1.763-.786 1.763-1.763V1.763C24 .786 23.214 0 22.237 0zM5.13 5.323l13.837.019-.009 13.836h-3.464l.01-10.382h-3.456L12.04 19.17H5.113z"/></svg>open-take on npm</a
+            >
           </div>
         </div>
       </section>
