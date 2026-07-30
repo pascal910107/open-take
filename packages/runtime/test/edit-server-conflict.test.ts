@@ -10,7 +10,7 @@
 // wire, not just in a unit.
 
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
@@ -40,6 +40,7 @@ let renderGate: ReturnType<typeof deferred<void>> | null = null;
 let renderStarted: ReturnType<typeof deferred<void>> | null = null;
 let lastRenderOpts: RenderCompositionOpts | null = null;
 let renderCalls = 0;
+let renderFails = false;
 let commitGate: ReturnType<typeof deferred<void>> | null = null;
 let commitStarted: ReturnType<typeof deferred<void>> | null = null;
 
@@ -58,6 +59,7 @@ const fakeRender = async (opts: RenderCompositionOpts) => {
   lastRenderOpts = opts;
   renderStarted?.resolve(undefined);
   await renderGate?.promise;
+  if (renderFails) throw new Error("render refused (test)");
   return { mp4Path: opts.outPath, compositionPath: compPath };
 };
 
@@ -266,6 +268,55 @@ test("two simultaneous guarded render requests reserve only one job", async () =
     renderGate = null;
     renderStarted = null;
   }
+});
+
+// Export overwrites the master in place. `render` keeps the version it replaces
+// as prev.mp4 so "keep the old one" (`ab --before-after`) means the take the
+// user just reacted to — the editor's door has to keep the same promise, or a
+// version exported from the GUI is simply gone and prev.mp4 points at a stale
+// BEFORE.
+test("Export keeps the master it replaces as prev.mp4", async () => {
+  await writeFile(paths.mp4Path, "the master before Export");
+  await rm(paths.prevPath, { force: true });
+  const take = await getTake();
+
+  const response = await post("api/render", {
+    composition: take.composition,
+    baseMtime: take.mtime,
+  });
+  assert.equal(response.status, 200);
+  const { jobId } = (await response.json()) as { jobId: string };
+  const events = await (await fetch(`${url}api/render/${jobId}/events`)).text();
+  assert.match(events, /event: done/);
+
+  assert.equal(await readFile(paths.prevPath, "utf8"), "the master before Export");
+});
+
+// A failed Export must NOT move the revert point: the master on disk is still
+// the one prev.mp4 already describes.
+test("a failed Export leaves the existing prev.mp4 alone", async () => {
+  await writeFile(paths.mp4Path, "current master");
+  await writeFile(paths.prevPath, "an older master");
+  const take = await getTake();
+  renderFails = true;
+  try {
+    const response = await post("api/render", {
+      composition: take.composition,
+      baseMtime: take.mtime,
+    });
+    assert.equal(response.status, 200);
+    const { jobId } = (await response.json()) as { jobId: string };
+    const events = await (await fetch(`${url}api/render/${jobId}/events`)).text();
+    assert.match(events, /event: failed/);
+  } finally {
+    renderFails = false;
+  }
+  assert.equal(await readFile(paths.prevPath, "utf8"), "an older master");
+  assert.equal(
+    (await readdir(paths.dir)).some((f) => f.endsWith(".pending")),
+    false,
+    "the staged copy is discarded, not left behind",
+  );
 });
 
 test("render persists once, re-bases at POST, and preserves an agent write made during rendering", async () => {

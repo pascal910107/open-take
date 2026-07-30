@@ -41,7 +41,7 @@ export type EditServerOpts = {
   chromePath?: string;
 };
 
-import { resolveTakePaths } from "./take";
+import { resolveTakePaths, stagePrev } from "./take";
 
 type TakePaths = Awaited<ReturnType<typeof resolveTakePaths>>;
 
@@ -482,6 +482,12 @@ export async function startEditServer(
     comp: TakeComposition,
     captureLog: CaptureLog | undefined,
   ) {
+    // Export overwrites the master in place. Keep the version it replaces as
+    // prev.mp4 — the same revert point `render` maintains, so "keep the old
+    // one" (`ab --before-after`) still means the take the user just reacted
+    // to, whichever door the render came through. Staged: a failed render must
+    // not move the revert point.
+    const staged = await stagePrev(take.mp4Path, take.prevPath);
     try {
       await (deps.renderComposition ?? renderComposition)({
         composition: comp,
@@ -498,6 +504,7 @@ export async function startEditServer(
           for (const c of j.clients) emit(c, "progress", { progress: p });
         },
       });
+      await staged.commit();
       j.status = "done";
       j.progress = 1;
       j.mp4Url = `/api/take/output?v=${Date.now().toString(36)}`;
@@ -506,6 +513,7 @@ export async function startEditServer(
         c.end();
       }
     } catch (err) {
+      await staged.abort();
       j.status = "error";
       j.error = err instanceof Error ? err.message : String(err);
       for (const c of j.clients) {

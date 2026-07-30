@@ -264,7 +264,10 @@ edits autosave into the SAME `demo.take/composition.json` you edit. Offer it whe
 the user wants to fine-tune many things by hand. Its Agent panel appends notes
 to `demo.take/notes.md` and prints `NOTE {...}` lines on the `edit` process stdout.
 Always re-read `demo.take/composition.json` before editing it yourself — the user
-may have changed it in the editor.
+may have changed it in the editor. Its **Export** renders over the master
+`demo.mp4` in place and keeps the version it replaced as `demo.take/prev.mp4`,
+exactly like `render` — so `ab --before-after` still means "the take they just
+reacted to" after a GUI export.
 
 **Get woken when they leave you a note.** The editor is in the browser; you are
 in a terminal. Start ONE waiter in the background right after you open it:
@@ -311,7 +314,8 @@ Run that drain whenever the user says they left notes, or before you render.
      paths, action timing. Say "that's a re-shoot (~1 min)" and get a yes, then
      re-`make`. **Beat numbers are re-dealt — re-run `render --review` + `beats`
      and re-post the sheet.**
-3. **Every re-render keeps the previous master as `demo.take/prev.mp4`** — "keep the old one" is mechanical:
+3. **Every re-render (yours or the editor's Export) keeps the previous master as
+   `demo.take/prev.mp4`** — "keep the old one" is mechanical:
    `npx open-take ab demo.mp4 --before-after` replays
    BEFORE then AFTER (twice) straight from the two files, no render.
 4. **Failures become handoff, not dead ends.** A validator refusal prints the
@@ -544,7 +548,8 @@ npx open-take render demo.mp4        # <take> form: the working dir resolves fro
 ```
 Re-renders the **edited** composition over the **kept** capture, keeping the
 previous master as `demo.take/prev.mp4` (committed only on success — a refused
-render never clobbers the revert point). Auto-loads the
+render never clobbers the revert point; the editor's Export keeps the same
+promise). Auto-loads the
 kept capture log (`demo.take/capture.json`) as the capture-lock ground truth
 (`--capture-log <path>` overrides it). Validates first and **refuses to render an
 errored composition** (prints the field + a suggested fix in milliseconds, before

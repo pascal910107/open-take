@@ -224,7 +224,8 @@ Usage:
           timeline with zoom blocks; every change previews live, Export renders
           the real mp4 — all on 127.0.0.1, nothing uploaded. Hands off anything
           it can't do (reorder, re-record) to your agent via the Agent panel
-          (notes land in <base>.take/notes.md + this terminal).
+          (notes land in <base>.take/notes.md + this terminal). Export
+          overwrites the master and keeps the replaced one as prev.mp4.
 
   notes   read the director's notes the editor's Agent panel left for you —
           the notes you have NOT already read, then remembered as read (the
