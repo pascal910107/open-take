@@ -1,0 +1,15 @@
+# Every path falls to the maintainer by default.
+*                            @pascal910107
+
+# The publish path, called out separately so a change here can never ride along
+# in a large PR unnoticed: release.yml carries `id-token: write`, and any `v*`
+# tag triggers it. Whoever can land a change to these files can, in effect, put
+# code on npm under this project's name.
+/.github/workflows/          @pascal910107
+/scripts/release.mjs         @pascal910107
+/scripts/publish-oidc.mjs    @pascal910107
+/scripts/lib/workspace.mjs   @pascal910107
+
+# Same reasoning one level down: `files`, `bin` and lifecycle scripts decide
+# what ends up inside a tarball.
+/packages/*/package.json     @pascal910107

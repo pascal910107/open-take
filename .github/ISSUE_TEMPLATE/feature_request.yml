@@ -1,0 +1,51 @@
+name: Feature request
+description: A demo you cannot make today, or a rough edge in making one.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The most useful version of this describes the **demo you were trying to
+        make** and where it broke down, rather than the API you would like.
+        Editorial problems and API problems have different fixes.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to make, and what stops you?
+      placeholder: >
+        A demo that starts on the pricing page and ends inside the dashboard
+        after a login, as one continuous video.
+    validations:
+      required: true
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: What you tried
+      description: Commands, composition edits, or notes you gave your agent.
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Which surface is this about?
+      multiple: true
+      options:
+        - CLI (open-take …)
+        - The agent skill (SKILL.md) — how the agent decides what to record
+        - Capture (driving the app, cursor, typing, navigation)
+        - Render (zoom, motion, look, pacing, output quality)
+        - composition.json (the editable format)
+        - Editor (open-take edit)
+        - Installer (npm create open-take)
+        - Docs / site
+    validations:
+      required: true
+
+  - type: textarea
+    id: reference
+    attributes:
+      label: Reference
+      description: >
+        A link to a demo that does this well, or a clip of the result you want.
+        Feel is easier to agree on by watching than by describing.

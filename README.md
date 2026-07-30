@@ -43,6 +43,17 @@ Requires Node.js 22+. For agent-facing commands, run `npx open-take --help`.
 ```sh
 pnpm install
 pnpm build
+pnpm -r test   # `pnpm test` at the root runs nothing
 ```
+
+Setup, the full gate list, and what to open an issue about before writing code:
+[CONTRIBUTING.md][contributing]. Security reports go through [SECURITY.md][security],
+not the issue tracker.
+
+<!-- Absolute, because this README is also the one npm serves for the `open-take`
+     package, where a relative link would resolve under packages/cli/. -->
+
+[contributing]: https://github.com/pascal910107/open-take/blob/main/CONTRIBUTING.md
+[security]: https://github.com/pascal910107/open-take/blob/main/SECURITY.md
 
 MIT.

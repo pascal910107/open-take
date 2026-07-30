@@ -1,0 +1,87 @@
+name: Bug report
+description: Something recorded, rendered or installed wrong.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The fields below are what the first reply would otherwise have to ask
+        for. If the video rendered but looked wrong, attach the clip and
+        `demo.take/composition.json` — that pair usually reproduces it without
+        access to your app.
+
+  - type: input
+    id: version
+    attributes:
+      label: Open Take version
+      description: "`npx open-take --version`"
+      placeholder: "0.2.9"
+    validations:
+      required: true
+
+  - type: input
+    id: platform
+    attributes:
+      label: OS and Node
+      description: "`node -v` plus your OS and version."
+      placeholder: "macOS 15.2 (Apple Silicon), Node 22.11.0"
+    validations:
+      required: true
+
+  - type: input
+    id: ffmpeg
+    attributes:
+      label: ffmpeg
+      description: >
+        First line of `ffmpeg -version`, or "none" — Open Take falls back to a
+        bundled build, and which one is in play matters.
+      placeholder: "ffmpeg version 7.1 / none (using the bundled build)"
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What you ran
+      description: >
+        The exact command, or what you asked your agent to do. Include the app
+        under demo if that matters (framework, port, whether it needs login).
+      placeholder: |
+        npx open-take make --url http://localhost:3000 --out demos/checkout.mp4
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What happened, and what you expected instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: Terminal output
+      description: >
+        The failure and the surrounding lines, including the end-of-run summary
+        if it got that far. Pasted as-is — no need to fence it.
+      render: shell
+
+  - type: textarea
+    id: composition
+    attributes:
+      label: composition.json
+      description: >
+        Only if the render succeeded but looked wrong. Found at
+        `demo.take/composition.json` beside the video.
+      render: json
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Before submitting
+      options:
+        - label: I am on the latest published version (`npm view open-take version`)
+          required: true
+        - label: >
+            I checked the video and any pasted output for anything private —
+            the capture records whatever my app had on screen.
+          required: true
