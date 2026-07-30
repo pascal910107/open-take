@@ -172,3 +172,24 @@ export function setCursorRebased(
   );
   return { ...c, events, cursor: next };
 }
+
+/** Does the stage draw the REST frame + the zoom box (inspect), or the composed
+ *  frame the camera actually produces?
+ *
+ *  Inspect exists so a selected beat's zoom box can be seen and dragged, which
+ *  means the camera is deliberately NOT applied (`preview.ts`: `this.inspect ?
+ *  this.d.rest : this.d.scaleAt(t)`). That collided with hold-to-compare: the
+ *  hold swaps the engine's composition to the session origin and redraws — but
+ *  in inspect mode BOTH compositions draw the same rest frame, so the badge
+ *  said ORIGINAL while the picture never moved, and the feature read as dead
+ *  exactly when it is most wanted (right after changing a zoom). `comparing`
+ *  now suspends inspect, so the hold shows the framing the original actually
+ *  produces and the release puts the box back. */
+export function stageInspects(s: {
+  ready: boolean;
+  selectedBeat: number;
+  playing: boolean;
+  comparing: boolean;
+}): boolean {
+  return s.ready && s.selectedBeat >= 0 && !s.playing && !s.comparing;
+}

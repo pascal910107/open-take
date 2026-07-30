@@ -33,7 +33,7 @@ import {
   resolveConflictAction,
   shouldKeepConflict,
 } from "./lib/conflict";
-import { setBeatZoom, setStart } from "./lib/edit";
+import { setBeatZoom, setStart, stageInspects } from "./lib/edit";
 import { IcCompare, IcExport, IcRedo, IcUndo } from "./ui/icons";
 
 type SaveState = "clean" | "saving" | "saved" | "error" | "export-error" | "invalid" | "conflict";
@@ -64,7 +64,9 @@ export function App() {
 
   const ready = p.status === "ready" && !!p.engine && !!c.derived;
   const sel = c.selectedBeat;
-  const inspecting = ready && sel >= 0 && !p.isPlaying;
+  // `comparing` suspends inspect so hold-to-compare shows the frame the ORIGIN
+  // actually composes instead of the same rest frame twice — see stageInspects.
+  const inspecting = stageInspects({ ready, selectedBeat: sel, playing: p.isPlaying, comparing });
 
   // inspect mode follows selection (and start-picking, whose inverse mapping
   // assumes the rest-centred frame); playing always exits it

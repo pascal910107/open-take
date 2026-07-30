@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { TakeComposition } from "../src/lib/compositor.js";
-import { sameComposition, setBeatZoom, setDuration } from "../src/lib/edit.js";
+import { sameComposition, setBeatZoom, setDuration, stageInspects } from "../src/lib/edit.js";
 
 const comp = (): TakeComposition =>
   ({
@@ -53,4 +53,28 @@ test("a missing side is never comparable", () => {
   assert.equal(sameComposition(null, comp()), false);
   assert.equal(sameComposition(comp(), null), false);
   assert.equal(sameComposition(null, null), true);
+});
+
+// The other half of hold-to-compare: it has to CHANGE THE PICTURE. Selecting a
+// beat puts the stage in inspect mode, which draws the rest frame so the zoom
+// box can be dragged — and in that mode the origin and the draft compose
+// identically, so the hold used to show the badge over a frame that never
+// moved. Holding now suspends inspect.
+test("holding compare suspends inspect, so the origin's real framing is drawn", () => {
+  const base = { ready: true, selectedBeat: 1, playing: false, comparing: false };
+  assert.equal(stageInspects(base), true); // editing a beat: box view
+  assert.equal(stageInspects({ ...base, comparing: true }), false); // held: composed view
+});
+
+test("inspect still needs a selected, paused, loaded take", () => {
+  const base = { ready: true, selectedBeat: 1, playing: false, comparing: false };
+  assert.equal(stageInspects({ ...base, selectedBeat: -1 }), false); // nothing selected
+  assert.equal(stageInspects({ ...base, playing: true }), false); // playing wins
+  assert.equal(stageInspects({ ...base, ready: false }), false); // no take yet
+});
+
+test("with nothing selected the stage was already composed — comparing changes nothing", () => {
+  const idle = { ready: true, selectedBeat: -1, playing: false, comparing: false };
+  assert.equal(stageInspects(idle), false);
+  assert.equal(stageInspects({ ...idle, comparing: true }), false);
 });
