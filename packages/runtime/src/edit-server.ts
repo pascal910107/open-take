@@ -33,7 +33,7 @@ import { renderComposition } from "./index";
 import { openWithOs } from "./review";
 
 export type EditServerOpts = {
-  /** path to the take: its .mp4 / .composition.json / a dir containing them. */
+  /** path to the take: its .mp4, its `.take/` working dir, or a file in it. */
   takePath: string;
   port?: number;
   /** open the browser at the served URL (default true). */

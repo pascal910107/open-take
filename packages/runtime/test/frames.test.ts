@@ -136,12 +136,12 @@ test("sheet labels non-hold cells and carries the head-trim note", () => {
   assert.ok(sheet.includes("HOLD cells"), "the judging rule is printed");
 });
 
-test("take family: .draft.mp4 resolves to the same base", async () => {
+test("take family: the working dir's draft.mp4 resolves to the same take", async () => {
   // built with the platform's own separators/drive so this holds on Windows too
   const dir = resolve("nowhere");
-  const take = await resolveTakePaths(join(dir, "demo.draft.mp4"));
+  const take = await resolveTakePaths(join(dir, "demo.take", "draft.mp4"));
   assert.equal(take.name, "demo");
   assert.equal(take.base, join(dir, "demo"));
   assert.equal(take.mp4Path, join(dir, "demo.mp4"));
-  assert.equal(take.draftPath, join(dir, "demo.draft.mp4"));
+  assert.equal(take.draftPath, join(dir, "demo.take", "draft.mp4"));
 });

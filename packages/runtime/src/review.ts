@@ -3,10 +3,13 @@
 // artifacts and the terminal (agent) is the only input channel.
 //
 //   beats   — a numbered stdout table: the shared map for "beat 3: no zoom"
-//   review  — `<base>.review.mp4`: fast draft with beat badges burned in
+//   review  — `<base>.take/review.mp4`: fast draft with beat badges burned in
 //             (the video itself teaches the referring vocabulary) + watermark
-//   ab      — `<base>.ab.mp4`: ONE knob, 2-4 labeled variants, each played
+//   ab      — `<base>.take/ab.mp4`: ONE knob, 2-4 labeled variants, each played
 //             twice — a taste question answered with one letter
+//
+// Every artifact here is disposable and lives in the take's working dir; the
+// master mp4 outside it is the only file meant to be posted.
 //
 // Badges/labels are drawn by the revideo scene in Chrome (composition.review),
 // NOT by ffmpeg drawtext — slim ffmpeg builds ship without font filters.
@@ -39,7 +42,7 @@ import {
   zoomLevelName,
 } from "@open-take/compositor";
 import { ensureChrome } from "./cdp";
-import { type TakePaths, requireTakeFiles } from "./take";
+import { type TakePaths, requireTakeFiles, takeFile } from "./take";
 
 /** Sibling capture log (`<capture>.json`), if present — enables the
  *  capture-lock check; silently absent otherwise (matches index.ts). */
@@ -209,7 +212,7 @@ export async function renderReview(
   return { reviewPath: take.reviewPath, sheet: buildBeatSheet(comp, take.name), warnings };
 }
 
-/** Draft-quality re-render of the CURRENT composition to `<base>.draft.mp4` —
+/** Draft-quality re-render of the CURRENT composition to `draft.mp4` —
  *  no badges, no watermark, and never the master's path, so a mid-refine
  *  frame-check (edit → draft → `frames`) costs seconds without downgrading or
  *  clobbering the postable mp4. Disposable like the review copy. */
@@ -477,7 +480,7 @@ export async function renderAbReel(
         ...base,
         review: { label: `${v.letter} · ${v.desc}` },
       };
-      const clip = `${take.base}.ab.${v.letter}.mp4`;
+      const clip = takeFile(take, `ab.${v.letter}.mp4`);
       if (opts.logProgress !== false)
         process.stderr.write(
           `variant ${v.letter} · ${v.desc}${rangeSec ? ` · window ${rangeSec[0].toFixed(1)}–${rangeSec[1].toFixed(1)}s` : ""}\n`,
@@ -543,8 +546,8 @@ export async function renderBeforeAfter(
     args.push("-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p", "-an", out);
     await ffmpeg(args);
   };
-  const before = `${take.base}.ab.before.mp4`;
-  const after = `${take.base}.ab.after.mp4`;
+  const before = takeFile(take, "ab.before.mp4");
+  const after = takeFile(take, "ab.after.mp4");
   await cut(take.prevPath, before);
   await cut(take.mp4Path, after);
   await concatWithGaps([before, after, before, after], take.abPath, {

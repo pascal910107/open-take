@@ -10,11 +10,12 @@
 // The refine loop is conversational: the user talks, the agent edits
 // composition.json and drives these verbs. See skills/open-take/SKILL.md.
 import { stat as fsStat, readFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   SAY_IT_CARD,
   type CompositionIssue,
+  type TakePaths,
   type TakePlan,
   authProfile,
   buildBeatSheet,
@@ -55,6 +56,7 @@ const BOOL_FLAGS = new Set([
   "--no-open",
   "--before-after",
   "--strict",
+  "--force",
   "--headed",
   "--verbose",
   "--wait",
@@ -103,6 +105,7 @@ const FLAGS_BY_CMD: Record<string, string[]> = {
     "--fps",
     "--capture-scale",
     "--strict",
+    "--force",
     "--draft",
     "--no-open",
     "--profile",
@@ -166,34 +169,41 @@ Usage:
   open-take init
   open-take skill  [install]
 
-  <take> is any member of a take's artifact family (its .mp4, .composition.json,
-  .capture.mp4, or the directory holding them) — siblings resolve by convention.
+  A take is TWO things on disk: the postable master at exactly your --out path
+  (<out>.mp4), and a working directory beside it (<out>.take/) holding
+  everything else — composition.json, the kept capture, the disposable
+  review/draft/ab copies, prev.mp4, dossier.md, notes.md. Post the mp4; ignore,
+  .gitignore (*.take/) or delete the folder.
 
-  make    drive the app (real-time) → polished <out>.mp4 + editable
-          <out>.composition.json + KEPT <out>.capture.mp4 + <out>.capture.json.
+  <take> is the master mp4, the <name>.take/ dir, any file inside it, or a
+  directory holding exactly one take — the rest resolves by convention.
+
+  make    drive the app (real-time) → polished <out>.mp4 + <out>.take/ with the
+          editable composition.json + the KEPT capture.mp4 + capture.json.
           The raw capture auto-opens the moment it lands (minutes before the
           polished render finishes) so the wait is spent watching raw footage —
-          --no-open to skip.
+          --no-open to skip. Refuses to overwrite a take of a DIFFERENT app
+          (name the second demo after its app instead); --force overrides.
   render  re-render the (edited) composition over the kept capture — NO app
-          drive, deterministic. The previous master is kept as <base>.prev.mp4
+          drive, deterministic. The previous master is kept as prev.mp4
           so "keep the old one" is a mechanical revert.
-          --review renders a fast DRAFT copy to <base>.review.mp4 instead, with
+          --review renders a fast DRAFT copy to review.mp4 instead, with
           beat badges burned in (the video teaches "beat 3" refers) + a REVIEW
           watermark — never overwrites the postable master. Review copies
           auto-open in the player (--no-open to skip; --reveal to reveal
           instead).
-          --draft renders a clean draft copy to <base>.draft.mp4 (30fps cap +
+          --draft renders a clean draft copy to draft.mp4 (30fps cap +
           motion blur off, no badges) — the cheap re-render for frame checks
           mid-refine; never overwrites the master. Does not auto-open.
           (legacy flags --composition/--video/--out/--capture-log still work)
   beats   print the numbered beat sheet — the shared map for notes like
           "beat 3: no zoom". --card appends the say-it cheat card.
-  frames  extract a beat-aware contact sheet (<base>.frames.png) from the
+  frames  extract a beat-aware contact sheet (<take>/frames.png) from the
           delivered mp4: an intro row, one row per beat (a mid-travel cell +
           4 samples across the beat's camera HOLD, timed off the real camera
           schedule), a tail row. --beat N densifies one beat into a 10-cell
-          strip with per-cell phase labels. Pass <base>.draft.mp4 or
-          <base>.review.mp4 as <take> to sample that copy instead of the
+          strip with per-cell phase labels. Pass <base>.take/draft.mp4 or
+          <base>.take/review.mp4 as <take> to sample that copy instead of the
           master. --tile <px> sets tile width (default 480; a --beat strip
           defaults 720 — thumbnails suspect a framing bug, bigger tiles
           confirm it). Seconds (pure ffmpeg, no render) — this is the
@@ -207,18 +217,18 @@ Usage:
           dot-path like cursor.holdMs=900,1300.
           Windowed to the beat's zoom arc by default (--full for the whole
           take); FEEL knobs render at full quality — judge motion by eye.
-          --before-after replays <base>.prev.mp4 vs the current master instead
+          --before-after replays prev.mp4 vs the current master instead
           (no render; BEFORE then AFTER, twice).
 
   edit    open the visual editor on a take: preview + icon-rail settings +
           timeline with zoom blocks; every change previews live, Export renders
           the real mp4 — all on 127.0.0.1, nothing uploaded. Hands off anything
           it can't do (reorder, re-record) to your agent via the Agent panel
-          (notes land in <base>.notes.md + this terminal).
+          (notes land in <base>.take/notes.md + this terminal).
 
   notes   read the director's notes the editor's Agent panel left for you —
           the notes you have NOT already read, then remembered as read (the
-          position lives in <base>.notes.cursor; --all re-reads everything).
+          position lives in notes.cursor; --all re-reads everything).
           <take> defaults to the current directory. --quiet prints nothing
           when there is nothing new (for hooks).
           --wait BLOCKS until a note lands and then exits — start it in the
@@ -245,6 +255,9 @@ Usage:
   --strict    (make only) exit non-zero when any plan step was skipped (target
               not found, or a navigate destination that didn't resolve) — the
               summary lists them either way.
+  --force     (make only) overwrite the take at --out even when it was shot from
+              a different app. Without it that is refused: two demos in one
+              folder each get their own name (\`--out linear.mp4\`).
   --profile <name>   (make/inspect) drive an authenticated session: reuse the
               persistent profile created by \`open-take auth <name>\`.
   --headed    (make/inspect) drive a visible Chrome window instead of headless —
@@ -258,6 +271,48 @@ const fmtDuration = (s: number): string => (s >= 120 ? `${Math.round(s / 60)}m` 
 
 const fmtBytes = (n: number): string =>
   n > 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.round(n / 1024)} KB`;
+
+/** `--out` names the postable master, so it is an mp4 path. A bare name is the
+ *  natural thing to type (`--out demo`) and used to produce a file literally
+ *  called "demo" that no player would open by double-click. */
+function normalizeOut(out: string): string {
+  if (/\.mp4$/i.test(out)) return out;
+  if (extname(out) === "") return `${out}.mp4`;
+  throw new Error(`make: --out must be an .mp4 path (got "${out}")`);
+}
+
+/** Two demos, one folder: the failure this prevents is a second `make` at the
+ *  default `--out` silently destroying the first demo — a capture that cost
+ *  minutes of real app drive, plus its hand-edited composition. A re-make of
+ *  the SAME app is the legitimate case and stays silent; a take shot from a
+ *  different origin is almost certainly a name collision, so it stops and says
+ *  what to type instead. Takes made before the URL was recorded have nothing to
+ *  compare and are not blocked. */
+async function refuseCrossAppOverwrite(take: TakePaths, planUrl: string): Promise<void> {
+  const previous = await readFile(take.captureLogPath, "utf8")
+    .then((t) => (JSON.parse(t) as { url?: string }).url)
+    .catch(() => undefined);
+  const origin = (u: string | undefined): string | undefined => {
+    try {
+      return u ? new URL(u).origin : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  const was = origin(previous);
+  const now = origin(planUrl);
+  if (!was || !now || was === now) return;
+  // A local app's hostname is "localhost" or an IP — no name to suggest there,
+  // and suggesting "--out 127.mp4" reads like a bug.
+  const host = new URL(planUrl).hostname.replace(/^www\./, "");
+  const named = /^[a-z]/i.test(host) && host !== "localhost" ? host.split(".")[0] : null;
+  throw new Error(
+    `make: ${take.mp4Path} is already a take of ${was} — this plan drives ${now}.\n` +
+      `Overwriting it would destroy that demo's capture and composition. Two demos in one folder\n` +
+      `each want their own name: --out ${named ?? "<the-app>"}.mp4\n` +
+      `If this IS the same app at a new address (a dev server that moved port), pass --force.`,
+  );
+}
 
 async function readyLine(mp4Path: string): Promise<string> {
   const take = await resolveTakePaths(mp4Path);
@@ -347,12 +402,8 @@ async function main() {
 
   if (cmd === "make") {
     const planPath = flag("--plan");
-    const out = flag("--out") ?? "take.mp4";
+    const out = normalizeOut(flag("--out") ?? "take.mp4");
     if (!planPath) throw new Error("make: missing --plan <plan.json>");
-    if (/\.(review|draft|ab|prev|capture)\.mp4$/i.test(out))
-      throw new Error(
-        `make: ".review/.draft/.ab/.prev/.capture" are reserved take suffixes — pick another --out name`,
-      );
     const plan = JSON.parse(await readFile(planPath, "utf8")) as TakePlan;
     const fpsFlag = flag("--fps");
     const fps = fpsFlag ? Number(fpsFlag) : undefined;
@@ -366,10 +417,11 @@ async function main() {
     // any hand-edited zoom overrides in the old one would silently vanish
     // (issue #10). `<base>.prev.composition.json` preserves them for re-apply.
     const takePre = await resolveTakePaths(out).catch(() => null);
+    if (takePre && !has("--force")) await refuseCrossAppOverwrite(takePre, plan.url);
     const noStage = { commit: async () => {}, abort: async () => {} };
     const staged = takePre ? await stagePrev(takePre.mp4Path, takePre.prevPath) : noStage;
     const stagedComp = takePre
-      ? await stagePrev(takePre.compositionPath, `${takePre.base}.prev.composition.json`)
+      ? await stagePrev(takePre.compositionPath, takePre.prevCompositionPath)
       : noStage;
     let made: Awaited<ReturnType<typeof makeTake>>;
     try {
@@ -408,6 +460,7 @@ async function main() {
     const {
       mp4Path,
       compositionPath,
+      takeDir,
       capturePath,
       captureLogPath,
       skipped,
@@ -417,7 +470,7 @@ async function main() {
     } = made;
     const draftNote = has("--draft")
       ? ` (DRAFT quality — \`${INVOKE} render ${mp4Path}\` masters it)`
-      : "";
+      : "      ← the one to post";
     // the dossier is the agent's exploration harvest — nudge for it here so
     // the NEXT demo of this app skips cold exploration even when the agent
     // isn't following the skill to the letter.
@@ -428,7 +481,9 @@ async function main() {
         `             (app thesis · hero candidates tried/rejected · selector map ·\n` +
         `             content answers · hazards) so the next demo skips cold exploration\n`;
     process.stdout.write(
-      `\nmp4:         ${mp4Path}${draftNote}\ncomposition: ${compositionPath}\n` +
+      `\nmp4:         ${mp4Path}${draftNote}\n` +
+        `working dir: ${takeDir}/      (everything below lives here)\n` +
+        `composition: ${compositionPath}\n` +
         `capture:     ${capturePath}\ncapture log: ${captureLogPath}\n` +
         dossierLine +
         `\nrefine by asking your agent for changes — or directly:\n` +
@@ -526,7 +581,7 @@ async function main() {
     }
 
     const takeArg = positional[0];
-    if (!takeArg) throw new Error("render: missing <take> (its .mp4 / .composition.json / dir)");
+    if (!takeArg) throw new Error("render: missing <take> (its .mp4, its .take/ dir, or a dir)");
     const take = await resolveTakePaths(takeArg);
 
     if (has("--review")) {
@@ -577,11 +632,9 @@ async function main() {
     if (beatFlag && (!Number.isInteger(beat) || beat! < 1))
       throw new Error(`frames: --beat expects a 1-based beat number (got "${beatFlag}")`);
     // naming a disposable copy samples that copy; anything else = the master.
-    const sourcePath = /\.(draft|review)\.mp4$/i.test(takeArg)
-      ? /\.draft\.mp4$/i.test(takeArg)
-        ? take.draftPath
-        : take.reviewPath
-      : undefined;
+    const named = basename(takeArg).toLowerCase();
+    const sourcePath =
+      named === "draft.mp4" ? take.draftPath : named === "review.mp4" ? take.reviewPath : undefined;
     const tileFlag = flag("--tile");
     const { framesPath, sheet } = await renderFrames(take, {
       ...(beat != null ? { beat } : {}),

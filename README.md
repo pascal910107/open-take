@@ -22,6 +22,13 @@ app root it asks which directory to create rather than writing into the one you
 are standing in. On the first demo, Open Take downloads and caches its own
 Chrome for Testing under `~/.open-take/browsers`; later runs reuse it.
 
+## What you get
+
+Two things per demo: `demo.mp4` — the one to post — and `demo.take/` beside it,
+holding the editable composition, the kept recording, and every draft copy. Post
+the mp4; ignore, `.gitignore` (`*.take/`) or delete the folder. Deleting it keeps
+the video and gives up re-rendering (the recording is not regenerable).
+
 ## Refine
 
 Watch the review copy and give notes in plain language: “beat 3: no zoom”,

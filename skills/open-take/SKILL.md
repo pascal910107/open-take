@@ -39,7 +39,7 @@ elements (name + bbox), and open the URL in any browser to see what the app
 
 **Explore efficiently — the measured time sink is HERE, not the renders:**
 - **Read the dossier FIRST.** A previous demo of this app left
-  `<base>.dossier.md` beside its take — the last run's exploration harvest
+  `<base>.take/dossier.md` in its working dir — the last run's exploration harvest
   (what the app is + audience, hero candidates tried AND rejected, the
   verified selector map, content answers, hazards). If one exists, read it
   before touching the app, and re-verify only what could be stale: one
@@ -156,7 +156,7 @@ the app's signature moment; make the wow the hero, not an afterthought.
   beat's `zoom.center`/`scale` to the CONTAINER's box instead:
   `center = {x: box.x+box.w/2, y: box.y+box.h/2}`, `scale =
   min(1920/(box.w·1.15), 1080/(box.h·1.15))`. Read the container's box off a
-  full-res capture frame (`ffmpeg -ss <t> -i <base>.capture.mp4 -frames:v 1
+  full-res capture frame (`ffmpeg -ss <t> -i <base>.take/capture.mp4 -frames:v 1
   -vf scale=<viewportW>:<viewportH> f.png`) — that frame is in viewport px, the
   same space `zoom.center` uses.
 - Restraint reads as intentional. Reserve zoom for the beats that earn it; many
@@ -226,7 +226,7 @@ stable selector. Don't silently fall back to clicking inert UI.
 ### 5. SHOW (frames, not claims)
 First verify it YOURSELF — get the beat-aware contact sheet and **look at it**:
 ```
-npx open-take frames demo.mp4              # <base>.frames.png + a row/time table
+npx open-take frames demo.mp4              # demo.take/frames.png + a row/time table
 npx open-take frames demo.mp4 --beat 3     # 10-cell strip of one beat
 ```
 `frames` samples off the REAL camera schedule: an intro row (dead-opening
@@ -260,10 +260,10 @@ the user is speaking — answer in that language, but keep every file you write
 **The visual editor is the user's other door.** `npx open-take edit demo.mp4`
 opens a local editor (preview + icon-rail settings + timeline with zoom
 blocks); the user can drag zoom regions, switch looks, and tune motion there —
-edits autosave into the SAME `demo.composition.json` you edit. Offer it when
+edits autosave into the SAME `demo.take/composition.json` you edit. Offer it when
 the user wants to fine-tune many things by hand. Its Agent panel appends notes
-to `demo.notes.md` and prints `NOTE {...}` lines on the `edit` process stdout.
-Always re-read `demo.composition.json` before editing it yourself — the user
+to `demo.take/notes.md` and prints `NOTE {...}` lines on the `edit` process stdout.
+Always re-read `demo.take/composition.json` before editing it yourself — the user
 may have changed it in the editor.
 
 **Get woken when they leave you a note.** The editor is in the browser; you are
@@ -278,7 +278,7 @@ The waiter prints the new notes and exits — that exit is your wake-up. Handle
 the batch (ECHO → resolve → render), then start a fresh waiter for the next
 one; each waiter delivers one batch. Notes left while no waiter was running are
 not lost: `npx open-take notes demo.mp4` drains whatever you have not read yet
-(the read position lives in `demo.notes.cursor`; `--all` re-reads everything).
+(the read position lives in `demo.take/notes.cursor`; `--all` re-reads everything).
 Run that drain whenever the user says they left notes, or before you render.
 
 **Hard rules, in order:**
@@ -288,15 +288,15 @@ Run that drain whenever the user says they left notes, or before you render.
    so a misread costs a sentence, not a render. Resolve referents against the
    ground truth: beat numbers → `events[n-1]`; "at 0:07" → the beat whose window
    covers it; element words → fuzzy-match `events[].label`, then bboxes in
-   `demo.capture.json`; "the opening"/intro → `start` + first beat; "the
+   `demo.take/capture.json`; "the opening"/intro → `start` + first beat; "the
    ending"/tail → `durationMs`.
 2. **Triage each note by cost, and say the cost:**
    - **Instant (~10s draft):** anything in the cinematic layer — zoom on/off/
      tightness/center, pacing, look, finish, intro, tail. Edit
-     `demo.composition.json` (presets below), then ONE `render --review` for ALL
+     `demo.take/composition.json` (presets below), then ONE `render --review` for ALL
      batched notes from the message. The badges re-burn so the sheet never goes
      stale. To verify an edit YOURSELF before showing it, `render --draft`
-     (clean `<base>.draft.mp4`, no badges) then `frames demo.draft.mp4` —
+     (clean `<base>.take/draft.mp4`, no badges) then `frames demo.take/draft.mp4` —
      seconds, and the master is never touched mid-refine.
    - **A taste question ("how tight? tighter? faster?"):** never guess twice —
      run an `ab` reel with the bracketing values and ask for a letter:
@@ -311,8 +311,7 @@ Run that drain whenever the user says they left notes, or before you render.
      paths, action timing. Say "that's a re-shoot (~1 min)" and get a yes, then
      re-`make`. **Beat numbers are re-dealt — re-run `render --review` + `beats`
      and re-post the sheet.**
-3. **Every re-render keeps the previous master as `demo.prev.mp4`** — "keep the
-   old one" is mechanical:
+3. **Every re-render keeps the previous master as `demo.take/prev.mp4`** — "keep the old one" is mechanical:
    `npx open-take ab demo.mp4 --before-after` replays
    BEFORE then AFTER (twice) straight from the two files, no render.
 4. **Failures become handoff, not dead ends.** A validator refusal prints the
@@ -334,7 +333,7 @@ Run that drain whenever the user says they left notes, or before you render.
    ```
 
 **The cheap/expensive boundary (why triage works):** `render` re-composites the
-cinematic layer over the frozen `demo.capture.mp4` — deterministic, no app
+cinematic layer over the frozen `demo.take/capture.mp4` — deterministic, no app
 drive. The video is temporal, so *what happens and when* (`tMs`, order, text,
 paths) is capture-locked: `render` refuses a drifted `tMs`; those notes are
 re-`make` jobs.
@@ -475,16 +474,26 @@ page changed).
 
 ### make (render)
 ```
-npx open-take make --plan plan.json --out demo.mp4 --draft    # the default loop
-npx open-take make --plan plan.json --out demo.mp4            # master up front
-npx open-take make --plan plan.json --out demo.mp4 --fps 30   # capture at 30
+npx open-take make --plan plan.json --out linear.mp4 --draft    # the default loop
+npx open-take make --plan plan.json --out linear.mp4            # master up front
+npx open-take make --plan plan.json --out linear.mp4 --fps 30   # capture at 30
 ```
-Produces `demo.mp4` (1920×1080 @ **60fps default**) and
-`demo.composition.json` (editable).
+Produces `<out>.mp4` (1920×1080 @ **60fps default**) — the one the user posts —
+and a working directory `<out>.take/` beside it holding everything else, starting
+with the editable `<out>.take/composition.json`.
+
+**Name the take after the app, not `demo.mp4`.** Two demos in one folder need two
+names (`vercel.mp4` + `vercel.take/`, `linear.mp4` + `linear.take/`), and `make`
+REFUSES to overwrite a take that was shot from a different app rather than
+destroying a capture that cost minutes of real drive time (`--force` overrides —
+it is the right flag only when the same app moved address). Re-shooting the SAME
+app at the same `--out` is the normal re-make and proceeds, keeping the old
+master + composition as `prev.mp4` / `prev.composition.json` (hand-edited zoom
+overrides survive a re-plan there — re-apply what still applies).
 
 **`--draft` renders the initial mp4 at draft quality** (30fps cap + motion blur
 off — several times faster) while the capture still records at the full fps and
-the composition sibling keeps the full-quality settings; the closing `render`
+the composition in the working dir keeps the full-quality settings; the closing `render`
 masters the same take with no re-shoot. Use it by default — the first cut
 exists to be verified and refined, not posted. (`--fps 30` is different: it
 halves the CAPTURE grid too, capping the master at 30fps.)
@@ -497,14 +506,18 @@ cursor. **`--fps 30` halves render time + file size** — use it for fast drafts
 while iterating, or for pure click/type demos where the gain is marginal. Needs
 a Chrome (auto-downloaded on first run — see Prerequisites).
 
-`make` prints the artifact family and the exact `render` command to refine:
+`make` prints the layout and the exact `render` command to refine:
 ```
-mp4:         demo.mp4
-composition: demo.composition.json   ← edit this
-capture:     demo.capture.mp4        ← render reads this (the frozen recording)
-capture log: demo.capture.json       ← render auto-loads this (capture-lock ground truth)
-dossier:     demo.dossier.md         ← the exploration harvest (you write this — see below)
+mp4:         demo.mp4                     ← the one to post
+working dir: demo.take/                   (everything below lives here)
+composition: demo.take/composition.json   ← edit this
+capture:     demo.take/capture.mp4        ← render reads this (the frozen recording)
+capture log: demo.take/capture.json       ← render auto-loads this (capture-lock ground truth)
+dossier:     demo.take/dossier.md         ← the exploration harvest (you write this — see below)
 ```
+Every verb takes the take by ANY member — `demo.mp4`, `demo.take/`, a file
+inside it, or a directory holding exactly one take — and resolves the rest. Pass
+`demo.mp4`; that is the name a user knows.
 
 After the capture, `make` frame-diffs the recording around every action and
 writes what each one actually changed into the log (`effectBox` — the changed
@@ -517,9 +530,8 @@ nothing** — a subtle effect (a 1px outline, a low-opacity highlight) diffs
 below the threshold and is often visually fine. The annotation steers the
 camera; the frames (step 5) are the ground truth for "did it work".
 
-**After the first successful `make`, write the dossier** — `<base>.dossier.md`
-beside the take, the exploration harvest the NEXT demo of this app reads
-instead of re-exploring: what the app is + audience · hero candidates you kept
+**After the first successful `make`, write the dossier** — `<base>.take/dossier.md`,
+the exploration harvest the NEXT demo of this app reads instead of re-exploring: what the app is + audience · hero candidates you kept
 AND rejected (with why) · the verified selector map · content answers (search
 terms with hits, seeded data) · hazards (autofocus races, saves that write
 files, lazy-load waits). Keep it human-readable — it doubles as your
@@ -528,19 +540,19 @@ something new about the app.
 
 ### refine (re-render edits — no app drive)
 ```
-npx open-take render demo.mp4        # <take> form: siblings resolve by convention
+npx open-take render demo.mp4        # <take> form: the working dir resolves from it
 ```
 Re-renders the **edited** composition over the **kept** capture, keeping the
-previous master as `demo.prev.mp4` (committed only on success — a refused render
-never clobbers the revert point). Auto-loads the
-sibling capture log (`demo.capture.json`) as the capture-lock ground truth
+previous master as `demo.take/prev.mp4` (committed only on success — a refused
+render never clobbers the revert point). Auto-loads the
+kept capture log (`demo.take/capture.json`) as the capture-lock ground truth
 (`--capture-log <path>` overrides it). Validates first and **refuses to render an
 errored composition** (prints the field + a suggested fix in milliseconds, before
 paying for a render) — e.g. a `zoom.scale` below the rest scale (zooms *out* past
 the frame), a `zoom.inAtMs` after its action, or a **drifted action `tMs`** (the
 capture-lock). Warnings (a no-op zoom, a soft-cap scale) print but don't block.
 
-**Map the user's words to fields** (edit `demo.composition.json`, then `render`):
+**Map the user's words to fields** (edit `demo.take/composition.json`, then `render`):
 - *"don't zoom on X" / "too zoomy"* → that beat's `zoom.enabled: false`.
 - *"zoom on X" / "tighter on X"* → `zoom.enabled: true` and/or raise `zoom.scale`
   (toward ~2.0; the validator soft-caps ~2.5). If the beat has a `bbox`, set
@@ -605,9 +617,9 @@ capture-lock). Warnings (a no-op zoom, a soft-cap scale) print but don't block.
 npx open-take notes demo.mp4 --wait   # background: blocks, exits on the next note
 npx open-take notes demo.mp4          # drain: prints what you have not read yet
 ```
-The editor's Agent panel appends one line per note to `demo.notes.md`. `notes`
+The editor's Agent panel appends one line per note to `demo.take/notes.md`. `notes`
 reads the ones you have not seen and remembers the position in
-`demo.notes.cursor`, so each note reaches you **exactly once** — `--all`
+`demo.take/notes.cursor`, so each note reaches you **exactly once** — `--all`
 re-reads the whole log, `--timeout <seconds>` caps a wait (default 1800), and a
 burst typed together arrives as one batch. With no `<take>` it resolves the take
 in the current directory. Treat its output exactly like a message the user

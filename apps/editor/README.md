@@ -25,7 +25,7 @@ the captured video.
 - **Icon rail + panels** (`components/Rail.tsx`, `components/panels.tsx`) —
   seven layered panes: Zoom · Background (Look thumbnails + custom) · Frame ·
   Cursor · Motion (pace cards, blur, fine-tune durations) · Clip · Agent (notes →
-  `<base>.notes.md` + a NOTE line on the edit-server stdout).
+  `<base>.take/notes.md` + a NOTE line on the edit-server stdout).
 - **Timeline** (`components/Timeline.tsx`) — transport, ruler, client-side
   filmstrip thumbnails, iris zoom blocks (dashed ghosts enable a zoom on a
   beat), synced playhead.

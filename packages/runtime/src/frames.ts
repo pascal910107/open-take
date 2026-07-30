@@ -20,7 +20,7 @@ import {
   resolveFfprobe,
 } from "@open-take/compositor";
 import { beatLabel } from "./review";
-import { type TakePaths, requireTakeFiles } from "./take";
+import { type TakePaths, requireTakeFiles, takeFile } from "./take";
 
 export type FramePhase = "intro" | "travel" | "hold" | "tail";
 export type FrameCell = {
@@ -214,7 +214,8 @@ export async function renderFrames(
   const trim = comp.startMs ?? 0;
   const durMs = await mp4Duration(src);
   const ffmpeg = await resolveFfmpeg();
-  const framesPath = opts.beat != null ? `${take.base}.frames.beat${opts.beat}.png` : `${take.base}.frames.png`;
+  const framesPath =
+    opts.beat != null ? takeFile(take, `frames.beat${opts.beat}.png`) : take.framesPath;
   const tileW = Math.round(opts.tileWidth ?? (opts.beat != null ? 720 : 480));
   if (!Number.isFinite(tileW) || tileW < 120 || tileW > 1920)
     throw new Error(`frames: tile width ${tileW} out of range (120-1920)`);

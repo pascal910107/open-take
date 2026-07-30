@@ -4,7 +4,7 @@
 // finds what it missed, and a burst arrives as one batch.
 
 import assert from "node:assert/strict";
-import { appendFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { after, before, test } from "node:test";
@@ -17,8 +17,9 @@ let take: Awaited<ReturnType<typeof resolveTakePaths>>;
 
 before(async () => {
   dir = await mkdtemp(join(tmpdir(), "open-take-notes-"));
-  await writeFile(join(dir, "demo.composition.json"), "{}");
   take = await resolveTakePaths(join(dir, "demo.mp4"));
+  await mkdir(take.dir, { recursive: true });
+  await writeFile(take.compositionPath, "{}");
 });
 after(async () => {
   await rm(dir, { recursive: true, force: true });
@@ -30,12 +31,12 @@ const reset = async () => {
   await rm(take.notesCursorPath, { force: true });
 };
 
-test("the notes sidecars join the take family, both ways", async () => {
+test("the notes sidecars live in the working dir, and resolve back to the take", async () => {
   const t = await resolveTakePaths("out/demo.mp4");
-  assert.equal(t.notesPath, resolve("out/demo.notes.md"));
-  assert.equal(t.notesCursorPath, resolve("out/demo.notes.cursor"));
-  assert.equal((await resolveTakePaths("out/demo.notes.md")).base, resolve("out/demo"));
-  assert.equal((await resolveTakePaths("out/demo.notes.cursor")).base, resolve("out/demo"));
+  assert.equal(t.notesPath, resolve("out/demo.take/notes.md"));
+  assert.equal(t.notesCursorPath, resolve("out/demo.take/notes.cursor"));
+  assert.equal((await resolveTakePaths("out/demo.take/notes.md")).base, resolve("out/demo"));
+  assert.equal((await resolveTakePaths("out/demo.take/notes.cursor")).base, resolve("out/demo"));
 });
 
 test("no notes file yet is empty, not an error", async () => {
@@ -167,6 +168,6 @@ test("the wake-up message names the notes and points at the composition", async 
   const out = formatNotes(take, { notes: ["開頭太慢"], total: 1, cursor: 0 });
   assert.match(out, /1 new note from the editor/);
   assert.match(out, /- 開頭太慢/);
-  assert.match(out, /demo\.composition\.json/);
+  assert.match(out, /demo\.take[/\\]composition\.json/);
   assert.match(formatNotes(take, { notes: [], total: 3, cursor: 0 }), /no new notes/);
 });

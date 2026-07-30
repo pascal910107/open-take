@@ -11,12 +11,13 @@
 // 404 for a file that plainly exists.
 
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { planComposition } from "@open-take/compositor";
 import { startEditServer } from "../src/edit-server.js";
+import { resolveTakePaths } from "../src/take.js";
 
 const log = {
   video: { width: 1280, height: 720 },
@@ -26,7 +27,6 @@ const log = {
 } as Parameters<typeof planComposition>[0];
 
 let dir: string;
-let base: string;
 let server: Awaited<ReturnType<typeof startEditServer>>;
 let url: string;
 
@@ -36,12 +36,13 @@ const OUTPUT_BYTES = "rendered-output-bytes";
 
 before(async () => {
   dir = await mkdtemp(join(tmpdir(), "open-take-serve-"));
-  base = join(dir, "demo");
-  await writeFile(`${base}.composition.json`, JSON.stringify(planComposition(log), null, 2));
-  await writeFile(`${base}.capture.json`, JSON.stringify(log));
-  await writeFile(`${base}.capture.mp4`, CAPTURE_BYTES);
-  await writeFile(`${base}.mp4`, OUTPUT_BYTES);
-  server = await startEditServer({ takePath: `${base}.mp4`, port: 0, open: false });
+  const take = await resolveTakePaths(join(dir, "demo.mp4"));
+  await mkdir(take.dir, { recursive: true });
+  await writeFile(take.compositionPath, JSON.stringify(planComposition(log), null, 2));
+  await writeFile(take.captureLogPath, JSON.stringify(log));
+  await writeFile(take.capturePath, CAPTURE_BYTES);
+  await writeFile(take.mp4Path, OUTPUT_BYTES);
+  server = await startEditServer({ takePath: take.mp4Path, port: 0, open: false });
   url = server.url;
 });
 

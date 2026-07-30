@@ -73,9 +73,13 @@ export type RenderTakeOpts = {
    *  from the CLIP start, and the first frame's trailing window is truncated.
    *  Forwarded to revideo's projectSettings.range. */
   rangeSec?: [number, number];
-  /** write the editable `<out>.composition.json` sibling (default true). Review
-   *  copies and A/B reels are disposable — they skip the sibling. */
+  /** write the editable composition (default true). Review copies and A/B reels
+   *  are disposable — they skip it. */
   writeCompositionSibling?: boolean;
+  /** where to write it. Default `<out>.composition.json`; the runtime passes the
+   *  take's working dir instead. WHERE a take keeps its files is a take-layout
+   *  question — the compositor just writes where it is told. */
+  compositionPath?: string;
 };
 
 export type RenderTakeResult = {
@@ -378,11 +382,14 @@ async function renderTakeExclusive(opts: RenderTakeOpts): Promise<RenderTakeResu
     } else {
       await copyFile(producedAbs, resolve(opts.outPath));
     }
-    const compositionPath = resolve(opts.outPath).replace(/\.mp4$/i, "") + ".composition.json";
+    const compositionPath = opts.compositionPath
+      ? resolve(opts.compositionPath)
+      : `${resolve(opts.outPath).replace(/\.mp4$/i, "")}.composition.json`;
     if (opts.writeCompositionSibling !== false) {
       // strip the render-time review decoration — the editable artifact is the
       // clean composition, never the badged/watermarked variant of it.
       const { review: _review, ...persisted } = composition;
+      await mkdir(dirname(compositionPath), { recursive: true });
       await writeFile(compositionPath, JSON.stringify(persisted, null, 2));
     }
 

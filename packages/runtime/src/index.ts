@@ -30,6 +30,7 @@ import { type CaptureOpts, captureTake } from "./capture";
 import { ensureChrome } from "./cdp";
 import { annotateCaptureLog } from "./frame-diff";
 import { toDraft } from "./review";
+import { ensureTakeDir, resolveTakePaths } from "./take";
 import type { TakePlan } from "./types";
 
 export type { TakePlan, TakeStep } from "./types";
@@ -53,9 +54,12 @@ export {
 export { ensureChrome, resolveChrome } from "./cdp";
 export { startEditServer, type EditServerOpts } from "./edit-server";
 export {
+  ensureTakeDir,
   requireTakeFiles,
   resolveTakePaths,
   stagePrev,
+  takeFile,
+  TAKE_DIR_SUFFIX,
   type StagedPrev,
   type TakePaths,
 } from "./take";
@@ -126,10 +130,12 @@ export type MakeTakeOpts = {
 export type MakeTakeResult = {
   mp4Path: string;
   compositionPath: string;
-  /** the KEPT raw capture (next to the mp4) — feed this back to
+  /** the take's working directory (`<out>.take/`) — everything but the master */
+  takeDir: string;
+  /** the KEPT raw capture (`<out>.take/capture.mp4`) — feed this back to
    *  renderComposition to refine without re-driving the app. */
   capturePath: string;
-  /** the KEPT capture log (`<out>.capture.json`) — the ground-truth action
+  /** the KEPT capture log (`<out>.take/capture.json`) — the ground-truth action
    *  timing. `render` auto-loads it so the capture-lock check (a refine must not
    *  move an action's tMs) is enforced in the real refine loop, not just inside
    *  makeTake. */
@@ -154,14 +160,10 @@ export type MakeTakeResult = {
   warnings: CompositionIssue[];
 };
 
-/** `<out>.mp4` → `<out>.capture.mp4` — the raw recording kept beside the
- *  polished output so the composition can be re-rendered (refined) later. */
-const capturePathFor = (outPath: string): string =>
-  `${resolve(outPath).replace(/\.mp4$/i, "")}.capture.mp4`;
-
-/** `<x>.capture.mp4` → `<x>.capture.json` — the capture log sits beside the
- *  video. Deriving it by convention lets `render` find the ground-truth timing
- *  from just the `--video` path. */
+/** `<video>.mp4` → `<video>.json` — the capture log sits beside its video
+ *  (`capture.mp4` → `capture.json` inside the take's working dir). Deriving it
+ *  by convention lets `render` find the ground-truth timing from just the
+ *  `--video` path. */
 export const captureLogPathFor = (capturePath: string): string =>
   resolve(capturePath).replace(/\.mp4$/i, ".json");
 
@@ -188,14 +190,15 @@ export async function makeTake(plan: TakePlan, opts: MakeTakeOpts): Promise<Make
 
   const raw = await captureTake(plan, { ...opts.capture, chromePath, videoPath: tmpVideo });
 
-  // KEEP the capture beside the output the moment it exists — BEFORE the
-  // frame-diff + render minutes — so the caller can reveal the raw footage
+  // KEEP the capture in the take's working dir the moment it exists — BEFORE
+  // the frame-diff + render minutes — so the caller can reveal the raw footage
   // while the polish is still cooking (perceived latency: the user sees
   // nothing for ~10 minutes otherwise). Refinement re-renders over this copy
   // without re-driving the app (the refine loop's whole point).
-  const capturePath = capturePathFor(opts.outPath);
-  const captureLogPath = captureLogPathFor(capturePath);
-  await mkdir(dirname(capturePath), { recursive: true });
+  const take = await resolveTakePaths(opts.outPath);
+  const { capturePath, captureLogPath } = take;
+  await mkdir(dirname(take.mp4Path), { recursive: true });
+  await ensureTakeDir(take);
   await copyFile(tmpVideo, capturePath);
   try {
     opts.onCaptureReady?.(capturePath);
@@ -207,10 +210,14 @@ export async function makeTake(plan: TakePlan, opts: MakeTakeOpts): Promise<Make
   // carries what each action actually changed (effectBox/changeCoverage) —
   // the director's ground truth for payoff-framing and nav pull-outs. The
   // annotated log is what gets KEPT, so later re-plans keep the signal.
-  const log =
+  const annotated =
     opts.frameDiff === false
       ? raw
       : await annotateCaptureLog(raw, tmpVideo, { logProgress: opts.verbose === true });
+  // Stamp the app this take is OF. Nothing in the render reads it; it is how a
+  // take on disk can answer "which app?" — `make` uses it to refuse
+  // overwriting a take of a different app at the same --out.
+  const log: CaptureLog = { ...annotated, url: plan.url };
 
   // Keep the LOG too — it's the ground-truth action timing the capture-lock
   // check needs in the refine loop (the composition is editable; the log is not).
@@ -232,7 +239,8 @@ export async function makeTake(plan: TakePlan, opts: MakeTakeOpts): Promise<Make
     // closing `render` masters this same take without a re-make.
     composition: opts.draft ? toDraft(composition) : composition,
     videoPath: capturePath,
-    outPath: resolve(opts.outPath),
+    outPath: take.mp4Path,
+    compositionPath: take.compositionPath,
     logProgress: opts.logProgress ?? false,
     chromePath,
     captureLog: log,
@@ -243,6 +251,7 @@ export async function makeTake(plan: TakePlan, opts: MakeTakeOpts): Promise<Make
   return {
     mp4Path,
     compositionPath,
+    takeDir: take.dir,
     capturePath,
     captureLogPath,
     composition,
@@ -268,7 +277,7 @@ export type RenderCompositionOpts = {
   chromePath?: string;
   /** render progress (0..1), forwarded from revideo — for a progress UI. */
   onProgress?: (progress: number) => void;
-  /** Write the editable `<out>.composition.json` sibling (default true).
+  /** Write the editable composition into the take's working dir (default true).
    *  Callers that already persisted the composition under their own
    *  concurrency guard can disable the second, unguarded write. */
   writeCompositionSibling?: boolean;
@@ -283,10 +292,15 @@ export async function renderComposition(
   opts: RenderCompositionOpts,
 ): Promise<{ mp4Path: string; compositionPath: string; warnings: CompositionIssue[] }> {
   const chromePath = await ensureChrome(opts.chromePath);
+  // Where the editable composition belongs is a TAKE-layout question (its
+  // working dir), so it is answered here and not in the compositor.
+  const take = await resolveTakePaths(opts.outPath);
+  if (opts.writeCompositionSibling !== false) await ensureTakeDir(take);
   return renderTake({
     composition: opts.composition,
     videoPath: resolve(opts.capturePath),
-    outPath: resolve(opts.outPath),
+    outPath: take.mp4Path,
+    compositionPath: take.compositionPath,
     logProgress: opts.logProgress ?? false,
     chromePath,
     captureLog: opts.captureLog,

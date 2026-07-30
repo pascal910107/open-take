@@ -133,6 +133,12 @@ export type CaptureEvent =
 export type CaptureLog = {
   video: { width: number; height: number; fps?: number | string; durationS?: number };
   viewport: { w: number; h: number };
+  /** the app this take was shot from (the plan's url). Written by makeTake into
+   *  the KEPT log; the composition never reads it. It exists so a take can say
+   *  which app it is of — `make` refuses to overwrite a take of a different
+   *  app, which is what stops a second demo in the same folder from destroying
+   *  the first. Absent on takes made before it was recorded. */
+  url?: string;
   start?: { x: number; y: number };
   /** the ordered ground-truth actions (click / type / drag) */
   events: CaptureEvent[];
