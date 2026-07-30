@@ -1,5 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "ignoreCommand": "npx turbo-ignore",
   "rewrites": [
     { "source": "/docs", "destination": "https://open-take-docs.vercel.app/docs" },
     { "source": "/docs/:path*", "destination": "https://open-take-docs.vercel.app/docs/:path*" },

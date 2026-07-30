@@ -7,6 +7,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://open-take.dev"),
   title: {
     default: "open-take docs",
     template: "%s — open-take docs",
