@@ -1,0 +1,31 @@
+# One pnpm workspace, one lockfile at the root — Dependabot resolves the
+# workspace packages from there, so a single npm entry covers packages/* and
+# apps/*.
+#
+# Monthly, and grouped: this repo ships a browser-and-ffmpeg dependency tree,
+# and a weekly ungrouped schedule would produce more PRs than a solo maintainer
+# can watch renders for. Majors stay ungrouped — @revideo and puppeteer majors
+# want their own render smoke run.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  # The workflows pin actions by commit SHA (see .github/workflows/*.yml), which
+  # is only safe if something keeps them current. This is that something.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns:
+          - "*"

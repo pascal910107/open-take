@@ -11,6 +11,19 @@ on:
   pull_request:
   workflow_dispatch:
 
+# A fork's pull request runs `pnpm install` (root postinstall) and `pnpm build`
+# on these runners, which is arbitrary code execution by definition. Nothing in
+# this workflow needs to write anything back, so it gets no write.
+permissions:
+  contents: read
+
+# Three pushes in a minute should not run the Windows leg and a real render
+# three times. Pushes to main are never cancelled — every commit on main earns
+# its own result.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   # The workspace retains upstream @revideo/renderer only as a build input for
   # our puppeteer-core bridge. Published consumers never install this copy.
@@ -26,9 +39,12 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v6
-      - uses: pnpm/action-setup@v6 # version comes from packageManager in package.json
-      - uses: actions/setup-node@v6
+      # Actions are pinned by commit SHA, not by tag: a tag is mutable, and
+      # these run against untrusted pull requests. Dependabot keeps them current
+      # (see .github/dependabot.yml) — bump the SHA, not the trailing comment.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6 — pnpm version comes from packageManager in package.json
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 22
           cache: pnpm
