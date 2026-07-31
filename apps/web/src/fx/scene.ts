@@ -40,6 +40,28 @@ export interface StageApi {
 const FOV = 30;
 const TAN_HALF = Math.tan((FOV * Math.PI) / 360);
 
+const APP_HALF_W = 1.75; // the window body is 3.4 wide; a hair of margin on top
+const COPY_GUTTER = 46; // px of clean background — wide enough to outlast parallax
+
+// How far left to sit the camera so the miniature clears the hero copy.
+//
+// The establish shot used to run the window's left bezel — a hard vertical
+// edge, with the selected sidebar row glowing right behind it — straight
+// through the headline. The copy has no plate, so that edge reads as a broken
+// layout rather than a backdrop. Punches were never the problem: once the lens
+// is in, the text sits over one flat surface.
+//
+// So derive the bias from the copy column instead of guessing a constant: put
+// the window's left edge just right of it. Where the viewport is too narrow to
+// hold both, clear as much as fits rather than shoving the window off-frame.
+function frameBias(aspect: number, vw: number, wideZ: number, copyRight: number): number {
+  if (aspect < 1.05) return 0; // stacked: the copy sits over a dimmed stage
+  const halfW = wideZ * TAN_HALF * aspect; // half the visible width at z = 0
+  const f = Math.min(0.62, (copyRight + COPY_GUTTER) / vw); // wanted left edge, 0..1
+  const clear = -APP_HALF_W + halfW * (1 - 2 * f);
+  return Math.max(clear, APP_HALF_W - 1.44 * halfW); // ≤ a fifth bleeds off right
+}
+
 // Neutral white radial, tinted via material.color — the iris glow behind the
 // window in the dark theme, and (in black) the soft ground shadow in light.
 function radialTexture(): CanvasTexture {
@@ -168,8 +190,9 @@ export function initStage(canvas: HTMLCanvasElement, hooks: StageHooks): StageAp
     const aspect = w / h;
     camera.aspect = aspect;
     camera.updateProjectionMatrix();
-    rig.frameX = aspect >= 1.45 ? -0.95 : aspect >= 1.05 ? -0.45 : 0;
     rig.wideZ = Math.max(6.4, 3.95 / (2 * TAN_HALF * aspect));
+    const copy = document.querySelector(".hero-copy");
+    rig.frameX = frameBias(aspect, w, rig.wideZ, copy ? copy.getBoundingClientRect().right : 0);
   };
   resize();
   rig.reset();

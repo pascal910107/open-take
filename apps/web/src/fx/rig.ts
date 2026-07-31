@@ -7,8 +7,9 @@ export const FOV = 30;
 const TAN_HALF = Math.tan((FOV * Math.PI) / 360);
 
 // The camera rig: one spring pair (position + look) chasing the current pose.
-// `frameX` frames the miniature right-of-center under the hero copy; punches
-// mostly recentre on their target so the zoomed subject owns the frame.
+// `frameX` frames the miniature right-of-center, clear of the hero copy (see
+// `frameBias`); punches mostly recentre on their target so the zoomed subject
+// owns the frame.
 export class Rig {
   frameX = 0;
   wideZ = 6.4;
