@@ -28,6 +28,33 @@ to any static host; no server, no env.
    assets under the rewritten path (verified end-to-end via the dev proxy).
 4. Set Node.js 22.x in both projects' settings.
 
+## SEO
+
+The domain is verified in [Google Search Console][gsc] as the URL-prefix
+property `https://open-take.dev/`, via the `google-site-verification` meta tag
+in `index.html` (the docs app carries the same token in its root metadata).
+**Leave the tag in place** — removing it un-verifies the property.
+
+- `/sitemap.xml` is an **index**, not a list of URLs: it points at
+  `/sitemap-site.xml` (this app — one page) and `/docs/sitemap.xml`, which the
+  docs deployment generates from its content tree. Submitting the index once
+  covers docs pages added later. `robots.txt` names only the index.
+- No `<lastmod>` anywhere. Google honours it only when it can verify it as
+  accurate, and a hand-typed date in a static file rots by the second commit.
+- `vercel.json` adds `X-Robots-Tag: noindex` on any `*.vercel.app` host, so
+  preview deployments — byte-identical copies of the site — never compete with
+  the real domain. Matched on host, so `open-take.dev` is untouched.
+- `index.html` carries one JSON-LD `@graph`: Organization, WebSite, WebPage,
+  SoftwareApplication, and a VideoObject for the take in Scene 05. The ids
+  (`#project`, `#software`, …) are the join keys between nodes and the docs
+  pages reference them too — keep them stable.
+- `public/film/hero-take.jpg` is a frame lifted from the take at t=2 s; it
+  exists solely as that VideoObject's `thumbnailUrl`, which Google requires
+  before it will index a video. `icon-{192,512}.png` and `apple-touch-icon.png`
+  are rasterized from `favicon.svg`.
+
+[gsc]: https://search.google.com/search-console
+
 ## Notes
 
 - `public/film/hero-take.mp4` is segment 03 of the launch film — the demo the

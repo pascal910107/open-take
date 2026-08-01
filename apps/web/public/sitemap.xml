@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- An index, not a urlset: the landing is served from here, /docs/* is
+     rewritten to the docs deployment and generates its own sitemap from the
+     content tree. Submitting this one URL in Search Console covers both, and
+     keeps covering docs pages added later. -->
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <sitemap>
+    <loc>https://open-take.dev/sitemap-site.xml</loc>
+  </sitemap>
+  <sitemap>
+    <loc>https://open-take.dev/docs/sitemap.xml</loc>
+  </sitemap>
+</sitemapindex>

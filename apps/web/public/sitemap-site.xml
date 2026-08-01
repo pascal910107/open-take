@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Everything this app serves. It is one page; the section anchors are not
+     separate URLs and deliberately are not listed. No <lastmod>: a hand-typed
+     date rots, and Google only honours one it can verify as accurate. -->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://open-take.dev/</loc>
+    <priority>1.0</priority>
+  </url>
+</urlset>

@@ -1,2 +1,7 @@
 User-agent: *
 Allow: /
+
+# The index — it fans out to this app's sitemap and the docs deployment's
+# generated one. This file is served on the preview *.vercel.app hosts too,
+# where the Allow above is overruled by vercel.json's X-Robots-Tag: noindex.
+Sitemap: https://open-take.dev/sitemap.xml
