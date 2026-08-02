@@ -2,8 +2,10 @@ import "@fontsource-variable/instrument-sans";
 import "@fontsource/geist-mono/400.css";
 import "@fontsource/geist-mono/500.css";
 import "./styles.css";
+import { initFilm } from "./film";
 import { type StageApi, initStage } from "./fx/scene";
 import { Spring1 } from "./fx/springs";
+import { initTheme } from "./theme";
 
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -294,23 +296,7 @@ buildScope();
 /* the take */
 const film = document.getElementById("film") as HTMLVideoElement | null;
 const filmPlay = document.getElementById("film-play");
-if (film && filmPlay) {
-  filmPlay.addEventListener("click", () => {
-    filmPlay.classList.add("hide");
-    film.controls = true;
-    void film.play();
-  });
-  film.addEventListener("ended", () => {
-    film.controls = false;
-    filmPlay.classList.remove("hide");
-  });
-  new IntersectionObserver(
-    (entries) => {
-      if (!entries[0]?.isIntersecting && !film.paused) film.pause();
-    },
-    { threshold: 0.2 },
-  ).observe(film);
-}
+if (film && filmPlay) initFilm(film, filmPlay);
 
 /* the stage */
 const canvas = document.getElementById("stage") as HTMLCanvasElement | null;
@@ -333,23 +319,5 @@ if (canvas) {
 }
 
 /* dark / light — the head script applied the stored theme before paint;
-   here we keep the stage and the toggle in sync */
-const themeBtn = document.getElementById("theme-btn");
-const applyTheme = (light: boolean): void => {
-  if (light) document.documentElement.dataset.theme = "light";
-  else delete document.documentElement.dataset.theme;
-  themeBtn?.setAttribute("aria-label", light ? "Switch to dark theme" : "Switch to light theme");
-  stage?.setTheme(light ? "light" : "dark");
-  try {
-    localStorage.setItem("ot-theme", light ? "light" : "dark");
-  } catch {
-    /* private mode — the theme just won't persist */
-  }
-};
-themeBtn?.addEventListener("click", () => {
-  applyTheme(document.documentElement.dataset.theme !== "light");
-});
-if (document.documentElement.dataset.theme === "light") {
-  themeBtn?.setAttribute("aria-label", "Switch to dark theme");
-  stage?.setTheme("light");
-}
+   the stage renders its own colours, so it is what needs keeping in step */
+initTheme((light) => stage?.setTheme(light ? "light" : "dark"));

@@ -62,8 +62,10 @@
     <script type="module" src="/src/main.ts"></script>
 
     <!-- One @graph, because the entities reference each other: the page is
-         about the software, and the take in Scene 05 is a real video the
-         crawler can index. Keep the ids stable — they are the join keys. -->
+         about the software. The take's VideoObject deliberately lives on
+         /take, not here — Google will not index a video that is only
+         supplementary to a page, which is exactly what it is on this one.
+         Keep the ids stable; they are the join keys, /take included. -->
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
@@ -140,23 +142,7 @@
               "Logged-in demos on a persistent auth profile"
             ],
             "screenshot": "https://open-take.dev/og.jpg",
-            "video": { "@id": "https://open-take.dev/#hero-take" }
-          },
-          {
-            "@type": "VideoObject",
-            "@id": "https://open-take.dev/#hero-take",
-            "name": "A deploy flow, shot by open-take in one take",
-            "description": "An unedited 23-second demo produced by open-take: an agent drives a real browser through a deploy flow while a measured camera punches in on each click and holds the frame that matters.",
-            "contentUrl": "https://open-take.dev/film/hero-take.mp4",
-            "thumbnailUrl": ["https://open-take.dev/film/hero-take.jpg"],
-            "uploadDate": "2026-07-30T18:51:08+08:00",
-            "duration": "PT23S",
-            "width": 1920,
-            "height": 1080,
-            "encodingFormat": "video/mp4",
-            "isFamilyFriendly": true,
-            "inLanguage": "en",
-            "publisher": { "@id": "https://open-take.dev/#project" }
+            "video": { "@id": "https://open-take.dev/take#video" }
           }
         ]
       }
@@ -395,7 +381,7 @@
             <span class="mono term-title">demos/deploy.mp4 — 23 s, unedited</span>
           </div>
           <div class="film-wrap">
-            <video id="film" src="/film/hero-take.mp4" playsinline preload="metadata" aria-label="A demo take produced by open-take: a deploy flow with cinematic zooms"></video>
+            <video id="film" src="/film/hero-take.mp4" poster="/film/hero-take.jpg" playsinline preload="none" aria-label="A demo take produced by open-take: a deploy flow with cinematic zooms"></video>
             <button class="film-play" id="film-play" type="button" aria-label="Play the demo take">
               <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path d="M8 5.5v13l11-6.5z" fill="currentColor" /></svg>
             </button>
@@ -403,7 +389,7 @@
           <figcaption>
             Shot by an agent in one take and delivered as-is. The editorial is visible: the
             file-drop is the hero, so it holds the full frame — the name field and Deploy share one
-            held camera frame.
+            held camera frame. <a href="/take">Watch it beat by beat →</a>
           </figcaption>
         </figure>
       </section>

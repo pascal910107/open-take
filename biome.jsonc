@@ -100,8 +100,10 @@
     },
     {
       // The hero take has no audio track. A captions file for a silent video
-      // would be an empty promise to anyone who turned captions on.
-      "includes": ["**/apps/web/index.html"],
+      // would be an empty promise to anyone who turned captions on. On /take
+      // the accessible alternative is the beat sheet printed under the film,
+      // which describes the action in full text rather than in a cue file.
+      "includes": ["**/apps/web/index.html", "**/apps/web/take/index.html"],
       "linter": {
         "rules": {
           "a11y": {

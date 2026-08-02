@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { type Plugin, defineConfig } from "vite";
 
 /**
@@ -61,6 +62,10 @@ function preloadHeroFonts(): Plugin {
 
 export default defineConfig({
   plugins: [preloadHeroFonts()],
+  // two real pages, not one app with routes — without this the dev and preview
+  // servers rewrite every unknown path to the landing, so /take would render
+  // the landing and a genuine 404 would look like a working page
+  appType: "mpa",
   server: {
     // local integration with the docs app (apps/docs, `next dev --port 4180`);
     // in production the host rewrites /docs/* to the docs deployment instead
@@ -68,8 +73,17 @@ export default defineConfig({
   },
   build: {
     target: "es2022",
-    // one page, one bundle — three.js dominates either way, and a single request
-    // beats a waterfall for a landing that animates on first paint
-    rollupOptions: { output: { manualChunks: undefined } },
+    rollupOptions: {
+      // two pages: the landing, and /take — the watch page the film lives on.
+      // They share styles but not scripts; take.ts deliberately pulls in none
+      // of the stage, so the watch page never downloads three.js.
+      input: {
+        main: resolve(import.meta.dirname, "index.html"),
+        take: resolve(import.meta.dirname, "take/index.html"),
+      },
+      // one page, one bundle — three.js dominates the landing either way, and a
+      // single request beats a waterfall for a page that animates on first paint
+      output: { manualChunks: undefined },
+    },
   },
 });

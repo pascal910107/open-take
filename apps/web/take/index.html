@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Watch a take — a deploy flow shot by open-take, unedited</title>
+    <meta
+      name="description"
+      content="The full 23-second take: an agent drives a real deploy in a real browser while a measured camera holds the file-drop full-frame and punches in on the name field. Beat by beat, with the camera's reasoning."
+    />
+    <link rel="canonical" href="https://open-take.dev/take" />
+    <meta
+      name="robots"
+      content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1"
+    />
+
+    <meta property="og:type" content="video.other" />
+    <meta property="og:site_name" content="open-take" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:url" content="https://open-take.dev/take" />
+    <meta property="og:title" content="Watch a take — a deploy flow shot by open-take, unedited" />
+    <meta
+      property="og:description"
+      content="23 seconds, one take, no edit. The file-drop holds the full frame; the name field earns the only punch-in."
+    />
+    <meta property="og:image" content="https://open-take.dev/film/hero-take.jpg" />
+    <meta property="og:image:type" content="image/jpeg" />
+    <meta property="og:image:width" content="1280" />
+    <meta property="og:image:height" content="720" />
+    <meta property="og:image:alt" content="The opening frame of the take: the app at full frame" />
+    <meta property="og:video" content="https://open-take.dev/film/hero-take.mp4" />
+    <meta property="og:video:type" content="video/mp4" />
+    <meta property="og:video:width" content="1920" />
+    <meta property="og:video:height" content="1080" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Watch a take — a deploy flow shot by open-take" />
+    <meta
+      name="twitter:description"
+      content="23 seconds, one take, no edit. The file-drop holds the full frame; the name field earns the only punch-in."
+    />
+    <meta name="twitter:image" content="https://open-take.dev/film/hero-take.jpg" />
+
+    <meta name="application-name" content="open-take" />
+    <meta name="theme-color" content="#08080b" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <script>
+      document.documentElement.classList.add("js");
+      try {
+        if (localStorage.getItem("ot-theme") === "light")
+          document.documentElement.dataset.theme = "light";
+      } catch {}
+    </script>
+    <script type="module" src="/src/take.ts"></script>
+
+    <!-- The watch page for the take: here the video IS the content, which is
+         what Google asks for before it will index one. The Clip parts are the
+         same beats the page lists, and each ?t= actually seeks. -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "VideoObject",
+            "@id": "https://open-take.dev/take#video",
+            "name": "A deploy flow, shot by open-take in one take",
+            "description": "An unedited 23-second demo produced by open-take. An agent drives a real deploy in a real browser: the file-drop is the thesis so it holds the full frame, and the only punch-in is the one the project name earns.",
+            "contentUrl": "https://open-take.dev/film/hero-take.mp4",
+            "thumbnailUrl": ["https://open-take.dev/film/hero-take.jpg"],
+            "uploadDate": "2026-07-30T18:51:08+08:00",
+            "duration": "PT23S",
+            "width": 1920,
+            "height": 1080,
+            "encodingFormat": "video/mp4",
+            "isFamilyFriendly": true,
+            "inLanguage": "en",
+            "publisher": { "@id": "https://open-take.dev/#project" },
+            "hasPart": [
+              {
+                "@type": "Clip",
+                "name": "Wide — establish",
+                "startOffset": 0,
+                "endOffset": 3,
+                "url": "https://open-take.dev/take?t=0"
+              },
+              {
+                "@type": "Clip",
+                "name": "The drop — held at full frame",
+                "startOffset": 3,
+                "endOffset": 7,
+                "url": "https://open-take.dev/take?t=3"
+              },
+              {
+                "@type": "Clip",
+                "name": "New Project",
+                "startOffset": 7,
+                "endOffset": 9,
+                "url": "https://open-take.dev/take?t=7"
+              },
+              {
+                "@type": "Clip",
+                "name": "Punch in — the name field",
+                "startOffset": 9,
+                "endOffset": 12,
+                "url": "https://open-take.dev/take?t=9"
+              },
+              {
+                "@type": "Clip",
+                "name": "Upload, held",
+                "startOffset": 12,
+                "endOffset": 15,
+                "url": "https://open-take.dev/take?t=12"
+              },
+              {
+                "@type": "Clip",
+                "name": "Release — the deployment panel",
+                "startOffset": 15,
+                "endOffset": 18,
+                "url": "https://open-take.dev/take?t=15"
+              },
+              {
+                "@type": "Clip",
+                "name": "It lands",
+                "startOffset": 18,
+                "endOffset": 23,
+                "url": "https://open-take.dev/take?t=18"
+              }
+            ]
+          },
+          {
+            "@type": "WebPage",
+            "@id": "https://open-take.dev/take#webpage",
+            "url": "https://open-take.dev/take",
+            "name": "Watch a take — a deploy flow shot by open-take, unedited",
+            "description": "The full 23-second take, beat by beat, with the camera's reasoning.",
+            "isPartOf": { "@type": "WebSite", "@id": "https://open-take.dev/#website" },
+            "primaryImageOfPage": {
+              "@type": "ImageObject",
+              "url": "https://open-take.dev/film/hero-take.jpg",
+              "width": 1280,
+              "height": 720
+            },
+            "video": { "@id": "https://open-take.dev/take#video" },
+            "breadcrumb": { "@id": "https://open-take.dev/take#breadcrumb" },
+            "inLanguage": "en"
+          },
+          {
+            "@type": "BreadcrumbList",
+            "@id": "https://open-take.dev/take#breadcrumb",
+            "itemListElement": [
+              {
+                "@type": "ListItem",
+                "position": 1,
+                "name": "open-take",
+                "item": "https://open-take.dev/"
+              },
+              {
+                "@type": "ListItem",
+                "position": 2,
+                "name": "Watch a take",
+                "item": "https://open-take.dev/take"
+              }
+            ]
+          }
+        ]
+      }
+    </script>
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+
+    <header class="nav scrolled" id="nav">
+      <a class="brand" href="/"><span class="brand-dot" aria-hidden="true"></span>open-take</a>
+      <nav class="nav-links mono" aria-label="Site">
+        <a class="nav-sec" href="/#how">How</a>
+        <a class="nav-sec" href="/#camera">Camera</a>
+        <a class="nav-sec" href="/#refine">Refine</a>
+        <a href="/docs">Docs</a>
+        <a class="nav-ico" href="https://github.com/pascal910107/open-take" aria-label="open-take on GitHub">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
+        </a>
+        <button class="theme-btn" id="theme-btn" type="button" aria-label="Switch to light theme">
+          <svg class="tb-sun" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="4.4" />
+            <path d="M12 2.5v2.6M12 18.9v2.6M2.5 12h2.6M18.9 12h2.6M5 5l1.8 1.8M17.2 17.2 19 19M19 5l-1.8 1.8M6.8 17.2 5 19" />
+          </svg>
+          <svg class="tb-moon" viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true">
+            <path d="M20.5 14.6A8.7 8.7 0 0 1 9.4 3.5a8.7 8.7 0 1 0 11.1 11.1Z" />
+          </svg>
+        </button>
+      </nav>
+    </header>
+
+    <main id="main" class="watch">
+      <section class="sec">
+        <div class="slate mono"><b>REEL 01</b><i></i><span>THE TAKE</span></div>
+        <h1 class="watch-h">A deploy flow,<br />shot in one take.</h1>
+        <p class="watch-lede">
+          23 seconds, unedited, delivered exactly as the agent handed it over. It drove a real
+          browser through a real deploy — the file lands, the project gets a name, the build goes
+          out — and a measured camera shot it from the plan it had already written.
+        </p>
+
+        <figure class="takefilm">
+          <div class="term-bar">
+            <i class="tl r"></i><i class="tl y"></i><i class="tl g"></i>
+            <span class="mono term-title">demos/deploy.mp4 — 23 s, 1920×1080, unedited</span>
+          </div>
+          <div class="film-wrap">
+            <video
+              id="film"
+              src="/film/hero-take.mp4"
+              poster="/film/hero-take.jpg"
+              playsinline
+              preload="none"
+              aria-label="A demo take produced by open-take: a deploy flow with cinematic zooms"
+            ></video>
+            <button class="film-play" id="film-play" type="button" aria-label="Play the take">
+              <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path d="M8 5.5v13l11-6.5z" fill="currentColor" /></svg>
+            </button>
+          </div>
+          <figcaption>
+            No cuts, no second attempt. The raw capture behind this file is still on disk, which is
+            why a change of mind here costs a re-render and not another deploy.
+          </figcaption>
+        </figure>
+      </section>
+
+      <div class="ruler" aria-hidden="true"></div>
+
+      <section class="sec">
+        <div class="slate mono"><b>BEAT SHEET</b><i></i><span>WHAT THE CAMERA DECIDED</span></div>
+        <h2 class="sec-h">Seven beats, one move.</h2>
+        <p class="watch-note">
+          Only one beat gets a zoom. That restraint is the editorial: a camera that punches in on
+          everything says nothing about what matters. Pick a beat to jump there.
+        </p>
+        <ol class="beats">
+          <li class="beat">
+            <button class="beat-go mono" type="button" data-at="0">00:00</button>
+            <div>
+              <h3>Wide — establish</h3>
+              <p>The app arrives whole, at full frame. Nothing moves until the viewer has it.</p>
+            </div>
+          </li>
+          <li class="beat">
+            <button class="beat-go mono" type="button" data-at="3">00:03</button>
+            <div>
+              <h3>The drop — held at full frame</h3>
+              <p>
+                <code>index.html</code> is dragged onto the target and the page lights up with
+                <em>drop to deploy</em>. This is the thesis of the demo, so the camera refuses to
+                punch in — cropping here would trade the whole gesture for a detail.
+              </p>
+            </div>
+          </li>
+          <li class="beat">
+            <button class="beat-go mono" type="button" data-at="7">00:07</button>
+            <div>
+              <h3>New Project</h3>
+              <p>The panel opens with the uploaded file listed. The camera stays wide while the cursor travels.</p>
+            </div>
+          </li>
+          <li class="beat">
+            <button class="beat-go mono" type="button" data-at="9">00:09</button>
+            <div>
+              <h3>Punch in — the name field</h3>
+              <p>
+                The only zoom in the take, and it departs on the keypress rather than before it.
+                Framed so the name field and the Deploy button share one held frame — the two things
+                the beat is about, and nothing else.
+              </p>
+            </div>
+          </li>
+          <li class="beat">
+            <button class="beat-go mono" type="button" data-at="12">00:12</button>
+            <div>
+              <h3>Upload, held</h3>
+              <p><em>Uploading 1 of 1</em>, and Deploy takes its spinner. The frame does not move while the work happens.</p>
+            </div>
+          </li>
+          <li class="beat">
+            <button class="beat-go mono" type="button" data-at="15">00:15</button>
+            <div>
+              <h3>Release — the deployment panel</h3>
+              <p>
+                The camera pulls back out to logs, summary and domains. The release runs about 1.8×
+                slower than the punch-in went in; a fast one reads like a flinch.
+              </p>
+            </div>
+          </li>
+          <li class="beat">
+            <button class="beat-go mono" type="button" data-at="18">00:18</button>
+            <div>
+              <h3>It lands</h3>
+              <p>Congratulations, and the dashboard fills in. The take holds on the result instead of cutting on it.</p>
+            </div>
+          </li>
+        </ol>
+      </section>
+
+      <div class="ruler" aria-hidden="true"></div>
+
+      <section class="sec">
+        <div class="slate mono"><b>PRODUCTION</b><i></i><span>HOW IT WAS SHOT</span></div>
+        <div class="watch-cols">
+          <div>
+            <h2>Nobody operated a recorder.</h2>
+            <p>
+              The agent explored the app first, wrote the beats above as a plan, then drove the
+              browser against that plan. Because it wrote the plan, it knows every click, coordinate
+              and timestamp — so the zoom follows ground truth instead of guessing at intent from
+              cursor motion the way a screen recorder has to.
+            </p>
+            <p>
+              Everything cinematic here — the punch-in, the hold, the release, the cursor — lives in
+              a readable <code>composition.json</code> beside the kept capture. The mp4 is a render
+              of that file. <a href="/docs/take-layout">See what a take is on disk</a>.
+            </p>
+          </div>
+          <ul class="watch-facts mono">
+            <li><b>Duration</b><span>23 s</span></li>
+            <li><b>Resolution</b><span>1920 × 1080</span></li>
+            <li><b>Zooms</b><span>1 of 7 beats</span></li>
+            <li><b>Punch-in</b><span>≈ 730 ms</span></li>
+            <li><b>Release</b><span>≈ 1.8× slower</span></li>
+            <li><b>Edit passes</b><span>none</span></li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="cta">
+        <div class="cta-inner">
+          <p class="kicker mono"><span class="kdot" aria-hidden="true"></span>ROLL CAMERA</p>
+          <h2>Your app deserves<br />one of these.</h2>
+          <div class="cta-links mono">
+            <a class="btn-ghost" href="/">How it works</a>
+            <a class="btn-ghost" href="/docs/getting-started">Get started</a>
+            <a class="btn-ghost" href="https://github.com/pascal910107/open-take"
+              ><svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>Star on GitHub</a
+            >
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <div class="foot-brand"><span class="brand-dot" aria-hidden="true"></span>open-take · MIT © 2026</div>
+      <p class="foot-meta mono">
+        This take is segment 03 of the launch film — shot by open-take, like the rest of it.
+      </p>
+      <nav class="foot-links mono" aria-label="Footer">
+        <a href="/">Home</a>
+        <a href="/docs">Docs</a>
+        <a href="https://github.com/pascal910107/open-take">GitHub</a>
+        <a href="https://www.npmjs.com/package/open-take">npm</a>
+      </nav>
+    </footer>
+  </body>
+</html>
