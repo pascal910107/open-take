@@ -7,7 +7,10 @@
 // fail fast WITH the app's own words, because "capture filmed Chrome's error
 // page for 10 minutes" is the expensive alternative.
 import assert from "node:assert/strict";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import {
   appBootEnv,
@@ -45,26 +48,38 @@ test("the app's boot env never contains the agent's or the runner's secrets", ()
   assert.equal(env.PORT, "3000");
 });
 
+// The probe children run from script FILES, not `node -e '…'`: cmd.exe does
+// not treat single quotes as quoting, so inline-shell one-liners are exactly
+// the kind of POSIX-only test that greens on a Mac and reds on windows-latest.
+async function probeScript(source: string): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), "open-take-ci-probe-"));
+  const path = join(dir, "probe.mjs");
+  await writeFile(path, source);
+  return path;
+}
+
 test("startApp actually launches with the scrubbed env, end to end", async () => {
-  process.env.OPEN_TAKE_TEST_SECRET_PROBE = "unset";
   process.env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY ?? "sk-test-canary";
-  const app = startApp(
-    `node -e 'console.log("key=" + (process.env.ANTHROPIC_API_KEY ?? "SCRUBBED"))'`,
+  const probe = await probeScript(
+    `console.log("key=" + (process.env.ANTHROPIC_API_KEY ?? "SCRUBBED"));`,
   );
+  const app = startApp(`node "${probe}"`);
   await new Promise((r) => setTimeout(r, 700));
   await app.stop();
   assert.match(app.output.tail(), /key=SCRUBBED/);
 });
 
-test("stop() takes down the whole process group, not just the shell", async () => {
-  // the shell spawns a child that would outlive a naive kill; the detached
-  // process group is what lets stop() take both
-  const app = startApp(`node -e 'setInterval(() => {}, 1000)'`);
+test("stop() takes down the whole process tree, not just the shell", async () => {
+  // the shell spawns a child that would outlive a naive kill; the process
+  // group (POSIX) / taskkill tree walk (Windows) is what lets stop() take both
+  const probe = await probeScript(`setInterval(() => {}, 1000);`);
+  const app = startApp(`node "${probe}"`);
   assert.ok(app.pid, "spawned");
   await app.stop();
-  // after stop resolves the group must be gone — signal 0 probes existence
-  await new Promise((r) => setTimeout(r, 100));
-  assert.throws(() => process.kill(app.pid!, 0), "the process group must be dead");
+  // after stop resolves the tree must be gone — signal 0 probes existence
+  // (taskkill is fire-and-forget, so give Windows a beat to reap)
+  await new Promise((r) => setTimeout(r, process.platform === "win32" ? 600 : 100));
+  assert.throws(() => process.kill(app.pid!, 0), "the process tree must be dead");
 });
 
 // --- the brief: the trust boundary and the two modes ------------------------
@@ -202,9 +217,10 @@ test("waitForHttp resolves once anything answers — even a late, non-200 server
 });
 
 test("waitForHttp's timeout carries the app's own last words", async () => {
-  const app = startApp(
-    `node -e 'console.error("EADDRINUSE: port 3000 already in use"); setInterval(() => {}, 1000)'`,
+  const probe = await probeScript(
+    `console.error("EADDRINUSE: port 3000 already in use"); setInterval(() => {}, 1000);`,
   );
+  const app = startApp(`node "${probe}"`);
   await new Promise((r) => setTimeout(r, 500));
   await assert.rejects(
     waitForHttp("http://127.0.0.1:1", { timeoutMs: 400, intervalMs: 100, appOutput: app.output }),

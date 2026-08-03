@@ -55,20 +55,40 @@ export function appBootEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.Proc
   return env;
 }
 
-/** Start the app under demo (`--start "pnpm dev"`). Detached = its own process
- *  group, so stop() can take the shell AND the server it spawned. */
+/** Kill a spawned command AND everything it started. POSIX: the detached
+ *  process group takes the shell and its children with one signal to -pid.
+ *  Windows has no process groups — negative-pid kill throws — so taskkill
+ *  walks the tree instead (/F, because a console dev server has no graceful
+ *  close to offer anyway). Returns false when there was nothing to kill. */
+function killProcessTree(pid: number, sig: NodeJS.Signals): boolean {
+  if (process.platform === "win32") {
+    spawn("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore" }).unref();
+    return true;
+  }
+  try {
+    process.kill(-pid, sig);
+    return true;
+  } catch {
+    return false; // group already gone (ESRCH) — that is success here
+  }
+}
+
+/** Start the app under demo (`--start "pnpm dev"`). On POSIX it gets its own
+ *  process group so stop() can take the shell AND the server it spawned; on
+ *  Windows `detached` would open a console window instead, so the tree is
+ *  taken down by taskkill. */
 export function startApp(command: string, opts: { cwd?: string } = {}): AppProcess {
   const output = new TailBuffer();
   const child: ChildProcess = spawn(command, {
     shell: true,
-    detached: true,
+    detached: process.platform !== "win32",
     cwd: opts.cwd ?? process.cwd(),
     env: appBootEnv(),
     stdio: ["ignore", "pipe", "pipe"],
   });
   child.stdout?.on("data", (d) => output.push(String(d)));
   child.stderr?.on("data", (d) => output.push(String(d)));
-  // the group is ours to kill; never let a dead capture leave a zombie server
+  // the tree is ours to kill; never let a dead capture leave a zombie server
   child.unref();
 
   let exited = false;
@@ -78,12 +98,7 @@ export function startApp(command: string, opts: { cwd?: string } = {}): AppProce
 
   const signalGroup = (sig: NodeJS.Signals): boolean => {
     if (exited || child.pid == null) return false;
-    try {
-      process.kill(-child.pid, sig);
-      return true;
-    } catch {
-      return false; // group already gone (ESRCH) — that is success here
-    }
+    return killProcessTree(child.pid, sig);
   };
 
   return {
@@ -323,7 +338,10 @@ export async function runAgent(opts: {
 }): Promise<AgentRunResult> {
   const child = spawn(opts.bin, opts.args, {
     cwd: opts.cwd,
-    detached: true, // its Chrome/node children die with it on timeout
+    // its Chrome/node children die with it on timeout (POSIX group; on
+    // Windows the timeout path uses taskkill and detached would just open
+    // a console window)
+    detached: process.platform !== "win32",
     ...(opts.env ? { env: opts.env } : {}),
     stdio: ["ignore", "pipe", "inherit"],
   });
@@ -374,11 +392,7 @@ export async function runAgent(opts: {
 
   const code = await new Promise<number>((done, fail) => {
     const deadline = setTimeout(() => {
-      try {
-        if (child.pid != null) process.kill(-child.pid, "SIGKILL");
-      } catch {
-        // already gone
-      }
+      if (child.pid != null) killProcessTree(child.pid, "SIGKILL");
       fail(
         new Error(
           `ci: the agent ran past ${Math.round(opts.timeoutMs / 60000)}min and was killed — raise --timeout, or lower the brief's scope`,
