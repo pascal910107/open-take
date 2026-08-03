@@ -28,7 +28,8 @@ concurrency:
   group: open-take-${{ github.ref }}
   cancel-in-progress: true
 
-permissions: {}   # the demo job needs NO repo write access
+permissions:
+  contents: read   # checkout needs this; the demo job gets NO write access
 
 jobs:
   demo:
@@ -58,7 +59,8 @@ even boot the app — Vercel/Netlify previews are already running. Prefer a
 demo on demand; note `labeled` can be fired by triage-permission users.
 
 To let it comment on the PR, add `comment: "true"` and give the job
-`permissions: { pull-requests: write }`. Steering the editorial is one input:
+`permissions: { contents: read, pull-requests: write }`. Steering the
+editorial is one input:
 `brief: "30s for X/Twitter: the bulk-edit flow is the hero"`.
 
 ## How runs get cheaper (and better) over time
