@@ -98,6 +98,28 @@ export {
   type FramesOpts,
 } from "./frames";
 export { validateComposition, formatIssues, type CompositionIssue } from "@open-take/compositor";
+export {
+  appBootEnv,
+  buildAgentArgs,
+  buildCiBrief,
+  CI_ALLOWED_TOOLS,
+  CI_DISALLOWED_TOOLS,
+  ciTake,
+  emitGithubOutputs,
+  emitStepSummary,
+  probeDurationS,
+  renderTeaserGif,
+  runAgent,
+  startApp,
+  waitForHttp,
+  type AgentArgsOpts,
+  type AgentRunResult,
+  type AppProcess,
+  type CiBriefOpts,
+  type CiMode,
+  type CiOpts,
+  type CiResult,
+} from "./ci";
 
 export type MakeTakeOpts = {
   /** output polished mp4 path */

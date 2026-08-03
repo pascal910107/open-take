@@ -289,6 +289,10 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
     // "still working" instead of betting on settleMs. Diagnostic only — a
     // failure to install just returns the old fixed-sleep behaviour.
     await installActivityProbe(cdp);
+    if (!originAllowed(plan.url))
+      throw new Error(
+        `captureTakeCDP: plan.url ${plan.url} is outside OPEN_TAKE_ALLOWED_ORIGINS — an unattended run only films the app it was pointed at`,
+      );
     await navigate(cdp, plan.url);
     await installActivityProbe(cdp);
 
@@ -438,6 +442,10 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
           skip("navigate", step.url ?? href ?? current, "destination is not a resolvable URL");
           continue;
         }
+        if (!originAllowed(dest)) {
+          skip("navigate", dest, "destination is outside OPEN_TAKE_ALLOWED_ORIGINS");
+          continue;
+        }
         // Same tab ⇒ same page target ⇒ the screencast never breaks. The
         // activity probe reinstalls itself on the new document (it is an
         // addScriptToEvaluateOnNewDocument), so the hold below can still tell
@@ -461,6 +469,18 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
             : null;
         if (!box) {
           skip("type", label, "target not found");
+          await hold(600);
+          continue;
+        }
+        // Unattended runs must never film a credential being typed — the plan
+        // is agent-written and the mp4 is the one artifact nobody reviews.
+        // The focus JS above already parked focus on the field, so ask the
+        // page what kind of field it actually is.
+        if (
+          process.env.OPEN_TAKE_CI &&
+          (await evalString(cdp, credentialFieldProbeJs())) === "secret"
+        ) {
+          skip("type", label, "refusing to type into a credential field (OPEN_TAKE_CI)");
           await hold(600);
           continue;
         }
@@ -904,6 +924,37 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
 }
 
 // Navigate and wait for load (bounded) so the first frame isn't a blank page.
+/** CI containment. A plan is agent-written, and the agent reads the very page
+ *  it films — a hostile string ON that page can talk its way into a plan step.
+ *  When OPEN_TAKE_ALLOWED_ORIGINS is set (comma-separated origins; `open-take
+ *  ci` sets it to the app's own origin), any navigation outside the list is a
+ *  skipped step, never a request. Unset (the interactive default), everything
+ *  is allowed — a human is watching. */
+function originAllowed(url: string): boolean {
+  const raw = process.env.OPEN_TAKE_ALLOWED_ORIGINS;
+  if (!raw) return true;
+  try {
+    const origin = new URL(url).origin;
+    return raw.split(",").some((entry) => entry.trim() === origin);
+  } catch {
+    return false;
+  }
+}
+
+/** Runs in-page AFTER focus landed on the type target: names the field
+ *  "secret" when it is a password input or smells like a credential field.
+ *  Only consulted under OPEN_TAKE_CI — locally the human sees what is typed. */
+function credentialFieldProbeJs(): string {
+  return `(() => {
+    const el = document.activeElement;
+    if (!el) return "ok";
+    const type = (el.getAttribute("type") || "").toLowerCase();
+    const smell = [el.getAttribute("name"), el.getAttribute("id"), el.getAttribute("autocomplete"), el.getAttribute("placeholder")]
+      .filter(Boolean).join(" ").toLowerCase();
+    return type === "password" || /passw|secret|api[-_]?key|access[-_]?token/.test(smell) ? "secret" : "ok";
+  })()`;
+}
+
 async function navigate(cdp: CDP, url: string): Promise<void> {
   const loaded = new Promise<void>((res) => {
     cdp.on("Page.loadEventFired", () => res());
