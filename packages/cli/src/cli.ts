@@ -9,8 +9,8 @@
 //
 // The refine loop is conversational: the user talks, the agent edits
 // composition.json and drives these verbs. See skills/open-take/SKILL.md.
-import { stat as fsStat, readFile } from "node:fs/promises";
-import { basename, dirname, extname, resolve } from "node:path";
+import { stat as fsStat, readFile, writeFile } from "node:fs/promises";
+import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   SAY_IT_CARD,
@@ -19,6 +19,10 @@ import {
   type TakePlan,
   authProfile,
   buildBeatSheet,
+  ciTake,
+  emitGithubOutputs,
+  emitStepSummary,
+  ensureChrome,
   formatIssues,
   formatNotes,
   inspectPage,
@@ -32,6 +36,7 @@ import {
   renderDraft,
   renderFrames,
   renderReview,
+  renderTeaserGif,
   requireTakeFiles,
   resolveTakePaths,
   revealPath,
@@ -62,6 +67,8 @@ const BOOL_FLAGS = new Set([
   "--wait",
   "--all",
   "--quiet",
+  "--dry-run",
+  "--skip-permissions",
 ]);
 
 const argv = process.argv.slice(2);
@@ -130,6 +137,22 @@ const FLAGS_BY_CMD: Record<string, string[]> = {
   edit: ["--port", "--no-open"],
   notes: ["--wait", "--timeout", "--all", "--quiet"],
   auth: ["--url"],
+  ci: [
+    "--start",
+    "--brief",
+    "--out",
+    "--fps",
+    "--capture-scale",
+    "--budget-usd",
+    "--agent",
+    "--model",
+    "--allowed-tools",
+    "--skip-permissions",
+    "--wait-timeout",
+    "--timeout",
+    "--dry-run",
+    "--verbose",
+  ],
   init: [],
   skill: [],
 };
@@ -166,6 +189,8 @@ Usage:
   open-take edit   <take> [--port 4178] [--no-open]
   open-take notes  [<take>] [--wait [--timeout 1800]] [--all] [--quiet]
   open-take auth   <name> [--url <login-url>]
+  open-take ci     <url> [--start "<command>"] [--brief "<what to demo>"]
+                   [--out demos/take.mp4] [--budget-usd 8] [--dry-run]
   open-take init
   open-take skill  [install]
 
@@ -247,6 +272,36 @@ Usage:
           the session via \`make --profile <name>\` — still headless, no
           credentials ever touch a plan. One profile per site keeps logins
           isolated (e.g. \`auth vercel --url https://vercel.com/login\`).
+
+  ci      the unattended lane: make a demo with NO human present (a CI runner,
+          a cron box). Boots the app if you pass --start "<command>", waits for
+          <url> to answer HTTP, installs the skill into the project, then runs
+          a headless coding agent (default: \`claude\`, needs ANTHROPIC_API_KEY)
+          that follows the skill end-to-end — explore, direct, shoot, verify,
+          master. Exits non-zero unless the polished master exists at --out.
+          Also writes <out>.take/beats.txt + a 6s <out>.take/teaser.gif, and
+          speaks GitHub Actions natively ($GITHUB_OUTPUT keys video, take-dir,
+          beats, gif, cost-usd + a $GITHUB_STEP_SUMMARY block) when those envs
+          exist. The take dir is the thing to CACHE between runs — the dossier
+          inside it turns the next run's cold exploration into a cheap
+          re-verify.
+          --brief "<text>"      what the demo should prove (audience, the hero
+                                flow); without it the agent uses its judgment.
+          --start "<command>"   boot the app first (own process group, killed
+                                after) — omit if an earlier step started it.
+          --wait-timeout <s>    how long <url> may take to answer (default 120).
+          --budget-usd <n>      hard spend cap for the agent run (default 8).
+          --timeout <s>         wall-clock cap for the agent (default 2400).
+          --agent <bin>         the agent CLI (default claude).
+          --model <name>        forwarded to the agent (e.g. sonnet).
+          --fps <n>             capture/render fps for CI (default 30 here —
+                                faster on 4-vCPU runners; masters still look
+                                right, use 60 for the premium finish).
+          --allowed-tools <l>   override the curated tool allowlist.
+          --skip-permissions    run the agent with permissions bypassed instead
+                                of allowlisted — only inside a sandboxed runner.
+          --dry-run             print the agent command + the exact brief and
+                                exit (nothing is booted, nothing is spent).
 
   init    install the Open Take skill into this project for coding agents.
 
@@ -399,6 +454,107 @@ async function main() {
     const { dir } = await authProfile({ name, url: flag("--url") });
     process.stdout.write(
       `profile saved: ${dir}\nauthenticated captures: ${INVOKE} make --plan <plan.json> --out <out.mp4> --profile ${name}\n`,
+    );
+    return;
+  }
+
+  if (cmd === "ci") {
+    const url = positional[0];
+    if (!url)
+      throw new Error(
+        `ci: missing <url> — the address the app answers on (add --start "<command>" if this run should boot it)`,
+      );
+    const out = normalizeOut(flag("--out") ?? DEFAULT_OUT);
+    const num = (name: string): number | undefined => {
+      const raw = flag(name);
+      if (raw == null) return undefined;
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n <= 0)
+        throw new Error(`ci: ${name} expects a positive number (got "${raw}")`);
+      return n;
+    };
+    // Every numeric flag validates BEFORE any side effect (skill install,
+    // Chrome download) — a typo'd flag should cost nothing.
+    const waitTimeoutS = num("--wait-timeout");
+    const agentTimeoutS = num("--timeout");
+    const budgetUsd = num("--budget-usd");
+    const fps = num("--fps");
+    const captureScale = num("--capture-scale");
+
+    // The agent discovers the playbook the same way an interactive one does:
+    // installed in the project. Idempotent, so a repo that already ran `init`
+    // just gets the bundled version refreshed to match this CLI — the skill
+    // the agent follows is always the one this binary shipped with.
+    const installed = await installAgentSkill({
+      root: process.cwd(),
+      skillText: await bundledSkill(),
+    });
+
+    // Chrome resolves BEFORE the agent starts burning budget: the first run on
+    // a cold runner downloads ~150MB, and that wait should not sit inside an
+    // agent turn (or worse, time one out). Dry runs spend nothing, skip it.
+    if (!has("--dry-run")) await ensureChrome();
+
+    const res = await ciTake({
+      url,
+      outPath: out,
+      brief: flag("--brief"),
+      startCmd: flag("--start"),
+      ...(waitTimeoutS != null ? { waitTimeoutMs: waitTimeoutS * 1000 } : {}),
+      agentBin: flag("--agent"),
+      model: flag("--model"),
+      budgetUsd,
+      ...(agentTimeoutS != null ? { agentTimeoutMs: agentTimeoutS * 1000 } : {}),
+      fps,
+      captureScale,
+      allowedTools: flag("--allowed-tools"),
+      skipPermissions: has("--skip-permissions"),
+      skillPath: installed.claudePath,
+      dryRun: has("--dry-run"),
+      logProgress: true,
+    });
+    if (res.dryRun) return;
+
+    const take = await resolveTakePaths(res.mp4Path);
+    const comp = JSON.parse(await readFile(take.compositionPath, "utf8"));
+    const sheet = buildBeatSheet(comp, take.name);
+    const beatsPath = join(take.dir, "beats.txt");
+    await writeFile(beatsPath, `${sheet}\n`);
+    const gifPath = join(take.dir, "teaser.gif");
+    const gif = await renderTeaserGif(res.mp4Path, gifPath).catch((e) => {
+      process.stderr.write(`⚠ teaser gif failed (the take itself is fine): ${e.message}\n`);
+      return undefined;
+    });
+
+    const ready = await readyLine(res.mp4Path);
+    const agentLine =
+      res.costUsd != null || res.turns != null
+        ? `agent:  ${res.costUsd != null ? `$${res.costUsd.toFixed(2)}` : "?"}${res.turns != null ? ` · ${res.turns} turns` : ""}\n`
+        : "";
+    process.stdout.write(
+      `\nready:  ${ready}\nbeats:  ${beatsPath}\n${gif ? `teaser: ${gif}\n` : ""}${agentLine}`,
+    );
+
+    await emitGithubOutputs({
+      video: res.mp4Path,
+      "take-dir": take.dir,
+      beats: beatsPath,
+      ...(gif ? { gif } : {}),
+      ...(res.costUsd != null ? { "cost-usd": res.costUsd.toFixed(4) } : {}),
+    });
+    await emitStepSummary(
+      [
+        `## open-take demo — ${take.name}`,
+        "",
+        `**${ready}**`,
+        "",
+        ...(res.finalText ? [res.finalText, ""] : []),
+        "```",
+        sheet,
+        "```",
+        "",
+        `_${agentLine.trim() || "agent run"} · download the video from this run's artifacts_`,
+      ].join("\n"),
     );
     return;
   }
