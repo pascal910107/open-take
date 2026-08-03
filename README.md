@@ -38,6 +38,26 @@ capture, so visual changes do not re-record your app.
 
 Requires Node.js 22+. For agent-facing commands, run `npx open-take --help`.
 
+## In CI
+
+The same demo with nobody at the desk: `open-take ci` boots your app, hands
+the wheel to a headless agent, and refuses to call the run a success unless
+the delivered master passes its proof gates — a missing demo is a fine CI
+outcome, a bad one is not. The bundled [GitHub Action][action] wires it to
+the pull requests that change your UI, and to releases:
+
+```yaml
+- uses: pascal910107/open-take/action@main
+  with:
+    url: http://localhost:3000
+    start: npm run dev
+    anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+```
+
+Read [the action's README][action] before adopting — it carries the security
+model (what the agent may and may not touch, why fork PRs are refused) and
+honest wall-clock and cost numbers.
+
 ## Develop
 
 ```sh
@@ -55,5 +75,6 @@ not the issue tracker.
 
 [contributing]: https://github.com/pascal910107/open-take/blob/main/CONTRIBUTING.md
 [security]: https://github.com/pascal910107/open-take/blob/main/SECURITY.md
+[action]: https://github.com/pascal910107/open-take/blob/main/action/README.md
 
 MIT.

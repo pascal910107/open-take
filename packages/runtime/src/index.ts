@@ -104,6 +104,7 @@ export {
   buildCiBrief,
   CI_ALLOWED_TOOLS,
   CI_DISALLOWED_TOOLS,
+  ciAllowedOrigins,
   ciTake,
   emitGithubOutputs,
   emitStepSummary,

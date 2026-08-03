@@ -50,8 +50,9 @@ jobs:
 
 That's the whole setup. No script to write, no first take to record — the
 first video is the agent's own cut, and the run **refuses to post a bad one**
-(see the gates below), so the failure mode is silence plus a log, never
-garbage with a green check.
+(see the gates below). The failure mode is a red check with a log and *no
+comment* — never garbage presented as success. That red is signal, not noise:
+don't wire this job in as a required merge check.
 
 Point `url` at a preview deployment instead of `start` and the job doesn't
 even boot the app — Vercel/Netlify previews are already running. Prefer a
@@ -106,17 +107,19 @@ input. The containment, layer by layer:
   your API key is exactly how CodeRabbit lost its GitHub App key in the
   Kudelski incident. Fork support needs a hosted backend, not a workaround —
   do not wire this into `pull_request_target`.
-- **The agent step holds only `ANTHROPIC_API_KEY`.** No `GITHUB_TOKEN` is
-  passed to it; the optional comment step is a separate step whose body is
-  built from files, fenced and backtick-stripped — agent-composed markdown
-  never reaches the PR.
+- **The only secret handed to the agent step is `ANTHROPIC_API_KEY`.** No
+  `GITHUB_TOKEN` is passed to it; the optional comment step is a separate
+  step whose body is built from files, fenced and backtick-stripped —
+  agent-composed markdown never reaches the PR.
 - **The app process is scrubbed**: `open-take ci` boots your `start` command
   with `ANTHROPIC_*`, `CLAUDE_*`, `GITHUB_TOKEN`, `ACTIONS_*`, `INPUT_*`
   removed from its environment.
 - **Navigation is pinned to the app's own origin**
   (`OPEN_TAKE_ALLOWED_ORIGINS`): a hostile string on the page that talks the
   agent into a `navigate` step to an attacker URL becomes a *skipped step*,
-  never a request.
+  never a request. A demo that legitimately hops origins (a docs site, a
+  deploy's generated domain) declares them via `allowed-origins` — the pin
+  stays deny-by-default.
 - **Credential fields are refused**: in CI mode the capture will not type
   into password/token-smelling inputs, so a plan can never film a secret
   being entered.
@@ -134,7 +137,10 @@ input. The containment, layer by layer:
   not a guarantee — the agent both reads the page's text and *looks at
   frames of it*. The origin pin, tool deny list, scrubbed env, and no-token
   design bound what a successful injection can do (roughly: waste your
-  budget, produce a bad video — which the gates then refuse to post).
+  budget, produce a bad video — which the gates then refuse to post). Known
+  allowlist gap: `ffmpeg` itself can write over http, so the allowlist alone
+  is not an egress guarantee — network-level egress filtering (e.g.
+  harden-runner) is the complete answer and is on the roadmap.
 
 ## Honest expectations
 

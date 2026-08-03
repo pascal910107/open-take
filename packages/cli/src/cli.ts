@@ -19,6 +19,7 @@ import {
   type TakePlan,
   authProfile,
   buildBeatSheet,
+  ciAllowedOrigins,
   ciTake,
   emitGithubOutputs,
   emitStepSummary,
@@ -147,6 +148,7 @@ const FLAGS_BY_CMD: Record<string, string[]> = {
     "--agent",
     "--model",
     "--allowed-tools",
+    "--allowed-origins",
     "--skip-permissions",
     "--wait-timeout",
     "--timeout",
@@ -297,7 +299,13 @@ Usage:
           --fps <n>             capture/render fps for CI (default 30 here —
                                 faster on 4-vCPU runners; masters still look
                                 right, use 60 for the premium finish).
+          --capture-scale <n>   capture pixel density (default 2 — Retina;
+                                drop to 1 if the runner drops frames).
           --allowed-tools <l>   override the curated tool allowlist.
+          --allowed-origins <l> extra origins the demo may navigate to,
+                                comma-separated (the app's own origin and its
+                                localhost/127.0.0.1 twin are always allowed;
+                                everything else is a skipped step).
           --skip-permissions    run the agent with permissions bypassed instead
                                 of allowlisted — only inside a sandboxed runner.
           --dry-run             print the agent command + the exact brief and
@@ -313,7 +321,7 @@ Usage:
               demos/take.mp4.
   --fps <n>   (make only) capture AND render fps (default 60). Drop to 30 for
               fast drafts while iterating.
-  --capture-scale <n>   (make only) capture pixel density (default 2 — Retina;
+  --capture-scale <n>   (make/ci) capture pixel density (default 2 — Retina;
               keeps zooms sharp). Drop to 1 if a heavy page can't hold fps.
   --strict    (make only) exit non-zero when any plan step was skipped (target
               not found, or a navigate destination that didn't resolve) — the
@@ -473,27 +481,33 @@ async function main() {
         throw new Error(`ci: ${name} expects a positive number (got "${raw}")`);
       return n;
     };
-    // Every numeric flag validates BEFORE any side effect (skill install,
-    // Chrome download) — a typo'd flag should cost nothing.
+    // Every flag validates BEFORE any side effect (skill install, Chrome
+    // download) — a typo'd flag should cost nothing.
     const waitTimeoutS = num("--wait-timeout");
     const agentTimeoutS = num("--timeout");
     const budgetUsd = num("--budget-usd");
     const fps = num("--fps");
     const captureScale = num("--capture-scale");
+    if (flag("--allowed-origins")) ciAllowedOrigins(url, flag("--allowed-origins"));
 
+    // --dry-run is PURE: print the command + brief and touch nothing — no
+    // skill install (installers never write into a tree that only asked to
+    // look), no Chrome download. The printed skillPath is where a real run
+    // WOULD install it.
+    const dryRun = has("--dry-run");
     // The agent discovers the playbook the same way an interactive one does:
     // installed in the project. Idempotent, so a repo that already ran `init`
     // just gets the bundled version refreshed to match this CLI — the skill
     // the agent follows is always the one this binary shipped with.
-    const installed = await installAgentSkill({
-      root: process.cwd(),
-      skillText: await bundledSkill(),
-    });
+    const skillPath = dryRun
+      ? resolve(process.cwd(), ".claude", "skills", "open-take", "SKILL.md")
+      : (await installAgentSkill({ root: process.cwd(), skillText: await bundledSkill() }))
+          .claudePath;
 
     // Chrome resolves BEFORE the agent starts burning budget: the first run on
     // a cold runner downloads ~150MB, and that wait should not sit inside an
-    // agent turn (or worse, time one out). Dry runs spend nothing, skip it.
-    if (!has("--dry-run")) await ensureChrome();
+    // agent turn (or worse, time one out).
+    if (!dryRun) await ensureChrome();
 
     const res = await ciTake({
       url,
@@ -508,9 +522,10 @@ async function main() {
       fps,
       captureScale,
       allowedTools: flag("--allowed-tools"),
+      allowedOrigins: flag("--allowed-origins"),
       skipPermissions: has("--skip-permissions"),
-      skillPath: installed.claudePath,
-      dryRun: has("--dry-run"),
+      skillPath,
+      dryRun,
       logProgress: true,
     });
     if (res.dryRun) return;
@@ -548,7 +563,9 @@ async function main() {
         "",
         `**${ready}**`,
         "",
-        ...(res.finalText ? [res.finalText, ""] : []),
+        // fenced + backtick-stripped, same rule as the PR comment: agent
+        // prose is content, never markup
+        ...(res.finalText ? ["```", res.finalText.replace(/`/g, "'"), "```", ""] : []),
         "```",
         sheet,
         "```",

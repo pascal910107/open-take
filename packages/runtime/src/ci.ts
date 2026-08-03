@@ -471,6 +471,7 @@ export type CiOpts = {
   fps?: number | undefined;
   captureScale?: number | undefined;
   allowedTools?: string | undefined;
+  allowedOrigins?: string | undefined;
   skipPermissions?: boolean | undefined;
   skillPath?: string | undefined;
   dryRun?: boolean | undefined;
@@ -516,6 +517,40 @@ export async function probeDurationS(mp4Path: string): Promise<number | undefine
 /** Bare host:port is the natural thing to type; fetch and URL need a scheme. */
 const withScheme = (url: string): string =>
   /^[a-z][a-z0-9+.-]*:\/\//i.test(url) ? url : `http://${url}`;
+
+/** The run's navigation fence: the app's own origin, its
+ *  localhost/127.0.0.1 twin (same server, two spellings — the commonest
+ *  false lockout), plus whatever --allowed-origins names (a demo that
+ *  legitimately hops to a second origin — a deploy's generated domain, a
+ *  docs site — declares it here; each entry normalizes to an origin). This
+ *  is the escape hatch the origin pin must ship WITH: without it, a
+ *  legitimate cross-origin beat is a skipped step + a failed gate, and the
+ *  agent has no knob to fix it. */
+export function ciAllowedOrigins(url: string, extra?: string): string {
+  const first = new URL(withScheme(url)).origin;
+  const origins = [first];
+  const twin = first.includes("//localhost")
+    ? first.replace("//localhost", "//127.0.0.1")
+    : first.includes("//127.0.0.1")
+      ? first.replace("//127.0.0.1", "//localhost")
+      : null;
+  if (twin) origins.push(twin);
+  for (const entry of extra?.split(",") ?? []) {
+    const trimmed = entry.trim();
+    if (!trimmed) continue;
+    try {
+      if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) {
+        origins.push(new URL(trimmed).origin);
+      } else {
+        // a bare host names the HOST as trusted — either scheme of it
+        origins.push(new URL(`https://${trimmed}`).origin, new URL(`http://${trimmed}`).origin);
+      }
+    } catch {
+      throw new Error(`ci: --allowed-origins entry "${trimmed}" is not a URL or origin`);
+    }
+  }
+  return [...new Set(origins)].join(",");
+}
 
 /** The whole unattended lane, in order: boot → liveness → agent → PROOF. The
  *  proof step is the difference between "a video exists" and "a video is safe
@@ -594,7 +629,7 @@ export async function ciTake(opts: CiOpts): Promise<CiResult> {
       env: {
         ...process.env,
         OPEN_TAKE_CI: "1",
-        OPEN_TAKE_ALLOWED_ORIGINS: new URL(url).origin,
+        OPEN_TAKE_ALLOWED_ORIGINS: ciAllowedOrigins(url, opts.allowedOrigins),
       },
       logProgress: opts.logProgress,
     });
@@ -612,14 +647,30 @@ export async function ciTake(opts: CiOpts): Promise<CiResult> {
     // green-check video where the cursor glides past dead UI.
     const take = await resolveTakePaths(outAbs);
     const captureLog = await readFile(take.captureLogPath, "utf8")
-      .then((t) => JSON.parse(t) as { skipped?: Array<{ action?: string; reason?: string }> })
+      .then(
+        (t) =>
+          JSON.parse(t) as {
+            skipped?: Array<{ action?: string; target?: unknown; reason?: string }>;
+          },
+      )
       .catch(() => null);
-    if (captureLog?.skipped?.length)
+    const skipped = captureLog?.skipped ?? [];
+    if (skipped.length) {
+      const lines = skipped
+        .map((s) => `  ${s.action ?? "?"} ${JSON.stringify(s.target ?? "")}: ${s.reason ?? "?"}`)
+        .join("\n");
+      // Three very different failures share this gate — the fix line must say
+      // which one fired, or every failure reads as "the UI changed".
+      const reasons = skipped.map((s) => s.reason ?? "");
+      const hint = reasons.some((r) => r.includes("ALLOWED_ORIGINS"))
+        ? "a navigation left the allowed origins — if that hop is a legitimate part of the demo, name its origin via --allowed-origins"
+        : reasons.some((r) => r.includes("OPEN_TAKE_CI"))
+          ? "the plan tried to type into a credential-smelling field — CI never films credentials; re-plan that beat without it"
+          : "the targets likely drifted with the UI — fix the plan and re-run";
       throw new Error(
-        `ci: the delivered video is missing ${captureLog.skipped.length} planned beat${captureLog.skipped.length === 1 ? "" : "s"} (` +
-          captureLog.skipped.map((s) => `${s.action ?? "?"}: ${s.reason ?? "?"}`).join("; ") +
-          `) — refusing to call this a success. Fix the plan targets (the UI likely changed) and re-run.`,
+        `ci: the delivered video is missing ${skipped.length} planned beat${skipped.length === 1 ? "" : "s"}:\n${lines}\n${hint} — refusing to call this a success.`,
       );
+    }
 
     // Gate 3: the file is a plausible demo, not a stub or a stalled epic.
     const durationS = await probeDurationS(outAbs);

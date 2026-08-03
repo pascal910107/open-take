@@ -15,6 +15,7 @@ import {
   buildCiBrief,
   CI_ALLOWED_TOOLS,
   CI_DISALLOWED_TOOLS,
+  ciAllowedOrigins,
   startApp,
   waitForHttp,
 } from "../src/ci";
@@ -152,6 +153,37 @@ test("git is readable but never writable — the diff feeds editorial, not exfil
   assert.match(allowed, /Bash\(git log \*\)/);
   assert.doesNotMatch(allowed, /git push|git commit|git remote/);
   assert.match(CI_DISALLOWED_TOOLS, /Bash\(git push\*\)/, "push stays on the deny list");
+});
+
+// --- the navigation fence and its escape hatch -------------------------------
+
+test("the fence always carries the localhost/127.0.0.1 twin — same server, two spellings", () => {
+  assert.equal(
+    ciAllowedOrigins("http://localhost:3000"),
+    "http://localhost:3000,http://127.0.0.1:3000",
+  );
+  assert.equal(
+    ciAllowedOrigins("http://127.0.0.1:4173"),
+    "http://127.0.0.1:4173,http://localhost:4173",
+  );
+  // a real domain has no twin to invent
+  assert.equal(ciAllowedOrigins("https://preview.example.com"), "https://preview.example.com");
+});
+
+test("--allowed-origins entries normalize to origins, dedupe, and a bare host trusts both schemes", () => {
+  assert.equal(
+    ciAllowedOrigins(
+      "https://app.example.com",
+      "https://docs.example.com/getting-started, app.example.com",
+    ),
+    // the path is dropped; the bare host adds http:// alongside the https://
+    // the app origin already covers
+    "https://app.example.com,https://docs.example.com,http://app.example.com",
+  );
+});
+
+test("an unparseable --allowed-origins entry errors up front, not as a silent no-match", () => {
+  assert.throws(() => ciAllowedOrigins("http://localhost:3000", "not a url at all"), /not a URL/);
 });
 
 // --- liveness: fail fast, and say why ---------------------------------------

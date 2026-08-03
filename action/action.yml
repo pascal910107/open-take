@@ -51,6 +51,13 @@ inputs:
   fps:
     description: "Capture/render fps (30 is the right default on 4-vCPU runners)."
     default: "30"
+  allowed-origins:
+    description: >-
+      Extra origins the demo may navigate to, comma-separated. The app's own
+      origin (and its localhost/127.0.0.1 twin) is always allowed; any other
+      destination becomes a skipped step — name legitimate hops (a docs site,
+      a deploy's generated domain) here.
+    default: ""
   model:
     description: "Model override forwarded to the agent (empty = the agent CLI's default)."
     default: ""
@@ -114,9 +121,11 @@ runs:
       shell: bash
       run: |
         # ubuntu-latest ships neither — any CJK/emoji text in the app renders
-        # as tofu boxes in the FOOTAGE without these.
-        sudo apt-get update -qq
-        sudo apt-get install -y -qq --no-install-recommends fonts-noto-cjk fonts-noto-color-emoji fonts-liberation
+        # as tofu boxes in the FOOTAGE without these. Nice-to-have, so an apt
+        # mirror hiccup must degrade the footage, never kill the job.
+        (sudo apt-get update -qq &&
+         sudo apt-get install -y -qq --no-install-recommends fonts-noto-cjk fonts-noto-color-emoji fonts-liberation) ||
+          echo "::warning::font install failed — CJK/emoji text in the app may render as tofu boxes"
 
     - name: Install open-take + the agent CLI
       shell: bash
@@ -183,6 +192,7 @@ runs:
         OT_WAIT_TIMEOUT: ${{ inputs.wait-timeout }}
         OT_FPS: ${{ inputs.fps }}
         OT_MODEL: ${{ inputs.model }}
+        OT_ORIGINS: ${{ inputs.allowed-origins }}
       run: |
         set -euo pipefail
         args=(ci "$OT_URL" --out "$OT_OUT" --budget-usd "$OT_BUDGET" \
@@ -190,6 +200,7 @@ runs:
         [ -n "$OT_START" ] && args+=(--start "$OT_START")
         [ -n "$OT_BRIEF" ] && args+=(--brief "$OT_BRIEF")
         [ -n "$OT_MODEL" ] && args+=(--model "$OT_MODEL")
+        [ -n "$OT_ORIGINS" ] && args+=(--allowed-origins "$OT_ORIGINS")
         open-take "${args[@]}"
 
     - name: Upload the take

@@ -59,7 +59,7 @@ test("a flag from another verb is refused on ci too", async () => {
   assert.match(r.err, /unknown flag --profile/);
 });
 
-test("--dry-run prints the exact agent command and the brief, and installs the skill", async () => {
+test("--dry-run prints the exact agent command and the brief, and writes NOTHING", async () => {
   const dir = await scratch();
   const r = await run(
     ["ci", "http://localhost:3000", "--brief", "demo the search flow", "--dry-run"],
@@ -76,9 +76,26 @@ test("--dry-run prints the exact agent command and the brief, and installs the s
   assert.match(r.out, /--- brief ---/);
   assert.match(r.out, /demo the search flow/);
   assert.match(r.out, /author mode/, "no dossier here — cold authorship");
-  // the skill landed where a headless agent will look for it
-  const skill = await stat(join(dir, ".claude", "skills", "open-take", "SKILL.md"));
-  assert.ok(skill.isFile());
+  // a look-only run leaves the tree byte-identical: no skill install, no
+  // scaffolding — installers never touch a cwd that only asked a question
+  await assert.rejects(stat(join(dir, ".claude")), "dry-run must not install the skill");
+  await assert.rejects(stat(join(dir, ".agents")), "dry-run must not scaffold");
+});
+
+test("--allowed-origins is accepted, and a bad entry dies before any side effect", async () => {
+  const dir = await scratch();
+  const ok = await run(
+    ["ci", "http://localhost:3000", "--allowed-origins", "https://docs.example.com", "--dry-run"],
+    dir,
+  );
+  assert.equal(ok.code, 0, ok.err);
+  const bad = await run(
+    ["ci", "http://localhost:3000", "--allowed-origins", "not a url at all", "--dry-run"],
+    dir,
+  );
+  assert.equal(bad.code, 1);
+  assert.match(bad.err, /not a URL/);
+  await assert.rejects(stat(join(dir, ".claude")), "the typo cost nothing");
 });
 
 test("--skip-permissions swaps to the explicit bypass in the printed command", async () => {
