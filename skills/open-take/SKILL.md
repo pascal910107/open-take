@@ -97,6 +97,18 @@ judgment; when skipping, restate the brief so they can correct it.
   would materially change the story.
 - Do not write the plan or run `make` until a required answer arrives.
 
+**Unattended runs (CI, cron — no human on the channel).** When the invocation
+says no human is available (`open-take ci` writes exactly such a brief), the
+alignment gate is PRE-ANSWERED: treat the given brief as the confirmed story —
+or, when it says "use your judgment", pick the strongest thesis yourself and
+name it in your final summary. Never call AskUserQuestion or block waiting for
+input. The dailies loop is bounded there too: verify with `frames`, fix what
+composition warnings name, at most two re-makes, ONE master render at the end —
+and none of the human-loop verbs (`edit`, `notes --wait`, `ab`, `auth`). The
+dossier is not optional in CI: the runner caches the take dir between runs, and
+the dossier is what turns the next run's cold exploration into a cheap
+re-verify.
+
 ### 2. DIRECT (the editorial work — ignore capture feasibility here)
 Choose **3–5 beats** forming ONE coherent arc: a hook in the first ~2s → a
 couple of meaningful interactions → a clear payoff/closer. For each beat write:
