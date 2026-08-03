@@ -1,0 +1,235 @@
+# open-take demo — record a polished demo video of your app in CI.
+#
+# Composite on purpose: everything it does is a readable shell step you can
+# audit, and the heavy lifting lives in the published `open-take` CLI (the
+# `ci` verb), so any CI system can run the same lane without this wrapper.
+#
+# Security posture (README#security has the full model):
+# - fork PRs are refused outright — running a fork's code next to your API key
+#   is the CodeRabbit-incident shape, and no comment is worth it.
+# - the agent step holds ONLY the Anthropic key; no GITHUB_TOKEN is passed to
+#   it. The optional comment step is a separate step with the token, fed by
+#   files the run wrote — never by agent-composed markdown.
+# - `open-take ci` itself scrubs the key (and INPUT_/ACTIONS_ vars) from the
+#   env of the app it boots, pins the agent's navigations to the app's origin,
+#   and refuses to type into credential fields.
+name: "open-take demo"
+description: >-
+  Make (or keep fresh) a cinematic demo video of your web app: a headless
+  coding agent explores the running app, directs a ~25s editorial cut, and
+  open-take renders the polished master — posted to the workflow's artifacts,
+  optionally summarized on the PR.
+branding:
+  icon: film
+  color: purple
+
+inputs:
+  url:
+    description: "Where the app answers HTTP (a localhost port, or a preview-deployment URL)."
+    required: true
+  anthropic-api-key:
+    description: "API key for the headless agent (store it in repo secrets)."
+    required: true
+  start:
+    description: 'Command that boots the app first (e.g. "pnpm dev"). Omit if an earlier step started it or url is a deployed preview.'
+    default: ""
+  brief:
+    description: "What the demo should prove (audience + hero flow). Omit to let the agent use its judgment."
+    default: ""
+  out:
+    description: "Where the postable master lands (demos/<app>.mp4)."
+    default: "demos/take.mp4"
+  budget-usd:
+    description: "Hard spend cap for the agent run."
+    default: "8"
+  timeout:
+    description: "Wall-clock cap for the agent, in seconds."
+    default: "2400"
+  wait-timeout:
+    description: "How long the app may take to answer HTTP, in seconds."
+    default: "120"
+  fps:
+    description: "Capture/render fps (30 is the right default on 4-vCPU runners)."
+    default: "30"
+  model:
+    description: "Model override forwarded to the agent (empty = the agent CLI's default)."
+    default: ""
+  working-directory:
+    description: "Directory to run in (monorepos: the app's package)."
+    default: "."
+  version:
+    description: "open-take npm version to install. Pin this (and claude-code-version) to exact versions in anything you rely on."
+    default: "latest"
+  claude-code-version:
+    description: "@anthropic-ai/claude-code npm version to install."
+    default: "latest"
+  cache:
+    description: "Cache the take's dossier + composition between runs, so run N+1 re-verifies instead of re-exploring (true/false)."
+    default: "true"
+  artifact:
+    description: "Upload the video (+ teaser + beat sheet) as a workflow artifact (true/false)."
+    default: "true"
+  retention-days:
+    description: "Artifact retention. Short by default: the mp4 is world-readable to anyone with repo access, and an accidentally-filmed secret should age out fast."
+    default: "7"
+  comment:
+    description: >-
+      Post/update a sticky PR comment with the beat sheet + artifact link
+      (true/false). Needs `permissions: pull-requests: write` on the job.
+      Off by default so the default posture grants the job no write scope.
+    default: "false"
+
+outputs:
+  video:
+    description: "Absolute path of the delivered master."
+    value: ${{ steps.ci.outputs.video }}
+  take-dir:
+    description: "The take's working directory (composition, dossier, capture)."
+    value: ${{ steps.ci.outputs.take-dir }}
+  beats:
+    description: "Path of the numbered beat-sheet text file."
+    value: ${{ steps.ci.outputs.beats }}
+  gif:
+    description: "Path of the ~6s GIF teaser (when ffmpeg produced one)."
+    value: ${{ steps.ci.outputs.gif }}
+  cost-usd:
+    description: "What the agent run actually spent."
+    value: ${{ steps.ci.outputs.cost-usd }}
+  artifact-url:
+    description: "URL of the uploaded artifact (requires a GitHub login to view)."
+    value: ${{ steps.upload.outputs.artifact-url }}
+
+runs:
+  using: composite
+  steps:
+    - name: Refuse fork PRs
+      if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+      shell: bash
+      run: |
+        echo "::error::open-take demo does not run on fork PRs: it would execute the fork's code (its dev server, its build scripts) on a runner holding your ANTHROPIC_API_KEY. Trigger demos from same-repo branches, release events, or a manually-gated workflow instead."
+        exit 1
+
+    - name: Fonts for capture (CJK + emoji)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        # ubuntu-latest ships neither — any CJK/emoji text in the app renders
+        # as tofu boxes in the FOOTAGE without these.
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq --no-install-recommends fonts-noto-cjk fonts-noto-color-emoji fonts-liberation
+
+    - name: Install open-take + the agent CLI
+      shell: bash
+      env:
+        OT_VERSION: ${{ inputs.version }}
+        CC_VERSION: ${{ inputs.claude-code-version }}
+      run: |
+        set -euo pipefail
+        npm install -g "open-take@${OT_VERSION}" "@anthropic-ai/claude-code@${CC_VERSION}"
+        # an older open-take (< 0.3.0) has no `ci` verb — fail here with a
+        # named fix, not 20 minutes in with a confusing usage dump
+        if ! open-take --help | grep -q "open-take ci"; then
+          echo "::error::the installed open-take ($(open-take --version)) predates the ci verb — set the action's 'version' input to >= 0.3.0"
+          exit 1
+        fi
+
+    - name: Use the runner's Chrome
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        # skips the ~150MB Chrome-for-Testing download; ubuntu-latest
+        # preinstalls google-chrome
+        if command -v google-chrome >/dev/null; then
+          echo "OPEN_TAKE_CHROME=$(command -v google-chrome)" >> "$GITHUB_ENV"
+        fi
+
+    - name: Derive take paths
+      id: paths
+      shell: bash
+      env:
+        OT_OUT: ${{ inputs.out }}
+      run: |
+        base="${OT_OUT%.mp4}"
+        echo "take-dir=${base}.take" >> "$GITHUB_OUTPUT"
+
+    - name: Restore the take's memory (dossier + composition)
+      if: inputs.cache == 'true'
+      uses: actions/cache@v4
+      with:
+        # ONLY the small editorial state — never capture.mp4. NB actions/cache
+        # is branch-scoped: seed this from a default-branch job (see README)
+        # or every PR's first run is cold.
+        path: |
+          ${{ inputs.working-directory }}/${{ steps.paths.outputs.take-dir }}/dossier.md
+          ${{ inputs.working-directory }}/${{ steps.paths.outputs.take-dir }}/composition.json
+        key: open-take-${{ inputs.out }}-${{ github.run_id }}
+        restore-keys: |
+          open-take-${{ inputs.out }}-
+
+    - name: Record the demo
+      id: ci
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        # the ONE secret this step holds. open-take ci scrubs it (plus
+        # INPUT_*/ACTIONS_*/GITHUB_TOKEN) from the app process it boots.
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+        OT_URL: ${{ inputs.url }}
+        OT_START: ${{ inputs.start }}
+        OT_BRIEF: ${{ inputs.brief }}
+        OT_OUT: ${{ inputs.out }}
+        OT_BUDGET: ${{ inputs.budget-usd }}
+        OT_TIMEOUT: ${{ inputs.timeout }}
+        OT_WAIT_TIMEOUT: ${{ inputs.wait-timeout }}
+        OT_FPS: ${{ inputs.fps }}
+        OT_MODEL: ${{ inputs.model }}
+      run: |
+        set -euo pipefail
+        args=(ci "$OT_URL" --out "$OT_OUT" --budget-usd "$OT_BUDGET" \
+          --timeout "$OT_TIMEOUT" --wait-timeout "$OT_WAIT_TIMEOUT" --fps "$OT_FPS")
+        [ -n "$OT_START" ] && args+=(--start "$OT_START")
+        [ -n "$OT_BRIEF" ] && args+=(--brief "$OT_BRIEF")
+        [ -n "$OT_MODEL" ] && args+=(--model "$OT_MODEL")
+        open-take "${args[@]}"
+
+    - name: Upload the take
+      id: upload
+      if: inputs.artifact == 'true' && steps.ci.outputs.video != ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: open-take-demo
+        retention-days: ${{ inputs.retention-days }}
+        path: |
+          ${{ steps.ci.outputs.video }}
+          ${{ steps.ci.outputs.beats }}
+          ${{ steps.ci.outputs.gif }}
+
+    - name: Sticky PR comment
+      if: inputs.comment == 'true' && github.event_name == 'pull_request' && steps.ci.outputs.video != ''
+      uses: actions/github-script@v7
+      env:
+        BEATS_PATH: ${{ steps.ci.outputs.beats }}
+        COST_USD: ${{ steps.ci.outputs.cost-usd }}
+        ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+      with:
+        script: |
+          // Fed by FILES the run wrote — the beat sheet goes into a fenced
+          // block with backticks stripped, so nothing the agent composed can
+          // smuggle markdown/links into the comment.
+          const fs = require("fs");
+          const marker = "<!-- open-take-demo -->";
+          const beats = fs.readFileSync(process.env.BEATS_PATH, "utf8").replace(/`/g, "'").trim();
+          const cost = process.env.COST_USD ? ` · agent $${process.env.COST_USD}` : "";
+          const link = process.env.ARTIFACT_URL
+            ? `\n\n▶ [Download the demo video](${process.env.ARTIFACT_URL}) (GitHub login required)`
+            : "";
+          const body = `${marker}\n### 🎬 Demo refreshed for this PR${cost}\n\n\`\`\`\n${beats}\n\`\`\`${link}`;
+          const { data: comments } = await github.rest.issues.listComments({
+            ...context.repo, issue_number: context.issue.number, per_page: 100,
+          });
+          const mine = comments.find(c => c.body && c.body.includes(marker));
+          if (mine) {
+            await github.rest.issues.updateComment({ ...context.repo, comment_id: mine.id, body });
+          } else {
+            await github.rest.issues.createComment({ ...context.repo, issue_number: context.issue.number, body });
+          }
