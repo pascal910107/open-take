@@ -42,8 +42,11 @@ const TAN_HALF = Math.tan((FOV * Math.PI) / 360);
 
 const APP_HALF_W = 1.75; // the window body is 3.4 wide; a hair of margin on top
 const COPY_GUTTER = 46; // px of clean background — wide enough to outlast parallax
+const RAIL_MAX = 42; // keep in step with .hud / .nav `right` — the frame's rail
+const MAX_PULLBACK = 1.5; // how far the lens may back off to make the body fit
 
-// How far left to sit the camera so the miniature clears the hero copy.
+// Where to sit the lens so the miniature clears the hero copy — and still
+// lands inside the frame.
 //
 // The establish shot used to run the window's left bezel — a hard vertical
 // edge, with the selected sidebar row glowing right behind it — straight
@@ -51,15 +54,36 @@ const COPY_GUTTER = 46; // px of clean background — wide enough to outlast par
 // layout rather than a backdrop. Punches were never the problem: once the lens
 // is in, the text sits over one flat surface.
 //
-// So derive the bias from the copy column instead of guessing a constant: put
-// the window's left edge just right of it. Where the viewport is too narrow to
-// hold both, clear as much as fits rather than shoving the window off-frame.
-function frameBias(aspect: number, vw: number, wideZ: number, copyRight: number): number {
-  if (aspect < 1.05) return 0; // stacked: the copy sits over a dimmed stage
+// So derive the framing from the copy column instead of guessing a constant.
+// But clearing the copy is only half of it: the band between the copy and the
+// right edge is narrower than the body at every ordinary desktop size, and
+// anchoring the left edge alone used to spend the difference off the right —
+// copy with a 380px margin, product sheared by the viewport with none. So fit
+// to the band: back the lens off until the whole body sits inside it, then
+// centre it there, right bezel landing on the same rail the nav and the REC hud
+// hang from. Below ~1200px there is no band worth fitting to; a hero shrunk to
+// a stamp is worse than a crop, so past the pull-back cap nothing is spent at
+// all — full size, left edge honest, surplus bleeding right as it used to.
+function frameBias(
+  aspect: number,
+  vw: number,
+  baseZ: number,
+  copyRight: number,
+): { wideZ: number; frameX: number } {
+  if (aspect < 1.05) return { wideZ: baseZ, frameX: 0 }; // stacked: copy over a dimmed stage
+  const rail = Math.min(RAIL_MAX, Math.max(20, vw * 0.035));
+  const left = Math.min(copyRight + COPY_GUTTER, vw * 0.62); // clean background starts here
+  const band = Math.max(1, vw - rail - left);
+  const fit = (APP_HALF_W * vw) / (band * TAN_HALF * aspect); // z at which the body is exactly `band`
+  const fits = fit <= baseZ * MAX_PULLBACK;
+  const wideZ = fits ? Math.max(baseZ, fit) : baseZ;
   const halfW = wideZ * TAN_HALF * aspect; // half the visible width at z = 0
-  const f = Math.min(0.62, (copyRight + COPY_GUTTER) / vw); // wanted left edge, 0..1
-  const clear = -APP_HALF_W + halfW * (1 - 2 * f);
-  return Math.max(clear, APP_HALF_W - 1.44 * halfW); // ≤ a fifth bleeds off right
+  const bodyPx = (APP_HALF_W * vw) / halfW; // the body's on-screen width
+  const centre = fits ? left + band / 2 : left + bodyPx / 2;
+  const frameX = -((centre / vw) * 2 - 1) * halfW;
+  // The old floor still guards the fallback: never shove the body so far right
+  // that more than a fifth of it leaves the frame.
+  return { wideZ, frameX: fits ? frameX : Math.max(frameX, APP_HALF_W - 1.44 * halfW) };
 }
 
 // Neutral white radial, tinted via material.color — the iris glow behind the
@@ -190,9 +214,11 @@ export function initStage(canvas: HTMLCanvasElement, hooks: StageHooks): StageAp
     const aspect = w / h;
     camera.aspect = aspect;
     camera.updateProjectionMatrix();
-    rig.wideZ = Math.max(6.4, 3.95 / (2 * TAN_HALF * aspect));
+    const baseZ = Math.max(6.4, 3.95 / (2 * TAN_HALF * aspect));
     const copy = document.querySelector(".hero-copy");
-    rig.frameX = frameBias(aspect, w, rig.wideZ, copy ? copy.getBoundingClientRect().right : 0);
+    const framing = frameBias(aspect, w, baseZ, copy ? copy.getBoundingClientRect().right : 0);
+    rig.wideZ = framing.wideZ;
+    rig.frameX = framing.frameX;
   };
   resize();
   rig.reset();
