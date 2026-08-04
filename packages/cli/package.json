@@ -3,6 +3,7 @@
   "version": "0.3.0",
   "description": "Agent-native demo recorder — your agent explores the app, records, and renders a cinematic demo; you refine by asking it for changes.",
   "license": "MIT",
+  "funding": "https://ko-fi.com/pascal18663",
   "type": "module",
   "bin": {
     "open-take": "./dist/cli.js"

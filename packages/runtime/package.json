@@ -3,6 +3,7 @@
   "version": "0.3.0",
   "description": "Thin take runtime — agent plan -> capture (event log) -> compositor -> polished mp4 + editable composition.",
   "license": "MIT",
+  "funding": "https://ko-fi.com/pascal18663",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

@@ -3,6 +3,7 @@
   "version": "0.3.0",
   "description": "Open Take's Revideo renderer bridge, using puppeteer-core with the Chrome Open Take already manages.",
   "license": "MIT",
+  "funding": "https://ko-fi.com/pascal18663",
   "main": "./dist/server/index.js",
   "types": "./dist/server/index.d.ts",
   "files": [

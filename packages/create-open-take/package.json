@@ -3,6 +3,7 @@
   "version": "0.2.10",
   "description": "Add Open Take and its agent skill to your app in one command.",
   "license": "MIT",
+  "funding": "https://ko-fi.com/pascal18663",
   "type": "module",
   "bin": {
     "create-open-take": "./dist/cli.js"

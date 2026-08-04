@@ -78,3 +78,5 @@ not the issue tracker.
 [action]: https://github.com/pascal910107/open-take/blob/main/action/README.md
 
 MIT.
+
+[![Support open-take on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/pascal18663)
