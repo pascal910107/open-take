@@ -1,6 +1,6 @@
 {
   "name": "@open-take/compositor",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Polish compositor (D3) — event log + captured frames -> polished mp4 + editable revideo composition.",
   "license": "MIT",
   "funding": "https://ko-fi.com/pascal18663",
