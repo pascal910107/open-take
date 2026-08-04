@@ -89,7 +89,7 @@ test("packed release artifacts form a browser-download-free dependency chain", a
   );
 
   assert.equal(manifests.bridge.dependencies.puppeteer, undefined);
-  assert.equal(manifests.bridge.dependencies["puppeteer-core"], "25.3.0");
+  assert.equal(manifests.bridge.dependencies["puppeteer-core"], "25.4.0");
 
   // Each link pins the EXACT version of the package below it. Asserting the
   // relationship rather than literal numbers is what keeps this a release gate:

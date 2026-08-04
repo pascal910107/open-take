@@ -18,5 +18,5 @@ test("the packaged renderer uses puppeteer-core and its own client", async () =>
   assert.doesNotMatch(declarations, /from 'puppeteer'/);
   assert.match(plugin, /@open-take\/revideo-renderer\/dist\/client\/render/);
   assert.equal(pkg.dependencies.puppeteer, undefined);
-  assert.equal(pkg.dependencies["puppeteer-core"], "25.3.0");
+  assert.equal(pkg.dependencies["puppeteer-core"], "25.4.0");
 });
