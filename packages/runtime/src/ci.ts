@@ -173,6 +173,10 @@ export const CI_ALLOWED_TOOLS = [
   "Bash(git status *)",
   "Bash(ls *)",
   "Bash(mkdir *)",
+  // mv is ergonomics, not new power: the agent already holds unrestricted
+  // Write/Edit, and mv has no network. The first real E2E showed the denial
+  // just costs a turn (the agent re-did the mv as a Write).
+  "Bash(mv *)",
 ].join(",");
 
 export type CiMode = "author" | "regenerate";

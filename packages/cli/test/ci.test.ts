@@ -98,6 +98,11 @@ test("--allowed-origins is accepted, and a bad entry dies before any side effect
   await assert.rejects(stat(join(dir, ".claude")), "the typo cost nothing");
 });
 
+test("--no-teaser is a known ci flag — the unknown-flag guard must not eat it", async () => {
+  const r = await run(["ci", "http://localhost:3000", "--no-teaser", "--dry-run"], await scratch());
+  assert.equal(r.code, 0, r.err);
+});
+
 test("--skip-permissions swaps to the explicit bypass in the printed command", async () => {
   const dir = await scratch();
   const r = await run(["ci", "http://localhost:3000", "--dry-run", "--skip-permissions"], dir);

@@ -170,6 +170,11 @@ test("git is readable but never writable — the diff feeds editorial, not exfil
   assert.match(CI_DISALLOWED_TOOLS, /Bash\(git push\*\)/, "push stays on the deny list");
 });
 
+test("the file-ergonomics verbs are allowed — mv joined after the first E2E's denial", () => {
+  assert.match(CI_ALLOWED_TOOLS, /Bash\(mkdir \*\)/);
+  assert.match(CI_ALLOWED_TOOLS, /Bash\(mv \*\)/);
+});
+
 // --- the navigation fence and its escape hatch -------------------------------
 
 test("the fence always carries the localhost/127.0.0.1 twin — same server, two spellings", () => {

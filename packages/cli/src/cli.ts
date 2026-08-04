@@ -70,6 +70,7 @@ const BOOL_FLAGS = new Set([
   "--quiet",
   "--dry-run",
   "--skip-permissions",
+  "--no-teaser",
 ]);
 
 const argv = process.argv.slice(2);
@@ -153,6 +154,7 @@ const FLAGS_BY_CMD: Record<string, string[]> = {
     "--wait-timeout",
     "--timeout",
     "--dry-run",
+    "--no-teaser",
     "--verbose",
   ],
   init: [],
@@ -310,6 +312,9 @@ Usage:
                                 of allowlisted — only inside a sandboxed runner.
           --dry-run             print the agent command + the exact brief and
                                 exit (nothing is booted, nothing is spent).
+          --no-teaser           skip the 6s teaser.gif (it only rides the CI
+                                artifact today — locally it is the thing you
+                                paste into Slack).
 
   init    install the Open Take skill into this project for coding agents.
 
@@ -328,7 +333,9 @@ Usage:
               summary lists them either way.
   --force     (make only) overwrite the take at --out even when it was shot from
               a different app. Without it that is refused: two demos in one
-              folder each get their own name (\`--out myapp.mp4\`).
+              folder each get their own name (\`--out myapp.mp4\`). Under
+              OPEN_TAKE_CI the refusal softens to a warning — preview deploys
+              give the same app a fresh origin every PR.
   --profile <name>   (make/inspect) drive an authenticated session: reuse the
               persistent profile created by \`open-take auth <name>\`.
   --headed    (make/inspect) drive a visible Chrome window instead of headless —
@@ -381,6 +388,18 @@ async function refuseCrossAppOverwrite(take: TakePaths, planUrl: string): Promis
   const was = origin(previous);
   const now = origin(planUrl);
   if (!was || !now || was === now) return;
+  // Unattended runs: per-PR preview deploys hand the SAME app a fresh hostname
+  // every PR (myapp-git-pr7-team.vercel.app), so a differing origin is the
+  // EXPECTED shape, not a second app — and in CI the take's identity is the
+  // pipeline's cache key (--out), declared by the operator. Warn (the log
+  // keeps the trail) instead of stranding regenerate mode.
+  if (process.env.OPEN_TAKE_CI) {
+    process.stderr.write(
+      `⚠ make: overwriting a take of ${was} with one of ${now} — allowed under OPEN_TAKE_CI ` +
+        `(per-PR preview origins differ by design; the --out path names the app)\n`,
+    );
+    return;
+  }
   // A local app's hostname is "localhost" or an IP — no name to suggest there,
   // and suggesting "--out 127.mp4" reads like a bug.
   const host = new URL(planUrl).hostname.replace(/^www\./, "");
@@ -535,11 +554,16 @@ async function main() {
     const sheet = buildBeatSheet(comp, take.name);
     const beatsPath = join(take.dir, "beats.txt");
     await writeFile(beatsPath, `${sheet}\n`);
+    // The teaser's only CI consumer today is the artifact zip (GitHub's API
+    // can't post playable media until the hosted relay exists) — so it stays
+    // default-on for the humans who grab it, with --no-teaser for leaner runs.
     const gifPath = join(take.dir, "teaser.gif");
-    const gif = await renderTeaserGif(res.mp4Path, gifPath).catch((e) => {
-      process.stderr.write(`⚠ teaser gif failed (the take itself is fine): ${e.message}\n`);
-      return undefined;
-    });
+    const gif = has("--no-teaser")
+      ? undefined
+      : await renderTeaserGif(res.mp4Path, gifPath).catch((e) => {
+          process.stderr.write(`⚠ teaser gif failed (the take itself is fine): ${e.message}\n`);
+          return undefined;
+        });
 
     const ready = await readyLine(res.mp4Path);
     const agentLine =
