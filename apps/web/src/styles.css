@@ -548,10 +548,13 @@ html[data-theme="light"] h1 em {
   color: var(--ink3);
 }
 
+/* The slate of the shot above it: right edge on the miniature's right bezel,
+   which the stage publishes as --mini-right on every resize. The nav's rail is
+   the floor, for the narrow sizes where the body bleeds off the frame. */
 .hud {
   position: absolute;
   z-index: 2;
-  right: clamp(20px, 3.5vw, 42px);
+  right: max(clamp(20px, 3.5vw, 42px), var(--mini-right, 42px));
   bottom: 34px;
   display: flex;
   align-items: center;

@@ -41,6 +41,7 @@ const FOV = 30;
 const TAN_HALF = Math.tan((FOV * Math.PI) / 360);
 
 const APP_HALF_W = 1.75; // the window body is 3.4 wide; a hair of margin on top
+const BODY_HALF_W = 1.7; // …and this is the bezel itself, with no margin on it
 const COPY_GUTTER = 46; // px of clean background — wide enough to outlast parallax
 const RAIL_MAX = 42; // keep in step with .hud / .nav `right` — the frame's rail
 const MAX_PULLBACK = 1.5; // how far the lens may back off to make the body fit
@@ -65,8 +66,14 @@ const MAX_PULLBACK = 1.5; // how far the lens may back off to make the body fit
 // The band's right edge mirrors the copy's left margin, so the miniature ends
 // exactly as far from the frame as the headline begins — the hero reads as one
 // centred block rather than a column of text with a product shoved against the
-// glass. (The nav and the REC hud keep their own tighter rail; they are the
-// frame, not the content. The rail is only a floor here.)
+// glass. (The nav keeps its own tighter rail; it is the frame, not the content.
+// The rail is only a floor here.)
+//
+// The REC hud does not: it sits a few inches under the miniature and reads as
+// that shot's slate, so a right edge on the nav's rail overhangs the bezel by
+// ~160px at 1080p and looks like a missed alignment rather than a frame. It
+// hangs off `bodyRight` instead — the margin the bezel itself lands on, which
+// is the mirrored one plus the hair of fitting margin above.
 //
 // Below ~1300px there is no band worth fitting to; a hero shrunk to a stamp is
 // worse than a crop, so past the pull-back cap nothing is spent at all — full
@@ -77,8 +84,17 @@ function frameBias(
   baseZ: number,
   copyLeft: number,
   copyRight: number,
-): { wideZ: number; frameX: number } {
-  if (aspect < 1.05) return { wideZ: baseZ, frameX: 0 }; // stacked: copy over a dimmed stage
+): { wideZ: number; frameX: number; bodyRight: number } {
+  // px from the frame's right edge to the miniature's right bezel, at the wide.
+  const bodyRightAt = (z: number, frameX: number): number => {
+    const halfW = z * TAN_HALF * aspect;
+    const centre = (vw * (1 - frameX / halfW)) / 2; // undo frameX, back to px
+    return vw - centre - (BODY_HALF_W * vw) / (2 * halfW);
+  };
+  if (aspect < 1.05) {
+    // stacked: copy over a dimmed stage
+    return { wideZ: baseZ, frameX: 0, bodyRight: bodyRightAt(baseZ, 0) };
+  }
   const rail = Math.min(RAIL_MAX, Math.max(20, vw * 0.035));
   const left = Math.min(copyRight + COPY_GUTTER, vw * 0.62); // clean background starts here
   const right = vw - Math.max(copyLeft, rail); // mirror the copy's margin, never past the rail
@@ -92,7 +108,8 @@ function frameBias(
   const frameX = -((centre / vw) * 2 - 1) * halfW;
   // The old floor still guards the fallback: never shove the body so far right
   // that more than a fifth of it leaves the frame.
-  return { wideZ, frameX: fits ? frameX : Math.max(frameX, APP_HALF_W - 1.44 * halfW) };
+  const x = fits ? frameX : Math.max(frameX, APP_HALF_W - 1.44 * halfW);
+  return { wideZ, frameX: x, bodyRight: bodyRightAt(wideZ, x) };
 }
 
 // Neutral white radial, tinted via material.color — the iris glow behind the
@@ -228,6 +245,12 @@ export function initStage(canvas: HTMLCanvasElement, hooks: StageHooks): StageAp
     const framing = frameBias(aspect, w, baseZ, copy?.left ?? 0, copy?.right ?? 0);
     rig.wideZ = framing.wideZ;
     rig.frameX = framing.frameX;
+    // The hud is the wide shot's slate — hand it the bezel's own margin. Where
+    // the body bleeds past the frame this goes negative; the CSS floors it.
+    document.documentElement.style.setProperty(
+      "--mini-right",
+      `${Math.round(framing.bodyRight)}px`,
+    );
   };
   resize();
   rig.reset();
