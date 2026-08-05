@@ -54,26 +54,35 @@ const MAX_PULLBACK = 1.5; // how far the lens may back off to make the body fit
 // layout rather than a backdrop. Punches were never the problem: once the lens
 // is in, the text sits over one flat surface.
 //
-// So derive the framing from the copy column instead of guessing a constant.
-// But clearing the copy is only half of it: the band between the copy and the
-// right edge is narrower than the body at every ordinary desktop size, and
-// anchoring the left edge alone used to spend the difference off the right —
-// copy with a 380px margin, product sheared by the viewport with none. So fit
-// to the band: back the lens off until the whole body sits inside it, then
-// centre it there, right bezel landing on the same rail the nav and the REC hud
-// hang from. Below ~1200px there is no band worth fitting to; a hero shrunk to
-// a stamp is worse than a crop, so past the pull-back cap nothing is spent at
-// all — full size, left edge honest, surplus bleeding right as it used to.
+// So derive the framing from the copy column instead of guessing a constant —
+// both edges of it. Clearing the copy is only half the job: the band between
+// the copy and the right of the frame is narrower than the body at every
+// ordinary desktop size, and anchoring the left edge alone spends the
+// difference off the right, leaving the copy on a 380px margin and the product
+// sheared by the viewport with none. Fit to the band instead: back the lens off
+// until the whole body sits inside, then centre it there.
+//
+// The band's right edge mirrors the copy's left margin, so the miniature ends
+// exactly as far from the frame as the headline begins — the hero reads as one
+// centred block rather than a column of text with a product shoved against the
+// glass. (The nav and the REC hud keep their own tighter rail; they are the
+// frame, not the content. The rail is only a floor here.)
+//
+// Below ~1300px there is no band worth fitting to; a hero shrunk to a stamp is
+// worse than a crop, so past the pull-back cap nothing is spent at all — full
+// size, left edge honest, surplus bleeding right as it used to.
 function frameBias(
   aspect: number,
   vw: number,
   baseZ: number,
+  copyLeft: number,
   copyRight: number,
 ): { wideZ: number; frameX: number } {
   if (aspect < 1.05) return { wideZ: baseZ, frameX: 0 }; // stacked: copy over a dimmed stage
   const rail = Math.min(RAIL_MAX, Math.max(20, vw * 0.035));
   const left = Math.min(copyRight + COPY_GUTTER, vw * 0.62); // clean background starts here
-  const band = Math.max(1, vw - rail - left);
+  const right = vw - Math.max(copyLeft, rail); // mirror the copy's margin, never past the rail
+  const band = Math.max(1, right - left);
   const fit = (APP_HALF_W * vw) / (band * TAN_HALF * aspect); // z at which the body is exactly `band`
   const fits = fit <= baseZ * MAX_PULLBACK;
   const wideZ = fits ? Math.max(baseZ, fit) : baseZ;
@@ -215,8 +224,8 @@ export function initStage(canvas: HTMLCanvasElement, hooks: StageHooks): StageAp
     camera.aspect = aspect;
     camera.updateProjectionMatrix();
     const baseZ = Math.max(6.4, 3.95 / (2 * TAN_HALF * aspect));
-    const copy = document.querySelector(".hero-copy");
-    const framing = frameBias(aspect, w, baseZ, copy ? copy.getBoundingClientRect().right : 0);
+    const copy = document.querySelector(".hero-copy")?.getBoundingClientRect();
+    const framing = frameBias(aspect, w, baseZ, copy?.left ?? 0, copy?.right ?? 0);
     rig.wideZ = framing.wideZ;
     rig.frameX = framing.frameX;
   };

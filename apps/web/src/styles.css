@@ -307,11 +307,16 @@ html[data-theme="light"] .nav {
   -webkit-backdrop-filter: blur(16px);
   border-color: var(--line);
 }
+/* Wider than the document container the sections below use (1240). The hero is
+   a frame, not a column: the copy's left margin is what the miniature's right
+   margin mirrors, so a narrower container here would buy symmetry by shrinking
+   the product. At 1580 the two margins meet at ~210px with the product at full
+   size. */
 .hero-inner {
   position: relative;
   z-index: 2;
   width: 100%;
-  max-width: 1240px;
+  max-width: 1580px;
   margin: 0 auto;
   padding: 96px clamp(22px, 4.5vw, 48px) 72px;
 }
