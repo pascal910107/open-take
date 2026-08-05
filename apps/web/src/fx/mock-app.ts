@@ -334,9 +334,12 @@ export function buildMockApp(): MockApp {
   modal.add(veil, modalCard, modalTitle, field, caret, ghostBtn, confirmBtn, confirmBar);
   ui.add(modal);
 
-  // toast
+  // toast — lands in the header's empty middle, not on the New button. It sits
+  // 0.2 in front of the UI plane, so an off-axis lens throws it further right
+  // still; anywhere past x ≈ 0.6 and it covers the very button the take just
+  // pressed.
   const toast = new Group();
-  toast.position.set(1.02, 0.72, 0.2);
+  toast.position.set(0.52, 0.6, 0.2);
   toast.visible = false;
   const toastBase = slab(0.66, 0.13, 0.024, C.panel, { r: 0.045 });
   const toastDot = slab(0.05, 0.05, 0.014, C.ok, { r: 0.024, emissive: C.ok, glow: 0.9 });
