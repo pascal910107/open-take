@@ -324,20 +324,26 @@ export function buildMockApp(): MockApp {
   const caret = slab(0.014, 0.09, 0.012, C.accHi, { r: 0.005, emissive: C.accHi, glow: 0.9 });
   caret.position.set(-0.54, 0.06, 0.05);
   caret.visible = false;
+  // footer: ghost + confirm, right-aligned to the field above them. The card is
+  // 1.5 wide, so its right edge is 0.75 and the field's is 0.62 — a confirm
+  // button *centred* on 0.62 hangs 0.09 out over the card's own edge.
   const ghostBtn = slab(0.32, 0.13, 0.02, C.panel, { r: 0.045 });
-  ghostBtn.position.set(0.24, -0.3, 0.028);
+  ghostBtn.position.set(-0.02, -0.3, 0.028);
   const confirmBtn = slab(0.44, 0.14, 0.03, C.acc, { r: 0.05, emissive: C.acc, glow: 0.65 });
-  confirmBtn.position.set(0.66 - 0.22, -0.3, 0.028);
-  confirmBtn.position.x = 0.62;
+  confirmBtn.position.set(0.62 - 0.22, -0.3, 0.028);
   const confirmBar = slab(0.22, 0.04, 0.012, 0xdad8ff, { r: 0.018, emissive: 0xdad8ff, glow: 0.4 });
-  confirmBar.position.set(0.62, -0.3, 0.05);
+  confirmBar.position.set(0.62 - 0.22, -0.3, 0.05);
   modal.add(veil, modalCard, modalTitle, field, caret, ghostBtn, confirmBtn, confirmBar);
   ui.add(modal);
 
-  // toast — lands in the header's empty middle, not on the New button. It sits
-  // 0.2 in front of the UI plane, so an off-axis lens throws it further right
-  // still; anywhere past x ≈ 0.6 and it covers the very button the take just
-  // pressed.
+  // toast — the header row, left of the New button. Not the corner a toast
+  // usually takes, because in this mock both corners are spoken for: the New
+  // button owns the top right, and the bar shot 04 grows owns the bottom right.
+  // Under the chart card there IS a free strip, but it sits at ~90% of the
+  // punched frame's height and the hero canvas routinely runs taller than the
+  // viewport — a toast down there is below the fold exactly when it fires.
+  // It rides 0.2 in front of the UI plane, so an off-axis lens throws it
+  // further right than its x suggests; past x ≈ 0.6 it reaches the button.
   const toast = new Group();
   toast.position.set(0.52, 0.6, 0.2);
   toast.visible = false;
