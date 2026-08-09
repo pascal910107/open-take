@@ -530,7 +530,7 @@ test("look: durationMs is required — a look IS its hold", () => {
     0,
     "a well-formed look validates clean",
   );
-  // biome-ignore lint/performance/noDelete: simulating a hand-edit that dropped the field
+  // simulating a hand-edit that dropped the field
   delete (c.events[0] as { durationMs?: number }).durationMs;
   const issues = validateComposition(c);
   assert.ok(

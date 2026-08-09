@@ -216,6 +216,7 @@ export type CiBriefOpts = {
  *  sure a newline in a title can't fake a fresh instruction line. */
 function dataLine(s: string, max = 240): string {
   const cleaned = s
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: matching them is the point — a control character in a PR title must not fake a new instruction line
     .replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
