@@ -13,12 +13,9 @@ import { stat as fsStat, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  SAY_IT_CARD,
-  type CompositionIssue,
-  type TakePaths,
-  type TakePlan,
   authProfile,
   buildBeatSheet,
+  type CompositionIssue,
   ciAllowedOrigins,
   ciTake,
   emitGithubOutputs,
@@ -28,9 +25,9 @@ import {
   formatNotes,
   inspectPage,
   makeTake,
-  readNotes,
-  profileDir,
   openPath,
+  profileDir,
+  readNotes,
   renderAbReel,
   renderBeforeAfter,
   renderCompositionFile,
@@ -41,10 +38,13 @@ import {
   requireTakeFiles,
   resolveTakePaths,
   revealPath,
+  SAY_IT_CARD,
   stagePrev,
+  type TakePaths,
+  type TakePlan,
   waitForNotes,
 } from "@open-take/runtime";
-import { installAgentSkill } from "./init";
+import { autoSyncAgentSkill, syncAgentSkill } from "./init";
 
 // how to invoke this CLI, for printed follow-up commands: the bin name when
 // installed, else the literal node path the user just ran (copy-pasteable).
@@ -161,8 +161,8 @@ const FLAGS_BY_CMD: Record<string, string[]> = {
     "--no-teaser",
     "--verbose",
   ],
-  init: [],
-  skill: [],
+  init: ["--force"],
+  skill: ["--force"],
 };
 
 function rejectUnknownFlags(cmd: string): void {
@@ -199,8 +199,8 @@ Usage:
   open-take auth   <name> [--url <login-url>]
   open-take ci     <url> [--start "<command>"] [--brief "<what to demo>"]
                    [--out demos/take.mp4] [--budget-usd 8] [--dry-run]
-  open-take init
-  open-take skill  [install]
+  open-take init   [--force]
+  open-take skill  [install [--force]]
 
   A take is TWO things on disk: the postable master at exactly your --out path
   (<out>.mp4), and a working directory beside it (<out>.take/) holding
@@ -341,7 +341,12 @@ Usage:
                                 artifact today — locally it is the thing you
                                 paste into Slack).
 
-  init    install the Open Take skill into this project for coding agents.
+  init    install the Open Take skill into this project for coding agents —
+          or update it: a re-run refreshes an unmodified skill to the copy
+          bundled with this CLI (a lock beside the skill proves "unmodified").
+          Local edits are kept; --force replaces them with the stock skill.
+          \`make\` quietly refreshes an unmodified skill the same way, so npm
+          upgrades reach the project without re-running init.
 
   skill   print the full agent guide (SKILL.md). \`skill install\` remains as a
           backwards-compatible alias for \`init\`.
@@ -484,15 +489,42 @@ async function main() {
     throw new Error("SKILL.md not found (re-run the package build)");
   };
 
-  if (cmd === "init") {
-    const installed = await installAgentSkill({
+  // package.json sits beside dist/ (or beside src/ in the monorepo) — the
+  // version stamps the skill lock so a lock file names the CLI that wrote it.
+  const cliVersion = async (): Promise<string | undefined> => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    return readFile(resolve(here, "..", "package.json"), "utf8")
+      .then((t) => (JSON.parse(t) as { version?: string }).version)
+      .catch(() => undefined);
+  };
+
+  // `init` and its alias `skill install`: install the skill, or refresh an
+  // installed one to this CLI's copy. Hash-verified local edits are the
+  // user's — refused without --force, so a routine re-init can never eat a
+  // deliberately customized playbook.
+  const runInit = async (): Promise<void> => {
+    const res = await syncAgentSkill({
       root: process.cwd(),
       skillText: await bundledSkill(),
+      cliVersion: await cliVersion(),
+      overwriteModified: has("--force"),
     });
+    if (res.action === "kept")
+      throw new Error(
+        `init: ${res.canonicalPath} has local edits — keeping them.\n` +
+          `To replace them with this CLI's stock skill: ${INVOKE} init --force`,
+      );
     process.stdout.write(
-      `initialized: ${installed.canonicalPath}\n` +
-        `Ask your agent to "make a demo of <your app>".\n`,
+      res.drift === "missing"
+        ? `initialized: ${res.canonicalPath}\nAsk your agent to "make a demo of <your app>".\n`
+        : res.drift === "current"
+          ? `up to date: ${res.canonicalPath}\n`
+          : `updated: ${res.canonicalPath} (now matches this CLI)\n`,
     );
+  };
+
+  if (cmd === "init") {
+    await runInit();
     return;
   }
 
@@ -540,13 +572,25 @@ async function main() {
     // WOULD install it.
     const dryRun = has("--dry-run");
     // The agent discovers the playbook the same way an interactive one does:
-    // installed in the project. Idempotent, so a repo that already ran `init`
-    // just gets the bundled version refreshed to match this CLI — the skill
-    // the agent follows is always the one this binary shipped with.
+    // installed in the project. An unmodified skill is refreshed to the copy
+    // bundled with this CLI (skill and binary must agree on the verbs); a
+    // hash-verified locally-edited skill is the operator's deliberate playbook
+    // and is kept — with a warning, since the skew is now theirs to own.
     const skillPath = dryRun
       ? resolve(process.cwd(), ".claude", "skills", "open-take", "SKILL.md")
-      : (await installAgentSkill({ root: process.cwd(), skillText: await bundledSkill() }))
-          .claudePath;
+      : await (async () => {
+          const res = await syncAgentSkill({
+            root: process.cwd(),
+            skillText: await bundledSkill(),
+            cliVersion: await cliVersion(),
+          });
+          if (res.action === "kept")
+            process.stderr.write(
+              `⚠ ci: ${res.canonicalPath} has local edits — the agent follows YOUR version, ` +
+                `not this CLI's (\`${INVOKE} init --force\` restores stock)\n`,
+            );
+          return res.claudePath;
+        })();
 
     // Chrome resolves BEFORE the agent starts burning budget: the first run on
     // a cold runner downloads ~150MB, and that wait should not sit inside an
@@ -651,6 +695,24 @@ async function main() {
     const out = normalizeOut(flag("--out") ?? DEFAULT_OUT);
     if (!planPath) throw new Error("make: missing --plan <plan.json>");
     const plan = JSON.parse(await readFile(planPath, "utf8")) as TakePlan;
+    // npm upgrades ship a new SKILL.md inside the package, but the copy agents
+    // read lives in the project — refresh it here, after validation (make is
+    // the verb every session runs, and it already writes into this tree).
+    // Only a PROVABLY unmodified skill is touched — see autoSyncAgentSkill —
+    // and never fatally: a demo must not fail over its own documentation.
+    const skillSync = await autoSyncAgentSkill({
+      root: process.cwd(),
+      skillText: await bundledSkill(),
+      cliVersion: await cliVersion(),
+    }).catch(() => ({ action: "none" }) as const);
+    if (skillSync.action === "refreshed")
+      process.stderr.write(
+        `⟳ agent skill refreshed to match this CLI: ${skillSync.canonicalPath}\n`,
+      );
+    else if (skillSync.action === "hint")
+      process.stderr.write(
+        `note: ${skillSync.canonicalPath} predates skill version tracking — \`${INVOKE} init\` updates it\n`,
+      );
     const fpsFlag = flag("--fps");
     const fps = fpsFlag ? Number(fpsFlag) : undefined;
     const scaleFlag = flag("--capture-scale");
@@ -940,16 +1002,8 @@ async function main() {
   }
 
   if (cmd === "skill") {
-    const text = await bundledSkill();
-    if (positional[0] === "install") {
-      const installed = await installAgentSkill({ root: process.cwd(), skillText: text });
-      process.stdout.write(
-        `installed: ${installed.canonicalPath}\n` +
-          `Ask your agent to "make a demo of <your app>".\n`,
-      );
-    } else {
-      process.stdout.write(text);
-    }
+    if (positional[0] === "install") await runInit();
+    else process.stdout.write(await bundledSkill());
     return;
   }
 
