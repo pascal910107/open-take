@@ -12,6 +12,7 @@ import { restStageScale } from "./math";
 import {
   type BBox,
   type CameraConfig,
+  type Caption,
   type CaptureLog,
   type CompEvent,
   type CursorConfig,
@@ -172,6 +173,28 @@ export function planComposition(log: CaptureLog, opts: PlanOpts = {}): TakeCompo
   const start = log.start ? mapPt(log.start) : { x: vW * 0.25, y: vH * 0.9 };
   const durationMs = Math.max(log.tEndMs ?? 0, lastEnd + cursor.holdMs + cursor.zoomOutMs + 400);
 
+  // --- captions: per-step caption strings → viewer-facing subtitle windows.
+  // Deterministic tiling ANCHORED AT ACTION INSTANTS: a caption lands exactly
+  // when its beat's action does — the camera has finished (or nearly finished)
+  // its move by then, so the swap happens over a settled frame. Anchoring at
+  // the zoom DEPARTURE (the first design) put every caption swap inside a
+  // camera ramp, and two simultaneous motions read as "the subtitle moves
+  // with the zoom" — the field complaint that moved the anchor here. A
+  // caption holds until the next beat's action (never narrating someone
+  // else's beat); the last one rides out to the end. All times
+  // untrimmed-timeline, editable afterwards like any composition field.
+  const captions: Caption[] = [];
+  log.events.forEach((c, i) => {
+    const text = c.caption?.trim();
+    if (!text) return;
+    const e = events[i]!;
+    const prevEnd = captions.length ? captions[captions.length - 1]!.toMs : 0;
+    const fromMs = Math.max(e.tMs, prevEnd);
+    const next = events[i + 1];
+    const toMs = Math.max(fromMs + 300, next ? next.tMs : durationMs);
+    captions.push({ fromMs, toMs, text });
+  });
+
   return {
     output: { width: oW, height: oH, fps },
     source: { videoUrl: "/capture.mp4", videoWidth: vW, videoHeight: vH, viewport: log.viewport },
@@ -181,6 +204,7 @@ export function planComposition(log: CaptureLog, opts: PlanOpts = {}): TakeCompo
     start,
     events,
     durationMs,
+    ...(captions.length ? { captions } : {}),
   };
 }
 

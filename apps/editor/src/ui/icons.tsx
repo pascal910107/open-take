@@ -124,3 +124,12 @@ export const IcSolid = ({ size = 18 }: P = {}) => (
     <rect x="4" y="4" width="16" height="16" rx="4" fill="currentColor" opacity=".82" />
   </svg>
 );
+
+export const IcOverlay = (p: P = {}) =>
+  I(
+    <>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M7 15h10M9 18h6" />
+    </>,
+    p,
+  );

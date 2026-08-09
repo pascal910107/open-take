@@ -193,3 +193,37 @@ export function stageInspects(s: {
 }): boolean {
   return s.ready && s.selectedBeat >= 0 && !s.playing && !s.comparing;
 }
+
+// --- overlays (captions + title card) ---------------------------------------
+// Content overlays are editable boundary too: text and existence are the
+// human's call; WINDOW timing stays agent/JSON territory (it is tied to beat
+// instants the editor has no gesture for yet).
+
+export function setCaptionText(c: TakeComposition, i: number, text: string): TakeComposition {
+  const captions = (c.captions ?? []).map((cap, j) => (j === i ? { ...cap, text } : cap));
+  return { ...c, captions };
+}
+
+export function removeCaption(c: TakeComposition, i: number): TakeComposition {
+  const captions = (c.captions ?? []).filter((_, j) => j !== i);
+  const { captions: _drop, ...rest } = c;
+  return captions.length ? { ...rest, captions } : rest;
+}
+
+export function clearCaptions(c: TakeComposition): TakeComposition {
+  const { captions: _drop, ...rest } = c;
+  return rest;
+}
+
+export function setTitleCard(
+  c: TakeComposition,
+  patch: Partial<{ title: string; subtitle: string }>,
+): TakeComposition {
+  const cur = c.titleCard ?? { title: "" };
+  return { ...c, titleCard: { ...cur, ...patch } };
+}
+
+export function removeTitleCard(c: TakeComposition): TakeComposition {
+  const { titleCard: _drop, ...rest } = c;
+  return rest;
+}

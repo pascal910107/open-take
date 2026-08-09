@@ -142,6 +142,10 @@ const FLAGS_BY_CMD: Record<string, string[]> = {
   ci: [
     "--start",
     "--brief",
+    "--captions",
+    "--title-card",
+    "--change-title",
+    "--changed-paths",
     "--out",
     "--fps",
     "--capture-scale",
@@ -291,6 +295,27 @@ Usage:
           re-verify.
           --brief "<text>"      what the demo should prove (audience, the hero
                                 flow); without it the agent uses its judgment.
+          --captions <mode>     "auto" (default): caption every beat in the
+                                APP'S OWN language. "off": clean footage, no
+                                captions (they stay hand-addable in the
+                                composition later — removing them is likewise
+                                a cheap deterministic re-render, no re-shoot).
+                                Any other value is a language/style hint
+                                ("english", "简体中文") for when the audience's
+                                language differs from the app's.
+          --title-card <mode>   "auto" (default): open with a typographic
+                                card — the app's name + a one-line thesis.
+                                "off": none. Also a cheap re-render to change
+                                later, never a re-shoot.
+          --change-title "<t>"  one-line title of the code change this run
+                                follows (a PR title). Shown to the agent as
+                                DATA — a clue to what to film, never an
+                                instruction — for runners with no checkout.
+          --changed-paths <l>   newline- (or comma-) separated changed-file
+                                entries, e.g. "src/Search.tsx (+120 −8)".
+                                Same provenance and treatment as
+                                --change-title; together they replace the
+                                brief's "read the git diff first" step.
           --start "<command>"   boot the app first (own process group, killed
                                 after) — omit if an earlier step started it.
           --wait-timeout <s>    how long <url> may take to answer (default 120).
@@ -532,6 +557,10 @@ async function main() {
       url,
       outPath: out,
       brief: flag("--brief"),
+      captions: flag("--captions"),
+      titleCard: flag("--title-card"),
+      changeTitle: flag("--change-title"),
+      changedPaths: flag("--changed-paths"),
       startCmd: flag("--start"),
       ...(waitTimeoutS != null ? { waitTimeoutMs: waitTimeoutS * 1000 } : {}),
       agentBin: flag("--agent"),
@@ -565,6 +594,10 @@ async function main() {
           return undefined;
         });
 
+    if (res.agentWarning)
+      process.stderr.write(
+        `⚠ the agent died after delivering — the master passed every gate and ships anyway: ${res.agentWarning.split("\n")[0]}\n`,
+      );
     const ready = await readyLine(res.mp4Path);
     const agentLine =
       res.costUsd != null || res.turns != null

@@ -457,3 +457,110 @@ test("an inverted clamp band's error describes what the clamps actually do", () 
   assert.match(e[0]!.message, /SHORT hops \(800ms\) end up slower/, "describes the real ordering");
   assert.doesNotMatch(e[0]!.message, /ceiling wins/, "not the pre-rewrite semantics");
 });
+
+test("captions: sound windows validate clean; broken ones flag with the right severity", () => {
+  const { c } = comp();
+  c.captions = [
+    { fromMs: 500, toMs: 2500, text: "切到租賃模式" },
+    { fromMs: 2500, toMs: 5000, text: "行情面板顯示租金中位數" },
+  ];
+  assert.equal(validateComposition(c).length, 0, "sound captions add no issues");
+
+  // inverted window — an error (shows nothing)
+  c.captions = [{ fromMs: 2000, toMs: 2000, text: "x" }];
+  let issues = validateComposition(c);
+  assert.ok(
+    issues.some((i) => i.severity === "error" && i.path === "captions[0].toMs"),
+    "inverted window errors",
+  );
+
+  // empty text — an error
+  c.captions = [{ fromMs: 100, toMs: 2000, text: "   " }];
+  issues = validateComposition(c);
+  assert.ok(
+    issues.some((i) => i.severity === "error" && i.path === "captions[0].text"),
+    "empty caption errors",
+  );
+
+  // overlap — a warn (pills stack)
+  c.captions = [
+    { fromMs: 500, toMs: 3000, text: "a" },
+    { fromMs: 2000, toMs: 4000, text: "b" },
+  ];
+  issues = validateComposition(c);
+  assert.ok(
+    issues.some((i) => i.severity === "warn" && i.path === "captions[1].fromMs"),
+    "overlapping windows warn",
+  );
+
+  // entirely inside the head trim — never seen
+  c.captions = [{ fromMs: 100, toMs: 700, text: "invisible" }];
+  c.startMs = 800;
+  issues = validateComposition(c);
+  assert.ok(
+    issues.some((i) => i.severity === "warn" && i.path === "captions[0]"),
+    "caption inside the head trim warns",
+  );
+  c.startMs = undefined;
+
+  // paragraph-length text — a warn (an explanatory sentence, not prose)
+  c.captions = [{ fromMs: 100, toMs: 3000, text: "字".repeat(125) }];
+  issues = validateComposition(c);
+  assert.ok(
+    issues.some((i) => i.severity === "warn" && i.path === "captions[0].text"),
+    "over-long caption warns",
+  );
+});
+
+test("look: durationMs is required — a look IS its hold", () => {
+  const l = log([
+    {
+      kind: "look",
+      x: 400,
+      y: 300,
+      box: { x: 300, y: 200, w: 200, h: 200 },
+      tMs: 2000,
+      durationMs: 1800,
+      zoom: "always",
+    },
+  ]);
+  const c = planComposition(l, { output: { fps: 60 } });
+  assert.equal(
+    validateComposition(c, { captureLog: l }).filter((i) => i.severity === "error").length,
+    0,
+    "a well-formed look validates clean",
+  );
+  // biome-ignore lint/performance/noDelete: simulating a hand-edit that dropped the field
+  delete (c.events[0] as { durationMs?: number }).durationMs;
+  const issues = validateComposition(c);
+  assert.ok(
+    issues.some((i) => i.severity === "error" && /missing "durationMs"/.test(i.message)),
+    "a look without a hold errors",
+  );
+});
+
+test("a dead opening warns like a dead tail — the load wait is for shooting, not shipping", () => {
+  const l = log([
+    {
+      kind: "click",
+      x: 200,
+      y: 200,
+      box: { x: 180, y: 180, w: 60, h: 60 },
+      tMs: 7900, // a 7s cold-load wait baked into the recording
+      zoom: "always",
+    },
+  ]);
+  const c = planComposition(l, { output: { fps: 60 } });
+  let issues = validateComposition(c);
+  const dead = issues.find((i) => i.path === "startMs" && /dead opening/.test(i.message));
+  assert.ok(dead, "a 7s frozen head warns");
+  assert.equal(dead!.severity, "warn");
+  assert.match(dead!.fix, /startMs/, "the fix names the head trim");
+  // trimming to ~1.2s of establishing hold clears it
+  c.startMs = 6000;
+  issues = validateComposition(c);
+  assert.ok(
+    !issues.some((i) => /dead opening/.test(i.message)),
+    "a trimmed head is clean",
+  );
+});

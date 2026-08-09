@@ -114,11 +114,13 @@ export default makeScene2D("take", function* (view) {
         </Rect>
 
         {/* click ripples — pointer-landing beats only (scroll/press have no
-          spatial click point). A dropFiles ripples at its DROP point on
-          RELEASE — not at the off-content carry entry — and stays on even when
-          the ghost card is disabled (parity with the editor preview). */}
+          spatial click point; a look touches nothing, and a ripple at a point
+          the cursor never visited would invent a click that did not happen).
+          A dropFiles ripples at its DROP point on RELEASE — not at the
+          off-content carry entry — and stays on even when the ghost card is
+          disabled (parity with the editor preview). */}
         {comp.events
-          .filter((e) => e.kind !== "scroll" && e.kind !== "press")
+          .filter((e) => e.kind !== "scroll" && e.kind !== "press" && e.kind !== "look")
           .map((e, index) => {
             const ms = comp.cursor.rippleMs / 1000;
             const at =
@@ -301,6 +303,130 @@ export default makeScene2D("take", function* (view) {
       view.add(pill(b.text, op, false));
     }
     if (review.label) view.add(pill(review.label, 1, true));
+  }
+
+  // Viewer-facing captions — SCREEN space like the review decor, but a
+  // first-class composition field drawn on EVERY render including the master.
+  // Bottom-CENTER (the subtitle slot), so review badges (bottom-left) never
+  // collide with it. Footage shows what happened; the caption says what it
+  // means — the difference between a demo a stranger can follow and "the
+  // screen moves around". 160ms fades: soft under motion blur, never a pop.
+  //
+  // Anchored INSIDE the framed card (above the at-rest backdrop band), never
+  // on the frame's edge: a pill straddling the card/backdrop seam has the
+  // zooming card boundary sweep THROUGH it, which reads as the caption itself
+  // moving — the field complaint that motivated this anchor. Sized for the
+  // couch, not the badge rail: 34px @1080 with a 600 weight (CJK at 500 reads
+  // thin), a hairline border and a soft drop shadow so it sits ON the video
+  // as a produced element instead of a debug overlay.
+  // CINEMA-style, not boxed: film subtitles earn their look from big
+  // confident type sitting on a soft bottom scrim — the pill/box treatment
+  // (two attempts, both rejected in the field) reads as a debug overlay no
+  // matter how it is dressed. The scrim is constant while captions exist
+  // (a pulsing scrim is worse than none) and the type carries a TIGHT
+  // shadow: at 1080p the footage is 4K-downsampled (supersampled-sharp)
+  // while overlays render native, so overlays must lean on stroke weight
+  // and contrast — a wide blur reads as smear next to that footage.
+  const k = oH / 1080;
+  const FONT = "system-ui, -apple-system, 'Segoe UI', 'Noto Sans', sans-serif";
+  if (comp.captions?.length) {
+    const cardBottom = (oH / 2) * comp.framing.insetFrac;
+    const scrimH = 190 * k;
+    view.add(
+      <Rect
+        width={oW}
+        height={scrimH}
+        position={[0, oH / 2]}
+        offset={[0, 1]}
+        fill={
+          new Gradient({
+            type: "linear",
+            from: { x: 0, y: -scrimH / 2 },
+            to: { x: 0, y: scrimH / 2 },
+            stops: [
+              { offset: 0, color: "rgba(0,0,0,0)" },
+              { offset: 1, color: "rgba(0,0,0,0.55)" },
+            ],
+          })
+        }
+      />,
+    );
+    for (const c of comp.captions) {
+      const op = () => {
+        const ms = t() * 1000;
+        if (ms < c.fromMs || ms >= c.toMs) return 0;
+        const inF = Math.min(1, (ms - c.fromMs) / 160);
+        const outF = Math.min(1, (c.toMs - ms) / 160);
+        return Math.min(inF, outF);
+      };
+      view.add(
+        <Txt
+          text={c.text}
+          fontFamily={FONT}
+          fontSize={36 * k}
+          fontWeight={600}
+          letterSpacing={0.8 * k}
+          fill={"rgba(255,255,255,0.98)"}
+          shadowColor={"rgba(0,0,0,0.9)"}
+          shadowBlur={6 * k}
+          shadowOffset={[0, 2 * k]}
+          maxWidth={oW * 0.82}
+          textWrap={true}
+          textAlign={"center"}
+          position={[0, cardBottom - 26 * k]}
+          offset={[0, 1]}
+          opacity={op}
+        />,
+      );
+    }
+  }
+
+  // Opening title card — full-frame scrim + the app/thesis in big type over
+  // the establishing hold, gone by untilMs. The cheapest "produced, not
+  // captured" signal; typographic and deterministic by design (no generated
+  // imagery — brand-safe, language follows the author, deletable field).
+  if (comp.titleCard?.title) {
+    const tc = comp.titleCard;
+    const untilMs = tc.untilMs ?? (comp.startMs ?? 0) + 1800;
+    const tcOp = () => {
+      const ms = t() * 1000;
+      if (ms >= untilMs) return 0;
+      return Math.min(1, (untilMs - ms) / 300);
+    };
+    view.add(
+      <Rect width={oW} height={oH} position={[0, 0]} fill={"rgba(6,7,14,0.55)"} opacity={tcOp} />,
+    );
+    view.add(
+      <Txt
+        text={tc.title}
+        fontFamily={FONT}
+        fontSize={72 * k}
+        fontWeight={800}
+        letterSpacing={2 * k}
+        fill={"rgba(255,255,255,0.98)"}
+        shadowColor={"rgba(0,0,0,0.8)"}
+        shadowBlur={10 * k}
+        shadowOffset={[0, 3 * k]}
+        position={[0, tc.subtitle ? -26 * k : 0]}
+        opacity={tcOp}
+      />,
+    );
+    if (tc.subtitle)
+      view.add(
+        <Txt
+          text={tc.subtitle}
+          fontFamily={FONT}
+          fontSize={30 * k}
+          fontWeight={500}
+          letterSpacing={1 * k}
+          fill={"rgba(255,255,255,0.78)"}
+          shadowColor={"rgba(0,0,0,0.8)"}
+          shadowBlur={8 * k}
+          shadowOffset={[0, 2 * k]}
+          position={[0, 40 * k]}
+          opacity={tcOp}
+        />,
+      );
   }
 
   yield* tween(cam.T, (v) => t(v * cam.T), linear);

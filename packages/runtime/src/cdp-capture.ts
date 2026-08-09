@@ -31,22 +31,23 @@ import {
   scrollDeltaByTextJs,
   scrollDeltaSelectorJs,
   selectAllInFocusedJs,
+  selectOptionJs,
 } from "./capture";
 import {
   type Browser,
   type CDP,
-  Screencast,
   encodeFrames,
   fitViewport,
   launchBrowser,
   makeFrameDir,
+  Screencast,
 } from "./cdp";
 import { resolveNavigateUrl } from "./nav";
 import {
   DEFAULT_SETTLE_BUDGET_MS,
-  PAINT_BLIND_FRAC,
   installActivityProbe,
   makeBudgetGovernor,
+  PAINT_BLIND_FRAC,
   settle,
 } from "./settle";
 import type { TakePlan } from "./types";
@@ -515,6 +516,7 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
           tMs,
           sel: label,
           note: step.note,
+          ...(step.caption ? { caption: step.caption } : {}),
           text: step.value,
           durationMs: Date.now() - tType,
           ...(step.zoom ? { zoom: step.zoom } : {}),
@@ -603,6 +605,7 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
           tMs,
           sel: label,
           note: step.note,
+          ...(step.caption ? { caption: step.caption } : {}),
           durationMs: drawnMs,
           ease: dragEase,
           ...(step.zoom ? { zoom: step.zoom } : {}),
@@ -720,6 +723,7 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
           tMs,
           sel: label,
           note: step.note,
+          ...(step.caption ? { caption: step.caption } : {}),
           durationMs: carriedMs,
           ease: dragEase,
           files,
@@ -780,6 +784,7 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
           dy,
           durationMs: Date.now() - tScroll,
           note: step.note,
+          ...(step.caption ? { caption: step.caption } : {}),
         });
         await hold(800);
         continue;
@@ -811,6 +816,7 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
           tMs,
           sel: label,
           note: step.note,
+          ...(step.caption ? { caption: step.caption } : {}),
           durationMs: dwell,
           ...(step.zoom ? { zoom: step.zoom } : {}),
         });
@@ -818,6 +824,92 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
         // A hover DWELLS on its target and the cursor is parked for all of it, so
         // this settle is the ONLY room the next glide has. 300ms could not fit
         // one (travelMaxMs is 850 at the shipped pace) and the cursor darted.
+        await hold(900);
+        continue;
+      }
+
+      if (step.action === "select") {
+        // Native <select>: set value + dispatch input/change (see
+        // selectOptionJs — clicking one hangs the capture). Visually this is
+        // a click beat: the cursor travels to the control and its value
+        // changes under the pointer, which is exactly what a viewer sees a
+        // user do, so it enters the log as `click`.
+        const label = step.text ?? step.selector;
+        const tMs = Date.now() - t0;
+        const r = await cdp.send<{ result?: { value?: unknown } }>("Runtime.evaluate", {
+          expression: selectOptionJs({ selector: step.selector, text: step.text }, step.value),
+          returnByValue: true,
+          awaitPromise: true,
+        });
+        const raw = r.result?.value;
+        const str = typeof raw === "string" ? raw : raw == null ? "NOTFOUND" : JSON.stringify(raw);
+        if (str === "NOTFOUND" || str === "NOTASELECT" || str === "NOOPTION") {
+          skip(
+            "select",
+            label,
+            str === "NOTASELECT"
+              ? "target is not a <select> (use click for custom dropdowns)"
+              : str === "NOOPTION"
+                ? `no option matching ${JSON.stringify(step.value)}`
+                : "target not found",
+          );
+          await hold(600);
+          continue;
+        }
+        const box = findBox(evalValue(str));
+        if (!box) {
+          skip("select", label, "target not found");
+          await hold(600);
+          continue;
+        }
+        events.push({
+          kind: "click",
+          ...center(box),
+          box,
+          tMs,
+          sel: label,
+          note: step.note,
+          ...(step.caption ? { caption: step.caption } : {}),
+          ...(step.zoom ? { zoom: step.zoom } : {}),
+        });
+        await hold(1300);
+        continue;
+      }
+
+      if (step.action === "look") {
+        // CAMERA-only: resolve the target's bbox so the compositor can frame
+        // it, then just WAIT out the hold. Nothing is dispatched to the page
+        // and the synthetic cursor stays parked (compositor: no travel leg,
+        // no ripple) — cursor movement promises an action, and a look makes
+        // none. Zoom defaults to "always": framing IS this beat's content.
+        // (Unrelated to the A/B `look=` knob, which names a backdrop preset.)
+        const label = step.text ?? step.selector;
+        const tMs = Date.now() - t0;
+        const box = step.text
+          ? await evalBox(cdp, boxByTextJs(step.text))
+          : step.selector
+            ? await evalBox(cdp, boxSelectorJs(step.selector))
+            : null;
+        if (!box) {
+          skip("look", label, step.text || step.selector ? "target not found" : "no target given");
+          await hold(600);
+          continue;
+        }
+        const dwell = step.durationMs ?? 1800;
+        events.push({
+          kind: "look",
+          ...center(box),
+          box,
+          tMs,
+          sel: label,
+          note: step.note,
+          ...(step.caption ? { caption: step.caption } : {}),
+          durationMs: dwell,
+          zoom: step.zoom ?? "always",
+        });
+        await sleep(dwell);
+        // The cursor is parked through the hold (like hover/press), so this
+        // settle is the entire window the next travel has to glide in.
         await hold(900);
         continue;
       }
@@ -854,6 +946,7 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
           keys: step.keys,
           sel: step.text ?? step.selector,
           note: step.note,
+          ...(step.caption ? { caption: step.caption } : {}),
           durationMs: dwell,
           ...(step.zoom ? { zoom: step.zoom } : {}),
         });
@@ -867,11 +960,23 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
       // click: timestamp, resolve bbox + programmatic click in one eval
       const label = step.text ?? step.selector;
       const tMs = Date.now() - t0;
-      const box = step.text
-        ? await evalBox(cdp, clickByTextJs(step.text))
+      // the locators refuse to .click() a <select> (it hangs the capture) and
+      // say so with this sentinel — name the real fix instead of "not found"
+      const clickRaw = step.text
+        ? await evalString(cdp, clickByTextJs(step.text))
         : step.selector
-          ? await evalBox(cdp, clickBySelectorJs(step.selector))
+          ? await evalString(cdp, clickBySelectorJs(step.selector))
           : null;
+      if (clickRaw === "SELECTINERT") {
+        skip(
+          "click",
+          label,
+          "clicking a native <select> does nothing headless (inert, no popup) — use the `select` action",
+        );
+        await hold(600);
+        continue;
+      }
+      const box = clickRaw ? findBox(evalValue(clickRaw)) : null;
       if (box) {
         events.push({
           kind: "click",
@@ -880,6 +985,7 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
           tMs,
           sel: label,
           note: step.note,
+          ...(step.caption ? { caption: step.caption } : {}),
           ...(step.zoom ? { zoom: step.zoom } : {}),
         });
       } else {

@@ -65,6 +65,7 @@ const KIND_LABEL: Record<CompEvent["kind"], string> = {
   dropFiles: "drop",
   scroll: "scroll",
   hover: "hover",
+  look: "look",
   press: "key",
 };
 

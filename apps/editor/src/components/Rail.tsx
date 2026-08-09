@@ -1,9 +1,9 @@
 // The icon rail — the reference navigation move: one icon per settings
 // category; clicking opens that category's panel. Icons over text walls.
 import type { JSX } from "react";
-import { IcAgent, IcBg, IcClip, IcCursor, IcFrame, IcMotion, IcZoom } from "../ui/icons";
+import { IcAgent, IcBg, IcClip, IcCursor, IcFrame, IcMotion, IcOverlay, IcZoom } from "../ui/icons";
 
-export type PaneKey = "zoom" | "bg" | "frame" | "cursor" | "motion" | "clip" | "agent";
+export type PaneKey = "zoom" | "bg" | "frame" | "cursor" | "motion" | "overlays" | "clip" | "agent";
 
 const ITEMS: { key: PaneKey; label: string; icon: () => JSX.Element }[] = [
   { key: "zoom", label: "Zoom", icon: () => <IcZoom /> },
@@ -11,6 +11,7 @@ const ITEMS: { key: PaneKey; label: string; icon: () => JSX.Element }[] = [
   { key: "frame", label: "Frame", icon: () => <IcFrame /> },
   { key: "cursor", label: "Cursor", icon: () => <IcCursor /> },
   { key: "motion", label: "Motion", icon: () => <IcMotion /> },
+  { key: "overlays", label: "Overlays", icon: () => <IcOverlay /> },
   { key: "clip", label: "Clip", icon: () => <IcClip /> },
   { key: "agent", label: "Agent", icon: () => <IcAgent /> },
 ];

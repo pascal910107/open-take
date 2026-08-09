@@ -25,6 +25,11 @@ export type CaptureEventBase = {
   /** selector / note, kept for editability */
   sel?: string;
   note?: string;
+  /** One-line viewer-facing caption from the plan step ("Applying the
+   *  filter re-prices every row"). planComposition turns these into `captions`
+   *  windows — the beat explains itself to a viewer who has never seen the
+   *  app, which footage alone cannot do. */
+  caption?: string;
   /** selective-zoom intent from the plan. Absent/"auto" ⇒ the camera director
    *  decides from the ground-truth log; "always"/"never" hard-override it (and
    *  cut the beat out of any cluster — an override is a segment boundary). */
@@ -91,6 +96,19 @@ export type CaptureHover = CaptureEventBase & {
   durationMs: number;
 };
 
+/** A look: a CAMERA-only beat. Nothing is done to the page and the cursor
+ *  does not move — the camera frames the target element and holds for
+ *  `durationMs`. This is the honest spelling of "show the viewer this
+ *  region": before it existed, the only way to aim the camera was to hover
+ *  a control you never meant to activate, which reads on screen as a
+ *  promise ("about to click") the video then breaks. `x,y` is the target's
+ *  center (zoom anchor); the cursor rests at its previous anchor. */
+export type CaptureLook = CaptureEventBase & {
+  kind: "look";
+  /** ms the framed hold occupies on screen */
+  durationMs: number;
+};
+
 /** A key press / shortcut: keyboard-driven, so the cursor holds (no travel).
  *  Holds for `durationMs` while the effect plays out; if a reveal element was
  *  located, `box` carries its bbox so the zoom can frame it. */
@@ -127,6 +145,7 @@ export type CaptureEvent =
   | CaptureDrag
   | CaptureScroll
   | CaptureHover
+  | CaptureLook
   | CapturePress
   | CaptureDropFiles;
 
@@ -203,7 +222,7 @@ export type GhostCardConfig = {
 };
 
 export type CompEvent = {
-  kind: "click" | "type" | "drag" | "scroll" | "hover" | "press" | "dropFiles";
+  kind: "click" | "type" | "drag" | "scroll" | "hover" | "look" | "press" | "dropFiles";
   tMs: number;
   /** anchor point (click / focus / drag start / hover) in video-px. For a
    *  scroll/press the cursor does not move; this is its resting point. */
@@ -363,6 +382,23 @@ export type MotionBlurConfig = {
  *  (inclusive) to `toMs` (exclusive) on the composition timeline. */
 export type ReviewBadge = { fromMs: number; toMs: number; text: string };
 
+/** One viewer-facing caption window on the DELIVERED video: `text` shows
+ *  bottom-center from `fromMs` (inclusive) to `toMs` (exclusive) on the
+ *  composition timeline. Unlike ReviewBadge this is a first-class, persisted
+ *  composition field rendered on masters — footage alone shows WHAT happened;
+ *  the caption says what it MEANS, which is the difference between a demo a
+ *  stranger can follow and "the screen moves around". Absent ⇒ rendered
+ *  output is byte-identical to a caption-less composition. */
+export type Caption = { fromMs: number; toMs: number; text: string };
+
+/** An opening title card: `title` (the app / the thesis) over a full-frame
+ *  scrim on top of the establishing hold, gone by `untilMs` (300ms fade).
+ *  Typographic and deterministic — rendered by the scene in the composition's
+ *  own look, in whatever language the author wrote, deletable like any field
+ *  — never generated imagery. The single cheapest "produced, not captured"
+ *  signal a demo can send. */
+export type TitleCard = { title: string; subtitle?: string; untilMs?: number };
+
 /** Render-time decoration for review copies and A/B variant reels: burned-in
  *  beat badges, a REVIEW watermark, and a per-variant corner label. Drawn by the
  *  scene in SCREEN space (fixed, outside the composition camera) so the text is
@@ -454,7 +490,19 @@ export type TakeComposition = {
    *  capture is the ground truth); only the delivered head moves. 0/absent =
    *  no trim. */
   startMs?: number;
-  /** render-time review decoration (badges/watermark/label); never persisted */
+  /** Viewer-facing captions, drawn bottom-center in SCREEN space (outside the
+   *  camera — legible at any zoom) on EVERY render including the master.
+   *  Persisted and hand-editable like any composition field; times are on the
+   *  untrimmed composition timeline (same convention as zoom.inAtMs — a
+   *  caption entirely inside the startMs head trim is never seen, and the
+   *  validator says so). Seeded from the plan steps' `caption` fields by
+   *  planComposition. */
+  captions?: Caption[];
+  /** optional opening title card over the establishing hold (see TitleCard) */
+  titleCard?: TitleCard;
+  /** render-time review decoration (badges/watermark/label); never persisted
+   *  (render strips exactly this field — `captions` above deliberately IS
+   *  persisted; it is content, not review scaffolding) */
   review?: ReviewDecor;
 };
 

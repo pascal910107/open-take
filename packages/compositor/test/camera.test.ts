@@ -259,3 +259,60 @@ test("camera.enabled=false: the manual escape hatch ignores the director", () =>
     "reasons say camera off",
   );
 });
+
+test("look: a short hold keeps its punch — the min-hold demotion never deletes the beat", () => {
+  // minHoldMs (1200) demotes a punch that can't stay up long enough — but a
+  // look's hold length is the AUTHOR'S statement, and dropping it to full view
+  // would delete the beat's entire content. 900ms look + a next beat 1s later
+  // would be demoted under the generic rule.
+  const comp = planComposition({
+    video: { width: 1920, height: 1080, fps: 60 },
+    viewport: { w: 1920, h: 1080 },
+    start: { x: 200, y: 900 },
+    tEndMs: 8000,
+    events: [
+      { kind: "click", x: 300, y: 500, box: { x: 280, y: 480, w: 40, h: 40 }, tMs: 1500 },
+      {
+        kind: "look",
+        x: 1500,
+        y: 400,
+        box: { x: 1350, y: 250, w: 300, h: 300 },
+        tMs: 3500,
+        durationMs: 900,
+        zoom: "always",
+      },
+      { kind: "click", x: 900, y: 800, box: { x: 880, y: 780, w: 40, h: 40 }, tMs: 4500 },
+    ],
+  });
+  const look = comp.events.find((e) => e.kind === "look")!;
+  assert.equal(look.zoom.enabled, true, "the look's punch survives a sub-minHold window");
+});
+
+test("look: the named target outranks a noisy effectBox — nothing happened, so the diff is ambient", () => {
+  const comp = planComposition({
+    video: { width: 1920, height: 1080, fps: 60 },
+    viewport: { w: 1920, h: 1080 },
+    start: { x: 200, y: 900 },
+    tEndMs: 9000,
+    events: [
+      {
+        kind: "look",
+        x: 400,
+        y: 600,
+        box: { x: 250, y: 450, w: 300, h: 300 },
+        // an animating map corner far from the target — ambient motion the
+        // frame-diff pass would report even though the look did nothing
+        effectBox: { x: 1600, y: 100, w: 200, h: 120 },
+        tMs: 3000,
+        durationMs: 1800,
+        zoom: "always",
+      },
+    ],
+  });
+  const look = comp.events[0]!;
+  assert.equal(look.zoom.enabled, true);
+  assert.ok(
+    Math.abs(look.zoom.center.x - 400) < 1,
+    `camera centers the NAMED box, not the ambient diff (got x=${look.zoom.center.x})`,
+  );
+});

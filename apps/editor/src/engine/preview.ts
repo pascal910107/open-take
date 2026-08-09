@@ -443,10 +443,11 @@ export class PreviewEngine {
     }
     ctx.restore();
 
-    // click ripples (scroll/press have no spatial point — skipped, as in scene;
-    // dropFiles ripples at its DROP point on release, with the ghost card below)
+    // click ripples (scroll/press have no spatial point, a look touches
+    // nothing — skipped, as in scene; dropFiles ripples at its DROP point on
+    // release, with the ghost card below)
     for (const e of comp.events) {
-      if (e.kind === "scroll" || e.kind === "press") continue;
+      if (e.kind === "scroll" || e.kind === "press" || e.kind === "look") continue;
       const ms = comp.cursor.rippleMs / 1000;
       const at =
         e.kind === "dropFiles"
@@ -561,6 +562,86 @@ export class PreviewEngine {
     }
     drawPoly(2.5, "rgba(0,0,0,0.35)", null); // soft shadow
     drawPoly(0, "rgb(20,20,24)", "white"); // body
+
+    // Viewer-facing captions — SCREEN space (outside the camera), bottom-
+    // center, mirrors scene.tsx exactly: they are CONTENT on the delivered
+    // master, so the editor must show them (unlike review decor, which is
+    // review-copy scaffolding and deliberately absent here).
+    // cinema-style captions + opening title card — mirrors scene.tsx exactly
+    const k = oH / 1080;
+    const CAP_FONT = "system-ui, -apple-system, 'Segoe UI', 'Noto Sans', sans-serif";
+    if (comp.captions?.length) {
+      const ms = t * 1000;
+      const cardBottomAbs = oH / 2 + (oH / 2) * comp.framing.insetFrac;
+      // constant bottom scrim while captions exist
+      const scrimH = 190 * k;
+      const grad = ctx.createLinearGradient(0, oH - scrimH, 0, oH);
+      grad.addColorStop(0, "rgba(0,0,0,0)");
+      grad.addColorStop(1, "rgba(0,0,0,0.55)");
+      ctx.save();
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, oH - scrimH, oW, scrimH);
+      ctx.restore();
+      for (const cap of comp.captions) {
+        if (ms < cap.fromMs || ms >= cap.toMs) continue;
+        const inF = Math.min(1, (ms - cap.fromMs) / 160);
+        const outF = Math.min(1, (cap.toMs - ms) / 160);
+        const alpha = Math.min(inF, outF);
+        if (alpha <= 0) continue;
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.font = `600 ${36 * k}px ${CAP_FONT}`;
+        ctx.shadowColor = "rgba(0,0,0,0.9)";
+        ctx.shadowBlur = 6 * k;
+        ctx.shadowOffsetY = 2 * k;
+        ctx.fillStyle = "rgba(255,255,255,0.98)";
+        ctx.textBaseline = "alphabetic";
+        ctx.textAlign = "center";
+        // greedy per-char wrap (CJK has no spaces) at the scene's maxWidth
+        const maxW = oW * 0.82;
+        const lines: string[] = [];
+        let line = "";
+        for (const ch of cap.text) {
+          if (ctx.measureText(line + ch).width > maxW && line) {
+            lines.push(line);
+            line = ch;
+          } else line += ch;
+        }
+        if (line) lines.push(line);
+        const lineH = 48 * k;
+        let y = cardBottomAbs - 26 * k - 12 * k - (lines.length - 1) * lineH;
+        for (const l of lines) {
+          ctx.fillText(l, oW / 2, y);
+          y += lineH;
+        }
+        ctx.restore();
+      }
+    }
+    if (comp.titleCard?.title) {
+      const ms = t * 1000;
+      const untilMs = comp.titleCard.untilMs ?? (comp.startMs ?? 0) + 1800;
+      const alpha = ms >= untilMs ? 0 : Math.min(1, (untilMs - ms) / 300);
+      if (alpha > 0) {
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = "rgba(6,7,14,0.55)";
+        ctx.fillRect(0, 0, oW, oH);
+        ctx.shadowColor = "rgba(0,0,0,0.8)";
+        ctx.shadowBlur = 10 * k;
+        ctx.shadowOffsetY = 3 * k;
+        ctx.fillStyle = "rgba(255,255,255,0.98)";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.font = `800 ${72 * k}px ${CAP_FONT}`;
+        ctx.fillText(comp.titleCard.title, oW / 2, oH / 2 + (comp.titleCard.subtitle ? -26 * k : 0));
+        if (comp.titleCard.subtitle) {
+          ctx.font = `500 ${30 * k}px ${CAP_FONT}`;
+          ctx.fillStyle = "rgba(255,255,255,0.78)";
+          ctx.fillText(comp.titleCard.subtitle, oW / 2, oH / 2 + 40 * k);
+        }
+        ctx.restore();
+      }
+    }
   }
 
   /** Editor affordance layer (NOT part of the faithful frame): outlines the

@@ -6,16 +6,20 @@ import { sendNote } from "../lib/bridge";
 import {
   DEFAULT_MOTION_BLUR,
   LOOKS,
-  MOTION,
-  type Pt,
   lookName,
+  MOTION,
   motionName,
+  type Pt,
 } from "../lib/compositor";
 import {
   applyLook,
+  clearCaptions,
+  removeCaption,
+  removeTitleCard,
   setBackground,
   setBeatGlide,
   setBeatZoom,
+  setCaptionText,
   setCursor,
   setCursorRebased,
   setDuration,
@@ -23,6 +27,7 @@ import {
   setMotionBlur,
   setShadow,
   setShadowOffset,
+  setTitleCard,
 } from "../lib/edit";
 import { Adv, Card, MiniBtn, OptionCards, Row, Slider, Thumbs, Toggle } from "../ui/controls";
 import {
@@ -685,3 +690,99 @@ export function AgentPane({ bridge }: { bridge: boolean }) {
 }
 
 export type { Pt };
+
+// --- Overlays (title card + captions) ---------------------------------------
+// Text and existence are editable here; WINDOW timing stays in the agent/JSON
+// loop (it is tied to beat instants the editor has no gesture for yet).
+
+export function OverlayPane({ c }: P) {
+  const comp = c.comp;
+  if (!comp) return null;
+  const tc = comp.titleCard;
+  const caps = comp.captions ?? [];
+  const inputStyle: React.CSSProperties = {
+    width: "100%",
+    background: "var(--bg2, #1a1c26)",
+    color: "inherit",
+    border: "1px solid var(--line, #333)",
+    borderRadius: 6,
+    padding: "6px 8px",
+    font: "inherit",
+  };
+  return (
+    <>
+      <Card
+        head="Title card"
+        headRight={
+          tc ? (
+            <MiniBtn onClick={() => c.update(removeTitleCard, "titlecard")}>Remove</MiniBtn>
+          ) : (
+            <MiniBtn onClick={() => c.update((x) => setTitleCard(x, { title: "" }), "titlecard")}>
+              Add
+            </MiniBtn>
+          )
+        }
+      >
+        {tc ? (
+          <>
+            <Row label="Title">
+              <input
+                style={inputStyle}
+                value={tc.title}
+                placeholder="App name / thesis"
+                onChange={(e) =>
+                  c.update((x) => setTitleCard(x, { title: e.target.value }), "tc-title")
+                }
+              />
+            </Row>
+            <Row label="Subtitle">
+              <input
+                style={inputStyle}
+                value={tc.subtitle ?? ""}
+                placeholder="One-line thesis (optional)"
+                onChange={(e) =>
+                  c.update((x) => setTitleCard(x, { subtitle: e.target.value }), "tc-sub")
+                }
+              />
+            </Row>
+          </>
+        ) : (
+          <div style={{ opacity: 0.65, fontSize: 12, padding: "4px 0" }}>
+            No opening title card. Add one to open the video with the app's name over the
+            establishing hold.
+          </div>
+        )}
+      </Card>
+      <Card
+        head="Captions"
+        headRight={
+          caps.length ? (
+            <MiniBtn onClick={() => c.update(clearCaptions, "captions")}>Remove all</MiniBtn>
+          ) : undefined
+        }
+      >
+        {caps.length === 0 && (
+          <div style={{ opacity: 0.65, fontSize: 12, padding: "4px 0" }}>
+            No captions. The agent adds them per beat (`caption` in the plan); edit or remove them
+            here — a re-render applies it, no re-shoot.
+          </div>
+        )}
+        {caps.map((cap, i) => (
+          // windows are monotonic (validator-enforced), so fromMs is a stable key
+          <Row key={cap.fromMs} label={`${(cap.fromMs / 1000).toFixed(1)}s`}>
+            <div style={{ display: "flex", gap: 6, alignItems: "center", width: "100%" }}>
+              <input
+                style={inputStyle}
+                value={cap.text}
+                onChange={(e) => c.update((x) => setCaptionText(x, i, e.target.value), `cap-${i}`)}
+              />
+              <MiniBtn onClick={() => c.update((x) => removeCaption(x, i))} title="Remove caption">
+                ✕
+              </MiniBtn>
+            </div>
+          </Row>
+        ))}
+      </Card>
+    </>
+  );
+}

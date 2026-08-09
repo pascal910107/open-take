@@ -712,15 +712,18 @@ export function buildLegs(comp: TakeComposition): Leg[] {
     return { sec: ms / 1000 };
   };
   for (const [evIdx, e] of comp.events.entries()) {
-    // scroll/press are not pointer-driven — the cursor holds where it was
-    // (the content pans / the keyboard acts). No travel leg; `cur` is untouched,
-    // so the between-legs parking logic keeps the cursor at its last anchor.
+    // scroll/press/look are not pointer-driven — the cursor holds where it was
+    // (the content pans / the keyboard acts / the CAMERA does the moving). No
+    // travel leg; `cur` is untouched, so the between-legs parking logic keeps
+    // the cursor at its last anchor. For a look this parking IS the feature:
+    // cursor movement promises an action, and a look makes none — the camera
+    // frames the target while the cursor honestly stays put.
     // They still OCCUPY the frame for durationMs, though: a scroll's duration IS
-    // the pan, and a press's is the reveal animating in. A travel that departs
-    // into either puts two motions on screen at once — content sliding under a
-    // cursor crossing it — so they push `freeAt` exactly like a pointer beat
-    // even though they contribute no leg.
-    if (e.kind === "scroll" || e.kind === "press") {
+    // the pan, a press's is the reveal animating in, a look's is the framed
+    // hold. A travel that departs into any of them puts two motions on screen
+    // at once — content sliding under a cursor crossing it — so they push
+    // `freeAt` exactly like a pointer beat even though they contribute no leg.
+    if (e.kind === "scroll" || e.kind === "press" || e.kind === "look") {
       freeAt = Math.max(freeAt, (e.tMs + (e.durationMs ?? 0)) / 1000);
       continue;
     }

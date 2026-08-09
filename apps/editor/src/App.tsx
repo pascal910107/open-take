@@ -13,6 +13,7 @@ import {
   CursorPane,
   FramePane,
   MotionPane,
+  OverlayPane,
   ZoomPane,
 } from "./components/panels";
 import { useBridge } from "./hooks/useBridge";
@@ -410,6 +411,7 @@ export function App() {
             {pane === "frame" && <FramePane c={c} />}
             {pane === "cursor" && <CursorPane c={c} />}
             {pane === "motion" && <MotionPane c={c} />}
+            {pane === "overlays" && <OverlayPane c={c} />}
             {pane === "clip" && (
               <ClipPane
                 c={c}

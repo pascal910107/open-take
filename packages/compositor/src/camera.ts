@@ -28,7 +28,7 @@ import type { BBox, CameraConfig, Pt, ZoomIntent } from "./types";
 
 /** One action, already mapped into video-px, handed to the director. */
 export type Beat = {
-  kind: "click" | "type" | "drag" | "scroll" | "hover" | "press" | "dropFiles";
+  kind: "click" | "type" | "drag" | "scroll" | "hover" | "look" | "press" | "dropFiles";
   tMs: number;
   durationMs: number;
   /** element bbox (for a drag: the path's bbox), video-px — or undefined for a
@@ -93,6 +93,11 @@ function roiForBeat(b: Beat, video: { w: number; h: number }): BBox | undefined 
   // there the payoff usually lands AWAY from the element, which is the whole
   // point of the frame-diff seam.
   if (b.kind === "press" && b.intent === "always" && b.box) return b.box;
+  // A look names exactly what to frame — that IS the beat. Nothing happened on
+  // the page, so any effectBox is neighbouring noise (an animation, a ticking
+  // number), and preferring it would aim the "show the viewer this" camera at
+  // something else entirely.
+  if (b.kind === "look" && b.box) return b.box;
   if (b.kind === "type" && b.box) {
     // Bound the frame to "field + top of results": keep the effectBox's real
     // reveal WIDTH, but cap the HEIGHT to growDown's result-sized window so an
@@ -321,6 +326,11 @@ export function directCamera(
   // merges across a break (order: hard break → coalesce → min-hold).
   segs.forEach((s, si) => {
     if (s.kind !== "punch") return;
+    // A look segment is exempt: its hold length is the AUTHOR'S statement
+    // ("show the viewer this for durationMs"), not a derived gap — demoting it
+    // to full view would delete the beat's entire content. A tight look reads
+    // brisk, not flinchy, because nothing else competes for the frame.
+    if (s.idx.some((i) => beats[i]!.kind === "look")) return;
     const firstT = beats[s.idx[0]!]!.tMs;
     const next = segs[si + 1];
     const heldUntil = next ? beats[next.idx[0]!]!.tMs : endMs;

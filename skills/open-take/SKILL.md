@@ -93,7 +93,14 @@ judgment; when skipping, restate the brief so they can correct it.
   put the recommended option first, and explain its advantage in one sentence.
   If only one story is credible, ask the user to confirm that thesis and allow
   a correction instead of inventing weak alternatives.
-- Ask audience/purpose as the second question only when it is unknown and
+- **Ask presentation in the SAME AskUserQuestion call** (a second question,
+  not a second round-trip): does the demo get captions + an opening title
+  card? Options: "Both (recommended)" first — per-beat subtitle sentences +
+  a typographic opening card; "Captions only"; "Clean footage" (neither —
+  they stay one cheap re-render away either way, never a re-shoot). Skip this
+  question when the user's request already said (e.g. "乾淨畫面就好",
+  "with captions in English").
+- Ask audience/purpose as an additional question only when it is unknown and
   would materially change the story.
 - Do not write the plan or run `make` until a required answer arrives.
 
@@ -147,11 +154,25 @@ the app's signature moment; make the wow the hero, not an afterthought.
 - **Progressive zoom (zoom in, then zoom in MORE).** Consecutive zoom beats
   don't reset to full view between them — the engine **pans and re-scales from
   one zoom target straight to the next** (the cinematic, premium style). So you can open
-  a region, then push deeper: e.g. `click`(zoom a panel) → `hover`(zoom a control
+  a region, then push deeper: e.g. `click`(zoom a panel) → `look`(zoom a detail
   *inside* it). A later beat on a *smaller* element gets a *higher* scale, so it
   reads as "going deeper." Use this for reveal→detail arcs; it only zooms back
   out at the end (or for a `scroll`/full-view beat). Still selective — 2–3
   chained zooms max, each earning it.
+- **The cursor is a promise.** Every cursor movement tells the viewer "I am
+  about to act HERE" — and the video must keep that promise. Never `hover` an
+  element you don't mean to activate just to aim the camera (the old idiom;
+  it reads as a click that never comes — the single most confusing shot a
+  demo can end on). When the intent is "show the viewer this region", use
+  **`look`**: the camera frames the target and holds while the cursor honestly
+  stays where it was. Reserve `hover` for real hover-STATES (tooltip,
+  dropdown, hover reveal).
+- **A payoff the viewer must COMPARE needs both halves on screen.** When the
+  beat's meaning is a number/state CHANGING (a filter recomputing a stat, a
+  toggle flipping a price), stage the before: `look` at the number first (or
+  hold the frame across the change), then act — the viewer watches the
+  number move and needs no explanation. An after-only shot reads as "a
+  number exists."
 - **Fits ≠ legible.** The auto-camera frames the payoff region so it FITS the
   frame; it has no notion of type size. When the payoff's *meaning* lives in
   small text (code, terminal output, an inspector panel, dense tables), a fit
@@ -200,17 +221,38 @@ ritual. The capture itself still records at the full fps and the composition
 keeps the full-quality settings, so nothing is lost — only deferred.
 
 **The capture vocabulary is `click` · `type` · `drag` · `scroll` · `hover` ·
-`press` · `navigate` · `wait`.** It covers most product wows directly:
+`look` · `select` · `press` · `navigate` · `wait`.** It covers most product wows directly:
 - **click** — trigger UI / orient / navigate.
 - **type** — search boxes, AI prompts, forms (real keystrokes).
 - **drag** — sketch / draw / move on a canvas (a *path*, not a point).
 - **scroll** — pan a landing page or feed to reveal content (to an element by
   name, or a fixed amount); the frame stays full-view as the content moves.
 - **hover** — dwell on an element to reveal a tooltip / dropdown / hover-state.
+- **look** — CAMERA-only: frame an element and hold, cursor stays put. The
+  honest "show the viewer this" (a stats panel, a result, a closing detail) —
+  never hover a control you don't mean to activate.
+- **select** — pick an option in a native `<select>`. **A `click` on a
+  `<select>` is inert headless** (measured: it returns immediately and
+  changes nothing — no popup paints, no value changes, the app gets no
+  event), so a click beat would film a control that never responds.
+  `select` sets the value and dispatches input+change: the app really
+  recomputes and the control really shows its new value on camera.
 - **press** — a key or shortcut (Enter to submit, Escape, ⌘K palette, arrows).
 - **navigate** — go to another page mid-take, in the same tab, without breaking
   the recording. Emits no beat (a navigation is global — show it full-view), and
   the new document gets the same font wait the take's first page gets.
+
+**Every beat-producing step also takes a `caption`** — one viewer-facing
+sentence rendered as a subtitle on the delivered video for that beat's
+window. Footage shows WHAT happened; the caption says what it MEANS, so a
+viewer who has never seen the app can follow without narration — and an
+unattended run has no narrator, so in CI caption every beat.
+
+Write ONE FULL SENTENCE that says what is happening AND why it matters (8-14
+words, or ~15-30 characters in a CJK script), in the app's own language. The
+viewer already SEES the click; the caption must explain it — "Applying the
+filter re-prices every district instantly" teaches, "Apply filter" only
+names.
 
 **`navigate` destinations are LATE-BOUND — that is the point.** A plan is
 written *before* the capture runs, so the second page's URL is often something
@@ -399,7 +441,8 @@ page changed).
     { "action": "press", "keys": "Meta+k", "selector": ".palette", "zoom": "always", "note": "⌘K opens the palette", "durationMs": 1400, "settleMs": 600 },
     { "action": "scroll", "toText": "Pricing", "note": "pan down to the pricing section", "durationMs": 1100, "settleMs": 900 },
     { "action": "hover", "text": "Profile", "zoom": "always", "note": "tooltip reveal", "durationMs": 1400, "settleMs": 600 },
-    { "action": "click", "text": "Open menu", "zoom": "always", "note": "local co-located popover", "settleMs": 1600 },
+    { "action": "click", "text": "Open menu", "zoom": "always", "note": "local co-located popover", "caption": "One tap opens the whole menu", "settleMs": 1600 },
+    { "action": "look", "text": "Monthly total", "durationMs": 1800, "note": "closing shot: the recomputed total", "caption": "Totals update live", "settleMs": 900 },
     { "action": "drag", "from": { "x": 560, "y": 400 }, "to": { "x": 1140, "y": 400 },
       "path": [{ "x": 560, "y": 400 }, { "x": 760, "y": 250 }, { "x": 1140, "y": 400 }],
       "durationMs": 1370, "zoom": "auto", "note": "sketch on the canvas (~660px path ÷ 480px/s)", "settleMs": 1200 }
@@ -448,7 +491,23 @@ page changed).
 - **`hover`** moves the cursor onto an element (by `text`/`selector`) and
   **dwells** (`durationMs` ≈ 1200–1600) so a tooltip / dropdown / hover-state
   shows — no click. Zooms like a click (auto/always); use `"never"` when the
-  reveal (a wide menu) spills past the element's own bbox.
+  reveal (a wide menu) spills past the element's own bbox. Only for real
+  hover-STATES — to aim the camera at something, that's `look`.
+- **`select`** picks an option in a native `<select>`: name the control by
+  `selector` or its accessible `text`, and the option by `value` (its value,
+  its exact label, or a whitespace-insensitive substring, so "Large" finds
+  "Large  (30 seats)"). Films like a click (cursor travels, the value changes under
+  it). A `click` aimed at a `<select>` is a SKIPPED step naming this verb
+  (it would otherwise be a silent no-op).
+- **`look`** frames an element (by `text`/`selector`) and **holds**
+  (`durationMs` ≈ 1500–2500, default 1800) while the cursor stays parked —
+  CAMERA-only, nothing is done to the page. Zoom defaults to `"always"`
+  (framing IS the beat). The finale shot ("end on the stats panel"), the
+  before-half of a compare, the "read this number" beat. Target a CONTAINER
+  (the panel, not one digit) and pair with a `caption` saying what the viewer
+  is looking at. If its target vanished, the step is SKIPPED (and `--strict`
+  fails) like any other step. For a full-page establishing hold use `wait` —
+  full view needs no camera beat. (Unrelated to the A/B `look=` backdrop knob.)
 - **`press`** sends a key or shortcut via `keys`: a named key (`"Enter"`,
   `"Escape"`, `"Tab"`, `"ArrowDown"`) or a combo (`"Meta+k"`, `"Control+Shift+p"`,
   `"Shift+Tab"`). Keyboard-driven, so the **cursor does not move**. The press
@@ -603,6 +662,23 @@ capture-lock). Warnings (a no-op zoom, a soft-cap scale) print but don't block.
   (top-level, ms): head-trims the DELIVERED mp4 on the composition timeline —
   no more `ffmpeg -ss` side-files that desync from the refine loop. Keep it ≤
   the first beat's `zoom.inAtMs` (the validator warns past that).
+- *"fix that caption" / "the subtitle lingers" / "caption beat 3"* →
+  `captions` (top-level): `[{fromMs, toMs, text}]`, drawn bottom-center on
+  every render including the master. Seeded from the plan steps' `caption`
+  fields (a window lands at its beat's action instant — over a settled
+  camera — and hands over at the next beat's); edit text/timing here like
+  any field. One explanatory sentence per window (~15-30 CJK chars — the
+  validator warns past 120; long lines wrap centered); times on the
+  untrimmed timeline, same as `zoom.inAtMs`.
+- *"no captions" / "拿掉字幕" / "clean footage"* → delete the `captions`
+  array and `render` — a deterministic re-render, no re-shoot. The reverse
+  (adding/translating captions later) is the same cheap edit, so caption
+  preference is never a reason to re-capture.
+- *"add an opening title" / "make it feel produced"* → `titleCard`
+  (top-level): `{title, subtitle?, untilMs?}` — a typographic card over the
+  establishing hold (full-frame scrim + the app/thesis in big type), fading
+  out by `untilMs` (default startMs+1800). Deterministic, in the author's
+  language, deletable — never generated imagery.
 - *"gentler / faster zoom"* → `cursor.zoomInMs` / `zoomOutMs` (bigger = slower
   ramp; defaults 730/1340 are frame-measured off a reference recorder — pull-outs are
   deliberately ~1.8× slower). Past **2× the slowest pace** (`calm` = 900/1650)

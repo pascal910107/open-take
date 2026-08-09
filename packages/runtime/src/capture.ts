@@ -111,6 +111,7 @@ export function clickByTextJs(text: string): string {
     // would advance state off-screen. Scroll into view ONLY when out of frame
     // so in-view beats keep their framing; re-read the rect post-scroll so the
     // compositor gets a viewport-relative (in-frame) bbox.
+    `if(m.tagName==='SELECT')return 'SELECTINERT';` +
     `var r=m.getBoundingClientRect();` +
     `if(r.top<0||r.bottom>window.innerHeight){m.scrollIntoView({block:'center'});r=m.getBoundingClientRect();}` +
     `var b={x:Math.round(r.x),y:Math.round(r.y),w:Math.round(r.width),h:Math.round(r.height)};` +
@@ -129,6 +130,7 @@ export function clickBySelectorJs(selector: string): string {
   return (
     `(function(){var m=document.querySelector(${s});` +
     `if(!m)return 'NOTFOUND';` +
+    `if(m.tagName==='SELECT')return 'SELECTINERT';` +
     `var r=m.getBoundingClientRect();` +
     `if(r.top<0||r.bottom>window.innerHeight){m.scrollIntoView({block:'center'});r=m.getBoundingClientRect();}` +
     `var b={x:Math.round(r.x),y:Math.round(r.y),w:Math.round(r.width),h:Math.round(r.height)};` +
@@ -479,4 +481,59 @@ export async function inspectPage(url: string, opts: InspectOpts = {}): Promise<
   } finally {
     await browser.close();
   }
+}
+
+// --- native <select> ----------------------------------------------------
+// A native `<select>` cannot be DRIVEN by clicking it. Measured directly
+// (probe, 2026-08-09): `.click()` on a select returns in ~3ms and changes
+// NOTHING — value stays put, no popup paints, the app receives no event.
+// Headless Chrome has no browser-process popup to open, so the click is a
+// silent no-op: the beat films a cursor landing on a control that does not
+// respond, and any downstream "the app recomputed" payoff never happens.
+// (An earlier note here blamed a capture hang on this click; a direct probe
+// disproved that — the click is inert, not blocking.)
+//
+// So we drive it the way the PAGE experiences it: set `value` and dispatch
+// input+change. Same honesty class as `type` (synthesized keystrokes) — the
+// app really receives the event, really recomputes, and the select really
+// shows its new value on camera. Only the OS popup is missing, and that was
+// never filmable.
+//
+// The option is matched by exact value, then exact label, then a trimmed
+// substring of the label — real option text carries thin spaces, units and
+// parenthetical detail ("Large  (30 seats)") that an author will not
+// reproduce character-perfect.
+export function selectOptionJs(
+  target: { selector?: string; text?: string },
+  value: string,
+): string {
+  const sel = JSON.stringify(target.selector ?? "");
+  const name = JSON.stringify(target.text ?? "");
+  const v = JSON.stringify(value);
+  return (
+    `(function(){var s=${sel},n=${name},want=${v};` +
+    `var m=null;` +
+    `if(s){m=document.querySelector(s);}` +
+    `else if(n){var els=Array.prototype.slice.call(document.querySelectorAll('select'));` +
+    // by accessible name: aria-label, the label element pointing at it, or a
+    // wrapping label's text
+    `m=els.find(function(e){var a=(e.getAttribute('aria-label')||'').trim();if(a===n)return true;` +
+    `var id=e.id;if(id){var l=document.querySelector('label[for="'+id+'"]');if(l&&(l.textContent||'').trim().indexOf(n)>=0)return true;}` +
+    `var p=e.closest('label');if(p&&(p.textContent||'').trim().indexOf(n)>=0)return true;return false;})||null;}` +
+    `if(!m)return 'NOTFOUND';` +
+    `if(m.tagName!=='SELECT')return 'NOTASELECT';` +
+    `var opts=Array.prototype.slice.call(m.options);` +
+    `var norm=function(x){return (x||'').replace(/\\s+/g,'').trim();};` +
+    `var o=opts.find(function(x){return x.value===want;})` +
+    `||opts.find(function(x){return norm(x.textContent)===norm(want);})` +
+    `||opts.find(function(x){return norm(x.textContent).indexOf(norm(want))>=0;});` +
+    `if(!o)return 'NOOPTION';` +
+    `var r=m.getBoundingClientRect();` +
+    `if(r.top<0||r.bottom>window.innerHeight){m.scrollIntoView({block:'center'});r=m.getBoundingClientRect();}` +
+    `m.focus();m.value=o.value;` +
+    `m.dispatchEvent(new Event('input',{bubbles:true}));` +
+    `m.dispatchEvent(new Event('change',{bubbles:true}));` +
+    `var b={x:Math.round(r.x),y:Math.round(r.y),w:Math.round(r.width),h:Math.round(r.height)};` +
+    `return JSON.stringify(b);})()`
+  );
 }

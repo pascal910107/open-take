@@ -70,6 +70,8 @@ const reqField: Record<string, string> = {
   press: "keys",
   drag: "to",
   dropFiles: "to",
+  // a look IS its hold — without a duration there is no beat to render
+  look: "durationMs",
 };
 
 export function validateComposition(
@@ -487,7 +489,10 @@ export function validateComposition(
             `this beat's camera window runs ${Math.round(rampMs)}ms — ${(rampMs / nominal).toFixed(1)}× cursor.${r.pullOut ? "zoomOutMs" : "zoomInMs"} (${nominal}ms) — so the camera departs at ${Math.round(r.startMs)}ms and creeps to the action instead of moving at the take's pace`,
             `set inAtMs = ${Math.max(0, e.tMs - comp.cursor.zoomInMs)} (tMs − cursor.zoomInMs) and change cursor.${r.pullOut ? "zoomOutMs" : "zoomInMs"} if the RAMP itself should be slower`,
           );
-        if (e.kind === "press") continue;
+        // press: reveal-timed by construction. look: nothing fires at tMs —
+        // the camera arriving early in the DWELL is the beat working as
+        // designed, so "the frame slides out from under it" cannot happen.
+        if (e.kind === "press" || e.kind === "look") continue;
         const lateMs = Math.round(r.landMs - e.tMs);
         if (lateMs <= MOVING_AT_ACTION_MS) continue;
         if (!(rampMs > 0) || lateMs / rampMs <= MOVING_AT_ACTION_FRAC) continue;
@@ -538,6 +543,22 @@ export function validateComposition(
     }
   }
 
+  // Dead HEAD — the mirror of the dead-tail check. A capture that had to wait
+  // out a cold load (map tiles, data fetch) ships that whole wait unless
+  // startMs trims it, and "8 seconds of nothing, then the cursor moves" is
+  // the first thing every viewer sees. The wait was necessary to SHOOT;
+  // shipping it is a choice, and the default choice should be no.
+  if (comp.events.length) {
+    const firstVisible = comp.events[0]!.zoom.inAtMs;
+    const deadHeadMs = firstVisible - (comp.startMs ?? 0);
+    if (deadHeadMs > DEAD_TAIL_MS)
+      warn(
+        "startMs",
+        `${(deadHeadMs / 1000).toFixed(1)}s of dead opening before the first beat's camera moves — the delivered video starts on a frozen screen`,
+        `set startMs ≈ ${Math.max(0, firstVisible - 1200)} (leave ~1.2s of establishing hold, trim the rest of the load wait)`,
+      );
+  }
+
   // head trim: cut dead pre-paint frames, never a beat. The trim only moves
   // the delivered head — tMs values stay on the capture timeline.
   const startMs = comp.startMs;
@@ -555,6 +576,49 @@ export function validateComposition(
         `keep the trim ≤ ${comp.events[0].zoom.inAtMs} so the delivered video opens at rest`,
       );
   }
+
+  // --- captions: viewer-facing timeline overlays on the DELIVERED video ---
+  // Times are on the untrimmed composition timeline, like zoom.inAtMs.
+  for (const [i, cap] of (comp.captions ?? []).entries()) {
+    if (!cap.text?.trim()) {
+      err(`captions[${i}].text`, "empty caption text", "give the caption a line, or delete it");
+      continue;
+    }
+    if (!(cap.toMs > cap.fromMs))
+      err(
+        `captions[${i}].toMs`,
+        `toMs ${cap.toMs} is not after fromMs ${cap.fromMs} — an inverted/empty window shows nothing`,
+        "set toMs > fromMs (a readable line needs ~1500ms on screen)",
+      );
+    if (!(cap.fromMs >= 0) || cap.fromMs >= comp.durationMs)
+      err(
+        `captions[${i}].fromMs`,
+        `fromMs ${cap.fromMs} outside [0, durationMs ${comp.durationMs})`,
+        "captions live on the composition timeline",
+      );
+    const prev = comp.captions?.[i - 1];
+    if (prev && cap.fromMs < prev.toMs)
+      warn(
+        `captions[${i}].fromMs`,
+        `window [${cap.fromMs}, ${cap.toMs}) overlaps captions[${i - 1}] [${prev.fromMs}, ${prev.toMs}) — two pills stack in the same slot`,
+        `start this caption at ${prev.toMs}, or end the previous one at ${cap.fromMs}`,
+      );
+    if (comp.startMs != null && cap.toMs <= comp.startMs)
+      warn(
+        `captions[${i}]`,
+        `window [${cap.fromMs}, ${cap.toMs}) sits entirely inside the startMs head trim (${comp.startMs}) — it is never seen`,
+        "move the window past the trim, or delete the caption",
+      );
+    if (cap.text.trim().length > 120)
+      warn(
+        `captions[${i}].text`,
+        `${cap.text.trim().length} chars — a caption is one explanatory sentence, not a paragraph`,
+        "cut to one sentence (~15-30 CJK chars / 8-14 words); move detail into the beat itself",
+      );
+  }
+
+  if (comp.titleCard && !comp.titleCard.title?.trim())
+    err("titleCard.title", "empty title on a title card", "give it the app/thesis line, or delete titleCard");
 
   // --- CAPTURE-LOCKED: action tMs must match the recording ---
   // The video is temporal: a beat's tMs is WHEN it is visible in the capture.

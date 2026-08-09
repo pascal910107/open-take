@@ -225,6 +225,11 @@ export async function annotateCaptureLog(
     const events = [...log.events];
     for (let i = 0; i < events.length; i++) {
       const e = events[i]!;
+      // a look DID nothing — any frame diff across its window is the page's
+      // own ambient motion (a ticking number, a map animating), and an
+      // effectBox made of that noise would out-vote the author's named target
+      // in the camera director. The captured box is the whole truth here.
+      if (e.kind === "look") continue;
       const durationMs = "durationMs" in e && e.durationMs != null ? e.durationMs : 0;
       const before = Math.max(0, (e.tMs - BEFORE_MS) / 1000);
       let after = (e.tMs + durationMs + SETTLE_MS) / 1000;

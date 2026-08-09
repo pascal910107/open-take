@@ -8,8 +8,18 @@
 //   drag   — sketch / draw / move (a PATH, not a point — canvas wow)
 //   scroll — pan the page / a feed to reveal content below or above the fold
 //   hover  — dwell on an element to reveal a tooltip / menu / hover-state
+//   select — pick an option in a native <select> (clicking one is inert)
+//   look   — CAMERA-only: frame an element and hold; cursor stays put (the
+//            honest "show the viewer this" — never hover a control you don't
+//            mean to activate)
 //   press  — a key or shortcut (Enter to submit, Escape, ⌘K palette, …)
 // plus `wait` for pacing.
+//
+// Every beat-producing step may carry a `caption` — one viewer-facing line
+// ("Applying the filter re-prices every row") rendered bottom-center on
+// the delivered video for that beat's window. Footage shows WHAT happened;
+// the caption says what it MEANS — without it, a viewer who has never seen
+// the app just watches "the screen move around".
 
 /** A point in viewport CSS px (the capture coordinate space). */
 export type PlanPoint = { x: number; y: number };
@@ -28,6 +38,8 @@ export type TakeStep =
       selector?: string;
       text?: string;
       note?: string;
+      /** one viewer-facing line for this beat (subtitle on the delivered video) */
+      caption?: string;
       settleMs?: number;
       zoom?: ZoomIntent;
     }
@@ -49,6 +61,8 @@ export type TakeStep =
        *  a deliberately slow reveal or a fast burst. */
       perCharMs?: number;
       note?: string;
+      /** one viewer-facing line for this beat (subtitle on the delivered video) */
+      caption?: string;
       settleMs?: number;
       zoom?: ZoomIntent;
     }
@@ -72,6 +86,8 @@ export type TakeStep =
       /** how long the drag takes on screen (default 1200ms) */
       durationMs?: number;
       note?: string;
+      /** one viewer-facing line for this beat (subtitle on the delivered video) */
+      caption?: string;
       settleMs?: number;
       zoom?: ZoomIntent;
     }
@@ -100,6 +116,8 @@ export type TakeStep =
       /** how long the carry takes on screen (default 1400ms) */
       durationMs?: number;
       note?: string;
+      /** one viewer-facing line for this beat (subtitle on the delivered video) */
+      caption?: string;
       settleMs?: number;
       zoom?: ZoomIntent;
     }
@@ -118,6 +136,8 @@ export type TakeStep =
       /** how long the scroll takes on screen (default 1000ms) */
       durationMs?: number;
       note?: string;
+      /** one viewer-facing line for this beat (subtitle on the delivered video) */
+      caption?: string;
       settleMs?: number;
     }
   | {
@@ -131,6 +151,8 @@ export type TakeStep =
       /** how long to dwell on screen so the reveal is visible (default 1200ms) */
       durationMs?: number;
       note?: string;
+      /** one viewer-facing line for this beat (subtitle on the delivered video) */
+      caption?: string;
       settleMs?: number;
       zoom?: ZoomIntent;
     }
@@ -152,6 +174,8 @@ export type TakeStep =
       /** how long to hold while the effect plays out (default 1000ms) */
       durationMs?: number;
       note?: string;
+      /** one viewer-facing line for this beat (subtitle on the delivered video) */
+      caption?: string;
       settleMs?: number;
       zoom?: ZoomIntent;
     }
@@ -186,6 +210,48 @@ export type TakeStep =
       query?: Record<string, string>;
       note?: string;
       settleMs?: number;
+    }
+  | {
+      // Pick an option in a native `<select>`. Its own action because
+      // CLICKING one is inert headless (measured: the click returns in ~3ms
+      // and changes nothing — no popup, no value change, no event), so a
+      // click beat films a cursor landing on a control that never responds.
+      // This sets the value and dispatches input+change, so the app really
+      // recomputes and the select really shows its new value on camera — the
+      // same synthesized-but-true class as `type`'s keystrokes.
+      // `value` matches an option by value, then exact label, then a
+      // whitespace-insensitive substring of the label ("Large" finds
+      // "Large  (30 seats)").
+      action: "select";
+      selector?: string;
+      /** the select's accessible name (aria-label / its <label>'s text) */
+      text?: string;
+      /** the option to pick: its value, or its visible label */
+      value: string;
+      note?: string;
+      /** one viewer-facing line for this beat (subtitle on the delivered video) */
+      caption?: string;
+      settleMs?: number;
+      zoom?: ZoomIntent;
+    }
+  | {
+      // CAMERA-only: frame the target element and HOLD — nothing is done to
+      // the page and the cursor does not move. The honest spelling of "show
+      // the viewer this region": hovering a control you never activate reads
+      // as a promise ("about to click") the video then breaks. Zoom defaults
+      // to "always" (framing IS the beat); pair with `caption` so the hold
+      // also says what the viewer is looking AT. For an establishing shot of
+      // the whole page, use a plain `wait` instead — full view needs no beat.
+      action: "look";
+      selector?: string;
+      text?: string;
+      /** how long the framed hold stays on screen (default 1800ms) */
+      durationMs?: number;
+      note?: string;
+      /** one viewer-facing line for this beat (subtitle on the delivered video) */
+      caption?: string;
+      settleMs?: number;
+      zoom?: ZoomIntent;
     }
   | { action: "wait"; ms: number };
 

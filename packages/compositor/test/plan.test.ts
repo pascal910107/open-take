@@ -863,3 +863,78 @@ test("ghostCardLines: a sub-kilobyte file reads as 1 KB, never 0 KB", () => {
   // rather than inventing one
   assert.equal(ghostCardLines([{ name: "unknown.bin" }]).meta, "");
 });
+
+test("look: cursor parks (no travel leg, no new anchor) while the camera frames the target", () => {
+  const comp = planComposition(
+    log([
+      { kind: "click", x: 300, y: 500, box: { x: 280, y: 480, w: 40, h: 40 }, tMs: 1500 },
+      {
+        kind: "look",
+        x: 1500,
+        y: 400,
+        box: { x: 1300, y: 200, w: 400, h: 400 },
+        tMs: 3500,
+        durationMs: 1800,
+        zoom: "always",
+      },
+      { kind: "click", x: 900, y: 800, box: { x: 880, y: 780, w: 40, h: 40 }, tMs: 7000 },
+    ]),
+  );
+  const legs = buildLegs(comp);
+  // one leg to the first click, one to the final click — the look contributes
+  // none: cursor movement promises an action, and a look makes none
+  assert.equal(legs.length, 2, "look contributes no travel leg");
+  assert.deepEqual(legs[1]!.a, { x: 300, y: 500 }, "next travel departs from the PRE-look anchor");
+  // the camera still frames the look's target
+  const look = comp.events.find((e) => e.kind === "look")!;
+  assert.equal(look.zoom.enabled, true, "look zooms onto its target");
+  assert.ok(
+    Math.abs(look.zoom.center.x - 1500) < 1 && Math.abs(look.zoom.center.y - 400) < 1,
+    "camera centers the look's bbox, not the cursor",
+  );
+  // ...and the hold occupies the frame: the next leg cannot depart into it
+  assert.ok(legs[1]!.t0 >= (3500 + 1800) / 1000, "next glide waits out the look's hold");
+});
+
+test("captions: per-step strings tile into monotonic windows on the composition", () => {
+  const comp = planComposition(
+    log([
+      {
+        kind: "click",
+        x: 100,
+        y: 100,
+        box: { x: 80, y: 80, w: 40, h: 40 },
+        tMs: 1500,
+        caption: "切到租賃模式",
+      },
+      { kind: "click", x: 500, y: 300, box: { x: 480, y: 280, w: 40, h: 40 }, tMs: 4000 },
+      {
+        kind: "look",
+        x: 900,
+        y: 600,
+        box: { x: 700, y: 400, w: 400, h: 400 },
+        tMs: 6500,
+        durationMs: 1800,
+        zoom: "always",
+        caption: "行情面板顯示租金中位數",
+      },
+    ]),
+  );
+  const caps = comp.captions!;
+  assert.equal(caps.length, 2, "only captioned beats emit windows");
+  assert.equal(caps[0]!.text, "切到租賃模式");
+  // window lands exactly AT the action instant — the camera has settled by
+  // then, so the swap never rides a zoom ramp (two simultaneous motions read
+  // as "the subtitle moves with the zoom")
+  assert.equal(caps[0]!.fromMs, 1500, "caption lands at the action instant");
+  // ...and hands over at the NEXT beat's action — never narrating someone
+  // else's beat
+  assert.equal(caps[0]!.toMs, comp.events[1]!.tMs, "first caption ends at the next action");
+  assert.ok(caps[1]!.fromMs >= caps[0]!.toMs, "windows are monotonic — pills never stack");
+  assert.equal(caps[1]!.toMs, comp.durationMs, "last caption rides out the tail");
+  // a caption-less log emits NO captions field at all (byte-identical output)
+  const bare = planComposition(
+    log([{ kind: "click", x: 100, y: 100, box: { x: 80, y: 80, w: 40, h: 40 }, tMs: 1500 }]),
+  );
+  assert.equal(bare.captions, undefined, "no captions unless the plan asked");
+});
