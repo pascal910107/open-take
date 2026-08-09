@@ -506,8 +506,9 @@ export type TakeComposition = {
   review?: ReviewDecor;
 };
 
-/** True when motion blur is configured to actually do something (so the OFF
- *  path stays byte-identical to the pre-motion-blur renderer). */
+/** True when motion blur is configured to actually do something — whether the
+ *  delivery encode folds in the tmix shutter average (render.ts deliverMp4;
+ *  OFF skips tmix but still runs the same single delivery encode). */
 export function motionBlurActive(mb: MotionBlurConfig | undefined): mb is MotionBlurConfig {
   return !!mb && mb.samples > 1 && mb.shutter > 0;
 }

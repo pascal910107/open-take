@@ -16,11 +16,10 @@
 import { spawn } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
 import {
-  copyFile,
   mkdir,
   mkdtemp,
-  readFile,
   readdir,
+  readFile,
   rm,
   symlink,
   unlink,
@@ -33,7 +32,12 @@ import { fileURLToPath } from "node:url";
 import { renderVideo } from "@open-take/revideo-renderer";
 import { repairBundledMediaPermissions, resolveFfmpeg } from "./ffmpeg";
 import { type PlanOpts, planComposition } from "./plan";
-import { type CaptureLog, type TakeComposition, motionBlurActive } from "./types";
+import {
+  type CaptureLog,
+  type MotionBlurConfig,
+  motionBlurActive,
+  type TakeComposition,
+} from "./types";
 import { type CompositionIssue, formatIssues, validateComposition } from "./validate";
 
 // dist/index.js -> package root
@@ -128,37 +132,54 @@ async function toMp4(videoPath: string, outMp4: string, fps: number): Promise<vo
   ]);
 }
 
-/** Temporal-supersampling motion blur: the scene was rendered at fps·samples
- *  (project.ts); average a trailing shutter window of sub-frames back down to the
- *  output fps. `tmix=frames=M` averages M consecutive sub-frames; `fps=baseFps`
- *  then decimates ≈every `samples`-th, so each output frame = the mean of the last
- *  M sub-frames of its interval (a trailing shutter). Re-tags bt709/tv to match
- *  the capture pipeline (the input is already bt709, but tmix→encode must keep it). */
-async function motionBlurMp4(
-  inMp4: string,
+/** Delivery encode: the visually-lossless ProRes intermediate -> the postable
+ *  H.264. The ONLY lossy generation in the pipeline, so its CRF is the
+ *  master's quality — overlay text (captions/title card) used to look soft
+ *  because it took TWO generations before this fix: revideo's default wasm
+ *  exporter (WebCodecs H.264 at the browser's default bitrate, no knob, at
+ *  fps·samples) and then this re-encode on top.
+ *
+ *  Motion blur folds in here (temporal supersampling: the scene was rendered
+ *  at fps·samples, project.ts): `tmix=frames=M` averages M consecutive
+ *  sub-frames; `fps=baseFps` then decimates ≈every `samples`-th, so each
+ *  output frame = the mean of the last M sub-frames of its interval (a
+ *  trailing shutter).
+ *
+ *  The scale step is a REAL conversion, not a re-tag: the ProRes encode
+ *  converts the scene's RGB frames with swscale's default bt601 matrix, so
+ *  the intermediate is 601-coded. Convert to bt709 and tag it — verified by
+ *  round-tripping primaries (601-coded red merely tagged 709 decodes to
+ *  rgb(255,24,0); converted it decodes to rgb(252,0,0)). */
+async function deliverMp4(
+  inMov: string,
   outMp4: string,
   baseFps: number,
-  samples: number,
-  shutter: number,
+  blur: MotionBlurConfig | null,
 ): Promise<void> {
-  const M = Math.max(1, Math.min(samples, Math.round(shutter * samples)));
-  const vf =
-    `tmix=frames=${M},fps=${baseFps},format=yuv420p,` +
-    "setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709";
+  const vf: string[] = [];
+  if (blur) {
+    const M = Math.max(1, Math.min(blur.samples, Math.round(blur.shutter * blur.samples)));
+    vf.push(`tmix=frames=${M}`, `fps=${baseFps}`);
+  }
+  vf.push(
+    "scale=in_color_matrix=bt601:out_color_matrix=bt709",
+    "format=yuv420p",
+    "setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709",
+  );
   await run(await resolveFfmpeg(), [
     "-y",
     "-loglevel",
     "error",
     "-i",
-    resolve(inMp4),
+    resolve(inMov),
     "-vf",
-    vf,
+    vf.join(","),
     "-c:v",
     "libx264",
-    "-pix_fmt",
-    "yuv420p",
     "-crf",
     "18",
+    "-movflags",
+    "+faststart",
     "-r",
     String(baseFps),
     "-an",
@@ -332,10 +353,23 @@ async function renderTakeExclusive(opts: RenderTakeOpts): Promise<RenderTakeResu
       produced = await renderVideo({
         projectFile: "/src/scene/project.ts",
         settings: {
-          outFile: "take.mp4",
+          outFile: "take.mov",
           outDir: RENDER_OUT,
           workers: 1,
-          ...(rangeSec ? { projectSettings: { range: rangeSec } } : {}),
+          // ProRes 4444 intermediate, NOT revideo's default wasm exporter: the
+          // wasm path encodes H.264 in-browser via WebCodecs at the browser's
+          // default bitrate (mp4-wasm passes `bitrate: undefined`, and revideo
+          // 0.11 exposes no knob) — at fps·samples that visibly softens fine
+          // detail, screen-space caption/title text worst of all, before the
+          // delivery encode ever runs. The ffmpeg exporter is fed lossless PNG
+          // frames and prores_ks 4444 keeps them visually intact (4:4:4, no
+          // DCT mush), leaving deliverMp4's CRF 18 as the single lossy
+          // generation. Costs scratch disk (GBs at fps·samples for a long
+          // take) and slower frame handoff — accepted for the master's text.
+          projectSettings: {
+            exporter: { name: "@revideo/core/ffmpeg", options: { format: "proRes" } },
+            ...(rangeSec ? { range: rangeSec } : {}),
+          },
           logProgress: opts.logProgress ?? false,
           ...(opts.onProgress
             ? {
@@ -367,21 +401,17 @@ async function renderTakeExclusive(opts: RenderTakeOpts): Promise<RenderTakeResu
       process.chdir(prevCwd);
     }
 
-    // 3. deliver mp4 (motion-blur down from fps·samples if configured) + the
-    //    editable composition. OFF ⇒ a plain copy (byte-identical to before).
+    // 3. deliver the postable mp4 from the ProRes intermediate + the editable
+    //    composition. Motion blur (when configured) and the 601→709 colour
+    //    conversion both happen inside this single encode — see deliverMp4.
     await mkdir(dirname(resolve(opts.outPath)), { recursive: true });
     const producedAbs = resolve(scratch, produced);
-    if (motionBlurActive(composition.motionBlur)) {
-      await motionBlurMp4(
-        producedAbs,
-        resolve(opts.outPath),
-        composition.output.fps,
-        composition.motionBlur.samples,
-        composition.motionBlur.shutter,
-      );
-    } else {
-      await copyFile(producedAbs, resolve(opts.outPath));
-    }
+    await deliverMp4(
+      producedAbs,
+      resolve(opts.outPath),
+      composition.output.fps,
+      motionBlurActive(composition.motionBlur) ? composition.motionBlur : null,
+    );
     const compositionPath = opts.compositionPath
       ? resolve(opts.compositionPath)
       : `${resolve(opts.outPath).replace(/\.mp4$/i, "")}.composition.json`;
