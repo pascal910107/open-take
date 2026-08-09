@@ -456,7 +456,15 @@ export async function inspectPage(url: string, opts: InspectOpts = {}): Promise<
     await cdp.send("Page.enable");
     await cdp.send("Runtime.enable");
     const inner = await fitViewport(cdp, browser.targetId, vw, vh);
-    await cdp.send("Page.navigate", { url });
+    // errorText set ⇒ no server answered (refused/DNS/timeout) and the tab is
+    // showing Chrome's own error page — inspecting ITS elements would send an
+    // agent planning a demo of ERR_CONNECTION_REFUSED. An HTTP 404/500 has no
+    // errorText: the app answered, inspect what it said.
+    const nav = await cdp.send<{ errorText?: string }>("Page.navigate", { url });
+    if (nav.errorText)
+      throw new Error(
+        `inspectPage: ${url} did not answer (${nav.errorText}) — is the app running?`,
+      );
     await sleep(opts.warmupMs ?? 1500);
 
     const evalRaw = async (expr: string): Promise<string> => {

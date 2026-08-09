@@ -294,7 +294,15 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
       throw new Error(
         `captureTakeCDP: plan.url ${plan.url} is outside OPEN_TAKE_ALLOWED_ORIGINS — an unattended run only films the app it was pointed at`,
       );
-    await navigate(cdp, plan.url);
+    // Fail BEFORE the screencast exists: a URL nobody is listening on used to
+    // sail through here and produce a polished 4K take of Chrome's
+    // ERR_CONNECTION_REFUSED page, minutes after the mistake was made.
+    const navError = await navigate(cdp, plan.url);
+    if (navError)
+      throw new Error(
+        `captureTakeCDP: ${plan.url} did not answer (${navError}) — is the app running? ` +
+          `Start it (or fix the URL) and re-make; nothing was recorded.`,
+      );
     await installActivityProbe(cdp);
 
     // Fonts before frames — the recording's first ~700ms is the one place a
@@ -451,7 +459,18 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
         // activity probe reinstalls itself on the new document (it is an
         // addScriptToEvaluateOnNewDocument), so the hold below can still tell
         // "finished" from "still working".
-        await navigate(cdp, dest);
+        const midNavError = await navigate(cdp, dest);
+        if (midNavError) {
+          // The failed navigation already replaced the app with Chrome's error
+          // page — filming THAT for the remaining beats helps nobody. Going
+          // back re-loads the app (SPA state is lost, and steps that depended
+          // on it will skip in turn, each with its own reason), which is still
+          // strictly more footage than an error page.
+          skip("navigate", dest, `destination did not answer (${midNavError})`);
+          await navigate(cdp, current);
+          await hold(1200);
+          continue;
+        }
         await awaitFonts(cdp);
         // Then the ordinary settle. A navigate with no hold cuts to a
         // half-painted screen — this is the beat where the new page arrives,
@@ -1061,11 +1080,17 @@ function credentialFieldProbeJs(): string {
   })()`;
 }
 
-async function navigate(cdp: CDP, url: string): Promise<void> {
+/** Returns Chrome's `errorText` (e.g. "net::ERR_CONNECTION_REFUSED") when the
+ *  navigation never reached a server — the tab is then showing Chrome's own
+ *  error page, which fires load events like any document and would otherwise
+ *  get filmed as if it were the app. HTTP error PAGES (404/500) carry no
+ *  errorText: the app answered, and what it said is what an honest take shows. */
+async function navigate(cdp: CDP, url: string): Promise<string | undefined> {
   const loaded = new Promise<void>((res) => {
     cdp.on("Page.loadEventFired", () => res());
     setTimeout(res, 8000); // don't hang on a never-firing load
   });
-  await cdp.send("Page.navigate", { url });
+  const nav = await cdp.send<{ errorText?: string }>("Page.navigate", { url });
   await loaded;
+  return nav.errorText || undefined;
 }
