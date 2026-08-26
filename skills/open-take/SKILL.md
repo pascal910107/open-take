@@ -1,6 +1,6 @@
 ---
 name: open-take
-description: Make a polished ~25s demo video of a web app the user names ("make a demo of this app for Twitter"). Explore the app, decide the IDEAL demo editorial-first, render a cinematic MP4 (smooth synthetic cursor + selective click-zoom) plus an editable composition. Use when the user wants a shareable product demo of a running web app.
+description: Make a polished demo video of a web app or a change to one ("make a demo of this app for Twitter", "record this PR as a video"). Explore the app, decide the IDEAL demo editorial-first — length follows what must be shown — and render a cinematic MP4 (smooth synthetic cursor + selective click-zoom) plus an editable composition. Use when the user wants a shareable demo of a running web app.
 ---
 
 # open-take — make a demo of an app
@@ -22,8 +22,8 @@ The failure mode this skill exists to prevent: **letting "what I can reliably
 click" decide the story.** That produces a demo that opens the page and clicks a
 few buttons — competent, forgettable, not something a founder would post.
 
-So: **decide the ideal demo FIRST** (what would make someone stop scrolling),
-*then* figure out how to capture it. Only downgrade a beat if capture genuinely
+So: **decide the ideal demo FIRST** (what would make the intended viewer care —
+stop scrolling, or hit merge), *then* figure out how to capture it. Only downgrade a beat if capture genuinely
 fails — and when you downgrade, **say so out loud** (it's a real product
 limitation, not something to paper over).
 
@@ -72,8 +72,9 @@ Answer, in writing:
 - **What is this product and who is it for** — one sentence.
 - **What is its SINGLE most impressive / differentiating thing** — the "wow"
   that makes someone stop scrolling. (Not "it has a nice UI." The specific
-  moment.)
-- **What ONE story should a ~25s demo tell** — one sentence.
+  moment.) For a change/PR demo: what can a user DO now that they couldn't
+  before.
+- **What ONE story should the demo tell** — one sentence.
 
 **Alignment gate — ask EARLY, confirm before DIRECT.** Use the host's
 structured question tool (Claude Code: `AskUserQuestion`; other agents: the
@@ -102,6 +103,10 @@ judgment; when skipping, restate the brief so they can correct it.
   "with captions in English").
 - Ask audience/purpose as an additional question only when it is unknown and
   would materially change the story.
+- Ask coverage depth (full walkthrough vs tight teaser, recommendation first)
+  in the same call only when the shot inventory is large or the audience is
+  ambiguous — see DIRECT; length questions the user didn't need answered are
+  friction.
 - Do not write the plan or run `make` until a required answer arrives.
 
 **Unattended runs (CI, cron — no human on the channel).** When the invocation
@@ -117,23 +122,32 @@ the dossier is what turns the next run's cold exploration into a cheap
 re-verify.
 
 ### 2. DIRECT (the editorial work — ignore capture feasibility here)
-Choose **3–5 beats** forming ONE coherent arc: a hook in the first ~2s → a
-couple of meaningful interactions → a clear payoff/closer. For each beat write:
-**what it shows · why it earns its place · what the viewer should feel.**
+**Scope before seconds: build the shot inventory.** What must the viewer SEE to
+believe the story? For a product demo, the signature moments that prove the
+thesis; for a change/PR demo, every user-facing affordance the change adds —
+read the diff and list them. The inventory is the editorial decision; everything
+below arranges it.
+
+**Length is an OUTPUT, not an input.** A delivered beat runs ~2.5–4s once
+travel + settle are in (measured across real takes), so duration ≈ that times
+the inventory — a one-control fix is honestly told in ~10s, a seven-affordance
+editor PR earns 30–45s, a feed teaser wants the leanest cut of the story. There
+is no house length: what's forbidden is **padding** (dead holds, trailing
+waits) and **silent thinness** (inventory dropped without a word — to a
+reviewer, a cut showing three of seven toolbar controls reads as "did the rest
+not work?"). For anything you skip, say why in the delivery note (an OS-native
+picker headless Chrome can't drive, a path that can't save) — a named omission
+reads as diligence, an unnamed one as a gap. When the inventory is large or the
+audience is unclear, ask depth in the alignment gate (one more option-question
+in the SAME AskUserQuestion call: full walkthrough vs tight teaser, with your
+recommendation first); unattended, derive depth from the brief.
+
+Arrange the inventory into beats forming ONE coherent arc: a hook in the first
+~2s → the interactions → a clear payoff/closer. For each beat write: **what it
+shows · why it earns its place · what the viewer should feel.**
 
 Decide the *ideal* version even if you're not sure you can capture it. Lead with
 the app's signature moment; make the wow the hero, not an afterthought.
-
-**Know your audience — a PR demo is a different cut than a feed demo.** The
-default above is the feed genre: hook-first, 3–5 beats, tight. But when the
-take demos a CHANGE for reviewers (a PR comment, CI), coverage outranks hook:
-enumerate the change's user-facing affordances from the diff, and give each one
-that films well its own beat, up to the ~25s budget — 6–8 short beats are fine
-here, still one arc, with the change's payoff as the closer. A 15s cut that
-shows three of seven toolbar controls reads as "did the rest not work?" to the
-person deciding whether to merge. And for any affordance you *skip*, say why in
-the delivery note (an OS-native picker headless Chrome can't drive, a path that
-can't save) — a named omission reads as diligence, an unnamed one as a gap.
 
 **Zoom — decide per beat by payoff locality:**
 - Zoom **only** when the payoff is **local AND co-located with the click** — a
@@ -210,7 +224,8 @@ can't save) — a named omission reads as diligence, an unnamed one as a gap.
 Ask, honestly:
 - **Is this the demo, or just the easy clicks?**
 - **Is the wow actually in here?**
-- **Would a skeptical founder post this?**
+- **Does the cut cover the inventory — and is every omission named?**
+- **Would a skeptical founder post this — would a reviewer merge on it?**
 
 If the answer to any is weak, revise the DIRECT step. This is also where you map
 the ideal onto the capture vocabulary (next section) and decide your downgrades.
@@ -220,7 +235,8 @@ Write the plan (schema below), then `make --draft`. The runtime drives the live
 app and composites the polish.
 
 **Post the thesis + beat plan to the user BEFORE running `make`** — one line
-of thesis, then the 3–5 beats with what each shows. The shoot + render takes
+of thesis, then the beats with what each shows and the expected delivered
+length. The shoot + render takes
 minutes; the user spends them reading your editorial instead of watching a
 spinner. `make` auto-opens the raw capture the moment it lands (minutes before
 the polished mp4): tell the user that's the **unpolished footage** — real
@@ -819,9 +835,10 @@ resolution/duration.
 - Make the app's *signature* moment the hero. If the hero is global (a restyle,
   a navigation), show it full-view — don't zoom into it.
 - One strong closer (a result, a completed action, a striking page/state).
-- **~25s is a target, not a floor.** A tight, all-signal 12–18s draft beats a
-  padded 25s. Snappy beats read better than long holds. (Feed genre — a PR
-  demo spends the leftover budget on affordance coverage instead; see DIRECT.)
+- **Cut dead air, not coverage.** Length belongs to the shot inventory (see
+  DIRECT), not to a genre number. Snappy beats read better than long holds, so
+  the fix for "it drags" is tighter pacing inside the beats — never silently
+  dropping inventory to hit a length.
 - **Never pad to length with trailing `wait`s.** A long wait after the last
   payoff delivers a frozen screen, not a closer — and it is invisible unless
   you watch the tail (the contact sheet's last row exists for exactly this).
