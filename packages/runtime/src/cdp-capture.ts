@@ -976,9 +976,18 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
         continue;
       }
 
-      // click: timestamp, resolve bbox + programmatic click in one eval
+      // click: one eval resolves the element and decides delivery. When the
+      // centre is hittable the eval returns `cx`/`cy` WITHOUT clicking, and
+      // the click is delivered here as trusted CDP input — press + release,
+      // the full pointerdown→click pipeline. A programmatic m.click() fires a
+      // lone `click` event, and pointer-listening controls (Radix dropdown
+      // triggers open on pointerdown) treat that as silence: measured on a
+      // real shoot, the step "succeeded", nothing opened, and 8 of 10 beats
+      // died downstream. The eval keeps m.click() as its own fallback for
+      // targets a coordinate cannot reach (zero-size / covered /
+      // pointer-events:none), so `cx` missing means "already clicked in-page".
       const label = step.text ?? step.selector;
-      const tMs = Date.now() - t0;
+      let tMs = Date.now() - t0; // js-fallback mode: the eval clicks ~now
       // the locators refuse to .click() a <select> (it hangs the capture) and
       // say so with this sentinel — name the real fix instead of "not found"
       const clickRaw = step.text
@@ -995,11 +1004,33 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
         await hold(600);
         continue;
       }
-      const box = clickRaw ? findBox(evalValue(clickRaw)) : null;
+      const parsed = clickRaw ? (evalValue(clickRaw) as Record<string, unknown> | null) : null;
+      const box = parsed ? findBox(parsed) : null;
+      const pt =
+        parsed && typeof parsed.cx === "number" && typeof parsed.cy === "number"
+          ? { x: parsed.cx, y: parsed.cy }
+          : null;
+      if (box && pt) {
+        // Trusted delivery, mirroring the drag block's proven pattern: pause
+        // the forced-raster pump (a stalled captureScreenshot would block the
+        // held-button dispatch), drain any in-flight one, then fire-and-forget
+        // — a held-button dispatchMouseEvent withholds its ack ~5s in headless,
+        // so awaiting press/release would stall the beat. Sends stay ordered
+        // on the socket; Chrome processes them promptly.
+        pumpPaused = true;
+        await sleep(160);
+        tMs = Date.now() - t0; // the press, not the eval, is the beat
+        mouse(cdp, "mouseMoved", pt.x, pt.y, 0).catch(() => {});
+        mouse(cdp, "mousePressed", pt.x, pt.y, 1).catch(() => {});
+        await sleep(60); // a human-scale press→release gap
+        mouse(cdp, "mouseReleased", pt.x, pt.y, 0).catch(() => {});
+        await sleep(120); // let the release flush before resuming rasters
+        pumpPaused = false;
+      }
       if (box) {
         events.push({
           kind: "click",
-          ...center(box),
+          ...(pt ?? center(box)),
           box,
           tMs,
           sel: label,

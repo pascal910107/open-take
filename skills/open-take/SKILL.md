@@ -450,8 +450,13 @@ page changed).
 }
 ```
 - **`click`** targets by `text` (accessible name — robust) **or** `selector`
-  (CSS — for unlabeled controls). Both resolve the bbox and click in one atomic
-  page eval. Prefer `text`; use `selector` when there's no accessible name.
+  (CSS — for unlabeled controls). Both resolve the element and its bbox in one
+  page eval, then the click is delivered as TRUSTED input (a real CDP
+  press/release at the element's centre — the full pointerdown→click pipeline,
+  so pointer-listening controls like Radix dropdown triggers open like they
+  would for a human). A target a coordinate can't reach (zero-size/sr-only, a
+  covered centre) falls back to an in-page programmatic click automatically.
+  Prefer `text`; use `selector` when there's no accessible name.
 - **`type`** locates a field by `text` (its accessible name **or placeholder**)
   or `selector`, focuses it, and types `value` with real keystrokes, char by
   char (the cursor parks on the field and the zoom holds while text appears).
@@ -768,8 +773,8 @@ typed: ECHO each note, resolve, then batch ONE render.
   *needs* seeded state, set it up within the plan itself (type/click your way
   in), not across runs.
 - **Target unlabeled controls by CSS `selector`** (see inspect note). The
-  selector path is atomic (resolve-bbox-and-click in one page eval), so it's as
-  robust as the text path.
+  selector path resolves in one page eval and delivers the same trusted click
+  as the text path, so it's just as robust.
 - **A beat that saves/exports can write REAL files into the user's project.**
   The app under demo is the user's actual app — a "save" or "export" beat may
   write into their working tree (measured runs did exactly this, to an

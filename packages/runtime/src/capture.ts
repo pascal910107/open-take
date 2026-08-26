@@ -95,10 +95,42 @@ const NAME_JS =
   `for(i=0;i<els.length;i++){n=names(els[i]);for(j=0;j<n.length;j++){if(n[j].indexOf(t)!==-1)return els[i];}}` +
   `return null;}`;
 
+// Shared tail for both click resolvers: the element is in hand — decide HOW
+// the click gets delivered. `m.click()` fires a lone synthetic `click` event
+// with NO pointerdown/mousedown/pointerup in front of it, and a whole class
+// of real controls listens to exactly those: a Radix DropdownMenuTrigger
+// opens on pointerdown, so a programmatic click was a SILENT no-op — the
+// step "succeeded", nothing opened, and every later beat died with "target
+// not found" (a measured shoot lost 8 of 10 beats this way). So when the
+// element's centre is actually hittable — elementFromPoint lands on it or on
+// one of its descendants — do NOT click in-page: return the point (`cx`/`cy`)
+// and let the capture driver deliver a trusted CDP press/release there, the
+// full native pipeline `hover` and `drag` already use. The in-page m.click()
+// survives as the fallback for what a coordinate cannot reach: zero-size
+// targets (sr-only), a centre covered by an unrelated overlay,
+// pointer-events:none — everything that resolved before still resolves.
+//
+// Scrolling: m.click() never scrolls, and a below-fold target would advance
+// state off-screen — so scroll into view ONLY when out of frame (in-view
+// beats keep their framing) and re-read the rect so the compositor gets a
+// viewport-relative bbox. behavior:'instant' is load-bearing for the point
+// path: with CSS scroll-behavior:smooth the post-scroll rect is mid-animation
+// and the trusted click would land on yesterday's layout.
+const CLICK_TAIL_JS =
+  `if(m.tagName==='SELECT')return 'SELECTINERT';` +
+  `var r=m.getBoundingClientRect();` +
+  `if(r.top<0||r.bottom>window.innerHeight){m.scrollIntoView({block:'center',behavior:'instant'});r=m.getBoundingClientRect();}` +
+  `var b={x:Math.round(r.x),y:Math.round(r.y),w:Math.round(r.width),h:Math.round(r.height)};` +
+  `var cx=Math.round(r.x+r.width/2),cy=Math.round(r.y+r.height/2);` +
+  `var hit=(r.width>0&&r.height>0&&document.elementFromPoint)?document.elementFromPoint(cx,cy):null;` +
+  `if(hit&&(hit===m||(m.contains&&m.contains(hit)))){b.cx=cx;b.cy=cy;return JSON.stringify(b);}` +
+  `m.click();return JSON.stringify(b);`;
+
 // Find a clickable by accessible name (aria-label or text), record its
-// rect (ground-truth bbox), and click it — all in one page eval so the
-// bbox and the action refer to the same element. Robust where CSS hooks
-// are unstable.
+// rect (ground-truth bbox), and resolve the click — all in one page eval so
+// the bbox and the action refer to the same element. Robust where CSS hooks
+// are unstable. Returns the bbox, plus `cx`/`cy` when the caller should
+// deliver the click as trusted CDP input (see CLICK_TAIL_JS).
 export function clickByTextJs(text: string): string {
   const t = JSON.stringify(text);
   return (
@@ -107,19 +139,12 @@ export function clickByTextJs(text: string): string {
     NAME_JS +
     `var m=pick(els,t);` +
     `if(!m)return 'NOTFOUND';` +
-    // m.click() fires programmatically and never scrolls; below-fold targets
-    // would advance state off-screen. Scroll into view ONLY when out of frame
-    // so in-view beats keep their framing; re-read the rect post-scroll so the
-    // compositor gets a viewport-relative (in-frame) bbox.
-    `if(m.tagName==='SELECT')return 'SELECTINERT';` +
-    `var r=m.getBoundingClientRect();` +
-    `if(r.top<0||r.bottom>window.innerHeight){m.scrollIntoView({block:'center'});r=m.getBoundingClientRect();}` +
-    `var b={x:Math.round(r.x),y:Math.round(r.y),w:Math.round(r.width),h:Math.round(r.height)};` +
-    `m.click();return JSON.stringify(b);})()`
+    CLICK_TAIL_JS +
+    `})()`
   );
 }
 
-// Selector twin of clickByTextJs: resolve the element's rect AND click it in
+// Selector twin of clickByTextJs: resolve the element's rect AND the click in
 // ONE page eval, atomically. The old path made two separate agent-browser
 // round-trips (`get box <sel>` then `click <sel>`); under recording the CDP
 // `get box` call flaked (returned null ~1-in-3) and the beat was silently
@@ -130,11 +155,8 @@ export function clickBySelectorJs(selector: string): string {
   return (
     `(function(){var m=document.querySelector(${s});` +
     `if(!m)return 'NOTFOUND';` +
-    `if(m.tagName==='SELECT')return 'SELECTINERT';` +
-    `var r=m.getBoundingClientRect();` +
-    `if(r.top<0||r.bottom>window.innerHeight){m.scrollIntoView({block:'center'});r=m.getBoundingClientRect();}` +
-    `var b={x:Math.round(r.x),y:Math.round(r.y),w:Math.round(r.width),h:Math.round(r.height)};` +
-    `m.click();return JSON.stringify(b);})()`
+    CLICK_TAIL_JS +
+    `})()`
   );
 }
 
