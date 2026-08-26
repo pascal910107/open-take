@@ -124,6 +124,17 @@ couple of meaningful interactions → a clear payoff/closer. For each beat write
 Decide the *ideal* version even if you're not sure you can capture it. Lead with
 the app's signature moment; make the wow the hero, not an afterthought.
 
+**Know your audience — a PR demo is a different cut than a feed demo.** The
+default above is the feed genre: hook-first, 3–5 beats, tight. But when the
+take demos a CHANGE for reviewers (a PR comment, CI), coverage outranks hook:
+enumerate the change's user-facing affordances from the diff, and give each one
+that films well its own beat, up to the ~25s budget — 6–8 short beats are fine
+here, still one arc, with the change's payoff as the closer. A 15s cut that
+shows three of seven toolbar controls reads as "did the rest not work?" to the
+person deciding whether to merge. And for any affordance you *skip*, say why in
+the delivery note (an OS-native picker headless Chrome can't drive, a path that
+can't save) — a named omission reads as diligence, an unnamed one as a gap.
+
 **Zoom — decide per beat by payoff locality:**
 - Zoom **only** when the payoff is **local AND co-located with the click** — a
   popover, dropdown, inline result, or small control whose effect appears right
@@ -737,6 +748,25 @@ burst typed together arrives as one batch. With no `<take>` it resolves the take
 in the current directory. Treat its output exactly like a message the user
 typed: ECHO each note, resolve, then batch ONE render.
 
+## Delivering to GitHub (PR comment, issue, README)
+
+A comment posted via the API cannot attach a video, so the inline surface is an
+image — the pattern is: commit `demo.mp4` **and** a GIF to a throwaway branch
+(the PR's diff stays clean; note the branch is deletable), embed the GIF via
+its raw URL, and link the MP4 blob right under it labelled with
+resolution/duration.
+
+- **GIF width ≥900px, 12–15fps.** Captions are authored for 1080p; much below
+  ~860px wide they smear (measured on a real PR: a 640×360 gif was the first
+  thing the maintainer flagged — "blurry"). The whole take as the GIF when it's
+  ≤20s; otherwise a teaser of the hero beats. Keep the file under ~10MB or
+  GitHub stops rendering it inline — shorten or drop fps before shrinking width.
+- Two-pass palette, or the colours band:
+  `ffmpeg -i demo.mp4 -vf "fps=12,scale=960:-1:flags=lanczos,split[a][b];[a]palettegen[p];[b][p]paletteuse" -loop 0 demo.gif`
+  (`open-take ci` writes the 6s version of this as `<out>.take/teaser.gif`.)
+- Ship the delivered mp4 AS IS — it is already the postable encode; every
+  re-encode on top is a visible generation lost.
+
 ## Capture robustness — checks that keep "user does nothing" honest
 - **Read the `⚠ n composition warnings` block.** Every render path (`make`,
   `render`, `--review`, `--draft`) re-prints the validator's non-fatal findings
@@ -790,7 +820,8 @@ typed: ECHO each note, resolve, then batch ONE render.
   a navigation), show it full-view — don't zoom into it.
 - One strong closer (a result, a completed action, a striking page/state).
 - **~25s is a target, not a floor.** A tight, all-signal 12–18s draft beats a
-  padded 25s. Snappy beats read better than long holds.
+  padded 25s. Snappy beats read better than long holds. (Feed genre — a PR
+  demo spends the leftover budget on affordance coverage instead; see DIRECT.)
 - **Never pad to length with trailing `wait`s.** A long wait after the last
   payoff delivers a frozen screen, not a closer — and it is invisible unless
   you watch the tail (the contact sheet's last row exists for exactly this).

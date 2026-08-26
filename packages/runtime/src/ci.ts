@@ -543,15 +543,19 @@ export async function runAgent(opts: {
 }
 
 /** A ~6s looping teaser for surfaces that render GIF but not video (a PR
- *  comment). Palette pass keeps it small enough to actually load. Best-effort:
- *  a take without a teaser is a warning, never a failed run. */
+ *  comment). Palette pass keeps it small enough to actually load. 960 wide is
+ *  the legibility floor, not a luxury: captions are authored for 1080p, and a
+ *  real PR's 640-wide gif was the maintainer's first complaint ("blurry") —
+ *  while ~6s at 960/12fps of UI content still lands well under the ~10MB
+ *  ceiling GitHub renders inline. Best-effort: a take without a teaser is a
+ *  warning, never a failed run. */
 export async function renderTeaserGif(
   mp4Path: string,
   gifPath: string,
   opts: { seconds?: number; width?: number; fps?: number } = {},
 ): Promise<string> {
   const ffmpeg = await resolveFfmpeg();
-  const vf = `fps=${opts.fps ?? 10},scale=${opts.width ?? 480}:-1:flags=lanczos,split[a][b];[a]palettegen[p];[b][p]paletteuse`;
+  const vf = `fps=${opts.fps ?? 12},scale=${opts.width ?? 960}:-1:flags=lanczos,split[a][b];[a]palettegen[p];[b][p]paletteuse`;
   await new Promise<void>((done, fail) => {
     const p = spawn(
       ffmpeg,
