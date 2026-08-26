@@ -5,7 +5,7 @@
 // @revideo/ffmpeg — so the fallback costs consumers no extra download). Throw
 // with an install hint only when neither exists.
 
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { chmod, stat } from "node:fs/promises";
 
 let cachedFfmpeg: string | undefined;
@@ -67,6 +67,46 @@ export async function resolveFfmpeg(): Promise<string> {
   throw new Error(
     "ffmpeg not found — install it (e.g. `brew install ffmpeg`) or `npm install` so the bundled @ffmpeg-installer binary resolves for this platform",
   );
+}
+
+/** True when an `ffmpeg -encoders` table has a video-encoder ROW named
+ *  `encoder` (" V....D libx264  ..."), not merely the name as a substring
+ *  somewhere — descriptions repeat encoder names constantly. */
+export function parseEncoders(encodersText: string, encoder: string): boolean {
+  const escaped = encoder.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^\\s*V\\S{5}\\s+${escaped}(?:\\s|$)`, "m").test(encodersText);
+}
+
+const encoderCache = new Map<string, Promise<boolean>>();
+
+/** True when the RESOLVED ffmpeg (resolveFfmpeg — which may be a system
+ *  binary lacking libvpx-vp9) offers the named video encoder. Cached per
+ *  name; any failure is false, never a throw. */
+export function ffmpegHasEncoder(name: string): Promise<boolean> {
+  let cached = encoderCache.get(name);
+  if (!cached) {
+    cached = hasEncoderOnce(name).catch(() => false);
+    encoderCache.set(name, cached);
+  }
+  return cached;
+}
+
+async function hasEncoderOnce(name: string): Promise<boolean> {
+  const ffmpeg = await resolveFfmpeg();
+  const text = await new Promise<string>((res, rej) => {
+    const child = spawn(ffmpeg, ["-hide_banner", "-encoders"], {
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    let out = "";
+    child.stdout.on("data", (d) => {
+      out += d;
+    });
+    child.on("error", rej);
+    child.on("close", (code) =>
+      code === 0 ? res(out) : rej(new Error(`ffmpeg -encoders exited ${code}`)),
+    );
+  });
+  return parseEncoders(text, name);
 }
 
 export async function resolveFfprobe(): Promise<string> {

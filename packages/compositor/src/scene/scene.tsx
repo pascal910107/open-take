@@ -13,6 +13,7 @@ import {
   carryWindow,
   ghostCardLines,
 } from "../math";
+import { buildUndecodableMessage } from "../decode-guard";
 import comp from "./.composition.json";
 
 const vW = comp.source.videoWidth,
@@ -40,6 +41,45 @@ const CURSOR = [
 ].map(([x, y]) => [x * S, y * S]);
 
 export default makeScene2D("take", function* (view) {
+  // Fail fast if this browser cannot decode the capture: revideo's <Video>
+  // waitForCanPlay resolves only on 'canplay' (its 'error' handler just
+  // logs), so an undecodable capture — H.264 on a codec-less Chromium —
+  // otherwise hangs the render forever. A rejection here propagates out as a
+  // renderVideo failure; its message starts with the shared sentinel
+  // (decode-guard.ts), which render.ts recognises to retry with a VP9
+  // intermediate.
+  if (comp.source.videoUrl) {
+    yield new Promise((res, rej) => {
+      const el = document.createElement("video");
+      el.muted = true;
+      el.preload = "auto";
+      let timer = 0;
+      const done = (err) => {
+        clearTimeout(timer);
+        el.removeEventListener("canplay", onCanPlay);
+        el.removeEventListener("error", onError);
+        el.removeAttribute("src");
+        el.load();
+        if (err) rej(err);
+        else res(undefined);
+      };
+      const onCanPlay = () => done(undefined);
+      const onError = () => {
+        const e = el.error;
+        const detail = `MediaError code ${e ? e.code : "?"}: ${e?.message ? e.message : "no detail"}`;
+        done(new Error(buildUndecodableMessage("media-error", detail, comp.source.videoUrl)));
+      };
+      el.addEventListener("canplay", onCanPlay, { once: true });
+      el.addEventListener("error", onError, { once: true });
+      timer = setTimeout(() => {
+        const detail = `readyState=${el.readyState}`;
+        done(new Error(buildUndecodableMessage("timeout", detail, comp.source.videoUrl)));
+      }, 30000);
+      el.src = comp.source.videoUrl;
+      el.load();
+    });
+  }
+
   const t = createSignal(0);
 
   // The camera: ONE eased viewport rect (centre + size in lockstep, targets

@@ -30,7 +30,8 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { renderVideo } from "@open-take/revideo-renderer";
-import { repairBundledMediaPermissions, resolveFfmpeg } from "./ffmpeg";
+import { isCaptureUndecodable } from "./decode-guard";
+import { ffmpegHasEncoder, repairBundledMediaPermissions, resolveFfmpeg } from "./ffmpeg";
 import { type PlanOpts, planComposition } from "./plan";
 import {
   type CaptureLog,
@@ -110,21 +111,37 @@ function run(cmd: string, args: string[]): Promise<void> {
 
 /** Normalise the capture to a constant-fps mp4 the web decoder can read.
  *  fps follows the composition so a hi-fps capture can render at 60 (the
- *  render grid must match — a 30-grid would throw away the extra frames). */
-async function toMp4(videoPath: string, outMp4: string, fps: number): Promise<void> {
+ *  render grid must match — a 30-grid would throw away the extra frames).
+ *
+ *  `codec` is normally h264; "vp9" is the retry arm for render browsers
+ *  WITHOUT H.264 decoding (Playwright-style Chromium builds ship no
+ *  proprietary codecs). The scene's decode guard rejects in seconds when the
+ *  capture can't decode there (see src/decode-guard.ts); renderTakeExclusive
+ *  catches that rejection and re-encodes the scratch capture with this arm
+ *  before one retry. The VP9 fallback must keep the .mp4 container AND the
+ *  capture.mp4 name: revideo routes video decoding by file extension, so a
+ *  .webm would take a different (and broken) decode path — VP9-in-MP4 (vp09
+ *  track) is the shape that works. */
+async function toMp4(
+  videoPath: string,
+  outMp4: string,
+  fps: number,
+  codec: "h264" | "vp9",
+): Promise<void> {
   await mkdir(dirname(outMp4), { recursive: true });
+  const codecArgs =
+    codec === "vp9"
+      ? ["-c:v", "libvpx-vp9", "-b:v", "0", "-crf", "24", "-row-mt", "1", "-cpu-used", "4"]
+      : ["-c:v", "libx264", "-crf", "18"];
   await run(await resolveFfmpeg(), [
     "-y",
     "-loglevel",
     "error",
     "-i",
     resolve(videoPath),
-    "-c:v",
-    "libx264",
+    ...codecArgs,
     "-pix_fmt",
     "yuv420p",
-    "-crf",
-    "18",
     "-r",
     String(fps),
     "-an",
@@ -260,8 +277,10 @@ async function prepareScratch(composition: TakeComposition, videoPath: string): 
     // ignored on POSIX.
     await symlink(nm, join(dir, "node_modules"), "junction");
     // fps follows the composition: the render grid must match the source, or a
-    // hi-fps capture is decimated before the scene ever sees it.
-    await toMp4(videoPath, join(dir, "public", "capture.mp4"), composition.output.fps);
+    // hi-fps capture is decimated before the scene ever sees it. Always H.264
+    // here — the happy path — the decode-guard retry re-encodes as VP9 in
+    // place when the render browser can't take it.
+    await toMp4(videoPath, join(dir, "public", "capture.mp4"), composition.output.fps, "h264");
     return dir;
   } catch (error) {
     await cleanupScratch(dir);
@@ -338,65 +357,131 @@ async function renderTakeExclusive(opts: RenderTakeOpts): Promise<RenderTakeResu
   // monorepo root's postinstall script.
   await repairBundledMediaPermissions();
 
-  // 1. lay out this render's own directory (scene + composition + capture)
+  // 1. lay out this render's own directory (scene + composition + capture).
+  //    The intermediate starts as H.264; the decode-guard retry below swaps
+  //    it for VP9 when the render browser turns out not to decode it.
   const scratch = await prepareScratch(composition, opts.videoPath);
   const deps = depsRoot();
+  // Resolved BEFORE the chdir below: the retry re-encode runs while cwd is
+  // the scratch dir, where a relative videoPath would resolve wrongly.
+  const videoAbs = resolve(opts.videoPath);
   try {
     // 2. render headless, with cwd pinned to the scratch dir.
     // revideo's @revideo/telemetry phones home to PostHog by default; this is an
     // all-local tool, so default it OFF (an explicit user-set value still wins).
     if (process.env.DISABLE_TELEMETRY === undefined) process.env.DISABLE_TELEMETRY = "true";
+
+    // One attempt = one renderVideo call with its own no-progress hint timer.
+    // A stuck render is SILENT: revideo's first progress tick fires only after
+    // the first frame fully renders, and legitimate pre-roll can take tens of
+    // seconds — so hint (never kill) when no tick has landed after 3 minutes.
+    const renderOnce = async (): Promise<string> => {
+      let noProgressTimer: ReturnType<typeof setTimeout> | undefined = setTimeout(() => {
+        process.stderr.write(
+          "open-take: no render progress after 3 minutes — if this never advances, the render browser may be stuck decoding the capture (see OPEN_TAKE_CHROME)\n",
+        );
+      }, 180_000);
+      try {
+        return await renderVideo({
+          projectFile: "/src/scene/project.ts",
+          settings: {
+            outFile: "take.mov",
+            outDir: RENDER_OUT,
+            workers: 1,
+            // ProRes 4444 intermediate, NOT revideo's default wasm exporter: the
+            // wasm path encodes H.264 in-browser via WebCodecs at the browser's
+            // default bitrate (mp4-wasm passes `bitrate: undefined`, and revideo
+            // 0.11 exposes no knob) — at fps·samples that visibly softens fine
+            // detail, screen-space caption/title text worst of all, before the
+            // delivery encode ever runs. The ffmpeg exporter is fed lossless PNG
+            // frames and prores_ks 4444 keeps them visually intact (4:4:4, no
+            // DCT mush), leaving deliverMp4's CRF 18 as the single lossy
+            // generation. Costs scratch disk (GBs at fps·samples for a long
+            // take) and slower frame handoff — accepted for the master's text.
+            projectSettings: {
+              exporter: { name: "@revideo/core/ffmpeg", options: { format: "proRes" } },
+              ...(rangeSec ? { range: rangeSec } : {}),
+            },
+            logProgress: opts.logProgress ?? false,
+            // Wrapped even without opts.onProgress: the first tick proves the
+            // browser is decoding frames, which disarms the no-progress hint.
+            progressCallback: (_worker: number, progress: number) => {
+              if (noProgressTimer !== undefined) {
+                clearTimeout(noProgressTimer);
+                noProgressTimer = undefined;
+              }
+              opts.onProgress?.(progress);
+            },
+            // vite's dev server refuses to serve outside its root, and its root is
+            // now a tmp dir — so allow the dependency tree the scene imports
+            // through the node_modules link (vite resolves it to the realpath).
+            viteConfig: {
+              server: { fs: { allow: [scratch, ...(deps ? [deps] : [])] } },
+            },
+            // Reuse the capture-managed Chrome-for-Testing for both stages.
+            puppeteer: {
+              // --password-store/--use-mock-keychain: never touch the OS keychain, so
+              // macOS doesn't pop a "Chrome wants to use Chromium Safe Storage" prompt
+              // mid-render (matches the capture launch in runtime/cdp.ts).
+              args: [
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--password-store=basic",
+                "--use-mock-keychain",
+              ],
+              executablePath: opts.chromePath,
+            },
+          },
+        });
+      } finally {
+        if (noProgressTimer !== undefined) clearTimeout(noProgressTimer);
+      }
+    };
+
     const prevCwd = process.cwd();
     process.chdir(scratch);
     let produced: string;
     try {
-      produced = await renderVideo({
-        projectFile: "/src/scene/project.ts",
-        settings: {
-          outFile: "take.mov",
-          outDir: RENDER_OUT,
-          workers: 1,
-          // ProRes 4444 intermediate, NOT revideo's default wasm exporter: the
-          // wasm path encodes H.264 in-browser via WebCodecs at the browser's
-          // default bitrate (mp4-wasm passes `bitrate: undefined`, and revideo
-          // 0.11 exposes no knob) — at fps·samples that visibly softens fine
-          // detail, screen-space caption/title text worst of all, before the
-          // delivery encode ever runs. The ffmpeg exporter is fed lossless PNG
-          // frames and prores_ks 4444 keeps them visually intact (4:4:4, no
-          // DCT mush), leaving deliverMp4's CRF 18 as the single lossy
-          // generation. Costs scratch disk (GBs at fps·samples for a long
-          // take) and slower frame handoff — accepted for the master's text.
-          projectSettings: {
-            exporter: { name: "@revideo/core/ffmpeg", options: { format: "proRes" } },
-            ...(rangeSec ? { range: rangeSec } : {}),
-          },
-          logProgress: opts.logProgress ?? false,
-          ...(opts.onProgress
-            ? {
-                progressCallback: (_worker: number, progress: number) => opts.onProgress!(progress),
-              }
-            : {}),
-          // vite's dev server refuses to serve outside its root, and its root is
-          // now a tmp dir — so allow the dependency tree the scene imports
-          // through the node_modules link (vite resolves it to the realpath).
-          viteConfig: {
-            server: { fs: { allow: [scratch, ...(deps ? [deps] : [])] } },
-          },
-          // Reuse the capture-managed Chrome-for-Testing for both stages.
-          puppeteer: {
-            // --password-store/--use-mock-keychain: never touch the OS keychain, so
-            // macOS doesn't pop a "Chrome wants to use Chromium Safe Storage" prompt
-            // mid-render (matches the capture launch in runtime/cdp.ts).
-            args: [
-              "--no-sandbox",
-              "--disable-setuid-sandbox",
-              "--password-store=basic",
-              "--use-mock-keychain",
-            ],
-            executablePath: opts.chromePath,
-          },
-        },
-      });
+      try {
+        produced = await renderOnce();
+      } catch (error) {
+        // The scene's decode guard rejected: this browser cannot decode the
+        // H.264 intermediate (Playwright-style Chromium ships no proprietary
+        // codecs — before the guard, such a render hung forever; a real user
+        // lost ~20 minutes to that silence). Re-encode the scratch capture as
+        // VP9-in-MP4 and retry ONCE; without an ffmpeg that can, refuse with
+        // the fix. Any other rejection rethrows untouched.
+        if (!isCaptureUndecodable(error)) throw error;
+        const detail = error instanceof Error ? error.message : String(error);
+        if (!(await ffmpegHasEncoder("libvpx-vp9"))) {
+          throw new Error(
+            `render: the browser at ${opts.chromePath} cannot decode the capture (${detail}) — ` +
+              "point OPEN_TAKE_CHROME at a full Chrome/Chrome-for-Testing build, or install an " +
+              "ffmpeg with libvpx-vp9 to enable the VP9 fallback",
+            { cause: error },
+          );
+        }
+        process.stderr.write(
+          "open-take: the render browser cannot decode the H.264 capture — retrying with a VP9 intermediate (output unchanged)\n",
+        );
+        await toMp4(
+          videoAbs,
+          join(scratch, "public", "capture.mp4"),
+          composition.output.fps,
+          "vp9",
+        );
+        try {
+          produced = await renderOnce();
+        } catch (retryError) {
+          if (!isCaptureUndecodable(retryError)) throw retryError;
+          const retryDetail = retryError instanceof Error ? retryError.message : String(retryError);
+          throw new Error(
+            `render: the browser at ${opts.chromePath} cannot decode the capture even as VP9 ` +
+              `(${retryDetail}) — point OPEN_TAKE_CHROME at a full Chrome/Chrome-for-Testing build`,
+            { cause: retryError },
+          );
+        }
+      }
     } finally {
       process.chdir(prevCwd);
     }
