@@ -283,7 +283,7 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
     // window chrome). This — NOT a metrics override — keeps the captured frame,
     // the viewport, and the event coordinate space all the same size (the
     // frame is exactly `scale`× the CSS event space; see launchBrowser).
-    const inner = await fitViewport(cdp, browser.targetId, vw, vh);
+    let inner = await fitViewport(cdp, browser.targetId, vw, vh);
 
     // Watch the page for activity from the very first document (and every
     // one a mid-take navigation creates) so a hold can tell "finished" from
@@ -308,6 +308,15 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
     // Fonts before frames — the recording's first ~700ms is the one place a
     // viewer's eye is guaranteed to be. Every mid-take `navigate` repeats this.
     await awaitFonts(cdp);
+
+    // Re-fit AFTER navigation + font wait: a window manager (cloud/Xvfb) can
+    // re-apply its own bounds during those seconds, and a viewport measured
+    // before that lie skews EVERY recorded coordinate the same way — a real
+    // take shipped with the cursor drawn 13% below every control because the
+    // window grew ~1226px tall after the first measure while the screencast
+    // stayed capped at the stale 1080. Re-running the fit both retries the
+    // requested size and, failing that, adopts what the window truly is.
+    inner = await fitViewport(cdp, browser.targetId, vw, vh);
 
     const screencast = new Screencast(cdp, frameDir);
     const t0 = Date.now();
@@ -1052,6 +1061,26 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
     await encodeFrames(screencast.frames, tEndMs + 400, out, fps);
 
     const probe = await ffprobe(out);
+    // Space-integrity check: the whole pipeline maps coordinates viewport →
+    // stage 1:1, which is only true while the encoded frame KEEPS the
+    // viewport's aspect (uniform scale cancels out downstream; a non-uniform
+    // one skews every cursor/zoom point). A window resize mid-capture — after
+    // the re-fit above — is the one thing that breaks it: the screencast then
+    // uniform-fits a changed surface into the stale cap and the aspects drift
+    // apart. Say so loudly; the take will render with visibly misplaced
+    // cursors and re-running is the fix.
+    if (probe.width && probe.height) {
+      const videoAspect = probe.width / probe.height;
+      const viewAspect = inner[0] / inner[1];
+      if (Math.abs(videoAspect / viewAspect - 1) > 0.01) {
+        process.stderr.write(
+          `⚠ the browser window resized MID-capture: viewport ${inner[0]}×${inner[1]} but the ` +
+            `recording is ${probe.width}×${probe.height} — cursor/zoom coordinates in this take ` +
+            `are skewed. Re-run; in a cloud/Xvfb environment give the screen a fixed size at ` +
+            `least the requested viewport.\n`,
+        );
+      }
+    }
     return {
       video: {
         width: probe.width ?? inner[0],
