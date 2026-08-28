@@ -493,7 +493,21 @@ page changed).
   so pointer-listening controls like Radix dropdown triggers open like they
   would for a human). A target a coordinate can't reach (zero-size/sr-only, a
   covered centre) falls back to an in-page programmatic click automatically.
-  Prefer `text`; use `selector` when there's no accessible name.
+  Prefer `text` **for real controls**; use `selector` when there's no
+  accessible name — and always for content elements. `text` is not a page-wide
+  search: a click queries only clickables (`button, a,
+  [role=button/link/menuitem]`, submit inputs), exact name first, then
+  **substring**. A headline or paragraph is not in that set, so its words
+  match whatever clickable merely *contains* them — typically a sidebar
+  thumbnail or nav item, and the take dies on the wrong element. Target
+  content by scoped CSS (`main h1[…]`). The pre-capture check reports every
+  by-text target that lands away from the same-named element inside `main`,
+  but only *refuses* the clear-cut case (a cold-prefix substring match landing
+  outside `main`, on an element whose real name dwarfs the words you gave —
+  an abbreviated label like `"Comments"` for a `"Comments3"` badge is fine) —
+  the rest are warnings you still have to read. Note a step
+  that carries both `text` and `selector` is resolved by `text` alone for a
+  click, with no fallback if it misses.
 - **`type`** locates a field by `text` (its accessible name **or placeholder**)
   or `selector`, focuses it, and types `value` with real keystrokes, char by
   char (the cursor parks on the field and the zoom holds while text appears).

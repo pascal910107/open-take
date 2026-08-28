@@ -19,6 +19,33 @@ render finishes — so the wait is spent watching footage, not a spinner
 In practice the plan is authored by your agent from the skill's editorial
 loop; `--plan` is the contract between that plan and the camera.
 
+## The pre-capture target check
+
+Before a single frame is recorded, every plan target is resolved against the
+page as loaded, with the capture's own locator semantics — and only the field
+the capture will actually read (`text` beats `selector` for a click; a
+`scroll` reads `toSelector` first).
+
+Two findings refuse the shoot **in seconds**, before anything is recorded: a
+target in the plan's cold prefix that doesn't exist, and a selector the page
+rejects as invalid CSS.
+
+A third is the *parse-intent mismatch*: a by-text target that resolves — but
+to a **different element** than the one inside `main` carrying that name. Each
+action searches its own candidate set (a click sees only clickables; a scroll
+also sees headings and paragraphs) and matches an exact name first, then a
+substring — so a headline's words can land on whatever element merely contains
+them, classically a sidebar thumbnail that navigates away. This refuses the
+shoot only in the shape that is a certainty: a cold-prefix target whose
+substring match sits **outside** `main`, covering only a sliver of the picked
+element's actual name, while the named element is inside `main`. Every other
+mismatch — an exact-name match, an abbreviated label (`"Comments"` naming a
+`"Comments3"` badge button), a landing inside `main`, anything after the cold
+prefix — is a warning, and the capture proceeds.
+
+Targets that only exist after earlier steps reveal them aggregate into one
+advisory; if one never appears, the skipped step fails the run at capture time.
+
 ## Overwrite safety
 
 `make` refuses to overwrite a take that was shot from a **different** app —
