@@ -33,6 +33,6 @@ honest case, same app on a new dev-server port, is `--force`.
 | `--fps <n>` | 60 | capture and render fps; 30 for fast drafts |
 | `--capture-scale <n>` | 2 | Retina capture — drop to 1 if a heavy page can't hold fps |
 | `--draft` | — | fast draft render of the delivery |
-| `--strict` | — | exit non-zero if any plan step was skipped (summary lists them either way) |
+| `--no-strict` | — | exit 0 even when plan steps were skipped or a post-shoot check failed — by default those exit non-zero (the summary lists them either way) |
 | `--profile <name>` | — | authenticated session from [`auth`](/docs/cli/auth) |
 | `--headed` | — | visible Chrome window; the screencast records the page either way |

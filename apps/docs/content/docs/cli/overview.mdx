@@ -36,7 +36,7 @@ directory holding exactly one take. See
 | `--out <path>` | `make` | where the postable master goes — taken literally; default `demos/take.mp4` |
 | `--fps <n>` | `make` | capture **and** render fps (default 60; 30 for fast drafts) |
 | `--capture-scale <n>` | `make` | capture pixel density (default 2 — Retina, keeps zooms sharp) |
-| `--strict` | `make` | exit non-zero when any plan step was skipped |
+| `--no-strict` | `make` | exit 0 even on skipped steps / failed post-shoot checks (the strict exit is the default) |
 | `--force` | `make` | overwrite a take shot from a different app |
 | `--profile <name>` | `make` / `inspect` | reuse the persistent session from `open-take auth <name>` |
 | `--headed` | `make` / `inspect` | drive a visible Chrome window — the escape hatch for sites that gate on a real window |

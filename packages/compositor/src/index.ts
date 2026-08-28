@@ -7,16 +7,23 @@
 // Edit `comp` (zoom decisions, framing, cursor) and re-render — the
 // composition is the editable source of truth.
 
-export * from "./types";
-export * from "./presets";
-export { resolveFfmpeg, resolveFfprobe } from "./ffmpeg";
-export { planComposition, type PlanOpts } from "./plan";
-export { directCamera, type Beat, type Framing } from "./camera";
-export { renderTake, type RenderTakeOpts, type RenderTakeResult } from "./render";
 export {
-  validateComposition,
-  formatIssues,
-  type CompositionIssue,
-  type ValidateOpts,
-} from "./validate";
+  type AuditCursorOpts,
+  type AuditRow,
+  auditCursor,
+  auditIssues,
+  predictCursorTips,
+} from "./audit-cursor";
+export { type Beat, directCamera, type Framing } from "./camera";
+export { resolveFfmpeg, resolveFfprobe } from "./ffmpeg";
 export * as math from "./math";
+export { type PlanOpts, planComposition } from "./plan";
+export * from "./presets";
+export { type RenderTakeOpts, type RenderTakeResult, renderTake } from "./render";
+export * from "./types";
+export {
+  type CompositionIssue,
+  formatIssues,
+  type ValidateOpts,
+  validateComposition,
+} from "./validate";

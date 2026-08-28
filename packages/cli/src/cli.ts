@@ -13,9 +13,11 @@ import { stat as fsStat, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  auditCursor,
   authProfile,
   buildBeatSheet,
   type CompositionIssue,
+  checkTake,
   ciAllowedOrigins,
   ciTake,
   emitGithubOutputs,
@@ -24,6 +26,7 @@ import {
   formatIssues,
   formatNotes,
   inspectPage,
+  lintPlan,
   makeTake,
   openPath,
   profileDir,
@@ -62,6 +65,7 @@ const BOOL_FLAGS = new Set([
   "--no-open",
   "--before-after",
   "--strict",
+  "--no-strict",
   "--force",
   "--headed",
   "--verbose",
@@ -114,6 +118,7 @@ const FLAGS_BY_CMD: Record<string, string[]> = {
     "--fps",
     "--capture-scale",
     "--strict",
+    "--no-strict",
     "--force",
     "--draft",
     "--no-open",
@@ -358,9 +363,13 @@ Usage:
               fast drafts while iterating.
   --capture-scale <n>   (make/ci) capture pixel density (default 2 — Retina;
               keeps zooms sharp). Drop to 1 if a heavy page can't hold fps.
-  --strict    (make only) exit non-zero when any plan step was skipped (target
-              not found, or a navigate destination that didn't resolve) — the
-              summary lists them either way.
+  --no-strict (make only) exit 0 even when plan steps were skipped (target not
+              found, or a navigate destination that didn't resolve) or a
+              post-shoot check found an error (mis-drawn cursor, dead opening).
+              By DEFAULT those make make exit 2 — the mp4 is still written and
+              the summary lists every finding, but the exit code refuses to
+              call a defective take a success. (--strict is the default and
+              remains accepted.)
   --force     (make only) overwrite the take at --out even when it was shot from
               a different app. Without it that is refused: two demos in one
               folder each get their own name (\`--out myapp.mp4\`). Under
@@ -694,7 +703,27 @@ async function main() {
     const planPath = flag("--plan");
     const out = normalizeOut(flag("--out") ?? DEFAULT_OUT);
     if (!planPath) throw new Error("make: missing --plan <plan.json>");
-    const plan = JSON.parse(await readFile(planPath, "utf8")) as TakePlan;
+    const parsedPlan: unknown = JSON.parse(await readFile(planPath, "utf8"));
+    // The structural gate in front of everything: a plan whose steps the
+    // engine would silently no-op (a wait without `ms`) or certainly skip (a
+    // type without `value`) must fail HERE, in milliseconds, with messages
+    // that teach the field semantics — measured on a 44-plan repair benchmark,
+    // teaching messages doubled one-retry convergence over terse ones.
+    {
+      const planIssues = lintPlan(parsedPlan);
+      const planErrors = planIssues.filter((i) => i.severity === "error");
+      for (const i of planIssues)
+        process.stderr.write(
+          `plan ${i.severity}: ${i.path}: ${i.message}\n${i.fix ? `  fix: ${i.fix}\n` : ""}`,
+        );
+      if (planErrors.length) {
+        process.stderr.write(
+          `make: ${planPath} has ${planErrors.length} structural error${planErrors.length === 1 ? "" : "s"} — nothing was recorded. Fix the plan and re-make.\n`,
+        );
+        process.exit(2);
+      }
+    }
+    const plan = parsedPlan as TakePlan;
     // npm upgrades ship a new SKILL.md inside the package, but the copy agents
     // read lives in the project — refresh it here, after validation (make is
     // the verb every session runs, and it already writes into this tree).
@@ -772,6 +801,7 @@ async function main() {
       capturePath,
       captureLogPath,
       skipped,
+      precheck,
       settleWaits,
       paintedFrac,
       warnings,
@@ -801,8 +831,71 @@ async function main() {
         `  ${INVOKE} ab     ${mp4Path} --set zoom=light,tight --beat 2   (taste A/B)\n`,
     );
     printWarnings(warnings);
+    // Post-shoot gates: line the delivered video up against the engine's own
+    // intent. checkTake reads pixels (dead opening / static tail) and the
+    // capture log (zoom vs payoff locality); auditCursor re-derives every
+    // pointer landing from the compositor's math and template-matches the
+    // DRAWN cursor — the check that keeps a mis-drawn cursor from shipping
+    // again (a real take once went out 13% off; the audit flags 1%).
+    let postShootErrors = 0;
+    try {
+      const captureLogJson = JSON.parse(await readFile(captureLogPath, "utf8"));
+      const postIssues: CompositionIssue[] = [];
+      // each gate reports independently — an audit that cannot run must not
+      // discard the checks that already did
+      try {
+        postIssues.push(
+          ...(await checkTake({
+            composition: made.composition,
+            captureLog: captureLogJson,
+            deliveredMp4: mp4Path,
+            captureMp4: capturePath,
+          })),
+        );
+      } catch (e) {
+        process.stderr.write(`take checks did not run: ${e instanceof Error ? e.message : e}\n`);
+      }
+      try {
+        postIssues.push(...(await auditCursor(made.composition, mp4Path)).issues);
+      } catch (e) {
+        process.stderr.write(`cursor audit did not run: ${e instanceof Error ? e.message : e}\n`);
+      }
+      if (postIssues.length) {
+        process.stdout.write(
+          `\n⚠ ${postIssues.length} post-shoot check finding${postIssues.length === 1 ? "" : "s"}:\n` +
+            postIssues
+              .map(
+                (p) =>
+                  `  [${p.severity}] ${p.path}: ${p.message}\n${p.fix ? `          fix: ${p.fix}\n` : ""}`,
+              )
+              .join(""),
+        );
+        postShootErrors = postIssues.filter((p) => p.severity === "error").length;
+      }
+    } catch (e) {
+      // the gate must never turn a delivered take into a crash — report and move on
+      process.stderr.write(
+        `post-shoot checks did not run: ${e instanceof Error ? e.message : e}\n`,
+      );
+    }
+    // Pre-capture target findings (ambiguous selectors, late-bound targets).
+    // Errors already refused the capture inside the engine; what prints here
+    // is the suspect tier — same summary treatment as composition warnings.
+    if (precheck.length) {
+      process.stdout.write(
+        `\n⚠ ${precheck.length} plan-target warning${precheck.length === 1 ? "" : "s"} (pre-capture check):\n` +
+          precheck
+            .map(
+              (p) =>
+                `  [${p.severity}] ${p.path}: ${p.message}\n${p.fix ? `          fix: ${p.fix}\n` : ""}`,
+            )
+            .join(""),
+      );
+    }
     // dropped steps reach the SUMMARY (not just an early stderr line buried
-    // under render progress), and --strict turns them into the exit code.
+    // under render progress) — and, by default, the exit code. The engine's
+    // own diagnosis outranks any downstream reader: a take with missing beats
+    // must not exit 0 just because an mp4 exists (--no-strict opts out).
     if (skipped.length) {
       process.stdout.write(
         `\n⚠ ${skipped.length} step${skipped.length === 1 ? "" : "s"} skipped:\n` +
@@ -814,7 +907,18 @@ async function main() {
             .join("") +
           `the video is missing ${skipped.length === 1 ? "this beat" : "these beats"} — fix the plan targets and re-make\n`,
       );
-      if (has("--strict")) process.exit(2);
+      if (!has("--no-strict")) {
+        process.stdout.write(
+          `exiting 2: a take with missing beats is not a success (pass --no-strict to downgrade this to a warning)\n`,
+        );
+        process.exit(2);
+      }
+    }
+    if (postShootErrors && !has("--no-strict")) {
+      process.stdout.write(
+        `exiting 2: ${postShootErrors} post-shoot check error${postShootErrors === 1 ? "" : "s"} — the take is on disk; read the findings above before posting it (pass --no-strict to downgrade to a warning)\n`,
+      );
+      process.exit(2);
     }
     // Beats the PAGE outlasted. The capture already waited, so nothing is
     // broken — but the plan under-budgeted them, and now there is a measured

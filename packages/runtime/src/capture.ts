@@ -82,7 +82,7 @@ export function evalValue(raw: string): unknown {
 // substring, DOM order. This is strictly more permissive than any of the old
 // chains, so nothing that resolved before stops resolving, and an exact hit
 // anywhere in the document still beats a substring hit that comes earlier.
-const NAME_JS =
+export const NAME_JS =
   `function names(e){var raw=[e.getAttribute('aria-label'),e.textContent,e.getAttribute('title'),e.getAttribute('alt'),e.getAttribute('placeholder')];var out=[];` +
   `for(var i=0;i<raw.length;i++){var s=(raw[i]||'').replace(/\\s+/g,' ').trim();if(s&&out.indexOf(s)===-1)out.push(s);}return out;}` +
   // The name to SHOW (inspect). Placeholder is deliberately NOT a display name:
@@ -126,6 +126,19 @@ const CLICK_TAIL_JS =
   `if(hit&&(hit===m||(m.contains&&m.contains(hit)))){b.cx=cx;b.cy=cy;return JSON.stringify(b);}` +
   `m.click();return JSON.stringify(b);`;
 
+// The candidate sets each by-text locator queries — exported for the
+// pre-capture check (precheck.ts), which must resolve with EXACTLY these:
+// a looser probe set would pass targets the real locator then misses, a
+// tighter one would refuse targets it finds.
+export const CLICK_CANDIDATES =
+  "button,a,[role=button],[role=link],[role=menuitem],input[type=submit],input[type=button]";
+export const FIELD_CANDIDATES =
+  "input,textarea,[contenteditable],[contenteditable=true],[role=textbox],[role=searchbox]";
+export const BOX_CANDIDATES =
+  "button,a,[role=button],[role=link],[role=menuitem],[aria-label],[title],img[alt],li,[draggable=true]";
+export const SCROLL_CANDIDATES =
+  "button,a,[role=button],[role=link],[role=heading],[aria-label],[title],h1,h2,h3,li,section,p";
+
 // Find a clickable by accessible name (aria-label or text), record its
 // rect (ground-truth bbox), and resolve the click — all in one page eval so
 // the bbox and the action refer to the same element. Robust where CSS hooks
@@ -135,7 +148,7 @@ export function clickByTextJs(text: string): string {
   const t = JSON.stringify(text);
   return (
     `(function(){var t=${t};` +
-    `var els=Array.prototype.slice.call(document.querySelectorAll('button,a,[role=button],[role=link],[role=menuitem],input[type=submit],input[type=button]'));` +
+    `var els=Array.prototype.slice.call(document.querySelectorAll('${CLICK_CANDIDATES}'));` +
     NAME_JS +
     `var m=pick(els,t);` +
     `if(!m)return 'NOTFOUND';` +
@@ -168,7 +181,7 @@ export function focusFieldByTextJs(text: string): string {
   const t = JSON.stringify(text);
   return (
     `(function(){var t=${t};` +
-    `var els=Array.prototype.slice.call(document.querySelectorAll('input,textarea,[contenteditable],[contenteditable=true],[role=textbox],[role=searchbox]'));` +
+    `var els=Array.prototype.slice.call(document.querySelectorAll('${FIELD_CANDIDATES}'));` +
     NAME_JS +
     `var m=pick(els,t);` +
     `if(!m)return 'NOTFOUND';` +
@@ -221,7 +234,7 @@ export function boxByTextJs(text: string): string {
   const t = JSON.stringify(text);
   return (
     `(function(){var t=${t};` +
-    `var els=Array.prototype.slice.call(document.querySelectorAll('button,a,[role=button],[role=link],[role=menuitem],[aria-label],[title],img[alt],li,[draggable=true]'));` +
+    `var els=Array.prototype.slice.call(document.querySelectorAll('${BOX_CANDIDATES}'));` +
     NAME_JS +
     `var m=pick(els,t);` +
     `if(!m)return 'NOTFOUND';var r=m.getBoundingClientRect();` +
@@ -275,7 +288,7 @@ export function scrollDeltaByTextJs(text: string): string {
   const t = JSON.stringify(text);
   return (
     `(function(){var t=${t};` +
-    `var els=Array.prototype.slice.call(document.querySelectorAll('button,a,[role=button],[role=link],[role=heading],[aria-label],[title],h1,h2,h3,li,section,p'));` +
+    `var els=Array.prototype.slice.call(document.querySelectorAll('${SCROLL_CANDIDATES}'));` +
     NAME_JS +
     `var m=pick(els,t);` +
     `if(!m)return 'NOTFOUND';var r=m.getBoundingClientRect();` +

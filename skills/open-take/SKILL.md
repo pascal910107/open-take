@@ -295,7 +295,8 @@ Precedence is `hrefFrom` > `url` > the current page. `hrefFrom` is also the
 answer to a `target="_blank"` link: the screencast is bound to one page target
 and cannot follow a new tab, but it CAN go to that same href in the tab it is
 already recording. A `hrefFrom` that matches nothing is a *skipped step* (it
-shows up in the summary, and `--strict` fails the run) — never a silent jump.
+shows up in the summary and fails the run — skipped steps exit non-zero by
+default; `--no-strict` downgrades that to a warning) — never a silent jump.
 
 **Use the real mechanic.** If the wow is drawing, *drag to draw it*; if it's
 search, *type the query then `press` Enter*; if it's a hover-reveal, *hover*; if
@@ -537,8 +538,8 @@ page changed).
   (framing IS the beat). The finale shot ("end on the stats panel"), the
   before-half of a compare, the "read this number" beat. Target a CONTAINER
   (the panel, not one digit) and pair with a `caption` saying what the viewer
-  is looking at. If its target vanished, the step is SKIPPED (and `--strict`
-  fails) like any other step. For a full-page establishing hold use `wait` —
+  is looking at. If its target vanished, the step is SKIPPED (and the run
+  exits non-zero by default) like any other step. For a full-page establishing hold use `wait` —
   full view needs no camera beat. (Unrelated to the A/B `look=` backdrop knob.)
 - **`press`** sends a key or shortcut via `keys`: a named key (`"Enter"`,
   `"Escape"`, `"Tab"`, `"ArrowDown"`) or a combo (`"Meta+k"`, `"Control+Shift+p"`,
@@ -792,7 +793,8 @@ resolution/duration.
   justify out loud.
 - **Confirm no beat was dropped.** A missing target is skipped, recorded on the
   capture log (`skipped[]`), and listed in `make`'s end-of-run summary
-  (`⚠ n steps skipped`); `--strict` additionally exits non-zero. If a beat was
+  (`⚠ n steps skipped`); by default `make` then exits non-zero
+  (pass `--no-strict` to downgrade skipped steps to a warning). If a beat was
   dropped, fix the target (re-`inspect`; names/layout may have changed) or just
   re-run (capture can flake on a cold first run) — never ship a silently-empty
   demo. ALWAYS look at the frames (step 5) to catch this.

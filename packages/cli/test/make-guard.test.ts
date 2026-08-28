@@ -10,8 +10,8 @@ import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 const CLI = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
 const TSX = import.meta.resolve("tsx/esm");
@@ -52,8 +52,12 @@ async function crossAppScene(): Promise<{ dir: string; planPath: string }> {
   );
   const planPath = join(dir, "plan.json");
   // never navigated to in these tests: the run either refuses before Chrome or
-  // dies launching the fake Chrome below
-  await writeFile(planPath, JSON.stringify({ url: "http://127.0.0.1:9", steps: [] }));
+  // dies launching the fake Chrome below. The plan must still pass the
+  // structural lint (which runs FIRST) so the guard under test is reached.
+  await writeFile(
+    planPath,
+    JSON.stringify({ url: "http://127.0.0.1:9", steps: [{ action: "wait", ms: 1 }] }),
+  );
   return { dir, planPath };
 }
 

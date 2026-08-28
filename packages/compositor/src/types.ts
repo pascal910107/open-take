@@ -164,9 +164,15 @@ export type CaptureLog = {
   tEndMs?: number;
   /** Steps the capture DROPPED (target not found / endpoint unresolved) — the
    *  take still completes, but a missing beat must reach the end-of-run
-   *  summary and (with --strict) the exit code, not just an early stderr line
+   *  summary and (strict by default) the exit code, not just an early stderr line
    *  buried under render progress. `step` is the plan's 0-based step index. */
   skipped?: { step: number; action: string; target?: string; reason: string }[];
+  /** Pre-capture target-resolution findings (runtime/src/precheck.ts): every
+   *  plan target resolved against the page as loaded, with the capture's own
+   *  locator semantics, BEFORE the screencast started. Errors abort the
+   *  capture, so only warnings ever reach a written log — kept here so a take
+   *  on disk records what the gate already said about its plan. */
+  precheck?: { severity: "error" | "warn"; path: string; message: string; fix?: string }[];
   /** Beats whose editorial hold ran out before the PAGE had finished — the
    *  capture kept waiting (see runtime/src/settle.ts) and records how much
    *  longer it needed. This is the measurement that replaces guessing

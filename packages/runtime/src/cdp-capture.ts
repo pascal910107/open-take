@@ -43,6 +43,7 @@ import {
   Screencast,
 } from "./cdp";
 import { resolveNavigateUrl } from "./nav";
+import { precheckPlan } from "./precheck";
 import {
   DEFAULT_SETTLE_BUDGET_MS,
   installActivityProbe,
@@ -318,6 +319,22 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
     // requested size and, failing that, adopts what the window truly is.
     inner = await fitViewport(cdp, browser.targetId, vw, vh);
 
+    // The 2-second gate in front of the 60-second shoot: resolve every plan
+    // target with the exact locator semantics the steps below will use. A
+    // cold-prefix miss is a certainty, and fails here — BEFORE the screencast
+    // exists — like the dead-URL check above. Warnings ride along on the log.
+    const precheck = await precheckPlan(plan.steps, (js) => evalAny(cdp, js));
+    const precheckErrors = precheck.filter((p) => p.severity === "error");
+    if (precheckErrors.length)
+      throw new Error(
+        `captureTakeCDP: ${precheckErrors.length} plan target(s) failed the pre-capture check — nothing was recorded:\n` +
+          precheckErrors
+            .map((p) => `  ${p.path}: ${p.message}${p.fix ? `\n    fix: ${p.fix}` : ""}`)
+            .join("\n"),
+      );
+    for (const p of precheck)
+      console.error(`captureTakeCDP precheck [${p.severity}] ${p.path}: ${p.message}`);
+
     const screencast = new Screencast(cdp, frameDir);
     const t0 = Date.now();
     // max dims in PHYSICAL px — at deviceScaleFactor 2 the surface is 2× the
@@ -377,7 +394,8 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
 
     const events: CaptureLog["events"] = [];
     // Dropped steps are collected onto the log (and echoed to stderr at the
-    // moment they happen) so the end-of-run summary and --strict can see them
+    // moment they happen) so the end-of-run summary and the strict-by-default
+    // exit code can see them
     // — an early stderr line alone gets buried under render progress.
     const skipped: NonNullable<CaptureLog["skipped"]> = [];
     // Beats whose hold was NOT long enough for the page — the measurement that
@@ -1093,10 +1111,11 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
       events,
       tEndMs,
       // Both of these were collected all along but never reached the caller on
-      // this path, so the end-of-run summary and --strict saw an empty list and
+      // this path, so the end-of-run summary and the strict exit saw an empty list and
       // a dropped beat lived only in an early stderr line — exactly what the
       // CaptureLog.skipped contract says must not happen.
       ...(skipped.length ? { skipped } : {}),
+      ...(precheck.length ? { precheck } : {}),
       ...(settleWaits.length ? { settleWaits } : {}),
       ...(paintedFrac >= PAINT_BLIND_FRAC
         ? { paintedFrac: Math.round(paintedFrac * 100) / 100 }

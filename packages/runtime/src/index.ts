@@ -22,9 +22,9 @@ import {
   type CaptureLog,
   type CompositionIssue,
   type PlanOpts,
-  type TakeComposition,
   planComposition,
   renderTake,
+  type TakeComposition,
 } from "@open-take/compositor";
 import { type CaptureOpts, captureTake } from "./capture";
 import { ensureChrome } from "./cdp";
@@ -33,77 +33,39 @@ import { toDraft } from "./review";
 import { ensureTakeDir, resolveTakePaths } from "./take";
 import type { TakePlan } from "./types";
 
-export type { TakePlan, TakeStep } from "./types";
 export {
-  captureTake,
+  type AuditCursorOpts,
+  type AuditRow,
+  auditCursor,
+  type CompositionIssue,
+  formatIssues,
+  validateComposition,
+} from "@open-take/compositor";
+export { type AuthOpts, type AuthResult, authProfile, profileDir } from "./auth";
+export {
   type CaptureOpts,
-  inspectPage,
+  captureTake,
+  type InspectElement,
   type InspectOpts,
   type InspectResult,
-  type InspectElement,
+  inspectPage,
 } from "./capture";
-export { captureTakeCDP } from "./cdp-capture";
-export { resolveNavigateUrl, type NavigateTarget } from "./nav";
-export { authProfile, profileDir, type AuthOpts, type AuthResult } from "./auth";
-export {
-  annotateCaptureLog,
-  diffFrames,
-  type AnnotateOpts,
-  type FrameDiffResult,
-} from "./frame-diff";
 export { ensureChrome, resolveChrome } from "./cdp";
-export { startEditServer, type EditServerOpts } from "./edit-server";
+export { captureTakeCDP } from "./cdp-capture";
+export { type CheckTakeOpts, checkTake, type InventoryRule } from "./check-take";
 export {
-  ensureTakeDir,
-  requireTakeFiles,
-  resolveTakePaths,
-  stagePrev,
-  takeFile,
-  TAKE_DIR_SUFFIX,
-  type StagedPrev,
-  type TakePaths,
-} from "./take";
-export {
-  formatNotes,
-  readNotes,
-  waitForNotes,
-  type NotesRead,
-  type ReadNotesOpts,
-  type WaitNotesOpts,
-  type WaitNotesResult,
-} from "./notes";
-export {
-  buildBeatSheet,
-  buildBadges,
-  beatLabel,
-  renderReview,
-  renderDraft,
-  renderAbReel,
-  renderBeforeAfter,
-  toDraft,
-  openPath,
-  revealPath,
-  SAY_IT_CARD,
-  type AbOpts,
-  type ReviewOpts,
-} from "./review";
-export {
-  buildFramePlan,
-  buildFrameSheet,
-  renderFrames,
-  type FramePlan,
-  type FrameRow,
-  type FrameCell,
-  type FramePhase,
-  type FramesOpts,
-} from "./frames";
-export { validateComposition, formatIssues, type CompositionIssue } from "@open-take/compositor";
-export {
+  type AgentArgsOpts,
+  type AgentRunResult,
+  type AppProcess,
   appBootEnv,
   buildAgentArgs,
   buildCiBrief,
   CI_ALLOWED_TOOLS,
   CI_DISALLOWED_TOOLS,
+  type CiBriefOpts,
+  type CiMode,
+  type CiOpts,
+  type CiResult,
   ciAllowedOrigins,
   ciTake,
   emitGithubOutputs,
@@ -113,14 +75,62 @@ export {
   runAgent,
   startApp,
   waitForHttp,
-  type AgentArgsOpts,
-  type AgentRunResult,
-  type AppProcess,
-  type CiBriefOpts,
-  type CiMode,
-  type CiOpts,
-  type CiResult,
 } from "./ci";
+export { type EditServerOpts, startEditServer } from "./edit-server";
+export {
+  type AnnotateOpts,
+  annotateCaptureLog,
+  diffFrames,
+  type FrameDiffResult,
+} from "./frame-diff";
+export {
+  buildFramePlan,
+  buildFrameSheet,
+  type FrameCell,
+  type FramePhase,
+  type FramePlan,
+  type FrameRow,
+  type FramesOpts,
+  renderFrames,
+} from "./frames";
+export { lintPlan, type PlanIssue } from "./lint-plan";
+export { type NavigateTarget, resolveNavigateUrl } from "./nav";
+export {
+  formatNotes,
+  type NotesRead,
+  type ReadNotesOpts,
+  readNotes,
+  type WaitNotesOpts,
+  type WaitNotesResult,
+  waitForNotes,
+} from "./notes";
+export { type PrecheckIssue, planTargets, precheckPlan } from "./precheck";
+export {
+  type AbOpts,
+  beatLabel,
+  buildBadges,
+  buildBeatSheet,
+  openPath,
+  type ReviewOpts,
+  renderAbReel,
+  renderBeforeAfter,
+  renderDraft,
+  renderReview,
+  revealPath,
+  SAY_IT_CARD,
+  toDraft,
+} from "./review";
+export {
+  ensureTakeDir,
+  requireTakeFiles,
+  resolveTakePaths,
+  type StagedPrev,
+  stagePrev,
+  TAKE_DIR_SUFFIX,
+  type TakePaths,
+  takeFile,
+} from "./take";
+export type { TakePlan, TakeStep } from "./types";
 
 export type MakeTakeOpts = {
   /** output polished mp4 path */
@@ -165,8 +175,13 @@ export type MakeTakeResult = {
   captureLogPath: string;
   composition: TakeComposition;
   /** steps the capture dropped (target not found) — surface these in the
-   *  end-of-run summary; `--strict` turns them into a non-zero exit. */
+   *  end-of-run summary; by default they turn into a non-zero exit
+   *  (`--no-strict` downgrades them to a warning). */
   skipped: NonNullable<CaptureLog["skipped"]>;
+  /** pre-capture target-resolution warnings (runtime/src/precheck.ts). Errors
+   *  already aborted the capture; what survives here is the suspect-but-legal
+   *  tier (ambiguous selectors, late-bound targets) — summary material. */
+  precheck: NonNullable<CaptureLog["precheck"]>;
   /** beats whose `settleMs` ran out before the PAGE was done. The capture
    *  waited (see runtime/src/settle.ts) so the take is still correct, but the
    *  plan is now known to under-budget those beats — the summary prints the
@@ -279,6 +294,7 @@ export async function makeTake(plan: TakePlan, opts: MakeTakeOpts): Promise<Make
     captureLogPath,
     composition,
     skipped: log.skipped ?? [],
+    precheck: log.precheck ?? [],
     settleWaits: log.settleWaits ?? [],
     ...(log.paintedFrac != null ? { paintedFrac: log.paintedFrac } : {}),
     warnings,
