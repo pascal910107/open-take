@@ -1,0 +1,45 @@
+---
+title: check
+description: Judge an existing take without rendering anything — the standalone post-shoot verdict.
+---
+
+```sh
+open-take check demos/myapp.mp4             # exit 0 = postable, 2 = defective
+open-take check demos/myapp.mp4 --no-strict # findings print, exit stays 0
+```
+
+`check` re-runs the **post-shoot gates** against a take already on disk — the
+same verdict `make` and `render` apply to their own output, for the take that
+got here some other way: an older CLI, a copied working dir, the editor's
+Export, or plain "is this still postable?".
+
+What it judges:
+
+- **cursor audit** — every pointer-landing beat's drawn cursor,
+  template-matched against the compositor's own math (the gate that catches a
+  mis-drawn master before it ships)
+- **dead opening** — unpainted head, measured on the kept capture's pixels
+- **static tail** — a delivered video that ends frozen
+- **zoom vs payoff** — a zoom punched into a global repaint
+- **skipped steps** — re-printed from the capture log; missing beats keep a
+  take unpostable no matter how clean its pixels are
+
+## Exit codes
+
+| exit | meaning |
+| --- | --- |
+| 0 | no error finding, no skipped step — the summary line says `✓` |
+| 2 | defective: at least one error finding or skipped step (`--no-strict` downgrades to warnings and exits 0) |
+| 1 | **could not judge** — a gate never ran (no working ffmpeg, an unreadable file, a capture log that exists but won't parse). "No error found" by a gate that never ran is not a clean bill. |
+
+## READ-ONLY by contract
+
+`check` never rewrites the take. When the cursor audit fails,
+[`render`](/docs/cli/render) is the healing move — it re-renders from the
+frozen capture and re-audits (the transient-misdraw class heals on one
+re-render; a repeat failure is a real renderer bug). `check` prints exactly
+that hint when it applies.
+
+A take without its `capture.json` (an old or cleaned working dir) is still
+judged: the pixel gates and the cursor audit run; only the coverage checks and
+the skipped-step re-print stand down, and `check` says so.

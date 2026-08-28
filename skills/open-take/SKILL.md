@@ -306,7 +306,16 @@ expressible — e.g. a hover-reveal whose menu has no accessible name AND no
 stable selector. Don't silently fall back to clicking inert UI.
 
 ### 5. SHOW (frames, not claims)
-First verify it YOURSELF — get the beat-aware contact sheet and **look at it**:
+First verify it YOURSELF. The deterministic part is a verb — run it before
+spending your own eyes:
+```
+npx open-take check demo.mp4               # post-shoot gates: cursor audit · dead
+                                           # opening · static tail · zoom vs payoff ·
+                                           # skipped steps — exit 2 on any error
+```
+(`make` and `render` already run these same gates on their own output; `check`
+re-judges a take standing on disk.) Then get the beat-aware contact sheet and
+**look at it** — the gates can't see taste:
 ```
 npx open-take frames demo.mp4              # demo.take/frames.png + a row/time table
 npx open-take frames demo.mp4 --beat 3     # 10-cell strip of one beat
@@ -674,6 +683,12 @@ errored composition** (prints the field + a suggested fix in milliseconds, befor
 paying for a render) — e.g. a `zoom.scale` below the rest scale (zooms *out* past
 the frame), a `zoom.inAtMs` after its action, or a **drifted action `tMs`** (the
 capture-lock). Warnings (a no-op zoom, a soft-cap scale) print but don't block.
+The fresh master then goes through the same **post-shoot gates** as `make`
+(cursor audit, dead opening, static tail, zoom vs payoff) and exits 2 on an
+error finding (`--no-strict` downgrades). A cursor-audit failure triggers ONE
+automatic re-render + re-audit before that exit: the mis-drawn-cursor class is
+measured transient — a repeat failure means a real renderer bug, which no
+composition edit can fix.
 
 **Map the user's words to fields** (edit `demo.take/composition.json`, then `render`):
 - *"don't zoom on X" / "too zoomy"* → that beat's `zoom.enabled: false`.
@@ -785,6 +800,17 @@ resolution/duration.
   re-encode on top is a visible generation lost.
 
 ## Capture robustness — checks that keep "user does nothing" honest
+- **The post-shoot gates guard `make` and `render`'s `<take>` form.** Both end
+  by judging their own product (cursor audit against the compositor's math,
+  dead opening, static tail, zoom vs payoff, skipped steps) and exit 2 on an
+  error finding; `open-take check <take>` re-runs the same verdict on any take
+  already on disk. Two master-writing paths are NOT gated — the editor's
+  Export and `render`'s legacy `--composition/--video` form — so after either,
+  run `check` before posting. A cursor-audit error gets ONE automatic
+  re-render + re-audit first — measured on a real take, that defect is
+  transient and the re-render heals it; a repeat failure is a genuine renderer
+  bug worth reporting, not retrying. Read the findings block before posting
+  anything.
 - **Read the `⚠ n composition warnings` block.** Every render path (`make`,
   `render`, `--review`, `--draft`) re-prints the validator's non-fatal findings
   in its end-of-run summary, because the copy it writes at the render boundary

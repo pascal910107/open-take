@@ -6,7 +6,8 @@ description: Every command at a glance. Run npx open-take --help for the authori
 ```txt
 open-take inspect <url> [--viewport 1920x1080]
 open-take make   --plan <plan.json> --out <out.mp4> [--fps 60] [--draft] [--no-open]
-open-take render <take> [--review] [--draft] [--open] [--reveal] [--no-open]
+open-take render <take> [--review] [--draft] [--open] [--reveal] [--no-open] [--no-strict]
+open-take check  <take> [--no-strict]
 open-take beats  <take> [--card]
 open-take frames <take> [--beat N] [--tile 720]
 open-take ab     <take> --set <knob>=<v1>,<v2>[,<v3>] [--beat N] [--full] [--draft] [--no-open]
@@ -36,7 +37,7 @@ directory holding exactly one take. See
 | `--out <path>` | `make` | where the postable master goes — taken literally; default `demos/take.mp4` |
 | `--fps <n>` | `make` | capture **and** render fps (default 60; 30 for fast drafts) |
 | `--capture-scale <n>` | `make` | capture pixel density (default 2 — Retina, keeps zooms sharp) |
-| `--no-strict` | `make` | exit 0 even on skipped steps / failed post-shoot checks (the strict exit is the default) |
+| `--no-strict` | `make` / `render` / `check` | exit 0 even on skipped steps / failed post-shoot checks (the strict exit is the default) |
 | `--force` | `make` | overwrite a take shot from a different app |
 | `--profile <name>` | `make` / `inspect` | reuse the persistent session from `open-take auth <name>` |
 | `--headed` | `make` / `inspect` | drive a visible Chrome window — the escape hatch for sites that gate on a real window |

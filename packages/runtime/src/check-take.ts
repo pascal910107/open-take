@@ -70,7 +70,10 @@ export type InventoryRule = {
 
 export type CheckTakeOpts = {
   composition: TakeComposition;
-  captureLog: CaptureLog;
+  /** the shoot's ground-truth log — the coverage checks read it. Absent (an
+   *  old take, a deleted capture.json) ⇒ those stand down; the pixel checks
+   *  read only the mp4s and still run. */
+  captureLog?: CaptureLog;
   /** the delivered (cinematic) mp4 — static-tail reads it. Absent ⇒ skipped. */
   deliveredMp4?: string;
   /** the raw capture mp4 (viewport pixels) — dead-opening reads it. Absent ⇒ skipped. */
@@ -123,8 +126,8 @@ export async function checkTake(opts: CheckTakeOpts): Promise<CompositionIssue[]
   // the very plans this tool critiques are model-edited — read defensively so
   // a dropped field degrades to "nothing to say", never a TypeError.
   const events = comp.events ?? [];
-  const logEvents = log.events ?? [];
-  const diffBlind = (log.paintedFrac ?? 0) > DIFF_BLIND_PAINTED_FRAC;
+  const logEvents = log?.events ?? [];
+  const diffBlind = (log?.paintedFrac ?? 0) > DIFF_BLIND_PAINTED_FRAC;
   if (!diffBlind) {
     const n = Math.min(events.length, logEvents.length);
     for (let i = 0; i < n; i++) {

@@ -95,6 +95,10 @@ export type RenderTakeResult = {
    *  into empty space, a press whose zoom departs before the keypress, a tail
    *  that delivers a frozen screen. Empty when `skipValidate` is set. */
   warnings: CompositionIssue[];
+  /** the composition this render actually used — callers that judge the
+   *  output (post-shoot gates) must judge THIS object, not a re-read of
+   *  composition.json, which a concurrent editor save may have moved on. */
+  composition: TakeComposition;
 };
 
 function run(cmd: string, args: string[]): Promise<void> {
@@ -508,7 +512,7 @@ async function renderTakeExclusive(opts: RenderTakeOpts): Promise<RenderTakeResu
       await writeFile(compositionPath, JSON.stringify(persisted, null, 2));
     }
 
-    return { mp4Path: resolve(opts.outPath), compositionPath, warnings };
+    return { mp4Path: resolve(opts.outPath), compositionPath, warnings, composition };
   } finally {
     await cleanupScratch(scratch);
   }

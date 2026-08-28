@@ -245,6 +245,25 @@ test("pixel checks: dead-opening on the capture, static-tail on the delivery, cl
       deliveredMp4: join(work, "nope.mp4"),
     });
     assert.equal(skipped.length, 0, "unreadable videos skip their checks");
+
+    // NO capture log at all (an old or cleaned take): the pixel checks read
+    // only the mp4s and MUST still run — a lost capture.json must not turn
+    // the pixel gates off (only the coverage checks stand down)
+    const noLog = await checkTake({
+      composition: c,
+      captureMp4: blankHead,
+      deliveredMp4: frozenTail,
+    });
+    assert.equal(
+      noLog.filter((i) => i.path === "startMs").length,
+      1,
+      "dead-opening runs without a log",
+    );
+    assert.equal(
+      noLog.filter((i) => i.path === "durationMs").length,
+      1,
+      "static-tail runs without a log",
+    );
   } finally {
     await rm(work, { recursive: true, force: true });
   }

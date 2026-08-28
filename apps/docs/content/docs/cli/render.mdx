@@ -31,3 +31,22 @@ the master, does not auto-open.
 The composition validator refuses to hand you a bad take quietly: a camera
 still mid-move at a click, a dead tail, a crowded release — each is flagged in
 the **end-of-run summary** with the fix.
+
+## The post-shoot gates run here too
+
+The `<take>` form doesn't just render — it **judges its own product** with the
+same post-shoot gates as `make`: the cursor audit (the drawn pointer,
+template-matched against the compositor's own math), dead opening, static
+tail, zoom-vs-payoff, and a re-print of the capture's skipped steps. An error
+finding or a skipped step makes `render` **exit 2** (the master is still on
+disk; `--no-strict` downgrades to a warning) — so a script should treat exit 2
+as "delivered but defective", not a crash.
+
+A cursor-audit error gets **one automatic re-render + re-audit** before that
+exit: measured on a real take, the renderer can transiently misdraw the
+cursor, and a deterministic re-render heals it. A repeat failure means the
+renderer disagrees with its own math — a bug to report, not retry.
+
+The disposable copies (`--review`, `--draft`) and the legacy
+`--composition/--video` form are not gated; use
+[`check`](/docs/cli/check) to judge those results.

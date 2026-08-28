@@ -16,6 +16,7 @@ import {
   auditCursor,
   authProfile,
   buildBeatSheet,
+  type CaptureLog,
   type CompositionIssue,
   checkTake,
   ciAllowedOrigins,
@@ -25,10 +26,13 @@ import {
   ensureChrome,
   formatIssues,
   formatNotes,
+  healingWithheld,
   inspectPage,
   lintPlan,
+  loadCaptureLogSibling,
   makeTake,
   openPath,
+  type PostShootPass,
   profileDir,
   readNotes,
   renderAbReel,
@@ -38,13 +42,17 @@ import {
   renderFrames,
   renderReview,
   renderTeaserGif,
+  reRenderInPlace,
   requireTakeFiles,
   resolveTakePaths,
   revealPath,
+  runPostShootGates,
   SAY_IT_CARD,
   stagePrev,
+  type TakeComposition,
   type TakePaths,
   type TakePlan,
+  toDraft,
   waitForNotes,
 } from "@open-take/runtime";
 import { autoSyncAgentSkill, syncAgentSkill } from "./init";
@@ -132,12 +140,14 @@ const FLAGS_BY_CMD: Record<string, string[]> = {
     "--open",
     "--reveal",
     "--no-open",
+    "--no-strict",
     "--composition",
     "--video",
     "--out",
     "--capture-log",
     "--verbose",
   ],
+  check: ["--no-strict", "--verbose"],
   beats: ["--card"],
   frames: ["--beat", "--tile", "--open", "--verbose"],
   ab: ["--set", "--beat", "--full", "--draft", "--before-after", "--no-open", "--verbose"],
@@ -194,7 +204,8 @@ const USAGE = `open-take — agent-native demo recorder
 Usage:
   open-take inspect <url> [--viewport 1920x1080]
   open-take make   --plan <plan.json> --out <out.mp4> [--fps 60] [--draft] [--no-open]
-  open-take render <take> [--review] [--draft] [--open] [--reveal] [--no-open]
+  open-take render <take> [--review] [--draft] [--open] [--reveal] [--no-open] [--no-strict]
+  open-take check  <take> [--no-strict]
   open-take beats  <take> [--card]
   open-take frames <take> [--beat N] [--tile 720]
   open-take ab     <take> --set <knob>=<v1>,<v2>[,<v3>] [--beat N] [--full] [--draft] [--no-open]
@@ -228,7 +239,12 @@ Usage:
           (name the second demo after its app instead); --force overrides.
   render  re-render the (edited) composition over the kept capture — NO app
           drive, deterministic. The previous master is kept as prev.mp4
-          so "keep the old one" is a mechanical revert.
+          so "keep the old one" is a mechanical revert. The new master then
+          goes through the same post-shoot gates as make (cursor audit, dead
+          opening, static tail, zoom vs payoff) and re-prints the capture's
+          skipped steps; a cursor-audit error gets ONE bounded re-render +
+          re-audit (the defect class is transient) before any error finding
+          or skipped step exits 2 (--no-strict downgrades to a warning).
           --review renders a fast DRAFT copy to review.mp4 instead, with
           beat badges burned in (the video teaches "beat 3" refers) + a REVIEW
           watermark — never overwrites the postable master. Review copies
@@ -238,6 +254,16 @@ Usage:
           motion blur off, no badges) — the cheap re-render for frame checks
           mid-refine; never overwrites the master. Does not auto-open.
           (legacy flags --composition/--video/--out/--capture-log still work)
+  check   judge an existing take without rendering anything: re-run the
+          post-shoot gates against the delivered master (cursor audit · dead
+          opening · static tail · zoom vs payoff) and re-print the capture's
+          skipped steps. Exit 2 on any error finding or skipped step
+          (--no-strict downgrades); exit 1 when a gate could not run at all —
+          "no error found" by a gate that never ran is not a clean bill.
+          READ-ONLY — it never rewrites the take; when the cursor audit
+          fails, \`render\` is the healing move (it re-renders from the
+          frozen capture and re-audits).
+
   beats   print the numbered beat sheet — the shared map for notes like
           "beat 3: no zoom". --card appends the say-it cheat card.
   frames  extract a beat-aware contact sheet (<take>/frames.png) from the
@@ -363,13 +389,16 @@ Usage:
               fast drafts while iterating.
   --capture-scale <n>   (make/ci) capture pixel density (default 2 — Retina;
               keeps zooms sharp). Drop to 1 if a heavy page can't hold fps.
-  --no-strict (make only) exit 0 even when plan steps were skipped (target not
-              found, or a navigate destination that didn't resolve) or a
-              post-shoot check found an error (mis-drawn cursor, dead opening).
-              By DEFAULT those make make exit 2 — the mp4 is still written and
-              the summary lists every finding, but the exit code refuses to
-              call a defective take a success. (--strict is the default and
-              remains accepted.)
+  --no-strict (make/render/check) exit 0 even when plan steps were skipped
+              (target not found, or a navigate destination that didn't
+              resolve) or a post-shoot check found an error (mis-drawn cursor,
+              dead opening). By DEFAULT those exit 2 — the mp4 is still
+              written and the summary lists every finding, but the exit code
+              refuses to call a defective take a success. A cursor-audit
+              error first gets ONE bounded re-render + re-audit (measured:
+              that defect class is transient and a re-render heals it) before
+              the exit code fires. (--strict is the default and remains
+              accepted on make.)
   --force     (make only) overwrite the take at --out even when it was shot from
               a different app. Without it that is refused: two demos in one
               folder each get their own name (\`--out myapp.mp4\`). Under
@@ -474,6 +503,41 @@ function printWarnings(warnings: CompositionIssue[] | undefined): void {
     `\n⚠ ${warnings.length} composition warning${warnings.length === 1 ? "" : "s"}:\n` +
       `${formatIssues(warnings)}\n` +
       `the render went ahead — but look at each one before you post this\n`,
+  );
+}
+
+/** The capture log's skipped[] re-printed as part of a verdict (render/check;
+ *  `make` prints its own copy with re-make guidance and exits on it first). */
+function printSkippedSummary(skipped: NonNullable<CaptureLog["skipped"]>): void {
+  process.stdout.write(
+    `\n⚠ ${skipped.length} step${skipped.length === 1 ? "" : "s"} skipped at capture time:\n` +
+      skipped
+        .map(
+          (s) =>
+            `  step ${s.step + 1}: ${s.action} ${JSON.stringify(s.target ?? "")} (${s.reason})\n`,
+        )
+        .join("") +
+      `the video is missing ${skipped.length === 1 ? "this beat" : "these beats"} — only a re-make (fresh capture) can restore them\n`,
+  );
+}
+
+const verdictLine = (errors: number, skipped: number): string =>
+  `${errors} post-shoot check error${errors === 1 ? "" : "s"}` +
+  (skipped ? ` + ${skipped} skipped step${skipped === 1 ? "" : "s"}` : "");
+
+/** Print one post-shoot gate pass's findings (make/render/check share the
+ *  format). The "re-audit" header marks the second pass after the bounded
+ *  re-render, so a reader can tell which findings survived the heal. */
+function printPostShoot(issues: CompositionIssue[], pass: PostShootPass): void {
+  if (!issues.length) return;
+  process.stdout.write(
+    `\n⚠ ${issues.length} ${pass === "re-audit" ? "re-audit" : "post-shoot check"} finding${issues.length === 1 ? "" : "s"}:\n` +
+      issues
+        .map(
+          (p) =>
+            `  [${p.severity}] ${p.path}: ${p.message}\n${p.fix ? `          fix: ${p.fix}\n` : ""}`,
+        )
+        .join(""),
   );
 }
 
@@ -812,7 +876,8 @@ async function main() {
     // the dossier is the agent's exploration harvest — nudge for it here so
     // the NEXT demo of this app skips cold exploration even when the agent
     // isn't following the skill to the letter.
-    const { dossierPath } = await resolveTakePaths(mp4Path);
+    const takePost = await resolveTakePaths(mp4Path);
+    const { dossierPath } = takePost;
     const dossierLine = (await fsStat(dossierPath).catch(() => null))?.isFile()
       ? `dossier:     ${dossierPath}      ← read this before re-exploring the app\n`
       : `dossier:     ${dossierPath}      ← missing — write the exploration harvest\n` +
@@ -836,42 +901,42 @@ async function main() {
     // capture log (zoom vs payoff locality); auditCursor re-derives every
     // pointer landing from the compositor's math and template-matches the
     // DRAWN cursor — the check that keeps a mis-drawn cursor from shipping
-    // again (a real take once went out 13% off; the audit flags 1%).
+    // again (a real take once went out 13% off; the audit flags 1%). A
+    // cursor-audit error gets ONE bounded re-render + full re-audit before
+    // the exit code fires — that defect class is measured transient (see
+    // runPostShootGates).
     let postShootErrors = 0;
     try {
-      const captureLogJson = JSON.parse(await readFile(captureLogPath, "utf8"));
-      const postIssues: CompositionIssue[] = [];
-      // each gate reports independently — an audit that cannot run must not
-      // discard the checks that already did
-      try {
-        postIssues.push(
-          ...(await checkTake({
+      const captureLogJson = JSON.parse(await readFile(captureLogPath, "utf8")) as CaptureLog;
+      // A take already doomed by skipped steps earns no healing minutes: the
+      // skipped-steps exit 2 below fires regardless of what a re-render fixes.
+      const doomed = healingWithheld(skipped.length, !has("--no-strict"));
+      const result = await runPostShootGates({
+        checkTake: () =>
+          checkTake({
             composition: made.composition,
             captureLog: captureLogJson,
             deliveredMp4: mp4Path,
             captureMp4: capturePath,
-          })),
-        );
-      } catch (e) {
-        process.stderr.write(`take checks did not run: ${e instanceof Error ? e.message : e}\n`);
-      }
-      try {
-        postIssues.push(...(await auditCursor(made.composition, mp4Path)).issues);
-      } catch (e) {
-        process.stderr.write(`cursor audit did not run: ${e instanceof Error ? e.message : e}\n`);
-      }
-      if (postIssues.length) {
-        process.stdout.write(
-          `\n⚠ ${postIssues.length} post-shoot check finding${postIssues.length === 1 ? "" : "s"}:\n` +
-            postIssues
-              .map(
-                (p) =>
-                  `  [${p.severity}] ${p.path}: ${p.message}\n${p.fix ? `          fix: ${p.fix}\n` : ""}`,
-              )
-              .join(""),
-        );
-        postShootErrors = postIssues.filter((p) => p.severity === "error").length;
-      }
+          }),
+        auditCursor: async () => (await auditCursor(made.composition, mp4Path)).issues,
+        ...(doomed
+          ? {}
+          : {
+              reRender: () =>
+                reRenderInPlace(
+                  takePost,
+                  // draft parity: the master on disk was rendered from the
+                  // draft transform, so the heal must render the same one
+                  has("--draft") ? toDraft(made.composition) : made.composition,
+                  captureLogJson,
+                ),
+            }),
+        onFindings: printPostShoot,
+        log: (line) => process.stdout.write(`\n${line}\n`),
+        warn: (line) => process.stderr.write(`${line}\n`),
+      });
+      postShootErrors = result.errors;
     } catch (e) {
       // the gate must never turn a delivered take into a crash — report and move on
       process.stderr.write(
@@ -1016,22 +1081,160 @@ async function main() {
 
     await requireTakeFiles(take, { capture: true });
     const staged = await stagePrev(take.mp4Path, take.prevPath);
+    let warnings: CompositionIssue[];
+    let composition: TakeComposition;
     try {
-      const { mp4Path, warnings } = await renderCompositionFile({
+      // keep the composition the render ACTUALLY used — judging a re-read of
+      // composition.json would race a concurrent editor save (TOCTOU)
+      ({ warnings, composition } = await renderCompositionFile({
         compositionPath: take.compositionPath,
         capturePath: take.capturePath,
         outPath: take.mp4Path,
         logProgress: true,
-      });
+      }));
       await staged.commit();
-      process.stdout.write(`\nready: ${await readyLine(mp4Path)}\n`);
-      printWarnings(warnings);
-      if (has("--open")) openPath(mp4Path);
-      if (has("--reveal")) revealPath(mp4Path);
     } catch (e) {
       await staged.abort();
       throw e;
     }
+    printWarnings(warnings);
+    // The render-only path judges its own product with the same post-shoot
+    // gates `make` runs, bounded re-render included — this is the very path
+    // the transient-misdraw class lives on. A master that skipped the gates
+    // just because it came from `render` was the hole a defective take could
+    // still ship through. (--review/--draft copies are disposable: ungated.)
+    let postShootErrors = 0;
+    const captureLog = await loadCaptureLogSibling(take.capturePath);
+    try {
+      const result = await runPostShootGates({
+        checkTake: () =>
+          checkTake({
+            composition,
+            ...(captureLog ? { captureLog } : {}),
+            deliveredMp4: take.mp4Path,
+            captureMp4: take.capturePath,
+          }),
+        auditCursor: async () => (await auditCursor(composition, take.mp4Path)).issues,
+        reRender: () => reRenderInPlace(take, composition, captureLog),
+        onFindings: printPostShoot,
+        log: (line) => process.stdout.write(`\n${line}\n`),
+        warn: (line) => process.stderr.write(`${line}\n`),
+      });
+      postShootErrors = result.errors;
+    } catch (e) {
+      process.stderr.write(
+        `post-shoot checks did not run: ${e instanceof Error ? e.message : e}\n`,
+      );
+    }
+    // The capture log's skipped[] stays part of the verdict on every path: a
+    // re-render cannot restore beats the shoot never recorded, and `render`
+    // exiting 0 on a take `check` refuses would make the two verbs argue.
+    const skipped = captureLog?.skipped ?? [];
+    if (skipped.length) printSkippedSummary(skipped);
+    if ((postShootErrors || skipped.length) && !has("--no-strict")) {
+      process.stdout.write(
+        `exiting 2: ${verdictLine(postShootErrors, skipped.length)} — the master is on disk; read the findings above before posting it (pass --no-strict to downgrade to a warning)\n`,
+      );
+      process.exit(2);
+    }
+    if (postShootErrors || skipped.length)
+      process.stdout.write(
+        `--no-strict: ${verdictLine(postShootErrors, skipped.length)} downgraded to warnings\n`,
+      );
+    process.stdout.write(`\nready: ${await readyLine(take.mp4Path)}\n`);
+    if (has("--open")) openPath(take.mp4Path);
+    if (has("--reveal")) revealPath(take.mp4Path);
+    return;
+  }
+
+  if (cmd === "check") {
+    // Judge an existing take WITHOUT rendering anything — the standalone gate
+    // verb. `make` and `render` already gate their own product; this is for
+    // the take that got here some other way (an older CLI, a copied working
+    // dir, "is this still postable?"). READ-ONLY by contract: a verb named
+    // check must never rewrite the master, so there is no bounded re-render
+    // here — when the cursor audit fails, `render` is the healing move.
+    const takeArg = positional[0];
+    if (!takeArg) throw new Error("check: missing <take> (its .mp4, its .take/ dir, or a dir)");
+    const take = await resolveTakePaths(takeArg);
+    await requireTakeFiles(take);
+    if (!(await fsStat(take.mp4Path).catch(() => null))?.isFile())
+      throw new Error(
+        `check: no delivered master at ${take.mp4Path} — nothing to judge; \`${INVOKE} render ${takeArg}\` produces one from the composition + kept capture`,
+      );
+    let composition: TakeComposition;
+    try {
+      composition = JSON.parse(await readFile(take.compositionPath, "utf8")) as TakeComposition;
+    } catch (e) {
+      throw new Error(
+        `check: ${take.compositionPath} is not readable JSON (${e instanceof Error ? e.message : e})`,
+      );
+    }
+    const captureLog = await loadCaptureLogSibling(take.capturePath);
+    const captureOnDisk = (await fsStat(take.capturePath).catch(() => null))?.isFile() ?? false;
+    // A corrupt capture.json must not read as "nothing to enforce" — a log
+    // that EXISTS but won't parse silently drops the skipped-step verdict, so
+    // it refuses the ✓ below instead.
+    const logOnDisk = (await fsStat(take.captureLogPath).catch(() => null))?.isFile() ?? false;
+    const logCorrupt = !captureLog && logOnDisk;
+    if (logCorrupt)
+      process.stderr.write(
+        `capture log ${take.captureLogPath} exists but did not parse — its skipped-step and coverage verdicts cannot run\n`,
+      );
+    else if (!captureLog)
+      process.stdout.write(
+        `note: no capture log at ${take.captureLogPath} — the coverage checks and the skipped-step re-print have nothing to read; the pixel gates still run\n`,
+      );
+    let cursorErrors = 0;
+    const result = await runPostShootGates({
+      checkTake: () =>
+        checkTake({
+          composition,
+          ...(captureLog ? { captureLog } : {}),
+          deliveredMp4: take.mp4Path,
+          ...(captureOnDisk ? { captureMp4: take.capturePath } : {}),
+        }),
+      auditCursor: async () => {
+        const { issues } = await auditCursor(composition, take.mp4Path);
+        cursorErrors = issues.filter((i) => i.severity === "error").length;
+        return issues;
+      },
+      onFindings: printPostShoot,
+      log: (line) => process.stdout.write(`\n${line}\n`),
+      warn: (line) => process.stderr.write(`${line}\n`),
+    });
+    // The capture log's skipped[] is part of the postability verdict: a take
+    // with missing beats stays defective no matter how clean its pixels are.
+    const skipped = captureLog?.skipped ?? [];
+    if (skipped.length) printSkippedSummary(skipped);
+    if (cursorErrors > 0 && captureOnDisk)
+      process.stdout.write(
+        `\na failed cursor audit can be a transient renderer misdraw — \`${INVOKE} render ${take.mp4Path}\` re-renders from the frozen capture and re-audits; a repeat failure means the renderer disagrees with its own math\n`,
+      );
+    if (result.errors || skipped.length) {
+      const verdict = verdictLine(result.errors, skipped.length);
+      if (!has("--no-strict")) {
+        process.stdout.write(
+          `exiting 2: ${verdict} — this take is not postable as-is (pass --no-strict to downgrade to a warning)\n`,
+        );
+        process.exit(2);
+      }
+      process.stdout.write(`--no-strict: ${verdict} downgraded to warnings\n`);
+      return;
+    }
+    // check's whole product is the verdict — "no errors found" from a run
+    // where a gate never measured anything is not a clean bill.
+    const unjudged = [
+      ...result.crashed,
+      ...(logCorrupt ? ["the capture-log verdicts (file exists but did not parse)"] : []),
+    ];
+    if (unjudged.length) {
+      process.stdout.write(
+        `exiting 1: could not judge this take — ${unjudged.join(" + ")} did not run; no error was FOUND, but nothing here says the take is clean\n`,
+      );
+      process.exit(1);
+    }
+    process.stdout.write(`\n✓ no post-shoot errors: ${await readyLine(take.mp4Path)}\n`);
     return;
   }
 

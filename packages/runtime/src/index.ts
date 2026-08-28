@@ -15,7 +15,7 @@
 // way; changing the choreography (what's clicked/typed, beat order) needs a
 // fresh makeTake (the video is temporal — see validateComposition).
 
-import { copyFile, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
@@ -30,15 +30,17 @@ import { type CaptureOpts, captureTake } from "./capture";
 import { ensureChrome } from "./cdp";
 import { annotateCaptureLog } from "./frame-diff";
 import { toDraft } from "./review";
-import { ensureTakeDir, resolveTakePaths } from "./take";
+import { ensureTakeDir, resolveTakePaths, takeFile, type TakePaths } from "./take";
 import type { TakePlan } from "./types";
 
 export {
   type AuditCursorOpts,
   type AuditRow,
   auditCursor,
+  type CaptureLog,
   type CompositionIssue,
   formatIssues,
+  type TakeComposition,
   validateComposition,
 } from "@open-take/compositor";
 export { type AuthOpts, type AuthResult, authProfile, profileDir } from "./auth";
@@ -104,6 +106,13 @@ export {
   type WaitNotesResult,
   waitForNotes,
 } from "./notes";
+export {
+  healingWithheld,
+  type PostShootIO,
+  type PostShootPass,
+  type PostShootResult,
+  runPostShootGates,
+} from "./post-shoot";
 export { type PrecheckIssue, planTargets, precheckPlan } from "./precheck";
 export {
   type AbOpts,
@@ -327,9 +336,12 @@ export type RenderCompositionOpts = {
  *  capture is frozen, so only your edits change the output. Validation runs at
  *  the render boundary (renderTake) and throws on a malformed edit — including a
  *  capture-locked tMs drift when `captureLog` is supplied. */
-export async function renderComposition(
-  opts: RenderCompositionOpts,
-): Promise<{ mp4Path: string; compositionPath: string; warnings: CompositionIssue[] }> {
+export async function renderComposition(opts: RenderCompositionOpts): Promise<{
+  mp4Path: string;
+  compositionPath: string;
+  warnings: CompositionIssue[];
+  composition: TakeComposition;
+}> {
   const chromePath = await ensureChrome(opts.chromePath);
   // Where the editable composition belongs is a TAKE-layout question (its
   // working dir), so it is answered here and not in the compositor.
@@ -348,6 +360,38 @@ export async function renderComposition(
   });
 }
 
+/** The bounded re-render behind the post-shoot cursor gate: render the SAME
+ *  composition over the frozen capture to a scratch name inside the working
+ *  dir, then rename over the master only on success — a crashed re-render
+ *  must not eat the file the first audit measured. Calls renderTake directly
+ *  (not renderComposition, which canonicalizes outPath back to the take's
+ *  master — exactly the in-place overwrite this scratch name exists to
+ *  avoid). */
+export async function reRenderInPlace(
+  take: TakePaths,
+  composition: TakeComposition,
+  captureLog: CaptureLog | undefined,
+  opts: { logProgress?: boolean } = {},
+): Promise<void> {
+  const chromePath = await ensureChrome();
+  const pending = takeFile(take, "re-render.pending.mp4");
+  try {
+    await renderTake({
+      composition,
+      videoPath: resolve(take.capturePath),
+      outPath: pending,
+      compositionPath: take.compositionPath,
+      logProgress: opts.logProgress ?? true,
+      chromePath,
+      captureLog,
+      writeCompositionSibling: false,
+    });
+    await rename(pending, take.mp4Path);
+  } finally {
+    await rm(pending, { force: true });
+  }
+}
+
 /** Convenience: load a `*.composition.json` and re-render over a saved capture.
  *  Auto-loads the sibling capture log (`<video>`.json) so the capture-lock check
  *  is enforced in the CLI refine loop — pass `captureLogPath` to override, or
@@ -362,7 +406,12 @@ export async function renderCompositionFile(opts: {
   logProgress?: boolean;
   chromePath?: string;
   onProgress?: (progress: number) => void;
-}): Promise<{ mp4Path: string; compositionPath: string; warnings: CompositionIssue[] }> {
+}): Promise<{
+  mp4Path: string;
+  compositionPath: string;
+  warnings: CompositionIssue[];
+  composition: TakeComposition;
+}> {
   const composition = JSON.parse(
     await readFile(resolve(opts.compositionPath), "utf8"),
   ) as TakeComposition;
