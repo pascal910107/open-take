@@ -524,7 +524,12 @@ page changed).
   "Meta+a"` does NOT work, dispatched key events never run Chrome's editing
   commands). **`"perCharMs"`** overrides the typing pace (default auto-paces
   ~1.1s per beat, 28–90ms per char; mostly-CJK text runs ~1.4× slower) — raise
-  for a deliberate hero reveal, lower for a fast burst.
+  for a deliberate hero reveal, lower for a fast burst. A field that never
+  takes focus (e.g. a contenteditable that only arms on a real click) is
+  recovered with one trusted click at the field's centre first; if focus STILL
+  doesn't land, the step is SKIPPED (`focus never reached the target`) instead
+  of typing into nothing — the fix is usually a prior `click` beat that arms
+  the editor, not a retarget.
 - **`drag`** is a path with the button held — the canvas wow (sketch, draw a
   shape, move an element). Give a **start** and **end**, each as either an
   explicit viewport point (`from` / `to`) or a located element (`selector`/`text`
@@ -880,8 +885,10 @@ loop is yours to drive, and it is bounded:
   (`⚠ n steps skipped`); by default `make` then exits non-zero
   (pass `--no-strict` to downgrade skipped steps to a warning). If a beat was
   dropped, fix the target (re-`inspect`; names/layout may have changed) or just
-  re-run (capture can flake on a cold first run) — never ship a silently-empty
-  demo. ALWAYS look at the frames (step 5) to catch this.
+  re-run (capture can flake on a cold first run) — except a `focus never
+  reached the target` skip, where the target RESOLVED but the field never
+  armed: add or fix the click beat that opens the editor instead. Never ship a
+  silently-empty demo. ALWAYS look at the frames (step 5) to catch this.
 - **For `drag`, verify the stroke actually rendered.** A drag whose endpoints
   resolved still produces *nothing visible* if the wrong tool was active or the
   surface ignored synthetic input — eyeball the frames mid-stroke. (Select the

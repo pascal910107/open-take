@@ -32,6 +32,7 @@ import {
   scrollDeltaSelectorJs,
   selectAllInFocusedJs,
   selectOptionJs,
+  verifyFocusJs,
 } from "./capture";
 import {
   type Browser,
@@ -509,21 +510,71 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
 
       if (step.action === "type") {
         const label = step.text ?? step.selector;
-        const tMs = Date.now() - t0;
-        const box = step.text
-          ? await evalBox(cdp, focusFieldByTextJs(step.text))
+        let tMs = Date.now() - t0;
+        const focusRaw = step.text
+          ? await evalAny(cdp, focusFieldByTextJs(step.text))
           : step.selector
-            ? await evalBox(cdp, focusSelectorJs(step.selector))
+            ? await evalAny(cdp, focusSelectorJs(step.selector))
             : null;
+        const box = focusRaw ? findBox(focusRaw as Record<string, unknown>) : null;
         if (!box) {
           skip("type", label, "target not found");
           await hold(600);
           continue;
         }
+        // Did focus LAND? Input.insertText types into the current selection —
+        // when the in-page focus();click();focus() bounces off (a
+        // contenteditable that only arms on a real click's coordinates:
+        // measured, activeElement stayed BODY, the string went nowhere, and
+        // the beat logged as a success with changeCoverage 0), recover the
+        // way a user would: one trusted press/release at the field's centre,
+        // then ask again. Still unfocused after that → the beat is a lie the
+        // video would tell — skip it and let the post-shoot gate name it.
+        let focused = (focusRaw as Record<string, unknown>).f === 1;
+        // A covered centre is not recovered: the press would land on whatever
+        // covers the field as a REAL click — state mutated on camera — and
+        // the beat would skip anyway. Name it and move on.
+        if (!focused && (focusRaw as Record<string, unknown>).hit !== 1) {
+          skip(
+            "type",
+            label,
+            "focus never reached the target — its centre is covered, so no click could arm it",
+          );
+          await hold(600);
+          continue;
+        }
+        if (!focused) {
+          const pt = center(box);
+          pumpPaused = true;
+          await sleep(160);
+          tMs = Date.now() - t0; // the press, not the eval, is the beat (as click)
+          mouse(cdp, "mouseMoved", pt.x, pt.y, 0).catch(() => {});
+          mouse(cdp, "mousePressed", pt.x, pt.y, 1).catch(() => {});
+          await sleep(60);
+          mouse(cdp, "mouseReleased", pt.x, pt.y, 0).catch(() => {});
+          await sleep(120);
+          pumpPaused = false;
+          // the app may arm the editor in a state update — a short bounded
+          // poll, not one fixed probe, so a slow arm (loaded CI box) is not a
+          // false skip; the failing path costs at most ~750ms extra
+          for (let poll = 0; poll < 3 && !focused; poll++) {
+            await sleep(250);
+            focused =
+              (await evalString(
+                cdp,
+                verifyFocusJs({ text: step.text, selector: step.selector }),
+              )) === "1";
+          }
+        }
+        if (!focused) {
+          skip("type", label, "focus never reached the target — typing would go nowhere");
+          await hold(600);
+          continue;
+        }
         // Unattended runs must never film a credential being typed — the plan
         // is agent-written and the mp4 is the one artifact nobody reviews.
-        // The focus JS above already parked focus on the field, so ask the
-        // page what kind of field it actually is.
+        // Focus is verified on the field by now, so ask the page what kind of
+        // field it actually is.
         if (
           process.env.OPEN_TAKE_CI &&
           (await evalString(cdp, credentialFieldProbeJs())) === "secret"
@@ -551,7 +602,6 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
           Math.min(90, Math.max(28, Math.round(1100 / Math.max(1, chars.length)))) *
           (cjk * 2 > chars.length ? 1.4 : 1);
         const perChar = Math.round(step.perCharMs ?? auto);
-        const tType = Date.now();
         for (const ch of chars) {
           await cdp.send("Input.insertText", { text: ch });
           await sleep(perChar);
@@ -565,7 +615,12 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
           note: step.note,
           ...(step.caption ? { caption: step.caption } : {}),
           text: step.value,
-          durationMs: Date.now() - tType,
+          // measured from tMs, not from the first keystroke: on the recovery
+          // path the beat starts at the assist press, and the frame-diff
+          // window + the compositor's dwell must span click-through-typing —
+          // a typing-only duration would leave the recovery's ~700ms outside
+          // the beat it belongs to
+          durationMs: Date.now() - t0 - tMs,
           ...(step.zoom ? { zoom: step.zoom } : {}),
         });
         await hold(900);

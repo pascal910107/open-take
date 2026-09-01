@@ -79,7 +79,10 @@ export const asDefects = (gate: DefectGate, issues: readonly GateIssue[]): Defec
   }));
 
 /** capture-time skipped steps as defects — error-severity: the beat is gone
- *  from the video, which is exactly what the strict exit refuses. */
+ *  from the video, which is exactly what the strict exit refuses. The fix
+ *  copy follows the reason: a focus skip means the target RESOLVED and the
+ *  not-found copy ("point the target at an element that exists") would send
+ *  the repair round at the wrong dimension. */
 export const skippedDefects = (
   skipped: readonly { step: number; action: string; target?: string; reason: string }[],
 ): Defect[] =>
@@ -88,7 +91,9 @@ export const skippedDefects = (
     severity: "error",
     path: `steps[${s.step}]`,
     message: `${s.action} ${JSON.stringify(s.target ?? "")}: step SKIPPED at capture (${s.reason}) — the video is missing this beat`,
-    fix: "point the target at an element that exists when this step runs (a pre-capture warning above may name the impostor or the late binding), or drop the step; then re-make",
+    fix: s.reason.startsWith("focus never reached")
+      ? "the target resolved but never took focus — have an earlier step click/open the control that arms this field, retarget the step at the element that actually receives the text, or drop the step; then re-make"
+      : "point the target at an element that exists when this step runs (a pre-capture warning above may name the impostor or the late binding), or drop the step; then re-make",
   }));
 
 /** Settle underruns whose beat DID go quiet carry a measured number the

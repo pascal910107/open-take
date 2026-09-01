@@ -17,16 +17,18 @@
 // asserting on the source string, because the bug lived in the emitted
 // JavaScript, not in the TypeScript around it.
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
+import { test } from "node:test";
 import {
   boxByTextJs,
   clickBySelectorJs,
   clickByTextJs,
   focusFieldByTextJs,
+  focusSelectorJs,
   hrefByTextJs,
   listInteractiveJs,
   scrollDeltaByTextJs,
+  verifyFocusJs,
 } from "../src/capture.js";
 
 // --- a DOM shim just large enough for the locators ----------------------
@@ -70,12 +72,19 @@ function matches(e: El, part: string): boolean {
   return true;
 }
 
-function makeDoc(els: El[]) {
+function makeDoc(els: El[], opts: { singularHit?: (x: number, y: number) => El | null } = {}) {
   // ONE wrapper per El, memoized. The click tail compares the resolved element
   // against document.elementFromPoint by IDENTITY (hit===m / m.contains(hit));
   // fresh wrappers per call would never be equal, every click would look
   // covered, and the fallback path would silently swallow the tests.
   const wrappers = new Map<El, object>();
+  const body = { tagName: "BODY" };
+  let active: object = body;
+  const focusable = (e: El) =>
+    e.tag === "input" ||
+    e.tag === "textarea" ||
+    "contenteditable" in e.attrs ||
+    "tabindex" in e.attrs;
   const wrap = (e: El) => {
     const got = wrappers.get(e);
     if (got) return got;
@@ -100,17 +109,49 @@ function makeDoc(els: El[]) {
       click: () => {
         e.clicked = true;
       },
+      // real browsers ignore focus() on a non-focusable element — the shim
+      // must too, or the focus-landed flag could never read 0
       focus: () => {
         e.focused = true;
+        if (focusable(e)) active = w;
       },
       select: () => {},
       closest: () => null,
       querySelector: () => null,
       contains: (other: unknown) => other === w, // flat shim: no children
+      get isContentEditable() {
+        return "contenteditable" in e.attrs;
+      },
+      get value() {
+        return e.tag === "input" || e.tag === "textarea" ? (e.attrs.value ?? "") : undefined;
+      },
+      get readOnly() {
+        return "readonly" in e.attrs;
+      },
+      get disabled() {
+        return "disabled" in e.attrs;
+      },
       tagName: e.tag.toUpperCase(),
     };
     wrappers.set(e, w);
     return w;
+  };
+  const hitsAt = (x: number, y: number) => {
+    const out: object[] = [];
+    for (let i = els.length - 1; i >= 0; i--) {
+      const e = els[i]!;
+      const r = e.rect;
+      if (
+        r.width > 0 &&
+        r.height > 0 &&
+        x >= r.x &&
+        x <= r.x + r.width &&
+        y >= r.y &&
+        y <= r.y + r.height
+      )
+        out.push(wrap(e));
+    }
+    return out;
   };
   return {
     querySelectorAll: (sel: string) => {
@@ -124,33 +165,41 @@ function makeDoc(els: El[]) {
     },
     // Paint order in the shim = DOM order, so the topmost hit is the LAST
     // element whose rect contains the point — the convention a page with an
-    // overlay follows (the overlay comes later in the DOM).
+    // overlay follows (the overlay comes later in the DOM). `singularHit`
+    // lets a test model the measured Chrome quirk where THIS api names an
+    // element whose box does not even contain the point while the layered
+    // list below answers correctly.
     elementFromPoint: (x: number, y: number) => {
-      for (let i = els.length - 1; i >= 0; i--) {
-        const e = els[i]!;
-        const r = e.rect;
-        if (
-          r.width > 0 &&
-          r.height > 0 &&
-          x >= r.x &&
-          x <= r.x + r.width &&
-          y >= r.y &&
-          y <= r.y + r.height
-        )
-          return wrap(e);
+      if (opts.singularHit) {
+        const e = opts.singularHit(x, y);
+        return e ? wrap(e) : null;
       }
-      return null;
+      return hitsAt(x, y)[0] ?? null;
+    },
+    elementsFromPoint: (x: number, y: number) => hitsAt(x, y),
+    body,
+    get activeElement() {
+      return active;
     },
   };
 }
 
-/** Run a generated locator against a shim DOM; returns its raw string result. */
-function run(js: string, els: El[]): string {
-  const doc = makeDoc(els);
+/** Evaluate a generated locator against a prebuilt shim doc — lets a test
+ *  run two scripts against ONE doc so state (activeElement) carries over. */
+function runOn(doc: ReturnType<typeof makeDoc>, js: string): string {
   const win = { innerWidth: 1920, innerHeight: 1080 };
   // new Function, not eval: the locator string is ours, and running the emitted
   // JavaScript is the entire point of the test.
   return new Function("document", "window", `return ${js}`)(doc, win) as string;
+}
+
+/** Run a generated locator against a fresh shim DOM; returns its raw string result. */
+function run(
+  js: string,
+  els: El[],
+  opts: { singularHit?: (x: number, y: number) => El | null } = {},
+): string {
+  return runOn(makeDoc(els, opts), js);
 }
 
 const box = (js: string, els: El[]) => {
@@ -278,7 +327,9 @@ test("a hittable button returns the trusted-click point and is NOT clicked in-pa
 });
 
 test("a zero-size (sr-only) target falls back to the in-page click", () => {
-  const dom = [el("button", { "aria-label": "Skip to content" }, "", { x: 0, y: 0, width: 0, height: 0 })];
+  const dom = [
+    el("button", { "aria-label": "Skip to content" }, "", { x: 0, y: 0, width: 0, height: 0 }),
+  ];
   const { parsed, clickedEls } = clicked(clickByTextJs("Skip to content"), dom);
   assert.equal(parsed?.cx, undefined); // no point → driver dispatches nothing
   assert.equal(clickedEls.length, 1); // the eval clicked it programmatically
@@ -305,6 +356,166 @@ test("the selector path shares the same delivery contract", () => {
 });
 
 test("a <select> still refuses with SELECTINERT from both paths", () => {
-  const dom = [el("select", { "aria-label": "Size" }, "", { x: 10, y: 10, width: 120, height: 30 })];
+  const dom = [
+    el("select", { "aria-label": "Size" }, "", { x: 10, y: 10, width: 120, height: 30 }),
+  ];
   assert.equal(run(clickBySelectorJs("select"), dom), "SELECTINERT");
+});
+
+// --- the singular-hit quirk (measured on a real shoot) -------------------
+// Chrome's elementFromPoint can name an element whose border box does not
+// even contain the point: a 33px heading's centre sat 16px above a sibling
+// with 164px glyphs on a 157px line-height, and the sibling's ink overflow
+// won the singular hit-test at every sample while elementsFromPoint()[0]
+// answered the heading — and a trusted click at that point reached the
+// heading. Treating the singular miss as an occluder downgraded the beat to
+// m.click(), which the app ignored (its edit handler resolves the anchor
+// from the click's coordinates, and a programmatic click carries 0,0): the
+// beat died with changeCoverage 0 and every dependent beat skipped.
+
+test("a singular-hit miss is overruled by the layered list — trusted point, no in-page click", () => {
+  const heading = el("h1", { "data-slide-loc": "371:10" }, "Build slides", {
+    x: 426,
+    y: 366,
+    width: 1333,
+    height: 33,
+  });
+  const sibling = el("h1", { "data-slide-loc": "376:10" }, "inside Replit.", {
+    x: 426,
+    y: 399,
+    width: 1333,
+    height: 128,
+  });
+  const dom = [heading, sibling];
+  // the quirk: singular names the sibling at the heading's centre (383),
+  // 16px outside the sibling's own box — the layered list stays honest
+  const out = run(clickBySelectorJs('h1[data-slide-loc="371:10"]'), dom, {
+    singularHit: () => sibling,
+  });
+  const parsed = JSON.parse(out) as Record<string, number>;
+  assert.equal(parsed.cx, 1093);
+  assert.equal(parsed.cy, 383);
+  assert.equal(dom.filter((e) => e.clicked).length, 0);
+});
+
+test("a genuine occluder still falls back in-page when BOTH point apis agree", () => {
+  const dom = [
+    el("button", {}, "Buried", { x: 100, y: 100, width: 80, height: 30 }),
+    el("button", { "aria-label": "Cookie banner" }, "", { x: 0, y: 0, width: 1920, height: 1080 }),
+  ];
+  // no singularHit override: both apis resolve the overlay
+  const { parsed, clickedEls } = clicked(clickByTextJs("Buried"), dom);
+  assert.equal(parsed?.cx, undefined);
+  assert.equal(clickedEls.length, 1);
+  assert.equal(clickedEls[0]!.text, "Buried");
+});
+
+// --- type delivery: the focus-landed flag --------------------------------
+// Input.insertText types into the current selection; when the in-page
+// focus();click();focus() bounces off, the driver must know (measured:
+// activeElement stayed BODY, the whole string went nowhere, and the beat
+// logged as a success). The focus resolvers report `f`, and verifyFocusJs
+// re-asks the same predicate side-effect-free after the driver's trusted
+// click recovery.
+
+test("focus that lands on an editable target reports f:1", () => {
+  const dom = [
+    el("input", { "aria-label": "Size" }, "", { x: 976, y: 278, width: 36, height: 28 }),
+  ];
+  const out = JSON.parse(run(focusFieldByTextJs("Size"), dom)) as Record<string, number>;
+  assert.equal(out.f, 1);
+  const verdict = run(verifyFocusJs({ text: "Size" }), dom);
+  // fresh shim: nothing focused yet, so the side-effect-free probe says 0
+  assert.equal(verdict, "0");
+});
+
+test("focus that bounces off a not-yet-editable target reports f:0", () => {
+  // the second-edit-round shape: a plain h1 whose contenteditable only arms
+  // when the app sees a real click — focus() is a no-op on it
+  const dom = [
+    el("h1", { "data-slide-loc": "371:10" }, "Build slides", {
+      x: 426,
+      y: 366,
+      width: 1333,
+      height: 33,
+    }),
+  ];
+  const out = JSON.parse(run(focusSelectorJs('h1[data-slide-loc="371:10"]'), dom)) as Record<
+    string,
+    number
+  >;
+  assert.equal(out.f, 0);
+  assert.equal(run(verifyFocusJs({ selector: 'h1[data-slide-loc="371:10"]' }), dom), "0");
+});
+
+test("verifyFocusJs answers 1 once the target became editable and holds focus", () => {
+  const dom = [
+    el("h1", { "data-slide-loc": "371:10", contenteditable: "true" }, "Build slides", {
+      x: 426,
+      y: 366,
+      width: 1333,
+      height: 33,
+    }),
+  ];
+  const doc = makeDoc(dom);
+  // model the app arming the editor after the trusted-click recovery: the
+  // element is contenteditable now, so the focus resolver's focus() lands —
+  // and the side-effect-free probe run against the SAME doc agrees
+  const primed = runOn(doc, focusSelectorJs('h1[data-slide-loc="371:10"]'));
+  assert.equal((JSON.parse(primed) as Record<string, number>).f, 1);
+  assert.equal(runOn(doc, verifyFocusJs({ selector: 'h1[data-slide-loc="371:10"]' })), "1");
+  // and a doc where nothing ever focused still answers 0
+  assert.equal(run(verifyFocusJs({ selector: 'h1[data-slide-loc="371:10"]' }), dom), "0");
+});
+
+test("a bounced focus reports whether the recovery click can reach the field", () => {
+  const field = el("h1", { "data-slide-loc": "371:10" }, "Build slides", {
+    x: 426,
+    y: 366,
+    width: 1333,
+    height: 33,
+  });
+  // uncovered: the driver may press the centre
+  const open = JSON.parse(run(focusSelectorJs('h1[data-slide-loc="371:10"]'), [field])) as Record<
+    string,
+    number
+  >;
+  assert.equal(open.f, 0);
+  assert.equal(open.hit, 1);
+  assert.equal(open.h, 33); // the box height survives — `hit` is its own key
+  // covered by a scrim painted later in the DOM: report, don't punch
+  const scrim = el("div", { "data-scrim": "1" }, "", { x: 0, y: 0, width: 1920, height: 1080 });
+  const covered = JSON.parse(
+    run(focusSelectorJs('h1[data-slide-loc="371:10"]'), [field, scrim]),
+  ) as Record<string, number>;
+  assert.equal(covered.f, 0);
+  assert.equal(covered.hit, 0);
+});
+
+test("a readOnly field reports f:0 — insertText would be swallowed", () => {
+  const dom = [
+    el("input", { "aria-label": "Locked", readonly: "" }, "", {
+      x: 10,
+      y: 10,
+      width: 120,
+      height: 30,
+    }),
+  ];
+  const out = JSON.parse(run(focusFieldByTextJs("Locked"), dom)) as Record<string, number>;
+  assert.equal(out.f, 0);
+});
+
+test("after the real recovery click, an editable focused OUTSIDE the target passes verify", () => {
+  // hidden-textarea editor pattern: the click on the container focuses a
+  // proxy editable elsewhere — a real user's click-then-type lands there
+  const dom = [
+    el("div", { "data-editor": "1" }, "", { x: 100, y: 100, width: 600, height: 400 }),
+    el("textarea", { "aria-label": "hidden-input" }, "", { x: 0, y: 0, width: 1, height: 1 }),
+  ];
+  const doc = makeDoc(dom);
+  // model the app's response to the trusted click: it focuses the proxy
+  runOn(doc, `(function(){document.querySelectorAll('textarea')[0].focus();return '1';})()`);
+  // strict tier would refuse (active element not in the target)…
+  // …but the post-click verify accepts: the insertion has a real editable home
+  assert.equal(runOn(doc, verifyFocusJs({ selector: 'div[data-editor="1"]' })), "1");
 });

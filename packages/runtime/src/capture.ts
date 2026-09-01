@@ -116,14 +116,37 @@ export const NAME_JS =
 // viewport-relative bbox. behavior:'instant' is load-bearing for the point
 // path: with CSS scroll-behavior:smooth the post-scroll rect is mid-animation
 // and the trusted click would land on yesterday's layout.
+//
+// The hittable test asks BOTH point APIs before giving up on the point path.
+// Chrome's singular elementFromPoint can return an element whose border box
+// does not even contain the point: measured on a 33px-tall heading whose
+// centre sat 16px above a sibling with 164px glyphs on a 157px line-height —
+// the sibling's ink overflow won the singular hit-test at every sample while
+// elementsFromPoint()[0] (per spec, the same answer) named the heading, and a
+// trusted click at that point reached the heading. Treating the singular miss
+// as an occluder silently downgraded the beat to m.click() — which the app
+// ignored, because its edit-mode handler resolves the anchor from the click's
+// clientX/clientY and a programmatic click carries (0,0). The beat died with
+// changeCoverage 0 and every dependent beat skipped. So: a miss from the
+// singular API alone is not occlusion — only when the layered list agrees the
+// centre belongs to someone else does the in-page fallback fire.
+const HITTABLE_JS =
+  `function hittable(m,r){var cx=Math.round(r.x+r.width/2),cy=Math.round(r.y+r.height/2);` +
+  `if(!(r.width>0&&r.height>0&&document.elementFromPoint))return null;` +
+  `var hit=document.elementFromPoint(cx,cy);` +
+  `var ok=!!hit&&(hit===m||(m.contains&&m.contains(hit)));` +
+  `if(!ok&&document.elementsFromPoint){var top=document.elementsFromPoint(cx,cy)[0];` +
+  `ok=!!top&&(top===m||(m.contains&&m.contains(top)));}` +
+  `return ok?{cx:cx,cy:cy}:null;}`;
+
 const CLICK_TAIL_JS =
   `if(m.tagName==='SELECT')return 'SELECTINERT';` +
+  HITTABLE_JS +
   `var r=m.getBoundingClientRect();` +
   `if(r.top<0||r.bottom>window.innerHeight){m.scrollIntoView({block:'center',behavior:'instant'});r=m.getBoundingClientRect();}` +
   `var b={x:Math.round(r.x),y:Math.round(r.y),w:Math.round(r.width),h:Math.round(r.height)};` +
-  `var cx=Math.round(r.x+r.width/2),cy=Math.round(r.y+r.height/2);` +
-  `var hit=(r.width>0&&r.height>0&&document.elementFromPoint)?document.elementFromPoint(cx,cy):null;` +
-  `if(hit&&(hit===m||(m.contains&&m.contains(hit)))){b.cx=cx;b.cy=cy;return JSON.stringify(b);}` +
+  `var p=hittable(m,r);` +
+  `if(p){b.cx=p.cx;b.cy=p.cy;return JSON.stringify(b);}` +
   `m.click();return JSON.stringify(b);`;
 
 // The candidate sets each by-text locator queries — exported for the
@@ -177,6 +200,53 @@ export function clickBySelectorJs(selector: string): string {
 // type targets are form fields (input/textarea/contenteditable), which the
 // clickable locator above does NOT match. Resolve the field by accessible
 // name OR placeholder, scroll into view, focus + click (caret), return bbox.
+//
+// Whether focus actually LANDED rides back as `f` — Input.insertText types
+// into the current selection, so when the in-page focus();click();focus()
+// bounces off (a contenteditable that only arms when the app sees a real
+// click's coordinates: measured, activeElement stayed BODY and the whole
+// string went nowhere while the step logged as a success), the driver must
+// know, not guess.
+//
+// The predicate reads the DEEP active element (piercing shadow roots — a web
+// component reports its host as document.activeElement while insertText lands
+// in the shadow's own active element) and calls it focused when it can take
+// an insertion (isContentEditable, or a string .value that is not readOnly/
+// disabled — a readOnly field swallows insertText exactly like body does)
+// AND it belongs to the target: on the composed ancestry (host chain
+// included), or as an editable host wrapping the target. document.body only
+// counts when body itself IS the target (designMode pages).
+const FOCUS_STATE_JS =
+  `function deepActive(){var a=document.activeElement;` +
+  `while(a&&a.shadowRoot&&a.shadowRoot.activeElement){a=a.shadowRoot.activeElement;}return a;}` +
+  `function editable(a){if(!a)return false;if(a.isContentEditable)return true;` +
+  `return typeof a.value==='string'&&!a.readOnly&&!a.disabled;}` +
+  `function withinTarget(a){var n=a;while(n){if(n===m||(m.contains&&m.contains(n)))return true;` +
+  `var rn=n.getRootNode?n.getRootNode():null;n=n.parentElement||((rn&&rn.host)?rn.host:null);}return false;}` +
+  `var ae=deepActive();` +
+  `var ok=!!ae&&(ae!==document.body||m===document.body)&&editable(ae)&&` +
+  `(withinTarget(ae)||(ae.isContentEditable&&ae.contains&&ae.contains(m)));`;
+
+// behavior:'instant' is load-bearing here too now: the box this returns aims
+// the driver's trusted recovery click, and a smooth scroll mid-flight would
+// hand it yesterday's layout (same reasoning as CLICK_TAIL_JS). When focus
+// bounced, `hit` says whether that recovery click can even reach the field —
+// the same hittable test the click path runs, read AFTER the in-page
+// focus/click so it sees whatever those opened. A covered centre is reported
+// rather than punched: a trusted press through an overlay would land on the
+// overlay as a real click, mutate state on camera, and the beat would still
+// skip.
+const FOCUS_TAIL_JS =
+  HITTABLE_JS +
+  `var r=m.getBoundingClientRect();` +
+  `if(r.top<0||r.bottom>window.innerHeight){m.scrollIntoView({block:'center',behavior:'instant'});r=m.getBoundingClientRect();}` +
+  `var b={x:Math.round(r.x),y:Math.round(r.y),w:Math.round(r.width),h:Math.round(r.height)};` +
+  `m.focus();m.click();m.focus();` +
+  FOCUS_STATE_JS +
+  `b.f=ok?1:0;` +
+  `if(!ok){b.hit=hittable(m,m.getBoundingClientRect())?1:0;}` +
+  `return JSON.stringify(b);`;
+
 export function focusFieldByTextJs(text: string): string {
   const t = JSON.stringify(text);
   return (
@@ -185,10 +255,8 @@ export function focusFieldByTextJs(text: string): string {
     NAME_JS +
     `var m=pick(els,t);` +
     `if(!m)return 'NOTFOUND';` +
-    `var r=m.getBoundingClientRect();` +
-    `if(r.top<0||r.bottom>window.innerHeight){m.scrollIntoView({block:'center'});r=m.getBoundingClientRect();}` +
-    `var b={x:Math.round(r.x),y:Math.round(r.y),w:Math.round(r.width),h:Math.round(r.height)};` +
-    `m.focus();m.click();m.focus();return JSON.stringify(b);})()`
+    FOCUS_TAIL_JS +
+    `})()`
   );
 }
 
@@ -196,10 +264,35 @@ export function focusSelectorJs(selector: string): string {
   const s = JSON.stringify(selector);
   return (
     `(function(){var m=document.querySelector(${s});if(!m)return 'NOTFOUND';` +
-    `var r=m.getBoundingClientRect();` +
-    `if(r.top<0||r.bottom>window.innerHeight){m.scrollIntoView({block:'center'});r=m.getBoundingClientRect();}` +
-    `var b={x:Math.round(r.x),y:Math.round(r.y),w:Math.round(r.width),h:Math.round(r.height)};` +
-    `m.focus();m.click();m.focus();return JSON.stringify(b);})()`
+    FOCUS_TAIL_JS +
+    `})()`
+  );
+}
+
+// Side-effect-free re-check of the focus predicate, for after the driver has
+// delivered a trusted click at the field's centre (the recovery a real user
+// performs by hand). Resolves the target exactly like the focus builders but
+// never focuses or clicks — a second in-page click here could toggle app
+// state the first one already changed.
+//
+// After that REAL click the ownership test widens: some editors focus a
+// proxy editable OUTSIDE the clicked container (hidden textarea patterns), so
+// post-click, a deep active element that can take the insertion is accepted
+// wherever it lives — that is where a real user's click-then-type would land,
+// and the strict tier already handled the no-click case. What still skips:
+// focus parked on body or a non-editable control (the measured lie).
+export function verifyFocusJs(target: { text?: string; selector?: string }): string {
+  if (!target.text && !target.selector) return `'0'`;
+  const resolve = target.text
+    ? `var els=Array.prototype.slice.call(document.querySelectorAll('${FIELD_CANDIDATES}'));` +
+      NAME_JS +
+      `var m=pick(els,${JSON.stringify(target.text)});`
+    : `var m=document.querySelector(${JSON.stringify(target.selector ?? "")});`;
+  return (
+    `(function(){${resolve}if(!m)return '0';` +
+    FOCUS_STATE_JS +
+    `if(ok)return '1';` +
+    `return (!!ae&&ae!==document.body&&editable(ae))?'1':'0';})()`
   );
 }
 

@@ -89,6 +89,21 @@ test("skipped steps become error defects at the step's path", () => {
   assert.ok(d?.fix);
 });
 
+test("a focus skip gets fix copy about arming the field, not about a missing element", () => {
+  const [d] = skippedDefects([
+    {
+      step: 10,
+      action: "type",
+      target: "main h1",
+      reason: "focus never reached the target — typing would go nowhere",
+    },
+  ]);
+  // the target RESOLVED — "point the target at an element that exists" would
+  // send the repair round at the wrong dimension
+  assert.match(d?.fix ?? "", /never took focus/);
+  assert.doesNotMatch(d?.fix ?? "", /element that exists/);
+});
+
 test("settle defects carry the measured number for beats that DID go quiet — and only those", () => {
   const ds = settleDefects([
     { step: 1, action: "click", heldMs: 900, waitedMs: 400, reason: "idle" },
