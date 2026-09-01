@@ -43,7 +43,7 @@ import {
   Screencast,
 } from "./cdp";
 import { resolveNavigateUrl } from "./nav";
-import { precheckPlan } from "./precheck";
+import { PrecheckRefusal, precheckPlan } from "./precheck";
 import {
   DEFAULT_SETTLE_BUDGET_MS,
   installActivityProbe,
@@ -326,11 +326,12 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
     const precheck = await precheckPlan(plan.steps, (js) => evalAny(cdp, js));
     const precheckErrors = precheck.filter((p) => p.severity === "error");
     if (precheckErrors.length)
-      throw new Error(
+      throw new PrecheckRefusal(
         `captureTakeCDP: ${precheckErrors.length} plan target(s) failed the pre-capture check — nothing was recorded:\n` +
           precheckErrors
             .map((p) => `  ${p.path}: ${p.message}${p.fix ? `\n    fix: ${p.fix}` : ""}`)
             .join("\n"),
+        precheck,
       );
     for (const p of precheck)
       console.error(`captureTakeCDP precheck [${p.severity}] ${p.path}: ${p.message}`);

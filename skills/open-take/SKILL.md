@@ -115,7 +115,8 @@ alignment gate is PRE-ANSWERED: treat the given brief as the confirmed story —
 or, when it says "use your judgment", pick the strongest thesis yourself and
 name it in your final summary. Never call AskUserQuestion or block waiting for
 input. The dailies loop is bounded there too: verify with `frames`, fix what
-composition warnings name, at most two re-makes, ONE master render at the end —
+the defects block and composition warnings name (nothing they don't), at most
+two re-makes, ONE master render at the end —
 and none of the human-loop verbs (`edit`, `notes --wait`, `ab`, `auth`). The
 dossier is not optional in CI: the runner caches the take dir between runs, and
 the dossier is what turns the next run's cold exploration into a cheap
@@ -311,7 +312,9 @@ spending your own eyes:
 ```
 npx open-take check demo.mp4               # post-shoot gates: cursor audit · dead
                                            # opening · static tail · zoom vs payoff ·
-                                           # skipped steps — exit 2 on any error
+                                           # skipped steps — exit 2 on any error, and
+                                           # ANY finding emits the defects block
+                                           # (see the repair loop)
 ```
 (`make` and `render` already run these same gates on their own output; `check`
 re-judges a take standing on disk.) Then get the beat-aware contact sheet and
@@ -410,14 +413,17 @@ Run that drain whenever the user says they left notes, or before you render.
    `npx open-take ab demo.mp4 --before-after` replays
    BEFORE then AFTER (twice) straight from the two files, no render.
 4. **Failures become handoff, not dead ends.** A validator refusal prints the
-   field + fix — relay it and apply the fix; never bypass validation. **A
-   validator *warning* is not a refusal, and it is not noise.** Every render
-   ends with `⚠ n composition warnings` in the summary when there are any —
-   read them. A zoom that "punches into empty space", a press zoom that departs
-   before the keypress, a tail that delivers a frozen screen: each one is a
-   defect a viewer will see, and each has shipped before because the warning
-   was printed at the START of a multi-minute render and got scrolled past.
-   Fix it or say out loud why you're keeping it. Never post over one silently.
+   field + fix — relay it and apply the fix; never bypass validation. An
+   exit-2 verdict prints the machine-readable defects block — relay THAT,
+   verbatim, per the repair loop (below): two rounds, report-named fixes
+   only. **A validator *warning* is not a refusal, and it is not noise.**
+   Every render ends with `⚠ n composition warnings` in the summary when
+   there are any — read them. A zoom that "punches into empty space", a press
+   zoom that departs before the keypress, a tail that delivers a frozen
+   screen: each one is a defect a viewer will see, and each has shipped
+   before because the warning was printed at the START of a multi-minute
+   render and got scrolled past. Fix it or say out loud why you're keeping
+   it. Never post over one silently.
 5. **The closing ritual.** On "done" / "ship it" (in any language): one
    full-quality master render,
    reveal it, and print the ready line — nothing else. In the draft-first loop
@@ -813,6 +819,43 @@ resolution/duration.
 - Ship the delivered mp4 AS IS — it is already the postable encode; every
   re-encode on top is a visible generation lost.
 
+## The repair loop (exit 2 → relay the report → re-verify — twice at most)
+Every defective verdict — `make`, `render`, or `check` exiting 2, including a
+pre-capture refusal (structural lint, or a target the gate proves resolves to
+the wrong element) — ends with a machine-readable report: one JSON object
+between `--- open-take defects v1 ---` and `--- end open-take defects ---` on
+stdout, also written to `<name>.take/defects.json` when the take dir exists
+(`check` writes the file for warn-only findings too, so warns stay closeable
+after the shoot; its exit-1 "could not judge" is no verdict and writes
+nothing). Every entry names the gate that measured it, the severity,
+the field path, the measured values, and — wherever the engine can compute
+one — the exact fix. The engine only judges and never calls a model; this
+loop is yours to drive, and it is bounded:
+
+1. **Relay the block UNCHANGED to whoever authored the plan** — a subagent, a
+   model call, or yourself in a fresh pass — and ask for the ENTIRE corrected
+   plan, same JSON shape. No paraphrase, no summary: every re-narration is a
+   chance to drop the one measured number that made a fix mechanical.
+2. **Fix ONLY what the report names.** `error` entries are refusals — they
+   must change. `warn` entries: fix each one or say out loud why it stays —
+   the late-bound target the gate cannot refuse surfaces ONLY here, and a
+   measured repair run came back clean precisely because the round closed the
+   named warns. Everything the report does not name is out of bounds:
+   measured on the repair benchmarks, report-driven rounds left every unnamed
+   dimension untouched (zero over-correction) — the model that "improves"
+   unnamed steps is re-rolling defects, not fixing them.
+3. **Re-run the SAME command** on the corrected plan and let the gate
+   re-judge. A corrected plan that comes back structurally broken exits 2
+   with `plan-lint` entries — that is the same loop, and it spends a round.
+4. **Two rounds, then stop.** A take still defective after two report-driven
+   repairs has a defect class the reports don't reach — post the final
+   defects block to the user and hand off; a third roll of the same dice
+   produces noise, not a demo. Never "finish" by bypassing: `--no-strict`
+   downgrades the exit code, not the defect (and a refusal BEFORE capture —
+   lint, pre-capture check — exits 2 regardless: there is nothing to
+   downgrade when nothing was recorded), and a gate loosened to let a take
+   through is a gate that stops meaning anything.
+
 ## Capture robustness — checks that keep "user does nothing" honest
 - **The post-shoot gates guard `make` and `render`'s `<take>` form.** Both end
   by judging their own product (cursor audit against the compositor's math,
@@ -824,7 +867,8 @@ resolution/duration.
   re-render + re-audit first — measured on a real take, that defect is
   transient and the re-render heals it; a repeat failure is a genuine renderer
   bug worth reporting, not retrying. Read the findings block before posting
-  anything.
+  anything — and on exit 2, drive the repair loop above with the defects
+  block, not from memory.
 - **Read the `⚠ n composition warnings` block.** Every render path (`make`,
   `render`, `--review`, `--draft`) re-prints the validator's non-fatal findings
   in its end-of-run summary, because the copy it writes at the render boundary

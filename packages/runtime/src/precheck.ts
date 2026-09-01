@@ -35,6 +35,21 @@ export type PrecheckIssue = {
   fix?: string;
 };
 
+/** Thrown by the capture when error-severity findings refuse the shoot.
+ *  Carries the FULL structured findings (warns included) so the CLI can emit
+ *  the machine-readable defects block and exit 2 like every other gate
+ *  verdict — the message is only the human rendering of the same facts, and
+ *  flattening the findings into it is how the measured values used to get
+ *  lost on the way to the repair loop. */
+export class PrecheckRefusal extends Error {
+  readonly issues: PrecheckIssue[];
+  constructor(message: string, issues: PrecheckIssue[]) {
+    super(message);
+    this.name = "PrecheckRefusal";
+    this.issues = issues;
+  }
+}
+
 type TargetSpec = {
   step: number;
   action: string;

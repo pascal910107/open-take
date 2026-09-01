@@ -379,7 +379,9 @@ export function buildCiBrief(opts: CiBriefOpts): string {
       " outcome; a broken one on a PR is not.",
     "- Verify before you finish: `npx open-take frames` and READ the contact" +
       " sheet; a skipped step or an unaddressed composition warning is a" +
-      " failure to fix (re-make), not a footnote. At most two re-makes, then" +
+      " failure to fix (re-make), not a footnote. A defective make exits 2" +
+      " with a `--- open-take defects v1 ---` block: repair from that block" +
+      " verbatim and fix ONLY what it names. At most two re-makes, then" +
       " ship the best take you have and say what you compromised — or conclude" +
       " the app cannot be demoed today and exit without a video.",
     "- The delivered file must be the polished master at the --out path (if you" +

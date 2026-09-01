@@ -23,6 +23,23 @@ What it judges:
 - **zoom vs payoff** — a zoom punched into a global repaint
 - **skipped steps** — re-printed from the capture log; missing beats keep a
   take unpostable no matter how clean its pixels are
+- **plan-target warnings** — the pre-capture findings recorded in
+  `capture.json` (late-bound targets, ambiguous names) re-surface here, so
+  the suspects stay visible after the shoot
+
+## The defects block
+
+ANY judged finding — the warn-only tier included — makes `check` print the
+machine-readable report (one JSON object between
+`--- open-take defects v1 ---` and `--- end open-take defects ---`) and write
+it to `<name>.take/defects.json`; a fully clean verdict removes a stale one.
+Exit 1 (could not judge) emits no block and leaves any existing
+`defects.json` untouched — an unjudged run has no verdict to report, and
+keeping the last judged report beats replacing it with a partial one.
+`make` and `render` print the same block on their defective verdicts. Each
+entry carries gate, severity, field path, measured values, and the computed
+fix where one exists — relay it verbatim to whatever authored the plan (the
+skill's repair loop: at most two rounds, fix only what the report names).
 
 ## Exit codes
 
@@ -34,7 +51,9 @@ What it judges:
 
 ## READ-ONLY by contract
 
-`check` never rewrites the take. When the cursor audit fails,
+`check` never rewrites the take — the master, the capture, and the
+composition are untouched (`defects.json`, the verdict's own report file, is
+the one thing it writes). When the cursor audit fails,
 [`render`](/docs/cli/render) is the healing move — it re-renders from the
 frozen capture and re-audits (the transient-misdraw class heals on one
 re-render; a repeat failure is a real renderer bug). `check` prints exactly

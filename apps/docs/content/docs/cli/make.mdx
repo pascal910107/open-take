@@ -46,6 +46,25 @@ prefix — is a warning, and the capture proceeds.
 Targets that only exist after earlier steps reveal them aggregate into one
 advisory; if one never appears, the skipped step fails the run at capture time.
 
+## The defects block (exit 2)
+
+Every defective verdict — a structural lint error, a pre-capture refusal, a
+skipped step, a post-shoot check error — exits 2 and prints a machine-readable
+report: one JSON object between `--- open-take defects v1 ---` and
+`--- end open-take defects ---`, also written to `<name>.take/defects.json`
+when the take dir exists (a refusal never creates the dir, and only writes
+into one that belongs to this plan's app — the stdout block is always the
+authority). Each entry names the gate that measured it
+(`plan-lint` · `precheck` · `capture` · `post-shoot` · `composition`), the
+severity, the field path, the measured values, and — wherever the engine can
+compute one — the exact fix. **Warnings ride along**: the late-bound target
+the gate cannot refuse surfaces only there.
+
+The block is a repair contract, not a log: relay it verbatim to whatever
+authored the plan, take back the entire corrected plan, and re-run — at most
+twice, then stop and hand the final block to a human. The skill spells out
+the loop; the engine never calls a model, it only judges.
+
 ## Overwrite safety
 
 `make` refuses to overwrite a take that was shot from a **different** app —

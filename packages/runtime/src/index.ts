@@ -113,7 +113,20 @@ export {
   type PostShootResult,
   runPostShootGates,
 } from "./post-shoot";
-export { type PrecheckIssue, planTargets, precheckPlan } from "./precheck";
+export { type PrecheckIssue, PrecheckRefusal, planTargets, precheckPlan } from "./precheck";
+export {
+  type Defect,
+  type DefectGate,
+  type DefectReport,
+  type GateIssue,
+  DEFECTS_CLOSE,
+  DEFECTS_OPEN,
+  asDefects,
+  buildDefectReport,
+  renderDefectBlock,
+  settleDefects,
+  skippedDefects,
+} from "./defect-report";
 export {
   type AbOpts,
   beatLabel,

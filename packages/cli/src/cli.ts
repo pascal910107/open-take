@@ -9,16 +9,20 @@
 //
 // The refine loop is conversational: the user talks, the agent edits
 // composition.json and drives these verbs. See skills/open-take/SKILL.md.
-import { stat as fsStat, readFile, writeFile } from "node:fs/promises";
+import { stat as fsStat, readFile, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  asDefects,
   auditCursor,
   authProfile,
   buildBeatSheet,
+  buildDefectReport,
   type CaptureLog,
   type CompositionIssue,
   checkTake,
+  type Defect,
+  type DefectReport,
   ciAllowedOrigins,
   ciTake,
   emitGithubOutputs,
@@ -33,11 +37,13 @@ import {
   makeTake,
   openPath,
   type PostShootPass,
+  PrecheckRefusal,
   profileDir,
   readNotes,
   renderAbReel,
   renderBeforeAfter,
   renderCompositionFile,
+  renderDefectBlock,
   renderDraft,
   renderFrames,
   renderReview,
@@ -48,6 +54,8 @@ import {
   revealPath,
   runPostShootGates,
   SAY_IT_CARD,
+  settleDefects,
+  skippedDefects,
   stagePrev,
   type TakeComposition,
   type TakePaths,
@@ -260,8 +268,10 @@ Usage:
           skipped steps. Exit 2 on any error finding or skipped step
           (--no-strict downgrades); exit 1 when a gate could not run at all —
           "no error found" by a gate that never ran is not a clean bill.
-          READ-ONLY — it never rewrites the take; when the cursor audit
-          fails, \`render\` is the healing move (it re-renders from the
+          Any judged finding (warns included) also emits the machine-readable
+          defects block and refreshes <name>.take/defects.json. Otherwise
+          READ-ONLY — it never rewrites the take itself; when the cursor
+          audit fails, \`render\` is the healing move (it re-renders from the
           frozen capture and re-audits).
 
   beats   print the numbered beat sheet — the shared map for notes like
@@ -399,6 +409,14 @@ Usage:
               that defect class is transient and a re-render heals it) before
               the exit code fires. (--strict is the default and remains
               accepted on make.)
+              Every defective verdict also prints a machine-readable report —
+              one JSON object between \`--- open-take defects v1 ---\` and
+              \`--- end open-take defects ---\` carrying EVERY finding (warns
+              included) with its measured values and computed fix — and writes
+              it to <name>.take/defects.json when the take dir exists (\`check\`
+              writes it for warn-only findings too). Relay the block VERBATIM
+              to whoever authored the plan and re-run; at most two repair
+              rounds (see the skill's repair loop).
   --force     (make only) overwrite the take at --out even when it was shot from
               a different app. Without it that is refused: two demos in one
               folder each get their own name (\`--out myapp.mp4\`). Under
@@ -540,6 +558,85 @@ function printPostShoot(issues: CompositionIssue[], pass: PostShootPass): void {
         .join(""),
   );
 }
+
+/** The pre-capture plan-target warnings re-printed as part of a verdict.
+ *  `make` prints the live ones; render/check read them back from capture.json
+ *  so a later verdict still names the late-bound suspects (the one defect
+ *  class the gate cannot refuse — the repair loop closes it from here). */
+function printPrecheckWarns(precheck: readonly CompositionIssue[]): void {
+  if (!precheck.length) return;
+  process.stdout.write(
+    `\n⚠ ${precheck.length} plan-target warning${precheck.length === 1 ? "" : "s"} (pre-capture check):\n` +
+      precheck
+        .map(
+          (p) =>
+            `  [${p.severity}] ${p.path}: ${p.message}\n${p.fix ? `          fix: ${p.fix}\n` : ""}`,
+        )
+        .join(""),
+  );
+}
+
+/** Print the machine-readable defects block, and persist it as
+ *  `<take>.take/defects.json` when the verdict belongs to a take on disk —
+ *  the stdout block is the authority, the file is the convenience copy.
+ *
+ *  The stdout writes are AWAITED: off Linux, stdio pipes are asynchronous,
+ *  and a process.exit right after a fire-and-forget write measurably
+ *  truncates the largest write in the queue once a slow reader has the ~64KB
+ *  pipe buffer full — which would cut the one payload a machine parses
+ *  mid-JSON. Awaiting the callback drains everything queued before it too;
+ *  the short verdict lines printed after this remain best-effort prose. */
+async function emitDefects(report: DefectReport, takeDir?: string): Promise<void> {
+  const flush = (s: string): Promise<void> =>
+    new Promise((done) => process.stdout.write(s, () => done()));
+  await flush(renderDefectBlock(report));
+  if (!takeDir) return;
+  const p = join(takeDir, "defects.json");
+  try {
+    await writeFile(p, `${JSON.stringify(report, null, 1)}\n`);
+    await flush(`defects also written to: ${p}\n`);
+  } catch (e) {
+    process.stderr.write(
+      `could not write ${p} (${e instanceof Error ? e.message : e}) — the block above is the report\n`,
+    );
+  }
+}
+
+/** The take dir that may carry a REFUSAL's defects.json. A refusal records
+ *  nothing, so it never creates the dir (a spurious ENOENT on every
+ *  first-make refusal taught that) — and a dir that already exists must
+ *  belong to THIS plan's app: a lint-refused plan for app B must not plant
+ *  its report in app A's take dir (same origin rule as the overwrite guard;
+ *  --force claims the dir like it claims the overwrite; an unparseable plan
+ *  url claims nothing). */
+async function defectsDirFor(
+  take: TakePaths | null,
+  planUrl: unknown,
+  force: boolean,
+): Promise<string | undefined> {
+  if (!take) return undefined;
+  if (!(await fsStat(take.dir).catch(() => null))?.isDirectory()) return undefined;
+  if (force) return take.dir;
+  if (typeof planUrl !== "string") return undefined;
+  const previous = await readFile(take.captureLogPath, "utf8")
+    .then((t) => (JSON.parse(t) as { url?: string }).url)
+    .catch(() => undefined);
+  const origin = (u: string | undefined): string | undefined => {
+    try {
+      return u ? new URL(u).origin : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  const was = origin(previous);
+  return !was || was === origin(planUrl) ? take.dir : undefined;
+}
+
+/** A verdict with nothing to report must not leave last round's defects.json
+ *  lying around — a stale report re-fed to the plan author would "repair"
+ *  defects that are already gone. */
+const clearDefects = async (takeDir: string): Promise<void> =>
+  unlink(join(takeDir, "defects.json")).catch(() => {});
 
 async function main() {
   if (parseError) throw new Error(`${cmd ?? ""}: ${parseError}`.trim());
@@ -773,8 +870,13 @@ async function main() {
     // type without `value`) must fail HERE, in milliseconds, with messages
     // that teach the field semantics — measured on a 44-plan repair benchmark,
     // teaching messages doubled one-retry convergence over terse ones.
+    // resolved before the lint so a refusal can refresh <out>.take/defects.json
+    // — a stale round-1 report outliving a round-2 lint refusal would feed the
+    // repair loop defects that are already fixed (resolveTakePaths is a pure
+    // string transform; the master need not exist)
+    const takePre = await resolveTakePaths(out).catch(() => null);
+    const planIssues = lintPlan(parsedPlan);
     {
-      const planIssues = lintPlan(parsedPlan);
       const planErrors = planIssues.filter((i) => i.severity === "error");
       for (const i of planIssues)
         process.stderr.write(
@@ -784,9 +886,26 @@ async function main() {
         process.stderr.write(
           `make: ${planPath} has ${planErrors.length} structural error${planErrors.length === 1 ? "" : "s"} — nothing was recorded. Fix the plan and re-make.\n`,
         );
+        await emitDefects(
+          buildDefectReport({
+            verb: "make",
+            verdict: `refused before capture: ${planErrors.length} plan structural error${planErrors.length === 1 ? "" : "s"} — nothing was recorded`,
+            exitCode: 2,
+            plan: planPath,
+            defects: asDefects("plan-lint", planIssues),
+          }),
+          await defectsDirFor(
+            takePre,
+            (parsedPlan as { url?: unknown } | null)?.url,
+            has("--force"),
+          ),
+        );
         process.exit(2);
       }
     }
+    // warn-tier lint findings survive to the verdict report below — a defect
+    // block that dropped them would hide half the repair surface
+    const planWarns = planIssues.filter((i) => i.severity === "warn");
     const plan = parsedPlan as TakePlan;
     // npm upgrades ship a new SKILL.md inside the package, but the copy agents
     // read lives in the project — refresh it here, after validation (make is
@@ -817,7 +936,6 @@ async function main() {
     // keep the old COMPOSITION too: a re-make re-plans from the new capture, so
     // any hand-edited zoom overrides in the old one would silently vanish
     // (issue #10). `<base>.prev.composition.json` preserves them for re-apply.
-    const takePre = await resolveTakePaths(out).catch(() => null);
     if (takePre && !has("--force")) await refuseCrossAppOverwrite(takePre, plan.url);
     const noStage = { commit: async () => {}, abort: async () => {} };
     const staged = takePre ? await stagePrev(takePre.mp4Path, takePre.prevPath) : noStage;
@@ -856,6 +974,27 @@ async function main() {
     } catch (e) {
       await staged.abort();
       await stagedComp.abort();
+      // The pre-capture gate's refusal is a VERDICT, not a crash: exit 2 like
+      // every other deterministic gate, with the machine-readable block the
+      // repair loop feeds back — riding the generic error path used to flatten
+      // the structured findings into prose and exit 1.
+      if (e instanceof PrecheckRefusal) {
+        process.stderr.write(`${e.message}\n`);
+        const n = e.issues.filter((i) => i.severity === "error").length;
+        await emitDefects(
+          buildDefectReport({
+            verb: "make",
+            verdict: `refused before capture: ${n} plan target${n === 1 ? "" : "s"} failed the pre-capture check — nothing was recorded`,
+            exitCode: 2,
+            plan: planPath,
+            defects: [...asDefects("plan-lint", planWarns), ...asDefects("precheck", e.issues)],
+          }),
+          // dir-existence checked: a refusal on a FIRST make has no take dir
+          // (nothing was recorded, so none was created)
+          await defectsDirFor(takePre, plan.url, has("--force")),
+        );
+        process.exit(2);
+      }
       throw e;
     }
     const {
@@ -906,6 +1045,7 @@ async function main() {
     // the exit code fires — that defect class is measured transient (see
     // runPostShootGates).
     let postShootErrors = 0;
+    let postShootIssues: CompositionIssue[] = [];
     try {
       const captureLogJson = JSON.parse(await readFile(captureLogPath, "utf8")) as CaptureLog;
       // A take already doomed by skipped steps earns no healing minutes: the
@@ -937,6 +1077,7 @@ async function main() {
         warn: (line) => process.stderr.write(`${line}\n`),
       });
       postShootErrors = result.errors;
+      postShootIssues = result.issues;
     } catch (e) {
       // the gate must never turn a delivered take into a crash — report and move on
       process.stderr.write(
@@ -946,21 +1087,12 @@ async function main() {
     // Pre-capture target findings (ambiguous selectors, late-bound targets).
     // Errors already refused the capture inside the engine; what prints here
     // is the suspect tier — same summary treatment as composition warnings.
-    if (precheck.length) {
-      process.stdout.write(
-        `\n⚠ ${precheck.length} plan-target warning${precheck.length === 1 ? "" : "s"} (pre-capture check):\n` +
-          precheck
-            .map(
-              (p) =>
-                `  [${p.severity}] ${p.path}: ${p.message}\n${p.fix ? `          fix: ${p.fix}\n` : ""}`,
-            )
-            .join(""),
-      );
-    }
+    printPrecheckWarns(precheck);
     // dropped steps reach the SUMMARY (not just an early stderr line buried
-    // under render progress) — and, by default, the exit code. The engine's
-    // own diagnosis outranks any downstream reader: a take with missing beats
-    // must not exit 0 just because an mp4 exists (--no-strict opts out).
+    // under render progress) — and, by default, the exit code (below, after
+    // the settle measurements have printed and the defects block is out). The
+    // engine's own diagnosis outranks any downstream reader: a take with
+    // missing beats must not exit 0 just because an mp4 exists.
     if (skipped.length) {
       process.stdout.write(
         `\n⚠ ${skipped.length} step${skipped.length === 1 ? "" : "s"} skipped:\n` +
@@ -972,18 +1104,6 @@ async function main() {
             .join("") +
           `the video is missing ${skipped.length === 1 ? "this beat" : "these beats"} — fix the plan targets and re-make\n`,
       );
-      if (!has("--no-strict")) {
-        process.stdout.write(
-          `exiting 2: a take with missing beats is not a success (pass --no-strict to downgrade this to a warning)\n`,
-        );
-        process.exit(2);
-      }
-    }
-    if (postShootErrors && !has("--no-strict")) {
-      process.stdout.write(
-        `exiting 2: ${postShootErrors} post-shoot check error${postShootErrors === 1 ? "" : "s"} — the take is on disk; read the findings above before posting it (pass --no-strict to downgrade to a warning)\n`,
-      );
-      process.exit(2);
     }
     // Beats the PAGE outlasted. The capture already waited, so nothing is
     // broken — but the plan under-budgeted them, and now there is a measured
@@ -1021,6 +1141,47 @@ async function main() {
           `  is painted there, settleMs is doing the whole job on its own. Budget those by eye and\n` +
           `  confirm with \`${INVOKE} frames ${mp4Path}\` rather than a quiet run.\n`,
       );
+    }
+    // The verdict. A defective take gets the machine-readable defects block —
+    // EVERY finding, warns included, so the repair round sees the late-bound
+    // suspects too — and then the strict exits fire in their long-standing
+    // order (missing beats outrank pixel findings).
+    if (skipped.length || postShootErrors) {
+      await emitDefects(
+        buildDefectReport({
+          verb: "make",
+          verdict: verdictLine(postShootErrors, skipped.length),
+          exitCode: has("--no-strict") ? 0 : 2,
+          plan: planPath,
+          master: mp4Path,
+          defects: [
+            ...asDefects("plan-lint", planWarns),
+            ...asDefects("precheck", precheck),
+            ...skippedDefects(skipped),
+            ...asDefects("post-shoot", postShootIssues),
+            ...asDefects("composition", warnings ?? []),
+            ...settleDefects(settleWaits),
+          ],
+        }),
+        takeDir,
+      );
+      if (!has("--no-strict")) {
+        if (skipped.length) {
+          process.stdout.write(
+            `exiting 2: a take with missing beats is not a success (pass --no-strict to downgrade this to a warning)\n`,
+          );
+          process.exit(2);
+        }
+        process.stdout.write(
+          `exiting 2: ${postShootErrors} post-shoot check error${postShootErrors === 1 ? "" : "s"} — the take is on disk; read the findings above before posting it (pass --no-strict to downgrade to a warning)\n`,
+        );
+        process.exit(2);
+      }
+      process.stdout.write(
+        `--no-strict: ${verdictLine(postShootErrors, skipped.length)} downgraded to warnings\n`,
+      );
+    } else {
+      await clearDefects(takeDir);
     }
     return;
   }
@@ -1104,6 +1265,7 @@ async function main() {
     // just because it came from `render` was the hole a defective take could
     // still ship through. (--review/--draft copies are disposable: ungated.)
     let postShootErrors = 0;
+    let postShootIssues: CompositionIssue[] = [];
     const captureLog = await loadCaptureLogSibling(take.capturePath);
     try {
       const result = await runPostShootGates({
@@ -1121,6 +1283,7 @@ async function main() {
         warn: (line) => process.stderr.write(`${line}\n`),
       });
       postShootErrors = result.errors;
+      postShootIssues = result.issues;
     } catch (e) {
       process.stderr.write(
         `post-shoot checks did not run: ${e instanceof Error ? e.message : e}\n`,
@@ -1131,16 +1294,36 @@ async function main() {
     // exiting 0 on a take `check` refuses would make the two verbs argue.
     const skipped = captureLog?.skipped ?? [];
     if (skipped.length) printSkippedSummary(skipped);
-    if ((postShootErrors || skipped.length) && !has("--no-strict")) {
-      process.stdout.write(
-        `exiting 2: ${verdictLine(postShootErrors, skipped.length)} — the master is on disk; read the findings above before posting it (pass --no-strict to downgrade to a warning)\n`,
+    printPrecheckWarns(captureLog?.precheck ?? []);
+    if (postShootErrors || skipped.length) {
+      await emitDefects(
+        buildDefectReport({
+          verb: "render",
+          verdict: verdictLine(postShootErrors, skipped.length),
+          exitCode: has("--no-strict") ? 0 : 2,
+          master: take.mp4Path,
+          defects: [
+            ...asDefects("precheck", captureLog?.precheck ?? []),
+            ...skippedDefects(skipped),
+            ...asDefects("post-shoot", postShootIssues),
+            ...asDefects("composition", warnings ?? []),
+            ...settleDefects(captureLog?.settleWaits ?? []),
+          ],
+        }),
+        take.dir,
       );
-      process.exit(2);
-    }
-    if (postShootErrors || skipped.length)
+      if (!has("--no-strict")) {
+        process.stdout.write(
+          `exiting 2: ${verdictLine(postShootErrors, skipped.length)} — the master is on disk; read the findings above before posting it (pass --no-strict to downgrade to a warning)\n`,
+        );
+        process.exit(2);
+      }
       process.stdout.write(
         `--no-strict: ${verdictLine(postShootErrors, skipped.length)} downgraded to warnings\n`,
       );
+    } else {
+      await clearDefects(take.dir);
+    }
     process.stdout.write(`\nready: ${await readyLine(take.mp4Path)}\n`);
     if (has("--open")) openPath(take.mp4Path);
     if (has("--reveal")) revealPath(take.mp4Path);
@@ -1207,12 +1390,34 @@ async function main() {
     // with missing beats stays defective no matter how clean its pixels are.
     const skipped = captureLog?.skipped ?? [];
     if (skipped.length) printSkippedSummary(skipped);
+    printPrecheckWarns(captureLog?.precheck ?? []);
     if (cursorErrors > 0 && captureOnDisk)
       process.stdout.write(
         `\na failed cursor audit can be a transient renderer misdraw — \`${INVOKE} render ${take.mp4Path}\` re-renders from the frozen capture and re-audits; a repeat failure means the renderer disagrees with its own math\n`,
       );
+    // check is the interrogation verb, so its report is not gated on exit 2:
+    // ANY finding — the warn-only tier included — emits the machine-readable
+    // block. That is what lets a repair round close the warns (late-bound
+    // poison never refuses; this report is the only stable place it surfaces
+    // after the shoot).
+    const checkDefects: Defect[] = [
+      ...asDefects("precheck", captureLog?.precheck ?? []),
+      ...skippedDefects(skipped),
+      ...asDefects("post-shoot", result.issues),
+      ...settleDefects(captureLog?.settleWaits ?? []),
+    ];
     if (result.errors || skipped.length) {
       const verdict = verdictLine(result.errors, skipped.length);
+      await emitDefects(
+        buildDefectReport({
+          verb: "check",
+          verdict,
+          exitCode: has("--no-strict") ? 0 : 2,
+          master: take.mp4Path,
+          defects: checkDefects,
+        }),
+        take.dir,
+      );
       if (!has("--no-strict")) {
         process.stdout.write(
           `exiting 2: ${verdict} — this take is not postable as-is (pass --no-strict to downgrade to a warning)\n`,
@@ -1233,6 +1438,20 @@ async function main() {
         `exiting 1: could not judge this take — ${unjudged.join(" + ")} did not run; no error was FOUND, but nothing here says the take is clean\n`,
       );
       process.exit(1);
+    }
+    if (checkDefects.length) {
+      await emitDefects(
+        buildDefectReport({
+          verb: "check",
+          verdict: `0 post-shoot check errors, ${checkDefects.length} warning${checkDefects.length === 1 ? "" : "s"} — postable; address each warn or say why it stays`,
+          exitCode: 0,
+          master: take.mp4Path,
+          defects: checkDefects,
+        }),
+        take.dir,
+      );
+    } else {
+      await clearDefects(take.dir);
     }
     process.stdout.write(`\n✓ no post-shoot errors: ${await readyLine(take.mp4Path)}\n`);
     return;
