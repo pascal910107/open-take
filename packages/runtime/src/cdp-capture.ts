@@ -37,10 +37,12 @@ import {
 import {
   type Browser,
   type CDP,
+  captureCadence,
   encodeFrames,
   fitViewport,
   launchBrowser,
   makeFrameDir,
+  pumpIdleRaster,
   Screencast,
 } from "./cdp";
 import { resolveNavigateUrl } from "./nav";
@@ -347,33 +349,21 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
       quality: 92,
     });
 
-    // Raster pump. Page.startScreencast only emits a frame when the renderer
-    // produces one, and in headless a state change that isn't driven by trusted
-    // input — a CSS :hover reveal, a keyboard-opened modal, window.scrollTo —
-    // updates the DOM/scroll offset but does NOT re-raster, so the screencast
-    // composites STALE tiles and the recording freezes on the old frame.
-    // Page.captureScreenshot forces a fresh raster; running it on a steady tick
-    // keeps the screencast current for the whole capture, so every action is
-    // recorded regardless of how it's driven. (quality:1 → cheap; the result is
-    // discarded — only the re-raster side effect matters.)
-    // captureScreenshot STALLS while a mouse button is held (mid-drag), and a
-    // stalled screenshot BLOCKS the whole CDP session — Chrome won't process the
-    // drag's mouseMoved events until it resolves, wedging the capture. So the
-    // pump PAUSES around a drag (a drag draws real ink, so it self-rasters and
-    // needs no pump). The timeout race is a second belt: it keeps a stall during
-    // any other beat from wedging the final `await pump`.
+    // Refresh genuinely idle surfaces, not every 45ms: unconditional large
+    // screenshots interrupt native animations and can queue behind each other.
+    // A held mouse button still pauses the pump because screenshots can stall
+    // CDP input mid-drag. The helper never waits indefinitely on a screenshot.
     let pumping = true;
     let pumpPaused = false;
-    const pump = (async () => {
-      while (pumping) {
-        if (!pumpPaused)
-          await Promise.race([
-            cdp.send("Page.captureScreenshot", { format: "jpeg", quality: 1 }).catch(() => {}),
-            sleep(150),
-          ]);
-        await sleep(45);
-      }
-    })();
+    const pump =
+      opts.rasterRefresh === "off"
+        ? Promise.resolve()
+        : pumpIdleRaster(
+            cdp,
+            screencast,
+            () => pumping,
+            () => pumpPaused,
+          );
 
     await sleep(opts.warmupMs ?? 900);
 
@@ -587,8 +577,9 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
         // first inserted character replaces it (dispatched "Meta+a" key events
         // never run Chrome's editing commands — see selectAllInFocusedJs).
         if (step.clear) await evalAny(cdp, selectAllInFocusedJs());
-        // progressive char-by-char so the recording shows text appear; paced
-        // by us (insertText fires `input` events React/inputs honour).
+        // A literal zero requests one real paste-like input event. Otherwise,
+        // type progressively so the recording shows the text appear; paced by
+        // us (insertText fires `input` events React/inputs honour).
         const chars = [...step.value];
         // ~1.1s per beat, clamped 28–90ms/char. The cap used to be 60ms, which
         // made SHORT strings the FASTEST typing in the video (inverted feel);
@@ -601,10 +592,14 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
         const auto =
           Math.min(90, Math.max(28, Math.round(1100 / Math.max(1, chars.length)))) *
           (cjk * 2 > chars.length ? 1.4 : 1);
-        const perChar = Math.round(step.perCharMs ?? auto);
-        for (const ch of chars) {
-          await cdp.send("Input.insertText", { text: ch });
-          await sleep(perChar);
+        if (step.perCharMs === 0) {
+          await cdp.send("Input.insertText", { text: step.value });
+        } else {
+          const perChar = Math.round(step.perCharMs ?? auto);
+          for (const ch of chars) {
+            await cdp.send("Input.insertText", { text: ch });
+            await sleep(perChar);
+          }
         }
         events.push({
           kind: "type",
@@ -1166,6 +1161,10 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
       start: plan.startCursor ?? { x: Math.round(inner[0] * 0.25), y: Math.round(inner[1] * 0.9) },
       events,
       tEndMs,
+      captureCadence: {
+        ...captureCadence(screencast.frames),
+        rasterRefresh: opts.rasterRefresh ?? "idle",
+      },
       // Both of these were collected all along but never reached the caller on
       // this path, so the end-of-run summary and the strict exit saw an empty list and
       // a dropped beat lived only in an early stderr line — exactly what the

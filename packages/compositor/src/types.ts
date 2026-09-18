@@ -162,6 +162,23 @@ export type CaptureLog = {
   /** the ordered ground-truth actions (click / type / drag) */
   events: CaptureEvent[];
   tEndMs?: number;
+  /** Delivered frame timing, not a unique-content or smoothness measurement.
+   * Static pages may legitimately send no frames. Compare image changes in
+   * active action windows; encoded video.fps alone does not establish cadence. */
+  captureCadence?: {
+    rasterRefresh?: "idle" | "off";
+    frameCount: number;
+    timestampSource: "frame-swap" | "arrival" | "mixed";
+    /** Sorted presentation offsets; paired arrivals can expose delivery lag. */
+    frameOffsetsMs: number[];
+    arrivalOffsetsMs: number[];
+    medianIntervalMs: number;
+    p95IntervalMs: number;
+    maxIntervalMs: number;
+    maxArrivalDelayMs: number;
+    outOfOrderFrames: number;
+    note: string;
+  };
   /** Steps the capture DROPPED (target not found / endpoint unresolved) — the
    *  take still completes, but a missing beat must reach the end-of-run
    *  summary and (strict by default) the exit code, not just an early stderr line

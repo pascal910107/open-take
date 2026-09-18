@@ -468,7 +468,7 @@ export type CaptureOpts = {
   /** ms to let the page settle after capture start before the first action */
   warmupMs?: number;
   /**
-   * Capture + encode fps. Default 60 (the polished, premium 60fps feel).
+   * Encode fps. Default 60; this does not guarantee 60 unique captured frames.
    * Capture is a CDP screencast at the browser's
    * native rate; this is the encode grid and the intended render fps. Drop to
    * 30 for fast-draft renders (~½ the render time + file size) while iterating.
@@ -484,6 +484,11 @@ export type CaptureOpts = {
    * if a heavy page can't hold the capture fps at 4K screencast.
    */
   captureScale?: number;
+  /** Refresh idle raster surfaces with a bounded screenshot request (default
+   * "idle"). Use "off" for verified self-animating pages when screenshot
+   * refresh interferes with their native frame delivery. Inspect actual frames
+   * and captureCadence for the chosen scale; neither mode guarantees smoothness. */
+  rasterRefresh?: "idle" | "off";
   /** explicit Chrome binary (else auto-resolved system Chrome / auto-download) */
   chromePath?: string;
   /** How a `drag` stroke is paced (and thus baked into the ink): "smooth"

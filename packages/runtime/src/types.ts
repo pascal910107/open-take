@@ -56,9 +56,10 @@ export type TakeStep =
        *  replaces it — the "rename / edit a setting / correct text" beat.
        *  Without it, typing always appends at the caret. */
       clear?: boolean;
-      /** ms per typed character on screen. Default auto-paces ~1.1s per beat
-       *  (clamped 28–90ms; mostly-CJK strings run ~1.4× slower) — override for
-       *  a deliberately slow reveal or a fast burst. */
+      /** ms per typed character on screen. Set 0 to insert the whole value in
+       *  one real, paste-like input event; positive values type progressively.
+       *  The default auto-paces ~1.1s per beat (clamped 28–90ms; mostly-CJK
+       *  strings run ~1.4× slower). */
       perCharMs?: number;
       note?: string;
       /** one viewer-facing line for this beat (subtitle on the delivered video) */

@@ -15,8 +15,8 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   readlinkSync,
   rmSync,
   writeFileSync,
@@ -441,16 +441,59 @@ export async function fitViewport(
 
 // --- screencast recorder ------------------------------------------------
 // Frames stream in only when the page surface changes; each is written to
-// disk immediately (don't buffer ~1500 JPEGs in RAM) with its arrival offset
-// from t0, so the encoder can reconstruct true wall-clock timing.
-export type Frame = { file: string; offMs: number };
+// disk immediately. Chrome's frame-swap time, not delayed JPEG delivery, is
+// the image's position on the action clock.
+export type Frame = {
+  file: string;
+  offMs: number;
+  arrivalMs?: number;
+  timestampSource?: "frame-swap" | "arrival";
+};
+
+export function captureCadence(frames: Frame[]) {
+  const ordered = [...frames].sort((a, b) => a.offMs - b.offMs);
+  const intervals = ordered
+    .slice(1)
+    .map((frame, i) => frame.offMs - ordered[i]!.offMs)
+    .sort((a, b) => a - b);
+  const rounded = (n: number) => Math.round(n * 1000) / 1000;
+  const sources = new Set(frames.map((frame) => frame.timestampSource ?? "arrival"));
+  return {
+    frameCount: frames.length,
+    timestampSource:
+      sources.size > 1
+        ? ("mixed" as const)
+        : sources.has("frame-swap")
+          ? ("frame-swap" as const)
+          : ("arrival" as const),
+    frameOffsetsMs: ordered.map((frame) => rounded(frame.offMs)),
+    arrivalOffsetsMs: ordered.map((frame) => rounded(frame.arrivalMs ?? frame.offMs)),
+    medianIntervalMs: rounded(intervals[Math.floor(intervals.length / 2)] ?? 0),
+    p95IntervalMs: rounded(intervals[Math.max(0, Math.ceil(intervals.length * 0.95) - 1)] ?? 0),
+    maxIntervalMs: rounded(intervals.at(-1) ?? 0),
+    maxArrivalDelayMs: rounded(
+      frames.reduce(
+        (max, frame) => Math.max(max, (frame.arrivalMs ?? frame.offMs) - frame.offMs),
+        0,
+      ),
+    ),
+    outOfOrderFrames: frames.filter((frame, i) => i > 0 && frame.offMs < frames[i - 1]!.offMs)
+      .length,
+    note: "Delivered-frame timing, not unique image content or a smoothness score. Static pages may send no frames; inspect image changes within active action windows. Encoded fps is separate.",
+  };
+}
 
 export class Screencast {
   private cdp: CDP;
   private dir: string;
   private t0 = 0;
   private n = 0;
+  private lastArrivalAt = 0;
   readonly frames: Frame[] = [];
+
+  get idleForMs(): number {
+    return Date.now() - this.lastArrivalAt;
+  }
 
   constructor(cdp: CDP, dir: string) {
     this.cdp = cdp;
@@ -463,14 +506,28 @@ export class Screencast {
     opts: { maxWidth: number; maxHeight: number; quality?: number },
   ): Promise<void> {
     this.t0 = t0;
-    this.cdp.on("Page.screencastFrame", (p: { data: string; sessionId: number }) => {
-      const off = Date.now() - this.t0;
-      const file = join(this.dir, `f-${String(this.n++).padStart(5, "0")}.jpg`);
-      writeFileSync(file, Buffer.from(p.data, "base64"));
-      this.frames.push({ file, offMs: off });
-      // ack so Chrome keeps sending (un-acked frames stall the stream)
-      this.cdp.send("Page.screencastFrameAck", { sessionId: p.sessionId }).catch(() => {});
-    });
+    this.lastArrivalAt = t0;
+    this.cdp.on(
+      "Page.screencastFrame",
+      (p: { data: string; sessionId: number; metadata?: { timestamp?: number } }) => {
+        const arrived = Date.now();
+        this.lastArrivalAt = arrived;
+        const swap = p.metadata?.timestamp;
+        const hasSwap = typeof swap === "number" && Number.isFinite(swap);
+        const off = Math.max(0, hasSwap ? swap * 1000 - this.t0 : arrived - this.t0);
+        const file = join(this.dir, `f-${String(this.n++).padStart(5, "0")}.jpg`);
+        // Release Chrome before local disk work; late delivery must not become
+        // late presentation. encodeFrames orders occasional out-of-order swaps.
+        this.cdp.send("Page.screencastFrameAck", { sessionId: p.sessionId }).catch(() => {});
+        writeFileSync(file, Buffer.from(p.data, "base64"));
+        this.frames.push({
+          file,
+          offMs: off,
+          arrivalMs: arrived - this.t0,
+          timestampSource: hasSwap ? "frame-swap" : "arrival",
+        });
+      },
+    );
     await this.cdp.send("Page.startScreencast", {
       format: "jpeg",
       quality: opts.quality ?? 90,
@@ -482,6 +539,29 @@ export class Screencast {
 
   async stop(): Promise<void> {
     await this.cdp.send("Page.stopScreencast").catch(() => {});
+  }
+}
+
+/** Refresh idle surfaces without interrupting pages already producing frames.
+ * Never queue another expensive screenshot behind a slow/in-flight request. */
+export async function pumpIdleRaster(
+  cdp: CDP,
+  screencast: Pick<Screencast, "idleForMs">,
+  active: () => boolean,
+  paused: () => boolean,
+): Promise<void> {
+  let pending = false;
+  while (active()) {
+    if (!paused() && !pending && screencast.idleForMs >= 200) {
+      pending = true;
+      void cdp
+        .send("Page.captureScreenshot", { format: "jpeg", quality: 1 })
+        .catch(() => {})
+        .finally(() => {
+          pending = false;
+        });
+    }
+    await sleep(45);
   }
 }
 
@@ -498,8 +578,9 @@ export async function encodeFrames(
   ffmpegBin?: string,
 ): Promise<void> {
   if (frames.length === 0) throw new Error("open-take(hi-fps): no frames captured");
+  frames = [...frames].sort((a, b) => a.offMs - b.offMs);
   const bin = ffmpegBin ?? (await resolveFfmpeg());
-  const dir = frames[0]!.file.slice(0, frames[0]!.file.lastIndexOf("/"));
+  const dir = dirname(frames[0]!.file);
   const listPath = join(dir, "frames.concat");
 
   // Each frame is shown until the next arrives; the first is held back to t0
@@ -508,14 +589,16 @@ export async function encodeFrames(
   const bounds = [
     0,
     ...frames.slice(1).map((f) => f.offMs),
-    Math.max(endMs, frames[frames.length - 1]!.offMs + 33),
+    Math.max(endMs, frames[frames.length - 1]!.offMs + 1000 / fps),
   ];
   for (let i = 0; i < frames.length; i++) {
     const dur = Math.max(0.001, (bounds[i + 1]! - bounds[i]!) / 1000);
-    lines.push(`file '${frames[i]!.file}'`, `duration ${dur.toFixed(4)}`);
+    // Image demuxers otherwise use a 1/25s clock. Keep observed millisecond
+    // timing before the final CFR resample instead of quantizing it to 40ms.
+    lines.push(`file '${frames[i]!.file}'`, "option framerate 1000", `duration ${dur.toFixed(6)}`);
   }
   // concat demuxer ignores the final entry's duration unless the file repeats.
-  lines.push(`file '${frames[frames.length - 1]!.file}'`);
+  lines.push(`file '${frames[frames.length - 1]!.file}'`, "option framerate 1000");
   writeFileSync(listPath, lines.join("\n"));
 
   const isWebm = /\.webm$/i.test(outPath);
