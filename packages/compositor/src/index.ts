@@ -16,7 +16,42 @@ export {
 } from "./audit-cursor";
 export { type Beat, directCamera, type Framing } from "./camera";
 export { resolveFfmpeg, resolveFfprobe } from "./ffmpeg";
+export {
+  evaluateUiMorph,
+  launchAudioAtS,
+  launchDurationS,
+  launchSceneDurationS,
+  launchSceneWindows,
+  uiMorphDurationS,
+  uiStateDurationS,
+} from "./launch-evaluate";
+export {
+  type RenderLaunchOpts,
+  type RenderLaunchResult,
+  renderLaunch,
+  validateLaunchAssets,
+} from "./launch-render";
+export { launchStarter } from "./launch-starter";
+export { analyzeLaunchStory, validateLaunchStory } from "./launch-story";
+export { launchTemplate } from "./launch-template";
+export * from "./launch-types";
+export { formatLaunchIssues, validateLaunchComposition } from "./launch-validate";
 export * as math from "./math";
+export { evaluateMotionScene, evaluateMotionTrack, motionGraphemes } from "./motion-evaluate";
+export { analyzeMotionQuality } from "./motion-quality";
+export {
+  type CompareMotionRecipe,
+  composeMotionStory,
+  type FocusMotionRecipe,
+  type MotionRecipe,
+  type MotionRecipeImage,
+  type MotionRecipeStyle,
+  type MotionStoryBrief,
+  type MotionStoryResult,
+  type StepsMotionRecipe,
+} from "./motion-recipes";
+export * from "./motion-types";
+export { validateMotionScene } from "./motion-validate";
 export { type PlanOpts, planComposition } from "./plan";
 export * from "./presets";
 export { type RenderTakeOpts, type RenderTakeResult, renderTake } from "./render";

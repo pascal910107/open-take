@@ -30,7 +30,7 @@ import { type CaptureOpts, captureTake } from "./capture";
 import { ensureChrome } from "./cdp";
 import { annotateCaptureLog } from "./frame-diff";
 import { toDraft } from "./review";
-import { ensureTakeDir, resolveTakePaths, takeFile, type TakePaths } from "./take";
+import { ensureTakeDir, resolveTakePaths, type TakePaths, takeFile } from "./take";
 import type { TakePlan } from "./types";
 
 export {
@@ -95,6 +95,7 @@ export {
   type FramesOpts,
   renderFrames,
 } from "./frames";
+export { checkLaunchFile, composeLaunchFile, initLaunchProject, renderLaunchFile } from "./launch";
 export { lintPlan, type PlanIssue } from "./lint-plan";
 export { type NavigateTarget, resolveNavigateUrl } from "./nav";
 export {

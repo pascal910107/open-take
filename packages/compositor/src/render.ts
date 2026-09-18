@@ -40,6 +40,7 @@ import {
   type TakeComposition,
 } from "./types";
 import { type CompositionIssue, formatIssues, validateComposition } from "./validate";
+import { withRenderLock } from "./render-lock";
 
 // dist/index.js -> package root
 const PKG_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -296,15 +297,8 @@ async function prepareScratch(composition: TakeComposition, videoPath: string): 
 // concurrently no matter how isolated their directories are — the scratch dirs
 // remove the shared STATE, this removes the interleaving. (True parallelism
 // needs the renderer off cwd, or one child process per render.)
-let renderQueue: Promise<unknown> = Promise.resolve();
-
 export async function renderTake(opts: RenderTakeOpts): Promise<RenderTakeResult> {
-  const run = renderQueue.then(
-    () => renderTakeExclusive(opts),
-    () => renderTakeExclusive(opts),
-  );
-  renderQueue = run.catch(() => {});
-  return run;
+  return withRenderLock(() => renderTakeExclusive(opts));
 }
 
 async function renderTakeExclusive(opts: RenderTakeOpts): Promise<RenderTakeResult> {
