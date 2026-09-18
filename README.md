@@ -38,6 +38,34 @@ capture, so visual changes do not re-record your app.
 
 Requires Node.js 22+. For agent-facing commands, run `npx open-take --help`.
 
+## Choose the presentation
+
+Ask for a clean recording with cursor/zoom, an explained demo with titles and
+captions, or a launch film with designed scenes. Each choice can be adjusted;
+sound is optional. Explicit preferences take priority, so “just record it,
+no captions or sound” stays a clean recording.
+
+Launch films arrange real footage, text, screenshot crops, shapes, groups and
+drawn lines in an editable `launch.json`. Video can also play inside an animated
+group, keeping a real operation connected to its surrounding graphics. Layers have independent animation
+tracks; music, narration and sound effects use optional local files. Length
+follows the scenes and their timing. New projects start with a simple
+recording-led composition that you can restructure for the product.
+
+```sh
+npx open-take launch init demos/launch-film --video demos/myapp.mp4
+npx open-take launch check demos/launch-film/launch.json
+npx open-take launch render demos/launch-film/launch.json --draft
+npx open-take launch render demos/launch-film/launch.json
+```
+
+Read the [composition guide][launch] and the [examples][launch-example]. Agent
+authors can run `npx open-take skill motion` for protected layouts and the
+free-layer schema. `launch compose brief.json
+--out launch.json` turns a short content brief into a focus, comparison or steps
+scene with programmatic layout; visual review still decides whether the story
+and framing work.
+
 ## In CI
 
 The same demo with nobody at the desk: `open-take ci` boots your app, hands
@@ -76,6 +104,8 @@ not the issue tracker.
 [contributing]: https://github.com/pascal910107/open-take/blob/main/CONTRIBUTING.md
 [security]: https://github.com/pascal910107/open-take/blob/main/SECURITY.md
 [action]: https://github.com/pascal910107/open-take/blob/main/action/README.md
+[launch]: https://github.com/pascal910107/open-take/blob/main/docs/launch-compositor.md
+[launch-example]: https://github.com/pascal910107/open-take/blob/main/examples/motion/README.md
 
 MIT.
 

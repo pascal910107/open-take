@@ -1,6 +1,6 @@
 ---
 name: open-take
-description: Make a polished demo video of a web app or a change to one ("make a demo of this app for Twitter", "record this PR as a video"). Explore the app, decide the IDEAL demo editorial-first — length follows what must be shown — and render a cinematic MP4 (smooth synthetic cursor + selective click-zoom) plus an editable composition. Use when the user wants a shareable demo of a running web app.
+description: Make a polished recording, demo, or opt-in launch film of a web app or change. Explore the app, decide the story editorial-first, and render real footage with cursor/camera polish plus an editable take or scene composition. Use when the user wants a shareable product video.
 ---
 
 # open-take — make a demo of an app
@@ -76,7 +76,10 @@ Answer, in writing:
   before.
 - **What ONE story should the demo tell** — one sentence.
 
-**Alignment gate — ask EARLY, confirm before DIRECT.** Use the host's
+**Alignment gate — ask EARLY, confirm before DIRECT.** First infer the presentation
+mode from explicit intent. If the user asked for a screen recording, launch film, title,
+captions, animation, transitions, or sound, do not ask them to repeat that choice. When the
+mode is ambiguous, use the host's
 structured question tool (Claude Code: `AskUserQuestion`; other agents: the
 equivalent) to ask which story the demo should prove — and ask it **the moment
 you have 2–3 credible hero candidates**, not when exploration feels finished.
@@ -88,19 +91,28 @@ map hazards. Skip the question only when the user already gave an unambiguous
 audience/purpose **and** hero outcome, or explicitly said to use your
 judgment; when skipping, restate the brief so they can correct it.
 
-- Ask **one question by default, two maximum**. Do not make the user restate
-  facts you can observe in the app.
+- Ask only unresolved decisions, grouped into one call: **one question by default, three
+  maximum** when story, presentation mode, and sound are all genuinely unknown. Audience or
+  depth questions count toward that same limit. Do not make the user restate observable facts.
 - Offer **2–3 concrete hero + payoff stories** grounded in what you observed,
   put the recommended option first, and explain its advantage in one sentence.
   If only one story is credible, ask the user to confirm that thesis and allow
   a correction instead of inventing weak alternatives.
-- **Ask presentation in the SAME AskUserQuestion call** (a second question,
-  not a second round-trip): does the demo get captions + an opening title
-  card? Options: "Both (recommended)" first — per-beat subtitle sentences +
-  a typographic opening card; "Captions only"; "Clean footage" (neither —
-  they stay one cheap re-render away either way, never a re-shoot). Skip this
-  question when the user's request already said (e.g. "乾淨畫面就好",
-  "with captions in English").
+- **Ask one grouped presentation choice in the SAME AskUserQuestion call** when it is
+  ambiguous: `Recording (recommended)` is real footage with smooth cursor/zoom and no
+  title, captions, audio, scene animation, or transitions; `Demo` defaults to a short title
+  plus per-beat captions over the recording; `Launch` is a designed scene composition that may include
+  typography, composed UI layers, and transitions. Ask about sound as one independent choice unless
+  the request already specified it. Never interrogate the user about each effect separately.
+  Fine-grained explicit instructions always win.
+  An exclusive brief such as "just record it with cursor/zoom" or "只要錄影加滑鼠縮放"
+  also rules out the unrequested extras, including sound; do not ask about them again.
+- **State the applied settings before capture** in one short sentence: mode, title/captions,
+  scene animation/transitions, and sound. This is a correction point, not another approval
+  gate. Route Recording and Demo through `make`/`render`; route Launch through `launch`. If
+  Recording or Demo explicitly includes sound, capture with `make`, then wrap that finished
+  recording as the only `footage` scene in a launch composition and add only the requested
+  audio—no title, morph, or transition unless separately chosen.
 - Ask audience/purpose as an additional question only when it is unknown and
   would materially change the story.
 - Ask coverage depth (full walkthrough vs tight teaser, recommendation first)
@@ -146,6 +158,11 @@ recommendation first); unattended, derive depth from the brief.
 Arrange the inventory into beats forming ONE coherent arc: a hook in the first
 ~2s → the interactions → a clear payoff/closer. For each beat write: **what it
 shows · why it earns its place · what the viewer should feel.**
+
+Fit opening copy to the time a first-time viewer can actually read it at normal
+speed. If the first operation feels rushed, shorten or split the copy before
+accelerating its entrance or the rest of the film. Pace each beat for its job;
+do not force one speed across titles, typing, cursor travel and product reveals.
 
 Decide the *ideal* version even if you're not sure you can capture it. Lead with
 the app's signature moment; make the wow the hero, not an afterthought.
@@ -270,11 +287,12 @@ keeps the full-quality settings, so nothing is lost — only deferred.
   the recording. Emits no beat (a navigation is global — show it full-view), and
   the new document gets the same font wait the take's first page gets.
 
-**Every beat-producing step also takes a `caption`** — one viewer-facing
+**When captions are enabled, every beat-producing step takes a `caption`** — one viewer-facing
 sentence rendered as a subtitle on the delivered video for that beat's
 window. Footage shows WHAT happened; the caption says what it MEANS, so a
 viewer who has never seen the app can follow without narration — and an
-unattended run has no narrator, so in CI caption every beat.
+unattended run has no narrator, so in CI caption every beat unless the brief chose Recording,
+clean footage, or otherwise explicitly disabled captions.
 
 Write ONE FULL SENTENCE that says what is happening AND why it matters (8-14
 words, or ~15-30 characters in a CJK script), in the app's own language. The
@@ -332,6 +350,13 @@ this exists to prevent. What to look for: every beat's payoff visible and
 legible, no dead opening, no skipped beat, drags actually inked. A raw
 `ffmpeg -ss <t> -i demo.mp4 -frames:v 1 frame.png` is still fine for one
 specific moment.
+For every critical animated or action window, also watch the raw capture and
+the current rendered output at normal speed and inspect a dense run of
+consecutive frames across the transition. Compare when the source state changes,
+when the cursor arrives, and when the final frame reveals it; repeat this check
+against the master before delivery. A reported 60 fps stream may still contain
+repeated or held source frames; fps metadata and stable contact-sheet cells do
+not establish smooth motion or correct reveal order.
 Then hand the user the **review copy** — a fast draft with the beat numbers
 burned into the frame (the video itself teaches how to refer to moments) and a
 REVIEW watermark so it can't be mistaken for the postable master:
@@ -524,7 +549,13 @@ page changed).
   "Meta+a"` does NOT work, dispatched key events never run Chrome's editing
   commands). **`"perCharMs"`** overrides the typing pace (default auto-paces
   ~1.1s per beat, 28–90ms per char; mostly-CJK text runs ~1.4× slower) — raise
-  for a deliberate hero reveal, lower for a fast burst. A field that never
+  for a deliberate hero reveal, lower for a fast burst. Set **`"perCharMs": 0`**
+  for one real, paste-like insertion of the complete value when watching each
+  character adds no useful explanation; keep a readable hold on the result.
+  A hero edit or any beat whose point is visible authorship should reveal
+  progressively. Do not use zero merely to save time: an instantaneous value
+  swap reads as a state cut unless the story explicitly calls for pasting.
+  A field that never
   takes focus (e.g. a contenteditable that only arms on a real click) is
   recovered with one trusted click at the field's centre first; if focus STILL
   doesn't land, the step is SKIPPED (`focus never reached the target`) instead
@@ -602,6 +633,11 @@ page changed).
   toolbar → `drag` on the canvas), give the click a generous `settleMs`
   (**~1000–1200ms**) so the cursor can glide to the canvas at a calm, constant
   speed instead of darting. Cramped gaps (<800ms) make the travel feel rushed.
+  Size each travel from both target distance and the available gap: a large
+  cross-frame move needs time to arrive, then a separate hold for the viewer to
+  read the target before the action. If a travel cap compresses that move into a
+  dart, lengthen the preceding settle/gap or tune the travel limit; review the
+  arrival at normal speed rather than accepting the numeric duration alone.
   **The CAMERA needs a bigger gap than the cursor.** When a zoomed beat is
   followed by a full-view one (`zoom: "never"`, or a `scroll`), the release
   needs `cursor.pullOutDwellMs + cursor.zoomOutMs` — **~2140ms at the
@@ -620,9 +656,44 @@ npx open-take make --plan plan.json --out demos/myapp.mp4 --draft    # the defau
 npx open-take make --plan plan.json --out demos/myapp.mp4            # master up front
 npx open-take make --plan plan.json --out demos/myapp.mp4 --fps 30   # capture at 30
 ```
-Produces `<out>.mp4` (1920×1080 @ **60fps default**) — the one the user posts —
+
+The `make` commands produce `<out>.mp4` (1920×1080 @ **60fps default**) — the one the user posts —
 and a working directory `<out>.take/` beside it holding everything else, starting
 with the editable `<out>.take/composition.json`.
+
+For an explicitly requested Launch composition, initialize from a real recording, edit the
+portable JSON, validate cheaply, then render. Scene order and timing come from the JSON; there
+is no fixed film length. Audio is absent unless the user chose it.
+
+```sh
+npx open-take launch init launch-film --video demos/myapp.mp4
+npx open-take launch check launch-film/launch.json
+npx open-take launch render launch-film/launch.json --draft
+npx open-take launch render launch-film/launch.json
+```
+
+The starter is title → real footage → end card at the recording's own fps, with
+editable timing and no sound or component animation. Replace the placeholder copy
+and remove scenes the brief does not need. Then read, in this order:
+
+- [launch-story.md](references/launch-story.md) — decide the one takeaway and the
+  source-backed beats first; length follows from them. Answer its questions from
+  context you already have rather than asking the user field by field.
+- [motion-composition.md](references/motion-composition.md) (or `npx open-take
+  skill motion`) — the `focus`/`compare`/`steps` recipes, the free-layer schema,
+  image crops, keyframes, and the review loop.
+
+Start with `launch compose` when a recipe fits: code owns layout and typography,
+and the output is still ordinary editable layers. Reach for free layers when the
+story needs a different structure. Either way, act on `launch check` findings and
+look at rendered frames — the visual structure comes from this product's story
+and brand, not from a house template.
+
+Use `motion: "off"` when the user wants static scenes; general layers then use their authored
+base values instead of animation tracks. Use a `cut` transition to keep layer animation but
+remove the scene entrance/exit. Omit `audio` for a silent launch. Omit animated scenes when
+unrequested. A Recording mode request stays on `make`/`render`; do not route it through Launch
+merely because Launch is available.
 
 **Where takes go: `demos/` in the project, never the project root.** All of a
 project's takes live in ONE folder so their masters sit side by side — that is

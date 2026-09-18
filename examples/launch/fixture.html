@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Fieldnotes — release workspace</title>
+  <style>
+    :root { color-scheme: light; font-family: 'Avenir Next', Avenir, sans-serif; color: #172e28; background: #f5f2ea; }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    button { font: inherit; cursor: pointer; }
+    header { height: 86px; padding: 0 65px; border-bottom: 1px solid #d9ddd2; display:flex; align-items:center; justify-content:space-between; }
+    .brand { font-size:25px; font-weight:650; letter-spacing:-1px; }
+    .mark { display:inline-block; width:20px; height:20px; border:5px solid #214f41; border-radius:50% 50% 50% 0; margin-right:11px; transform:rotate(-30deg); }
+    .nav { display:flex; align-items:center; gap:34px; font-size:14px; color:#768078; }
+    .nav b { color:#214f41; }
+    .avatar { width:32px; height:32px; border-radius:50%; background:#dce5d8; display:grid; place-items:center; font-size:12px; font-weight:700; }
+    main { max-width:1170px; margin:48px auto; }
+    .eyebrow { font-size:11px; font-weight:700; letter-spacing:2.4px; text-transform:uppercase; color:#6e7a70; }
+    .headline { display:flex; align-items:flex-end; justify-content:space-between; margin:14px 0 30px; }
+    h1 { font-size:49px; font-weight:550; letter-spacing:-2.2px; line-height:1.1; margin:0; }
+    .sub { color:#6e7a70; margin-top:13px; font-size:16px; }
+    .badge { border:1px solid #d1dacf; border-radius:30px; padding:9px 15px; font-size:12px; background:#edf0e7; }
+    .dot { display:inline-block; width:7px; height:7px; border-radius:50%; background:#a9af92; margin-right:7px; }
+    .layout { display:grid; grid-template-columns:1.5fr 1fr; gap:25px; }
+    .panel { background:#fbfaf6; border:1px solid #dce0d6; border-radius:17px; overflow:hidden; }
+    .panel-head { padding:22px 27px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #e5e7df; font-size:15px; font-weight:600; }
+    .count { font-size:12px; color:#7d877c; font-weight:400; }
+    .row { min-height:81px; display:flex; align-items:center; gap:16px; padding:14px 27px; border-bottom:1px solid #e9ebe3; }
+    .check { height:25px; width:25px; border-radius:50%; background:#e1e9db; display:grid; place-items:center; font-size:13px; color:#305c40; }
+    .pending .check { background:transparent; border:1px solid #bec9b8; color:transparent; transition:all .4s; }
+    .row strong { font-size:15px; font-weight:550; }
+    .row small { display:block; color:#879082; font-size:12px; margin-top:5px; }
+    .row .owner { margin-left:auto; font-size:11px; color:#7d8878; padding:5px 8px; border-radius:5px; background:#f0f1e9; }
+    .panel-foot { display:flex; justify-content:space-between; align-items:center; padding:22px 27px; font-size:12px; color:#7d8878; }
+    .secondary { border:1px solid #becbbb; border-radius:8px; padding:10px 15px; background:#f8f9f2; color:#214f41; font-size:12px; }
+    .preview { min-height:325px; padding:29px; background:#e6eadd; position:relative; }
+    .preview .mini { font-size:11px; letter-spacing:2px; color:#6b7e63; }
+    .preview h2 { font-size:39px; line-height:1.13; font-weight:500; letter-spacing:-1.4px; margin:32px 0 16px; }
+    .preview p { font-size:13px; line-height:1.6; color:#6b7e63; max-width:260px; }
+    .orbit { position:absolute; right:25px; top:39px; width:38px; height:38px; border:2px solid #6d876c; border-radius:50%; }
+    .orbit::after { content:''; position:absolute; width:10px; height:10px; background:#214f41; border-radius:50%; right:0; top:0; }
+    .publish-row { padding:19px 24px; display:flex; align-items:center; justify-content:space-between; }
+    .publish-row span { font-size:12px; color:#7d8878; }
+    .primary { border:0; background:#214f41; color:#fff; padding:13px 19px; border-radius:9px; font-size:13px; transition:background .2s, transform .2s; }
+    .primary:hover { background:#326b56; transform:translateY(-1px); }
+    .footer { display:flex; justify-content:space-between; margin-top:25px; font-size:11px; color:#92998c; }
+    .live { background:#214f41; color:#fff; border-color:#214f41; }
+    .live .dot { background:#a3d5ac; }
+    #receipt { position:fixed; bottom:35px; left:50%; transform:translate(-50%,30px); background:#172e28; color:#fff; padding:17px 24px; border-radius:12px; font-size:14px; opacity:0; transition:opacity .4s,transform .5s; box-shadow:0 8px 35px #172e281b; }
+    #receipt.show { opacity:1; transform:translate(-50%,0); }
+    #receipt span { color:#aacead; margin-right:10px; }
+    #release-view { display:none; text-align:center; padding:48px 0; }
+    #release-view h2 { font-family:Georgia,serif; font-size:74px; letter-spacing:-3px; font-weight:400; margin:30px 0 19px; }
+    #release-view p { color:#738070; font-size:18px; }
+    #release-view .release-line { width:62px; height:2px; background:#214f41; margin:34px auto; }
+    .feature-strip { display:flex; justify-content:center; gap:65px; margin:46px 0; font-size:14px; color:#4c674e; }
+    #release-view .badge { display:inline-block; }
+  </style>
+</head>
+<body>
+  <header><div class="brand"><span class="mark"></span>fieldnotes</div><div class="nav"><b>Releases</b><span>Library</span><span>Team</span><div class="avatar">FN</div></div></header>
+  <main>
+    <section id="workspace">
+      <div class="eyebrow">Workspace / Releases / 024</div>
+      <div class="headline"><div><h1>A little closer to launch.</h1><div class="sub">Everything your next release needs, in one place.</div></div><div id="status" class="badge"><span class="dot"></span>Ready for review</div></div>
+      <div class="layout">
+        <div class="panel"><div class="panel-head">Release checklist <span id="progress" class="count">3 of 4 complete</span></div>
+          <div class="row"><span class="check">✓</span><div><strong>The story is clear</strong><small>Release notes &amp; product copy</small></div><span class="owner">Editorial</span></div>
+          <div class="row"><span class="check">✓</span><div><strong>Every detail is in place</strong><small>Design &amp; final assets</small></div><span class="owner">Design</span></div>
+          <div class="row"><span class="check">✓</span><div><strong>The product is ready</strong><small>Quality checks complete</small></div><span class="owner">Product</span></div>
+          <div id="review-row" class="row pending"><span class="check">✓</span><div><strong id="review-title">One final look</strong><small id="review-sub">Your approval makes it official</small></div><span class="owner">You</span></div>
+          <div class="panel-foot"><span id="review-note">The smallest details make the difference.</span><button type="button" id="approve" class="secondary">Approve release</button></div>
+        </div>
+        <div class="panel"><div class="preview"><div class="mini">FIELDNOTES / 024</div><div class="orbit"></div><h2>Good work.<br>Out in the world.</h2><p>A calmer way to bring your team's next idea to life.</p></div><div class="publish-row"><span id="publish-note">Your next chapter is ready.</span><button type="button" id="publish" class="primary">Publish release ↗</button></div></div>
+      </div>
+      <div class="footer"><span>RELEASE 024 · A SMALL STEP FORWARD</span><span>Fieldnotes is an interactive demo fixture.</span></div>
+    </section>
+    <section id="release-view"><div class="badge live"><span class="dot"></span>Release 024 is live</div><h2>Good work.<br>Out in the world.</h2><p>A calmer way to bring your team's next idea to life.</p><div class="release-line"></div><div class="feature-strip"><span>Considered design</span><span>A clearer workflow</span><span>Room for what's next</span></div><button type="button" id="back" class="secondary">← Back to workspace</button></section>
+  </main>
+  <div id="receipt"><span>✓</span>Release 024 is live. Your next chapter starts here.</div>
+  <script>
+    let approved = false, published = false;
+    const el = id => document.getElementById(id);
+    el('approve').addEventListener('click', () => {
+      approved = true; el('review-row').classList.remove('pending'); el('progress').textContent = '4 of 4 complete';
+      el('review-title').textContent = 'Approved. Ready to go.'; el('review-sub').textContent = 'Every detail has your signature';
+      el('review-note').textContent = 'All checks complete.'; el('approve').textContent = 'Approved ✓';
+      el('status').innerHTML = '<span class="dot"></span>Ready to publish';
+    });
+    el('publish').addEventListener('click', () => {
+      if (published) { el('workspace').style.display = 'none'; el('release-view').style.display = 'block'; el('receipt').classList.remove('show'); return; }
+      if (!approved) { el('review-note').textContent = 'Approve the release to publish.'; return; }
+      published = true; el('status').classList.add('live'); el('status').innerHTML = '<span class="dot"></span>Published';
+      el('publish').textContent = 'View release ↗'; el('publish-note').textContent = 'Live. And looking good.'; el('receipt').classList.add('show');
+    });
+    el('back').addEventListener('click', () => { el('workspace').style.display = 'block'; el('release-view').style.display = 'none'; });
+  </script>
+</body>
+</html>
