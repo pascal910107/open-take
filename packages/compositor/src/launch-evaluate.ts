@@ -127,3 +127,21 @@ export function transitionOpacity(scene: LaunchScene, localS: number): number {
   const d = Math.min(t.durationS ?? 0.45, duration / 2);
   return Math.min(launchEase(localS / d), launchEase((duration - localS) / d));
 }
+
+/**
+ * Frame-grid clock helpers.
+ *
+ * Revideo advances scene time by accumulating 1/fps in floating point, so the
+ * clock at frame n sits a hair below n/fps; a `step` keyframe authored exactly on
+ * a frame is then reached one frame late. Prepared media carries millisecond
+ * timestamps (17, 33, 50 ms …), so seeking an HTMLVideoElement to n/fps lands
+ * just before the frame it names and the browser shows the previous one: every
+ * third source frame was skipped and the one before it held. Snapping the clock
+ * to the grid and seeking to the centre of the intended frame removes both.
+ */
+export function quantizeToFrame(seconds: number, fps: number): number {
+  return Math.round(seconds * fps) / fps;
+}
+export function frameCentreS(seconds: number, fps: number): number {
+  return (Math.round(seconds * fps) + 0.5) / fps;
+}

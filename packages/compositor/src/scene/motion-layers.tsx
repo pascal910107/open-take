@@ -1,4 +1,5 @@
 import { Circle, Img, Line, Node, Rect, Txt, Video } from "@revideo/2d";
+import { frameCentreS } from "../launch-evaluate";
 import { evaluateMotionScene } from "../motion-evaluate";
 import type { EvaluatedMotionLayer, MotionLayer, MotionScene } from "../motion-types";
 
@@ -216,7 +217,9 @@ export function createMotionLayers({
           time={() => {
             const layer = get();
             const lastSample = layer.trimStartS + Math.max(0, layer.durationS - 1 / output.fps);
-            return Math.min(layer.mediaTimeS, lastSample);
+            // Prepared media runs at the output rate; seek to the centre of the
+            // intended frame so millisecond timestamps never select the previous one.
+            return frameCentreS(Math.min(layer.mediaTimeS, lastSample), output.fps);
           }}
         />
       ) as FittedVideo;

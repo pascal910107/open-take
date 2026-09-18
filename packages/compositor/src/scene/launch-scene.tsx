@@ -5,6 +5,8 @@ import {
   launchEase,
   launchSceneWindows,
   transitionOpacity,
+  frameCentreS,
+  quantizeToFrame,
 } from "../launch-evaluate";
 import comp from "./.launch-composition.json";
 import { createMotionLayers } from "./motion-layers";
@@ -164,8 +166,11 @@ export default makeScene2D("launch", function* (view) {
           <Video
             src={scene.asset}
             time={() =>
-              (scene.trimStartS ?? 0) +
-              Math.max(0, Math.min(scene.durationS - 1 / comp.output.fps, local()))
+              frameCentreS(
+                (scene.trimStartS ?? 0) +
+                  Math.max(0, Math.min(scene.durationS - 1 / comp.output.fps, local())),
+                comp.output.fps,
+              )
             }
             alpha={() => (active() ? 1 : 0)}
             decoder="slow"
@@ -411,5 +416,11 @@ export default makeScene2D("launch", function* (view) {
     }
     view.add(root);
   }
-  yield* tween(windows.at(-1).endS, (v) => t(v * windows.at(-1).endS), linear);
+  // Snap the accumulated clock to the output frame grid so keyframes authored on
+  // a frame are reached on that frame, not the next.
+  yield* tween(
+    windows.at(-1).endS,
+    (v) => t(quantizeToFrame(v * windows.at(-1).endS, comp.output.fps)),
+    linear,
+  );
 });
