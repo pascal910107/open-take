@@ -6,8 +6,8 @@
 // edited this" (never overwrite silently). See syncAgentSkill /
 // autoSyncAgentSkill for the two update policies built on it.
 import { createHash } from "node:crypto";
-import { lstat, mkdir, readFile, symlink, unlink, writeFile } from "node:fs/promises";
-import { dirname, relative, resolve } from "node:path";
+import { lstat, mkdir, readFile, readdir, symlink, unlink, writeFile } from "node:fs/promises";
+import { dirname, relative, resolve, sep } from "node:path";
 
 export type SkillInstallResult = {
   canonicalPath: string;
@@ -37,12 +37,99 @@ export function skillHash(text: string): string {
   return createHash("sha256").update(text.replace(/\r\n/g, "\n").trimEnd()).digest("hex");
 }
 
-type SkillLock = { version: 1; sha256: string; cliVersion?: string; note?: string };
+export type SkillBundle = { skillText: string; resources?: Record<string, string> };
+type SkillLock = {
+  version: 1;
+  sha256: string;
+  resources?: Record<string, string>;
+  cliVersion?: string;
+  note?: string;
+};
+
+/** Resources are bounded Markdown references, never executable files or locks. */
+function resourceEntries(resources: Record<string, string> = {}): [string, string][] {
+  const entries = Object.entries(resources);
+  if (entries.length > 64) throw new Error("Skill bundle exceeds 64 references");
+  let bytes = 0;
+  const names = new Set<string>();
+  for (const [path, text] of entries) {
+    const parts = path.split("/");
+    if (
+      parts.length < 2 ||
+      parts.length > 9 ||
+      parts[0] !== "references" ||
+      !path.endsWith(".md") ||
+      parts.some(
+        (part) =>
+          !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(part) ||
+          /^(skill\.md|skill-lock\.json)$/i.test(part) ||
+          part.endsWith(".") ||
+          /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(part),
+      ) ||
+      names.has(path.toLowerCase()) ||
+      typeof text !== "string"
+    )
+      throw new Error(`Unsafe skill resource path: ${path}`);
+    names.add(path.toLowerCase());
+    bytes += Buffer.byteLength(text);
+  }
+  if (bytes > 2 * 1024 * 1024) throw new Error("Skill references exceed 2 MiB");
+  for (const path of names) {
+    const parts = path.split("/");
+    for (let i = 1; i < parts.length; i++) {
+      if (names.has(parts.slice(0, i).join("/")))
+        throw new Error(`Unsafe skill resource path: file/directory collision at ${path}`);
+    }
+  }
+  return entries;
+}
+
+/** Legacy guides may have no references; an explicit local Markdown link must resolve. */
+function checkBundleReferences(bundle: SkillBundle): void {
+  const links = bundle.skillText.matchAll(
+    /(?:\]\(\s*<?|\]:\s*<?)(?:\.\/)?(references\/[a-zA-Z0-9._/-]+\.md)(?:[?#][^\s)>]*)?(?=[>\s)]|$)/g,
+  );
+  for (const match of links) {
+    const path = match[1]!;
+    if (!Object.hasOwn(bundle.resources ?? {}, path))
+      throw new Error(`Missing skill reference: ${path} (re-run the package build)`);
+  }
+}
+
+/** Read all texts from one selected bundle; never mix package and source files. */
+export async function loadSkillBundle(directory: string): Promise<SkillBundle> {
+  const resources: Record<string, string> = {};
+  const walk = async (relativePath: string, depth: number): Promise<void> => {
+    if (depth > 8) throw new Error("Skill reference directory is too deep");
+    const path = resolve(directory, relativePath);
+    const info = await lstat(path).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT" && relativePath === "references") return null;
+      throw error;
+    });
+    if (!info) return;
+    if (info.isSymbolicLink()) throw new Error(`Unsafe skill resource path: ${relativePath}`);
+    if (info.isDirectory()) {
+      for (const name of await readdir(path)) await walk(`${relativePath}/${name}`, depth + 1);
+    } else {
+      if (!info.isFile() || info.size > 2 * 1024 * 1024)
+        throw new Error(`Invalid skill resource: ${relativePath}`);
+      resources[relativePath] = await readFile(path, "utf8");
+      resourceEntries(resources);
+    }
+  };
+  const skillText = await readFile(resolve(directory, "SKILL.md"), "utf8");
+  await walk("references", 0);
+  const bundle = { skillText, resources };
+  checkBundleReferences(bundle);
+  return bundle;
+}
 
 async function readLock(lockPath: string): Promise<SkillLock | null> {
   try {
     const lock = JSON.parse(await readFile(lockPath, "utf8")) as SkillLock;
-    return typeof lock?.sha256 === "string" ? lock : null;
+    if (typeof lock?.sha256 !== "string") return null;
+    if (lock.resources) resourceEntries(lock.resources);
+    return lock;
   } catch {
     return null;
   }
@@ -62,57 +149,125 @@ export type SkillDrift = {
   needsLockRepair: boolean;
 };
 
-export async function detectSkillDrift(options: {
-  root: string;
-  skillText: string;
-}): Promise<SkillDrift> {
-  const { canonicalPath, lockPath } = skillPaths(resolve(options.root));
-  const installed = await readFile(canonicalPath, "utf8").catch(() => null);
-  if (installed == null) return { state: "missing", needsLockRepair: false };
-  const installedHash = skillHash(installed);
-  const lock = await readLock(lockPath);
-  if (installedHash === skillHash(options.skillText))
-    return { state: "current", needsLockRepair: lock?.sha256 !== installedHash };
-  if (lock == null) return { state: "unknown", needsLockRepair: false };
-  return {
-    state: lock.sha256 === installedHash ? "stale" : "modified",
-    needsLockRepair: false,
-  };
+/** Reject symlinks in destinations before writing any member of the bundle. */
+async function checkDestination(root: string, path: string): Promise<void> {
+  const parts = relative(root, path).split(sep);
+  let current = root;
+  for (const part of parts) {
+    current = resolve(current, part);
+    const info = await lstat(current).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return null;
+      throw error;
+    });
+    if (info?.isSymbolicLink()) throw new Error(`Unsafe skill destination: ${current}`);
+  }
 }
 
-async function copyClaudeSkill(path: string, skillText: string): Promise<void> {
-  await mkdir(path, { recursive: true });
-  await writeFile(resolve(path, "SKILL.md"), skillText);
+export async function detectSkillDrift(
+  options: SkillBundle & {
+    root: string;
+  },
+): Promise<SkillDrift> {
+  checkBundleReferences(options);
+  const root = resolve(options.root);
+  const paths = skillPaths(root);
+  const entries: [string, string][] = [
+    ["SKILL.md", options.skillText],
+    ...resourceEntries(options.resources),
+  ];
+  const lock = await readLock(paths.lockPath);
+  const states: SkillDriftState[] = [];
+  let needsLockRepair = false;
+  const inspect = async (directory: string, copied: boolean): Promise<void> => {
+    for (const [name, text] of entries) {
+      const path = resolve(directory, name);
+      await checkDestination(root, path);
+      const installed = await readFile(path, "utf8").catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return null;
+        throw error;
+      });
+      const recorded = name === "SKILL.md" ? lock?.sha256 : lock?.resources?.[name];
+      if (installed === null) {
+        states.push(
+          name === "SKILL.md" ? (copied ? "stale" : "missing") : recorded ? "modified" : "stale",
+        );
+      } else if (skillHash(installed) === skillHash(text)) {
+        if (!copied && recorded !== skillHash(installed)) needsLockRepair = true;
+        states.push("current");
+      } else if (recorded) {
+        states.push(recorded === skillHash(installed) ? "stale" : "modified");
+      } else {
+        // Legacy guide behavior is preserved; untracked reference collisions
+        // are local files, never silently adopted or overwritten.
+        states.push(name === "SKILL.md" ? "unknown" : "modified");
+      }
+    }
+  };
+  await inspect(paths.canonicalDir, false);
+  const claude = await lstat(paths.claudeDir).catch(() => null);
+  if (claude && !claude.isSymbolicLink()) await inspect(paths.claudeDir, true);
+  const state = states.includes("modified")
+    ? "modified"
+    : states.includes("unknown")
+      ? "unknown"
+      : states.includes("missing")
+        ? "missing"
+        : states.includes("stale")
+          ? "stale"
+          : "current";
+  return { state, needsLockRepair: state === "current" && needsLockRepair };
+}
+
+async function writeBundle(directory: string, options: SkillBundle): Promise<void> {
+  const entries: [string, string][] = [
+    ["SKILL.md", options.skillText],
+    ...resourceEntries(options.resources),
+  ];
+  for (const [name, text] of entries) {
+    const path = resolve(directory, name);
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, text);
+  }
 }
 
 /** Unconditional write: skill + lock + the Claude Code link. Policy (what may
  *  be overwritten when) lives in syncAgentSkill / autoSyncAgentSkill. */
-export async function installAgentSkill(options: {
-  root: string;
-  skillText: string;
-  cliVersion?: string;
-  platform?: NodeJS.Platform;
-}): Promise<SkillInstallResult> {
+export async function installAgentSkill(
+  options: SkillBundle & {
+    root: string;
+    cliVersion?: string;
+    platform?: NodeJS.Platform;
+  },
+): Promise<SkillInstallResult> {
   const root = resolve(options.root);
   const { canonicalDir, canonicalPath, lockPath, claudeDir, claudePath } = skillPaths(root);
   const platform = options.platform ?? process.platform;
 
-  await mkdir(canonicalDir, { recursive: true });
-  await writeFile(canonicalPath, options.skillText);
+  const entries = resourceEntries(options.resources);
+  checkBundleReferences(options);
+  const existing = await lstat(claudeDir).catch(() => null);
+  await checkDestination(root, dirname(claudeDir));
+  for (const name of ["SKILL.md", "skill-lock.json", ...entries.map(([name]) => name)]) {
+    await checkDestination(root, resolve(canonicalDir, name));
+    if (!existing?.isSymbolicLink()) await checkDestination(root, resolve(claudeDir, name));
+  }
+  await writeBundle(canonicalDir, options);
   const lock: SkillLock = {
     version: 1,
     sha256: skillHash(options.skillText),
+    ...(entries.length
+      ? { resources: Object.fromEntries(entries.map(([name, text]) => [name, skillHash(text)])) }
+      : {}),
     ...(options.cliVersion ? { cliVersion: options.cliVersion } : {}),
-    note: "hash of SKILL.md as installed — lets open-take tell local edits from stale versions; do not edit",
+    note: "hashes of the guide and references as installed — detects local edits; do not edit",
   };
   await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`);
   await mkdir(dirname(claudeDir), { recursive: true });
 
-  const existing = await lstat(claudeDir).catch(() => null);
   if (existing?.isSymbolicLink()) {
     await unlink(claudeDir);
   } else if (existing) {
-    await copyClaudeSkill(claudeDir, options.skillText);
+    await writeBundle(claudeDir, options);
     return { canonicalPath, claudePath, claudeMode: "copied" };
   }
 
@@ -126,7 +281,7 @@ export async function installAgentSkill(options: {
     }
   }
 
-  await copyClaudeSkill(claudeDir, options.skillText);
+  await writeBundle(claudeDir, options);
   return { canonicalPath, claudePath, claudeMode: "copied" };
 }
 
@@ -139,15 +294,16 @@ export type SkillSyncResult =
  *  survive unless overwriteModified says otherwise. An "unknown" install
  *  (pre-lock era) is overwritten, which is exactly what init always did before
  *  the lock existed; protection starts with the first locked install. */
-export async function syncAgentSkill(options: {
-  root: string;
-  skillText: string;
-  cliVersion?: string;
-  overwriteModified?: boolean;
-  platform?: NodeJS.Platform;
-}): Promise<SkillSyncResult> {
+export async function syncAgentSkill(
+  options: SkillBundle & {
+    root: string;
+    cliVersion?: string;
+    overwriteModified?: boolean;
+    platform?: NodeJS.Platform;
+  },
+): Promise<SkillSyncResult> {
   const root = resolve(options.root);
-  const { state } = await detectSkillDrift({ root, skillText: options.skillText });
+  const { state } = await detectSkillDrift({ ...options, root });
   if (state === "modified" && !options.overwriteModified) {
     const { canonicalPath, claudePath } = skillPaths(root);
     return { action: "kept", drift: "modified", canonicalPath, claudePath };
@@ -167,13 +323,14 @@ export type SkillAutoSyncResult =
  *  modified skill is the user's, an unknown one gets a hint instead of a
  *  write, a missing one stays missing (a human driving make directly never
  *  asked for skill files). */
-export async function autoSyncAgentSkill(options: {
-  root: string;
-  skillText: string;
-  cliVersion?: string;
-}): Promise<SkillAutoSyncResult> {
+export async function autoSyncAgentSkill(
+  options: SkillBundle & {
+    root: string;
+    cliVersion?: string;
+  },
+): Promise<SkillAutoSyncResult> {
   const root = resolve(options.root);
-  const drift = await detectSkillDrift({ root, skillText: options.skillText });
+  const drift = await detectSkillDrift({ ...options, root });
   const { canonicalPath } = skillPaths(root);
   if (drift.state === "stale") {
     await installAgentSkill(options);
@@ -185,4 +342,21 @@ export async function autoSyncAgentSkill(options: {
   }
   if (drift.state === "unknown") return { action: "hint", canonicalPath };
   return { action: "none" };
+}
+
+/** Documentation refresh must never prevent recording, including bundle-loading failures. */
+export async function autoSyncBundledAgentSkill(options: {
+  root: string;
+  loadBundle: () => Promise<SkillBundle>;
+  cliVersion?: string;
+}): Promise<SkillAutoSyncResult> {
+  try {
+    return await autoSyncAgentSkill({
+      root: options.root,
+      ...(await options.loadBundle()),
+      cliVersion: options.cliVersion,
+    });
+  } catch {
+    return { action: "none" };
+  }
 }

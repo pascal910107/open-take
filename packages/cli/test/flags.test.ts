@@ -12,8 +12,8 @@
 // filesystem work starts, so the suite stays fast and hermetic.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 const CLI = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
 
@@ -113,4 +113,42 @@ test("a flag that belongs to another command is refused, not ignored", async () 
   const r = await run(["render", "x.mp4", "--profile", "vercel"]);
   assert.equal(r.code, 1);
   assert.match(r.err, /unknown flag --profile/);
+});
+
+test("launch subcommands validate flags before touching files or Chrome", async () => {
+  const missingVideo = await run(["launch", "init", "new-film"]);
+  assert.equal(missingVideo.code, 1);
+  assert.match(missingVideo.err, /--video <existing\.mp4> is required/);
+
+  const unknown = await run(["launch", "check", "missing.json", "--bogus", "x"]);
+  assert.equal(unknown.code, 1);
+  assert.match(unknown.err, /launch: unknown flag --bogus/);
+
+  const wrongRenderFlag = await run(["launch", "render", "missing.json", "--video", "x.mp4"]);
+  assert.equal(wrongRenderFlag.code, 1);
+  assert.match(wrongRenderFlag.err, /--video is not accepted/);
+
+  const missingComposeOut = await run(["launch", "compose", "brief.json"]);
+  assert.equal(missingComposeOut.code, 1);
+  assert.match(missingComposeOut.err, /--out <launch\.json> is required/);
+
+  const wrongComposeFlag = await run([
+    "launch",
+    "compose",
+    "brief.json",
+    "--out",
+    "launch.json",
+    "--draft",
+  ]);
+  assert.equal(wrongComposeFlag.code, 1);
+  assert.match(wrongComposeFlag.err, /only --out is accepted/);
+});
+
+test("launch help exposes init, recipe compose, cheap check, and editable render", async () => {
+  const result = await run(["--help"]);
+  assert.equal(result.code, 0);
+  assert.match(result.out, /launch init <directory> --video/);
+  assert.match(result.out, /launch compose <brief\.json> --out <launch\.json>/);
+  assert.match(result.out, /launch check <launch\.json>/);
+  assert.match(result.out, /launch render <launch\.json>/);
 });

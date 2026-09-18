@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readFile, mkdtemp } from "node:fs/promises";
-import { gunzipSync } from "node:zlib";
+import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
+import { gunzipSync } from "node:zlib";
 
 const workspaceRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const packages = {
@@ -132,8 +132,26 @@ test("packed release artifacts form a browser-download-free dependency chain", a
   assert.match(declarations, /from 'puppeteer-core'/);
   assert.doesNotMatch(declarations, /from 'puppeteer'/);
 
+  // Launch scenes are compiled by Vite on the consumer's machine. A passing
+  // monorepo build cannot detect a missing runtime source in the npm tarball.
+  for (const path of [
+    "src/scene/launch-project.ts",
+    "src/scene/launch-scene.tsx",
+    "src/scene/tsconfig.json",
+    "src/launch-evaluate.ts",
+    "src/launch-types.ts",
+    "src/motion-types.ts",
+    "src/motion-evaluate.ts",
+    "src/motion-recipes.ts",
+    "src/motion-quality.ts",
+    "src/scene/motion-layers.tsx",
+  ]) {
+    entryText(entries.compositor, `package/${path}`);
+  }
+
   const readme = entryText(entries.cli, "package/README.md");
   entryText(entries.cli, "package/skill/SKILL.md");
+  entryText(entries.cli, "package/skill/references/motion-composition.md");
   assert.doesNotMatch(readme, /PUPPETEER_SKIP_DOWNLOAD/);
   assert.doesNotMatch(readme, /open-take make/);
 });

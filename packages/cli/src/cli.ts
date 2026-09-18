@@ -20,17 +20,20 @@ import {
   buildDefectReport,
   type CaptureLog,
   type CompositionIssue,
+  checkLaunchFile,
   checkTake,
-  type Defect,
-  type DefectReport,
   ciAllowedOrigins,
   ciTake,
+  composeLaunchFile,
+  type Defect,
+  type DefectReport,
   emitGithubOutputs,
   emitStepSummary,
   ensureChrome,
   formatIssues,
   formatNotes,
   healingWithheld,
+  initLaunchProject,
   inspectPage,
   lintPlan,
   loadCaptureLogSibling,
@@ -46,10 +49,11 @@ import {
   renderDefectBlock,
   renderDraft,
   renderFrames,
+  renderLaunchFile,
   renderReview,
   renderTeaserGif,
-  reRenderInPlace,
   requireTakeFiles,
+  reRenderInPlace,
   resolveTakePaths,
   revealPath,
   runPostShootGates,
@@ -63,7 +67,7 @@ import {
   toDraft,
   waitForNotes,
 } from "@open-take/runtime";
-import { autoSyncAgentSkill, syncAgentSkill } from "./init";
+import { autoSyncBundledAgentSkill, loadSkillBundle, syncAgentSkill } from "./init";
 
 // how to invoke this CLI, for printed follow-up commands: the bin name when
 // installed, else the literal node path the user just ran (copy-pasteable).
@@ -186,6 +190,7 @@ const FLAGS_BY_CMD: Record<string, string[]> = {
   ],
   init: ["--force"],
   skill: ["--force"],
+  launch: ["--video", "--out", "--draft", "--verbose"],
 };
 
 function rejectUnknownFlags(cmd: string): void {
@@ -224,7 +229,11 @@ Usage:
   open-take ci     <url> [--start "<command>"] [--brief "<what to demo>"]
                    [--out demos/take.mp4] [--budget-usd 8] [--dry-run]
   open-take init   [--force]
-  open-take skill  [install [--force]]
+  open-take launch init <directory> --video <existing.mp4>
+  open-take launch compose <brief.json> --out <launch.json>
+  open-take launch check <launch.json>
+  open-take launch render <launch.json> [--out <movie.mp4>] [--draft]
+  open-take skill  [motion | install [--force]]
 
   A take is TWO things on disk: the postable master at exactly your --out path
   (<out>.mp4), and a working directory beside it (<out>.take/) holding
@@ -389,7 +398,8 @@ Usage:
           \`make\` quietly refreshes an unmodified skill the same way, so npm
           upgrades reach the project without re-running init.
 
-  skill   print the full agent guide (SKILL.md). \`skill install\` remains as a
+  skill   print the full agent guide (SKILL.md); \`skill motion\` prints the
+          motion composition reference. \`skill install\` remains as a
           backwards-compatible alias for \`init\`.
 
   --out <path>   (make) where the postable master goes — taken literally, and
@@ -645,16 +655,16 @@ async function main() {
   // only when this is set (see revideo-renderer/scripts/build.mjs).
   if (has("--verbose")) process.env.OPEN_TAKE_VERBOSE = "1";
 
-  const bundledSkill = async (): Promise<string> => {
-    // packaged copy (skill/SKILL.md beside dist/) first, monorepo source second
-    const here = dirname(fileURLToPath(import.meta.url)); // dist/ or src/
+  const bundledSkill = async () => {
+    // Select one complete bundle: never pair a packaged guide with source references.
+    const here = dirname(fileURLToPath(import.meta.url));
     const candidates = [
-      resolve(here, "..", "skill", "SKILL.md"),
-      resolve(here, "..", "..", "..", "skills", "open-take", "SKILL.md"),
+      resolve(here, "..", "skill"),
+      resolve(here, "..", "..", "..", "skills", "open-take"),
     ];
     for (const candidate of candidates) {
-      const text = await readFile(candidate, "utf8").catch(() => null);
-      if (text) return text;
+      const guide = await readFile(resolve(candidate, "SKILL.md"), "utf8").catch(() => null);
+      if (guide) return loadSkillBundle(candidate);
     }
     throw new Error("SKILL.md not found (re-run the package build)");
   };
@@ -675,7 +685,7 @@ async function main() {
   const runInit = async (): Promise<void> => {
     const res = await syncAgentSkill({
       root: process.cwd(),
-      skillText: await bundledSkill(),
+      ...(await bundledSkill()),
       cliVersion: await cliVersion(),
       overwriteModified: has("--force"),
     });
@@ -692,6 +702,62 @@ async function main() {
           : `updated: ${res.canonicalPath} (now matches this CLI)\n`,
     );
   };
+
+  if (cmd === "launch") {
+    const action = positional[0],
+      target = positional[1];
+    if (!action || !target || positional.length !== 2)
+      throw new Error(
+        "launch: expected init <directory>, compose <brief.json>, check <launch.json>, or render <launch.json>",
+      );
+    if (action === "init") {
+      const video = flag("--video");
+      if (!video) throw new Error("launch init: --video <existing.mp4> is required");
+      if (has("--out") || has("--draft")) throw new Error("launch init: only --video is accepted");
+      const result = await initLaunchProject(target, video);
+      process.stdout.write(`initialized: ${result.compositionPath}\nvideo: ${result.videoPath}\n`);
+      return;
+    }
+    if (action === "check") {
+      if (Object.keys(flags).length) throw new Error("launch check: this command takes no flags");
+      const { issues } = await checkLaunchFile(target);
+      if (issues.length) {
+        const errors = issues.filter((x) => x.severity === "error");
+        process.stdout.write(`${formatIssues(issues)}\n`);
+        if (errors.length) process.exitCode = 1;
+      } else process.stdout.write("launch composition valid\n");
+      return;
+    }
+    if (action === "compose") {
+      const out = flag("--out");
+      if (!out) throw new Error("launch compose: --out <launch.json> is required");
+      if (Object.keys(flags).some((name) => name !== "--out"))
+        throw new Error("launch compose: only --out is accepted");
+      const result = await composeLaunchFile(target, out);
+      const warnings = result.issues.filter((issue) => issue.severity === "warn");
+      if (warnings.length) process.stdout.write(`${formatIssues(warnings)}\n`);
+      process.stdout.write(`composed: ${result.compositionPath}\n`);
+      return;
+    }
+    if (action === "render") {
+      if (has("--video"))
+        throw new Error(
+          "launch render: --video is not accepted; footage paths come from launch.json",
+        );
+      const result = await renderLaunchFile({
+        compositionPath: target,
+        outPath: flag("--out"),
+        draft: has("--draft"),
+        logProgress: has("--verbose"),
+      });
+      if (result.warnings.length) process.stdout.write(`${formatIssues(result.warnings)}\n`);
+      process.stdout.write(
+        `rendered: ${result.mp4Path}\nduration: ${result.durationS.toFixed(3)}s\n`,
+      );
+      return;
+    }
+    throw new Error(`launch: unknown action ${action}`);
+  }
 
   if (cmd === "init") {
     await runInit();
@@ -751,7 +817,7 @@ async function main() {
       : await (async () => {
           const res = await syncAgentSkill({
             root: process.cwd(),
-            skillText: await bundledSkill(),
+            ...(await bundledSkill()),
             cliVersion: await cliVersion(),
           });
           if (res.action === "kept")
@@ -912,11 +978,11 @@ async function main() {
     // the verb every session runs, and it already writes into this tree).
     // Only a PROVABLY unmodified skill is touched — see autoSyncAgentSkill —
     // and never fatally: a demo must not fail over its own documentation.
-    const skillSync = await autoSyncAgentSkill({
+    const skillSync = await autoSyncBundledAgentSkill({
       root: process.cwd(),
-      skillText: await bundledSkill(),
+      loadBundle: bundledSkill,
       cliVersion: await cliVersion(),
-    }).catch(() => ({ action: "none" }) as const);
+    });
     if (skillSync.action === "refreshed")
       process.stderr.write(
         `⟳ agent skill refreshed to match this CLI: ${skillSync.canonicalPath}\n`,
@@ -1529,7 +1595,17 @@ async function main() {
 
   if (cmd === "skill") {
     if (positional[0] === "install") await runInit();
-    else process.stdout.write(await bundledSkill());
+    else {
+      if (positional.length > 1 || (positional[0] && positional[0] !== "motion"))
+        throw new Error("skill: expected motion or install [--force]");
+      const bundle = await bundledSkill();
+      const text =
+        positional[0] === "motion"
+          ? bundle.resources?.["references/motion-composition.md"]
+          : bundle.skillText;
+      if (!text) throw new Error("Motion reference not found (re-run the package build)");
+      process.stdout.write(text);
+    }
     return;
   }
 
