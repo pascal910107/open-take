@@ -28,7 +28,6 @@ import {
   publishOrder,
   publishedVersions,
   readPackages,
-  waitForVersion,
 } from "./lib/workspace.mjs";
 
 const argv = process.argv.slice(2);
@@ -139,15 +138,25 @@ if (DRY) {
 }
 
 // Verify against the registry rather than trusting exit codes: a scoped package
-// can 404 on a missing org while an unscoped one publishes fine.
+// can 404 on a missing org while an unscoped one publishes fine. The read API
+// lags a fresh publish by a variable amount — under ten seconds in 2026-09-02's
+// release, well over thirty seconds for 0.5.0 and 0.5.1, which failed this step
+// with every package published — so wait on all of them together against one
+// generous deadline, the same way `pnpm release` waits on the laptop.
 log(`\n▸ verifying the registry serves every package`);
-const missing = [];
-for (const pkg of chain) {
-  const ok = await waitForVersion(pkg.name, pkg.version);
-  log(`  ${ok ? "✓" : "✗"} ${pkg.name}@${pkg.version}`);
-  if (!ok) missing.push(pkg.name);
+const pending = new Map(chain.map((pkg) => [pkg.name, pkg.version]));
+const deadline = Date.now() + 5 * 60_000;
+while (pending.size && Date.now() < deadline) {
+  for (const [name, version] of pending) {
+    if ((await publishedVersions(name)).has(version)) {
+      log(`  ✓ ${name}@${version}`);
+      pending.delete(name);
+    }
+  }
+  if (pending.size) await new Promise((r) => setTimeout(r, 5000));
 }
-if (missing.length) die(`not on the registry: ${missing.join(", ")} — re-run to resume`);
+for (const [name, version] of pending) log(`  ✗ ${name}@${version}`);
+if (pending.size) die(`not on the registry after five minutes: ${[...pending.keys()].join(", ")} — re-run to resume`);
 
 log(`\nreleased ${chain.length} package(s)`);
 log(`smoke-test:  npm i -D open-take && npx open-take --version`);

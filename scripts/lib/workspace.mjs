@@ -81,12 +81,3 @@ export async function publishedVersions(name) {
   const body = await res.json();
   return new Set(Object.keys(body.versions ?? {}));
 }
-
-/** Wait for the registry to serve a just-published version (it lags a little). */
-export async function waitForVersion(name, version, tries = 5, delayMs = 2000) {
-  for (let i = 0; i < tries; i++) {
-    if (i) await new Promise((r) => setTimeout(r, delayMs));
-    if ((await publishedVersions(name)).has(version)) return true;
-  }
-  return false;
-}
