@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -27,6 +27,8 @@ test("the silent audio track bypasses fluent-ffmpeg's -formats check (FFmpeg ≥
     server,
     /Object\.assign\(\{\}, require\("@revideo\/ffmpeg"\), require\("\.\/silent-audio"\)\)/,
   );
-  const { createSilentAudioFile } = await import(resolve(root, "dist/server/silent-audio.js"));
+  const { createSilentAudioFile } = await import(
+    pathToFileURL(resolve(root, "dist/server/silent-audio.js")).href // a file URL: Windows needs it
+  );
   assert.equal(typeof createSilentAudioFile, "function");
 });
