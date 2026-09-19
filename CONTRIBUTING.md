@@ -40,12 +40,15 @@ eugeneware/ffmpeg-static, sha256-verified) into `~/.open-take/ffmpeg` once.
 `OPEN_TAKE_FFMPEG` / `OPEN_TAKE_FFPROBE` force a binary. Nothing is bundled in
 the npm package.
 
-The managed build is what a zero-config install runs, so the gates run on
-**both** the resolved binary and the managed one (`resolveManagedFfmpeg()`;
-see `everyFfmpeg()` in `packages/runtime/test/mjpeg-matroska.test.ts`) — a
-flag your newer system ffmpeg accepts cannot ship untried. 0.5.0/0.5.1 rendered
-nothing on machines without a system ffmpeg for exactly that reason. To see
-what a consumer without ffmpeg sees, hide yours:
+The managed build is what a zero-config install runs. The runtime's encode
+tests run on **both** the resolved binary and the managed one
+(`resolveManagedFfmpeg()`; see `everyFfmpeg()` in
+`packages/runtime/test/mjpeg-matroska.test.ts`); the compositor's suites run on
+the resolved binary. When you add an ffmpeg flag or filter anywhere, run it on
+the managed build too — 0.5.0/0.5.1 rendered nothing on machines without a
+system ffmpeg because a flag the developer's newer ffmpeg accepted was never
+tried on the one consumers had. To see what a consumer without ffmpeg sees,
+hide yours:
 
 ```sh
 PATH=$(echo "$PATH" | tr ':' '\n' | grep -v -E 'homebrew|/usr/local/bin' | paste -sd: -) \

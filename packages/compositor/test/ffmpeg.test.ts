@@ -4,13 +4,15 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { existsSync, readdirSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { gzipSync } from "node:zlib";
 import {
+  explicitBinary,
   FFMPEG_FLOOR,
   ffmpegHasEncoder,
   managedDir,
@@ -120,6 +122,95 @@ test("a download whose bytes do not match the pinned sha256 is refused and leave
     lines[0]?.startsWith("open-take: downloading ffmpeg"),
     "the user was told a download started",
   );
+});
+
+test("a 200 that is not the asset (a login or rate-limit page) names the network, not ffmpeg", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "ffmpeg-managed-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const html = Buffer.from("<!doctype html><title>Sign in</title>");
+  const fetchImpl = (async () =>
+    new Response(html, {
+      status: 200,
+      headers: { "content-type": "text/html; charset=utf-8" },
+    })) as unknown as typeof fetch;
+  await assert.rejects(
+    resolveManagedFfmpeg({ cacheDir: dir, fetchImpl, log: () => {} }),
+    /did not return the release asset \(got text\/html.*github\.com/,
+  );
+  assert.deepEqual(readdirSync(dir), []);
+});
+
+test("a body larger than the pinned asset is cut off, not written out", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "ffmpeg-managed-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  // valid gzip framing, 40 MB of incompressible bytes — past every pinned size
+  const chunk = gzipSync(randomBytes(1 << 20));
+  const body = new ReadableStream({
+    start(controller) {
+      for (let i = 0; i < 40; i++) controller.enqueue(chunk);
+      controller.close();
+    },
+  });
+  const fetchImpl = (async () => new Response(body, { status: 200 })) as unknown as typeof fetch;
+  await assert.rejects(
+    resolveManagedFfmpeg({ cacheDir: dir, fetchImpl, log: () => {} }),
+    /more than the pinned \d+ bytes/,
+  );
+  assert.deepEqual(readdirSync(dir), []);
+});
+
+test("a directory or a stale .part at the cache path is cleared, never a permanent wedge", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "ffmpeg-managed-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const exe = process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg";
+  await mkdir(join(dir, exe, "nested"), { recursive: true }); // someone's mistake
+  await writeFile(join(dir, `${exe}.99999.part`), "cut short by a Ctrl-C last week");
+  const fetchImpl = (async () => new Response(null, { status: 404 })) as unknown as typeof fetch;
+  await assert.rejects(
+    resolveManagedFfmpeg({ cacheDir: dir, fetchImpl, log: () => {} }),
+    /HTTP 404/,
+    "the fetch is reached: the directory did not wedge the resolver",
+  );
+  assert.deepEqual(readdirSync(dir), [], "directory and stale .part both gone");
+});
+
+test("a cached file that runs but is not ffmpeg ≥ floor is replaced", async (t) => {
+  if (process.platform === "win32") return;
+  const dir = await mkdtemp(join(tmpdir(), "ffmpeg-managed-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const fake = join(dir, "ffmpeg");
+  await writeFile(fake, "#!/bin/sh\necho 'ffmpeg version 4.4 stale copy'\n");
+  await chmod(fake, 0o755);
+  let fetched = false;
+  const fetchImpl = (async () => {
+    fetched = true;
+    return new Response(null, { status: 404 });
+  }) as unknown as typeof fetch;
+  await assert.rejects(
+    resolveManagedFfmpeg({ cacheDir: dir, fetchImpl, log: () => {} }),
+    /HTTP 404/,
+  );
+  assert.equal(fetched, true, "the stale binary was not trusted");
+  assert.ok(!existsSync(fake), "and it was removed");
+});
+
+test("explicitBinary: a relative path is pinned to an absolute one, a bare name stays a PATH lookup", async (t) => {
+  if (process.platform === "win32") return;
+  const dir = await mkdtemp(join(tmpdir(), "ffmpeg-explicit-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const script = join(dir, "my-ffmpeg");
+  await writeFile(script, "#!/bin/sh\necho 'ffmpeg version 6.5 wrapper'\n");
+  await chmod(script, 0o755);
+  const prev = process.cwd();
+  process.chdir(dir);
+  try {
+    // cwd is the realpath of the temp dir (macOS /var → /private/var)
+    assert.equal(explicitBinary("ffmpeg", "./my-ffmpeg"), join(process.cwd(), "my-ffmpeg"));
+  } finally {
+    process.chdir(prev);
+  }
+  assert.equal(explicitBinary("ffmpeg", "ffmpeg"), "ffmpeg");
+  assert.throws(() => explicitBinary("ffmpeg", join(dir, "nope")), /does not run/);
 });
 
 test("an HTTP failure is reported as such", async (t) => {

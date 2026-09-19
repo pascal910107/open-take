@@ -1087,7 +1087,13 @@ loop is yours to drive, and it is bounded:
   Chrome binary. (No agent-browser needed — capture is pure CDP.)
 - `ffmpeg`/`ffprobe`: handled like Chrome — the system binaries are used when
   they are ffmpeg ≥ 6.0; otherwise open-take downloads a pinned static build
-  once (cached under `~/.open-take/ffmpeg`, ~20–30 MB, progress on stderr).
-  `OPEN_TAKE_FFMPEG`/`OPEN_TAKE_FFPROBE` force a binary. The `ffmpeg -ss`
-  frame extraction in SHOW wants a system `ffmpeg` on PATH, or use the
-  downloaded one at `~/.open-take/ffmpeg/<release>/<platform>/ffmpeg`.
+  once (ffmpeg + ffprobe, ~40–60 MB gzipped, ~90 MB on disk under
+  `~/.open-take/ffmpeg`, progress on stderr). `OPEN_TAKE_FFMPEG`/
+  `OPEN_TAKE_FFPROBE` force a binary. The `ffmpeg -ss` frame extraction in
+  SHOW wants a system `ffmpeg` on PATH, or use the downloaded one at
+  `~/.open-take/ffmpeg/<release>/<platform>/ffmpeg`.
+  Licensing: the downloaded builds are GPLv3 (from eugeneware/ffmpeg-static);
+  running them is unrestricted and open-take (MIT) never bundles them, so
+  commercial use is fine. Do not copy that cache into an artifact you
+  redistribute (a shipped Docker image, an installer) — point the override at
+  a build of your own instead.

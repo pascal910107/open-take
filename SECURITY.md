@@ -25,8 +25,14 @@ writes files into your project:
 
 - **It runs a browser it downloaded.** Chrome for Testing is fetched on first
   use into `~/.open-take/browsers` and driven over CDP.
-- **It spawns ffmpeg/ffprobe** — PATH binaries if present, otherwise the
-  bundled `@ffmpeg-installer` / `@ffprobe-installer` platform binaries.
+- **It spawns ffmpeg/ffprobe** — the PATH binaries when they are ffmpeg ≥ 6.0,
+  otherwise a pinned, sha256-verified static build fetched once from the
+  [eugeneware/ffmpeg-static](https://github.com/eugeneware/ffmpeg-static/releases)
+  GitHub release into `~/.open-take/ffmpeg` (`OPEN_TAKE_FFMPEG` /
+  `OPEN_TAKE_FFPROBE` override). Those builds are GPLv3; Open Take (MIT) never
+  bundles them and only runs them as a separate process, which carries no GPL
+  obligation for you or your videos. Don't copy that cache into something you
+  redistribute — supply your own build via the override instead.
 - **It writes to your working tree** — a take is `demo.mp4` plus a `demo.take/`
   directory beside it.
 - **`open-take edit` starts a local HTTP server.** It binds `127.0.0.1` only
