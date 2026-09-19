@@ -11,6 +11,7 @@
 // No deps — Node 22's global `WebSocket`/`fetch` carry the protocol.
 
 import { type ChildProcess, spawn } from "node:child_process";
+import { once } from "node:events";
 import {
   existsSync,
   mkdirSync,
@@ -24,7 +25,9 @@ import {
 import { createRequire } from "node:module";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import type { Writable } from "node:stream";
 import { resolveFfmpeg } from "@open-take/compositor";
+import { mjpegMatroska, type TimedFrame } from "./mjpeg-matroska";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const require = createRequire(import.meta.url);
@@ -566,10 +569,35 @@ export async function pumpIdleRaster(
 }
 
 // --- encode timestamped frames -> video --------------------------------
-// concat demuxer with per-frame `duration` reproduces real wall-clock pacing
-// (static stretches naturally hold one frame). `-vsync cfr -r <fps>` resamples
-// onto a constant grid the web/MP4 decoders downstream read cleanly. Codec
-// follows the output extension so the file stays honest (.webm→vp9, else h264).
+// The frames go to ffmpeg as an MJPEG Matroska stream over stdin, each block
+// stamped with the millisecond Chrome swapped it (mjpeg-matroska.ts explains
+// why not a concat list). `-vsync cfr -r <fps>` then resamples that real
+// wall-clock pacing onto a constant grid the web/MP4 decoders downstream read
+// cleanly (static stretches naturally hold one frame). Codec follows the
+// output extension so the file stays honest (.webm→vp9, else h264).
+
+/** Where each frame sits on the video's clock, in whole milliseconds. The
+ *  first frame is pulled back to 0 so the video timeline starts where event
+ *  timestamps do; later frames keep their observed offset, nudged forward by
+ *  1 ms when two swaps round onto the same millisecond so no frame vanishes
+ *  under its neighbour. The last frame is repeated at the end time (at least
+ *  one frame period after it was shown) to give it a duration. */
+export function frameTimeline(frames: Frame[], endMs: number, fps: number): TimedFrame[] {
+  const ordered = [...frames].sort((a, b) => a.offMs - b.offMs);
+  const timeline: TimedFrame[] = [];
+  let tMs = 0;
+  for (let i = 0; i < ordered.length; i++) {
+    if (i > 0) tMs = Math.max(tMs + 1, Math.round(ordered[i]!.offMs));
+    timeline.push({ file: ordered[i]!.file, tMs });
+  }
+  const last = ordered[ordered.length - 1]!;
+  timeline.push({
+    file: last.file,
+    tMs: Math.max(tMs + 1, Math.round(endMs), Math.round(last.offMs + 1000 / fps)),
+  });
+  return timeline;
+}
+
 export async function encodeFrames(
   frames: Frame[],
   endMs: number,
@@ -578,28 +606,8 @@ export async function encodeFrames(
   ffmpegBin?: string,
 ): Promise<void> {
   if (frames.length === 0) throw new Error("open-take(hi-fps): no frames captured");
-  frames = [...frames].sort((a, b) => a.offMs - b.offMs);
+  const timeline = frameTimeline(frames, endMs, fps);
   const bin = ffmpegBin ?? (await resolveFfmpeg());
-  const dir = dirname(frames[0]!.file);
-  const listPath = join(dir, "frames.concat");
-
-  // Each frame is shown until the next arrives; the first is held back to t0
-  // so the video timeline starts where event timestamps do.
-  const lines: string[] = [];
-  const bounds = [
-    0,
-    ...frames.slice(1).map((f) => f.offMs),
-    Math.max(endMs, frames[frames.length - 1]!.offMs + 1000 / fps),
-  ];
-  for (let i = 0; i < frames.length; i++) {
-    const dur = Math.max(0.001, (bounds[i + 1]! - bounds[i]!) / 1000);
-    // Image demuxers otherwise use a 1/25s clock. Keep observed millisecond
-    // timing before the final CFR resample instead of quantizing it to 40ms.
-    lines.push(`file '${frames[i]!.file}'`, "option framerate 1000", `duration ${dur.toFixed(6)}`);
-  }
-  // concat demuxer ignores the final entry's duration unless the file repeats.
-  lines.push(`file '${frames[frames.length - 1]!.file}'`, "option framerate 1000");
-  writeFileSync(listPath, lines.join("\n"));
 
   const isWebm = /\.webm$/i.test(outPath);
   const codec = isWebm
@@ -628,11 +636,9 @@ export async function encodeFrames(
       "-loglevel",
       "error",
       "-f",
-      "concat",
-      "-safe",
-      "0",
+      "matroska",
       "-i",
-      listPath,
+      "pipe:0",
       "-vsync",
       "cfr",
       "-r",
@@ -644,18 +650,51 @@ export async function encodeFrames(
       ...codec,
       outPath,
     ];
-    const c = spawn(bin, args, { stdio: ["ignore", "ignore", "pipe"] });
+    const c = spawn(bin, args, { stdio: ["pipe", "ignore", "pipe"] });
     let err = "";
+    let feedErr: Error | undefined;
     c.stderr.on("data", (d) => {
       err += d;
     });
     c.on("error", reject);
-    c.on("close", (code) =>
-      code === 0
-        ? resolve()
-        : reject(new Error(`ffmpeg encode exited ${code}: ${err.slice(-800)}`)),
+    c.on("close", (code) => {
+      // ffmpeg's own words first: when it failed, its stderr says why (a bad
+      // output path, a full disk) and the pipe closing under the feeder is
+      // only the consequence. feedErr speaks when the feeder was the one that
+      // stopped things (a frame we could not read) and ffmpeg was killed.
+      if (code !== 0 && code !== null)
+        reject(new Error(`ffmpeg encode exited ${code}: ${err.slice(-800)}`));
+      else if (feedErr) reject(feedErr);
+      else if (code === 0) resolve();
+      else reject(new Error(`ffmpeg encode killed: ${err.slice(-800)}`));
+    });
+    // ffmpeg quitting early surfaces as EPIPE on the pipe; nothing to do here
+    // beyond keeping it from throwing — `close` above reports the cause.
+    c.stdin.on("error", () => {});
+    feedStdin(c.stdin, mjpegMatroska(timeline)).then(
+      () => c.stdin.end(),
+      (e: Error) => {
+        // A frame we could not read or parse: stop ffmpeg rather than leave it
+        // waiting on a stream that will never finish.
+        feedErr = e;
+        c.kill("SIGKILL");
+      },
     );
   });
+}
+
+/** Write chunks respecting backpressure. The pipe dying underneath us (ffmpeg
+ *  exited) simply ends the feed — the process exit explains itself; only the
+ *  source throwing (a frame that cannot be read) rejects. */
+async function feedStdin(stdin: Writable, chunks: AsyncIterable<Buffer>): Promise<void> {
+  for await (const chunk of chunks) {
+    if (stdin.destroyed || stdin.writableEnded) return;
+    try {
+      if (!stdin.write(chunk)) await once(stdin, "drain");
+    } catch {
+      return; // EPIPE / stream error: ffmpeg is gone
+    }
+  }
 }
 
 /** A throwaway temp dir for the screencast's per-frame JPEGs. */

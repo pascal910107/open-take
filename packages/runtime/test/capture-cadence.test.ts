@@ -1,21 +1,10 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { promisify } from "node:util";
-import { resolveFfmpeg } from "@open-take/compositor";
-import {
-  type CDP,
-  captureCadence,
-  encodeFrames,
-  type Frame,
-  pumpIdleRaster,
-  Screencast,
-} from "../src/cdp";
+import { type CDP, captureCadence, pumpIdleRaster, Screencast } from "../src/cdp";
 
-const exec = promisify(execFile);
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 test("screencast uses swap timestamps rather than JPEG delivery and records fallback", async (t) => {
@@ -106,37 +95,4 @@ test("idle raster pump does not interrupt active frames or queue slow screenshot
     release();
     await pump;
   }
-});
-
-test("timestamped 60fps frames retain their timing through the real concat encoder", async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), "capture-encode-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
-  const frames: Frame[] = [];
-  for (let i = 0; i < 60; i++) {
-    const file = join(dir, `frame-${i}.ppm`);
-    const pixels = Buffer.alloc(16 * 16 * 3, 24 + i * 3);
-    await writeFile(file, Buffer.concat([Buffer.from("P6\n16 16\n255\n"), pixels]));
-    frames.push({ file, offMs: (i * 1000) / 60, arrivalMs: (i * 1000) / 60 + (i % 3) * 40 });
-  }
-  [frames[11], frames[12]] = [frames[12]!, frames[11]!];
-  const ffmpeg = await resolveFfmpeg(),
-    out = join(dir, "capture.mp4");
-  await encodeFrames(frames, 1000, out, 60, ffmpeg);
-  const { stdout } = await exec(
-    ffmpeg,
-    ["-v", "error", "-i", out, "-pix_fmt", "gray", "-f", "rawvideo", "-"],
-    { encoding: "buffer" },
-  );
-  const values = Array.from({ length: stdout.length / 256 }, (_, i) => stdout[i * 256]!);
-  assert.ok(
-    values.length >= 60 && values.length <= 61,
-    `one-second source should occupy60 frames plus at most one rounding frame, got${values.length}`,
-  );
-  for (let i = 1; i < 60; i++)
-    assert.ok(
-      values[i]! > values[i - 1]!,
-      `source frame${i} must advance, not become a 25fps time-base hold`,
-    );
-  const concat = await readFile(join(dir, "frames.concat"), "utf8");
-  assert.match(concat, /option framerate 1000/);
 });

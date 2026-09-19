@@ -3,8 +3,9 @@
 // encode libvpx-vp9.
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { test } from "node:test";
-import { ffmpegHasEncoder, parseEncoders } from "../src/ffmpeg.js";
+import { ffmpegHasEncoder, parseEncoders, resolveBundledFfmpeg } from "../src/ffmpeg.js";
 
 const ENCODERS_EXCERPT = `Encoders:
  V..... = Video
@@ -45,4 +46,14 @@ test("ffmpegHasEncoder: the resolved ffmpeg has libx264", async () => {
 
 test("ffmpegHasEncoder: a made-up encoder is false", async () => {
   assert.equal(await ffmpegHasEncoder("definitely-not-an-encoder"), false);
+});
+
+test("resolveBundledFfmpeg: the installer's binary for this platform runs, and is never the PATH one", async () => {
+  const bundled = await resolveBundledFfmpeg();
+  if (!bundled) return; // no @ffmpeg-installer build for this platform
+  assert.notEqual(bundled, "ffmpeg", "a concrete path into node_modules, not the PATH lookup");
+  assert.match(bundled, /ffmpeg-installer/);
+  const r = spawnSync(bundled, ["-version"], { encoding: "utf8" });
+  assert.equal(r.status, 0);
+  assert.match(r.stdout, /^ffmpeg version /);
 });

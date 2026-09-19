@@ -52,17 +52,27 @@ export async function repairBundledMediaPermissions(): Promise<void> {
   await Promise.all(paths.map(ensureExecutable));
 }
 
+/** The ffmpeg every consumer has even with nothing on PATH: the
+ *  @ffmpeg-installer build for this platform (an old 4.x, and the floor any
+ *  ffmpeg invocation must clear). Null when the tree has no binary for this
+ *  platform. Tests run against it so a flag or directive the developer's
+ *  newer system ffmpeg accepts cannot ship untried on the zero-config path. */
+export async function resolveBundledFfmpeg(): Promise<string | null> {
+  const p = await installerPath("@ffmpeg-installer/ffmpeg");
+  await ensureExecutable(p);
+  return p && runsOk(p) ? p : null;
+}
+
 export async function resolveFfmpeg(): Promise<string> {
   if (cachedFfmpeg) return cachedFfmpeg;
   if (runsOk("ffmpeg")) {
     cachedFfmpeg = "ffmpeg";
     return cachedFfmpeg;
   }
-  const p = await installerPath("@ffmpeg-installer/ffmpeg");
-  await ensureExecutable(p);
-  if (p && runsOk(p)) {
-    cachedFfmpeg = p;
-    return p;
+  const bundled = await resolveBundledFfmpeg();
+  if (bundled) {
+    cachedFfmpeg = bundled;
+    return bundled;
   }
   throw new Error(
     "ffmpeg not found — install it (e.g. `brew install ffmpeg`) or `npm install` so the bundled @ffmpeg-installer binary resolves for this platform",
