@@ -44,6 +44,7 @@ import {
   makeFrameDir,
   pumpIdleRaster,
   Screencast,
+  waitUntil,
 } from "./cdp";
 import { resolveNavigateUrl } from "./nav";
 import { PrecheckRefusal, precheckPlan } from "./precheck";
@@ -597,8 +598,18 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
         } else {
           const perChar = Math.round(step.perCharMs ?? auto);
           for (const ch of chars) {
+            const painted = screencast.frames.length,
+              sentAt = Date.now();
             await cdp.send("Input.insertText", { text: ch });
-            await sleep(perChar);
+            // One character per painted frame. A fixed sleep after insertText let a
+            // slow re-render batch several characters into one paint and then stall:
+            // the recording showed 17–350 ms between visible characters for a 45 ms
+            // budget, i.e. typing that stutters. Wait for the page's own swap first,
+            // bounded so a surface that stops painting cannot hang the take, then
+            // spend whatever is left of the per-character budget.
+            await waitUntil(() => screencast.frames.length > painted, Math.max(perChar, 250));
+            const rest = perChar - (Date.now() - sentAt);
+            if (rest > 0) await sleep(rest);
           }
         }
         events.push({

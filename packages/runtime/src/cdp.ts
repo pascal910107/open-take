@@ -660,3 +660,19 @@ export async function encodeFrames(
 
 /** A throwaway temp dir for the screencast's per-frame JPEGs. */
 export const makeFrameDir = (): string => mkdtempSync(join(tmpdir(), "open-take-frames-"));
+
+/** Poll `ready` every few milliseconds until it is true or `timeoutMs` has passed.
+ * Resolves true when the condition was met, false on timeout. Used to pace work
+ * by something the page did (a painted frame) instead of by a blind timer. */
+export async function waitUntil(
+  ready: () => boolean,
+  timeoutMs: number,
+  stepMs = 4,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (!ready()) {
+    if (Date.now() >= deadline) return false;
+    await new Promise((r) => setTimeout(r, stepMs));
+  }
+  return true;
+}
