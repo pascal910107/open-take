@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -19,4 +19,14 @@ test("the packaged renderer uses puppeteer-core and its own client", async () =>
   assert.match(plugin, /@open-take\/revideo-renderer\/dist\/client\/render/);
   assert.equal(pkg.dependencies.puppeteer, undefined);
   assert.equal(pkg.dependencies["puppeteer-core"], "25.4.0");
+});
+
+test("the silent audio track bypasses fluent-ffmpeg's -formats check (FFmpeg ≥ 7 lists lavfi as a device)", async () => {
+  const server = await readFile(resolve(root, "dist/server/render-video.js"), "utf8");
+  assert.match(
+    server,
+    /Object\.assign\(\{\}, require\("@revideo\/ffmpeg"\), require\("\.\/silent-audio"\)\)/,
+  );
+  const { createSilentAudioFile } = await import(resolve(root, "dist/server/silent-audio.js"));
+  assert.equal(typeof createSilentAudioFile, "function");
 });

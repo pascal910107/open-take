@@ -51,4 +51,46 @@ await replaceOnce(
     "                console.log(`Worker ${id}: ${msg.args()[i]}`);\n" +
     "            }",
 );
+// The silent audio track revideo synthesises for a scene without sound goes
+// through fluent-ffmpeg, whose capability check parses `ffmpeg -formats` with
+// a two-column regex; FFmpeg ≥ 7 prints a third column for devices (" D d
+// lavfi"), so the check misreads the name and refuses "-f lavfi" on every
+// current ffmpeg ("Input format lavfi is not available"). Spawn ffmpeg
+// directly for that one file — same arguments, same output, no capability
+// lookup — through the path revideo was configured with.
+await writeFile(
+  join(out, "server", "silent-audio.js"),
+  `"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.createSilentAudioFile = createSilentAudioFile;
+const child_process_1 = require("node:child_process");
+const ffmpeg_1 = require("@revideo/ffmpeg");
+function createSilentAudioFile(filePath, duration) {
+    return new Promise((resolve, reject) => {
+        const args = [
+            "-y",
+            "-loglevel", ffmpeg_1.ffmpegSettings.getLogLevel(),
+            "-f", "lavfi",
+            "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+            "-t", String(duration),
+            filePath,
+        ];
+        const child = (0, child_process_1.spawn)(ffmpeg_1.ffmpegSettings.getFfmpegPath(), args, { stdio: ["ignore", "ignore", "pipe"] });
+        let stderr = "";
+        child.stderr.on("data", (d) => { stderr += d; });
+        child.on("error", reject);
+        child.on("close", (code) => code === 0
+            ? resolve(filePath)
+            : reject(new Error(\`ffmpeg (silent audio) exited \${code}: \${stderr.slice(-800)}\`)));
+    });
+}
+`,
+);
+// Both call sites (the multi-worker collector and the single-worker path)
+// reach it through the module object, so swap the one binding.
+await replaceOnce(
+  join(out, "server", "render-video.js"),
+  'const ffmpeg_1 = require("@revideo/ffmpeg");',
+  'const ffmpeg_1 = Object.assign({}, require("@revideo/ffmpeg"), require("./silent-audio"));',
+);
 await rm(join(out, "server", "tsconfig.tsbuildinfo"), { force: true });
