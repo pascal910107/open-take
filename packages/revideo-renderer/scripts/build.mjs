@@ -93,4 +93,14 @@ await replaceOnce(
   'const ffmpeg_1 = require("@revideo/ffmpeg");',
   'const ffmpeg_1 = Object.assign({}, require("@revideo/ffmpeg"), require("./silent-audio"));',
 );
+// revideo forces `--single-process` onto every Chrome it launches. Chrome
+// ≥ 152 on Linux crashes at startup under that flag (a CHECK trap before the
+// first CDP command answers — "Target closed" in puppeteer), which took the
+// Linux render down on GitHub's runners and in Docker; the flag buys nothing
+// the render needs. Leave the argv as the caller built it.
+await replaceOnce(
+  join(out, "server", "render-video.js"),
+  "    if (!args.includes('--single-process')) {\n        args.push('--single-process');\n    }\n",
+  "",
+);
 await rm(join(out, "server", "tsconfig.tsbuildinfo"), { force: true });

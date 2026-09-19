@@ -68,6 +68,9 @@ jobs:
       - run: pnpm test:package
       - name: Render smoke
         if: runner.os == 'Linux'
+        # a failed render used to leave vite's dev server alive and the step
+        # hanging for the job's full six hours
+        timeout-minutes: 10
         run: |
           chrome_path="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium)"
           OPEN_TAKE_E2E_CHROME="$chrome_path" pnpm --filter @open-take/compositor test:render-smoke
