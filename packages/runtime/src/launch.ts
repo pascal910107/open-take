@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import {
   analyzeLaunchStory,
   analyzeMotionQuality,
@@ -206,7 +206,9 @@ export async function composeLaunchFile(
   visitLaunchAssets(composition, (asset) => {
     const source = resolve(briefDir, asset);
     sourceAssets.push(source);
-    return relative(outputDir, source);
+    // the composition travels: forward slashes on every platform (resolve()
+    // reads them back fine on Windows; the renderer serves them as URLs)
+    return relative(outputDir, source).split(sep).join("/");
   });
   const protectedInputs = [brief, ...sourceAssets];
   if (protectedInputs.some((source) => sameArtifact(output, source))) {

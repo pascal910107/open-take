@@ -571,10 +571,15 @@ export async function pumpIdleRaster(
 // --- encode timestamped frames -> video --------------------------------
 // The frames go to ffmpeg as an MJPEG Matroska stream over stdin, each block
 // stamped with the millisecond Chrome swapped it (mjpeg-matroska.ts explains
-// why not a concat list). `-vsync cfr -r <fps>` then resamples that real
+// why not a concat list). `-fps_mode cfr -r <fps>` then resamples that real
 // wall-clock pacing onto a constant grid the web/MP4 decoders downstream read
 // cleanly (static stretches naturally hold one frame). Codec follows the
 // output extension so the file stays honest (.webm→vp9, else h264).
+//
+// Every flag here must clear FFMPEG_FLOOR *and* the newest release: `-vsync`
+// (deprecated 5.1) is gone in 9.0, and the scale filter's colour-matrix names
+// became an enum in 7.0 that knows `bt601` but not the `bt470bg` alias the
+// older string matcher accepted — both found by the managed-build test leg.
 
 /** Where each frame sits on the video's clock, in whole milliseconds. The
  *  first frame is pulled back to 0 so the video timeline starts where event
@@ -625,7 +630,7 @@ export async function encodeFrames(
   // primaries+transfer labels scale leaves unspecified, so all four are explicit.
   const colorConvert = isWebm
     ? ""
-    : ":in_range=full:in_color_matrix=bt470bg:out_range=tv:out_color_matrix=bt709";
+    : ":in_range=full:in_color_matrix=bt601:out_range=tv:out_color_matrix=bt709";
   const colorLabel = isWebm
     ? ""
     : ",setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709";
@@ -639,7 +644,7 @@ export async function encodeFrames(
       "matroska",
       "-i",
       "pipe:0",
-      "-vsync",
+      "-fps_mode",
       "cfr",
       "-r",
       String(fps),
