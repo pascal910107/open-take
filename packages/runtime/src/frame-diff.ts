@@ -17,8 +17,8 @@
 // behaviour) and `annotateCaptureLog` never throws.
 
 import { spawn } from "node:child_process";
-import { resolveFfmpeg } from "@open-take/compositor";
 import type { BBox, CaptureLog } from "@open-take/compositor";
+import { resolveFfmpeg } from "@open-take/compositor";
 
 // Analysis raster: frames are decoded grayscale at ~ANALYSIS_W wide. 16px cells
 // on that raster (≈32px at 1080p) are the change unit — coarse enough that
@@ -50,18 +50,94 @@ const AMBIENT_MS = 250;
 /** keep this much clearance before the NEXT action so its changes are never
  *  attributed to this one (ms). */
 const NEXT_CLEARANCE_MS = 60;
+/** changed regions whose boxes sit within this many cells of each other are
+ *  one region (a field and the results that open a margin below it); regions
+ *  further apart are distinct, so a toolbar button's highlight at the top of
+ *  the page and a hint line at the bottom are never boxed together — the
+ *  union's centre points at nothing. */
+const MERGE_GAP_CELLS = 2;
 /** a box-less event (bare press) only gets an effectBox when the change is at
  *  least this big — a blinking terminal cursor must not become a phantom
  *  punch target on an event that used to mean "full view". */
 const MIN_NO_BOX_COVERAGE = 0.015;
 
 export type FrameDiffResult = {
-  /** fraction of the frame's cells that changed (0..1) */
+  /** fraction of the frame's cells that changed (0..1) — ALL regions */
   coverage: number;
-  /** bbox of the changed region in ANALYSIS-raster px, or undefined when
-   *  nothing beyond isolated specks changed */
+  /** bbox of the DOMINANT changed region (most changed cells; nearest the
+   *  anchor on a tie) in ANALYSIS-raster px, or undefined when nothing
+   *  beyond isolated specks changed */
   box?: BBox;
+  /** every distinct changed region, largest first (raster px), each with its
+   *  own share of the frame's cells */
+  regions: { box: BBox; coverage: number }[];
 };
+
+type Region = { cells: number; x0: number; y0: number; x1: number; y1: number };
+
+/** empty cells between two regions' boxes along the axis they are furthest
+ *  apart on (0 when they touch or overlap) */
+function regionGap(a: Region, b: Region): number {
+  const dx = Math.max(a.x0 - b.x1 - 1, b.x0 - a.x1 - 1, 0);
+  const dy = Math.max(a.y0 - b.y1 - 1, b.y0 - a.y1 - 1, 0);
+  return Math.max(dx, dy);
+}
+
+/** Group kept cells into regions: 8-connected components, then components
+ *  whose boxes lie within MERGE_GAP_CELLS of one another are one region. */
+function regionsOf(kept: Uint8Array, cw: number, ch: number): Region[] {
+  const seen = new Uint8Array(kept.length);
+  const regions: Region[] = [];
+  for (let start = 0; start < kept.length; start++) {
+    if (!kept[start] || seen[start]) continue;
+    const region: Region = { cells: 0, x0: cw, y0: ch, x1: -1, y1: -1 };
+    const stack = [start];
+    seen[start] = 1;
+    while (stack.length) {
+      const i = stack.pop()!;
+      const cx = i % cw;
+      const cy = (i - cx) / cw;
+      region.cells++;
+      if (cx < region.x0) region.x0 = cx;
+      if (cy < region.y0) region.y0 = cy;
+      if (cx > region.x1) region.x1 = cx;
+      if (cy > region.y1) region.y1 = cy;
+      for (let dy = -1; dy <= 1; dy++)
+        for (let dx = -1; dx <= 1; dx++) {
+          const nx = cx + dx;
+          const ny = cy + dy;
+          if (nx < 0 || ny < 0 || nx >= cw || ny >= ch) continue;
+          const n = ny * cw + nx;
+          if (kept[n] && !seen[n]) {
+            seen[n] = 1;
+            stack.push(n);
+          }
+        }
+    }
+    regions.push(region);
+  }
+  // merge near neighbours until nothing is within reach of anything else
+  for (let merged = true; merged; ) {
+    merged = false;
+    for (let a = 0; a < regions.length && !merged; a++)
+      for (let b = a + 1; b < regions.length; b++) {
+        const ra = regions[a]!;
+        const rb = regions[b]!;
+        if (regionGap(ra, rb) > MERGE_GAP_CELLS) continue;
+        regions[a] = {
+          cells: ra.cells + rb.cells,
+          x0: Math.min(ra.x0, rb.x0),
+          y0: Math.min(ra.y0, rb.y0),
+          x1: Math.max(ra.x1, rb.x1),
+          y1: Math.max(ra.y1, rb.y1),
+        };
+        regions.splice(b, 1);
+        merged = true;
+        break;
+      }
+  }
+  return regions;
+}
 
 /** per-cell changed-pixel counts of |before−after| > PIXEL_DELTA (symmetric —
  *  appearing light-on-dark content matters as much as dark-on-light). */
@@ -96,6 +172,13 @@ function cellCounts(a: Uint8Array, b: Uint8Array, w: number, h: number): Uint16A
  * two white-ish pages repaints most of the frame while leaving most PIXELS
  * white-on-white, and it's the affected region the director's pull-out
  * threshold reasons about.
+ *
+ * `box` is the DOMINANT region, not the union of everything that changed: an
+ * action often touches two places at once (the control's own active state
+ * plus a hint line or status readout far away), and the union of a top
+ * toolbar and a bottom hint is a tall box whose centre sits on empty canvas.
+ * The region with the most changed cells is what the action was about; on a
+ * tie the one nearest `anchor` (the acted-on element, raster px) wins.
  */
 export function diffFrames(
   before: Uint8Array,
@@ -103,6 +186,7 @@ export function diffFrames(
   w: number,
   h: number,
   ambient?: Uint8Array,
+  anchor?: { x: number; y: number },
 ): FrameDiffResult {
   const cw = Math.ceil(w / CELL);
   const ch = Math.ceil(h / CELL);
@@ -118,11 +202,8 @@ export function diffFrames(
     counts[cy * cw + cx]! >= minCount &&
     (!ambientCounts || ambientCounts[cy * cw + cx]! < minCount);
 
-  let kept = 0;
-  let x0 = cw;
-  let y0 = ch;
-  let x1 = -1;
-  let y1 = -1;
+  const kept = new Uint8Array(cw * ch);
+  let keptCount = 0;
   for (let cy = 0; cy < ch; cy++) {
     for (let cx = 0; cx < cw; cx++) {
       if (!changed(cx, cy)) continue;
@@ -136,22 +217,30 @@ export function diffFrames(
           }
         }
       if (!neighbour) continue; // isolated speck
-      kept++;
-      if (cx < x0) x0 = cx;
-      if (cy < y0) y0 = cy;
-      if (cx > x1) x1 = cx;
-      if (cy > y1) y1 = cy;
+      kept[cy * cw + cx] = 1;
+      keptCount++;
     }
   }
-  if (kept === 0) return { coverage: 0 };
+  if (keptCount === 0) return { coverage: 0, regions: [] };
+
+  const toBox = (r: Region): BBox => ({
+    x: r.x0 * CELL,
+    y: r.y0 * CELL,
+    w: Math.min((r.x1 + 1) * CELL, w) - r.x0 * CELL,
+    h: Math.min((r.y1 + 1) * CELL, h) - r.y0 * CELL,
+  });
+  const distToAnchor = (r: Region): number => {
+    if (!anchor) return 0;
+    const b = toBox(r);
+    return Math.hypot(b.x + b.w / 2 - anchor.x, b.y + b.h / 2 - anchor.y);
+  };
+  const regions = regionsOf(kept, cw, ch).sort(
+    (a, b) => b.cells - a.cells || distToAnchor(a) - distToAnchor(b),
+  );
   return {
-    coverage: kept / (cw * ch),
-    box: {
-      x: x0 * CELL,
-      y: y0 * CELL,
-      w: Math.min((x1 + 1) * CELL, w) - x0 * CELL,
-      h: Math.min((y1 + 1) * CELL, h) - y0 * CELL,
-    },
+    coverage: keptCount / (cw * ch),
+    box: toBox(regions[0]!),
+    regions: regions.map((r) => ({ box: toBox(r), coverage: r.cells / (cw * ch) })),
   };
 }
 
@@ -252,11 +341,14 @@ export async function annotateCaptureLog(
         wantAmbient ? grabFrame(bin, videoPath, ambientT, aw, ah) : Promise.resolve(undefined),
       ]);
       if (!fa || !fb) continue;
-      const d = diffFrames(fa, fb, aw, ah, fc);
+      const box = "box" in e && e.box != null ? e.box : undefined;
+      const anchor = box ? { x: (box.x + box.w / 2) / mx, y: (box.y + box.h / 2) / my } : undefined;
+      const d = diffFrames(fa, fb, aw, ah, fc, anchor);
       // a box-less event (bare press) only gets an effectBox for a substantial
-      // change — else a blinking cursor becomes a phantom punch target
-      const hasBox = "box" in e && e.box != null;
-      const attachBox = d.box && (hasBox || d.coverage >= MIN_NO_BOX_COVERAGE);
+      // change — else a blinking cursor becomes a phantom punch target. Judged
+      // on the region that would BE the box, not the frame's total: three
+      // scattered slivers add up without any one of them being a target.
+      const attachBox = d.box && (box || (d.regions[0]?.coverage ?? 0) >= MIN_NO_BOX_COVERAGE);
       events[i] = {
         ...e,
         changeCoverage: Math.round(d.coverage * 1000) / 1000,
@@ -283,6 +375,10 @@ export async function annotateCaptureLog(
         process.stderr.write(
           `frame-diff [${i}] ${e.kind ?? "click"}@${e.tMs}ms coverage=${events[i]!.changeCoverage}${
             eb ? ` effect=(${eb.x},${eb.y} ${eb.w}x${eb.h})` : ""
+          }${
+            eb && d.regions.length > 1
+              ? ` (+${d.regions.length - 1} smaller region${d.regions.length > 2 ? "s" : ""} elsewhere)`
+              : ""
           }${subThreshold}\n`,
         );
       }

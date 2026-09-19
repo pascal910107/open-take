@@ -35,10 +35,13 @@ export type CaptureEventBase = {
    *  cut the beat out of any cluster — an override is a segment boundary). */
   zoom?: ZoomIntent;
   /** CAPTURE-DERIVED (frame-diff / mutation pass — the `effectBox` seam): the
-   *  region that actually CHANGED after the action, viewport CSS px. The
-   *  director frames THIS over `box` when present — a `type`'s result region, or
-   *  a payoff that lands somewhere other than where you clicked. Absent ⇒ the
-   *  director shapes an ROI from `box`/kind instead. */
+   *  region that actually CHANGED after the action, viewport CSS px — the
+   *  DOMINANT one when the action changed several disjoint places (a control's
+   *  own active state plus a hint line far away), never their union, whose
+   *  centre would sit on nothing. The director frames THIS over `box` when
+   *  present — a `type`'s result region, or a payoff that lands somewhere other
+   *  than where you clicked. Absent ⇒ the director shapes an ROI from
+   *  `box`/kind instead. */
   effectBox?: BBox;
   /** CAPTURE-DERIVED (same pass): fraction of the frame that changed after the
    *  action, 0..1. ≥ camera.pullOutCoverage ⇒ the action repainted most of the

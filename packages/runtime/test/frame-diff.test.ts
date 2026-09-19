@@ -8,8 +8,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { resolveFfmpeg } from "@open-take/compositor";
 import type { CaptureLog } from "@open-take/compositor";
+import { resolveFfmpeg } from "@open-take/compositor";
 import { annotateCaptureLog, diffFrames } from "../src/frame-diff";
 
 const frame = (w: number, h: number, fill: number): Uint8Array => new Uint8Array(w * h).fill(fill);
@@ -99,9 +99,9 @@ test("diffFrames: ambient motion (third frame) is masked out of the diff", () =>
   assert.ok(masked.box, "payoff found");
   assert.ok(masked.box!.x >= 192, `hero excluded (x ${masked.box!.x})`);
   assert.ok(masked.coverage < 0.1, `coverage only counts the payoff (${masked.coverage})`);
-  // without the ambient frame the hero poisons the union — this is the point
+  // without the ambient frame the hero out-votes the payoff — this is the point
   const poisoned = diffFrames(pre, post, w, h);
-  assert.ok(poisoned.box!.x === 0, "control: unmasked union includes the hero");
+  assert.ok(poisoned.box!.x === 0, "control: unmasked, the hero is the dominant region");
 });
 
 test("diffFrames: box clamps to true frame bounds when w/h aren't cell multiples", () => {
@@ -114,6 +114,57 @@ test("diffFrames: box clamps to true frame bounds when w/h aren't cell multiples
   assert.ok(d.box, "corner region found");
   assert.equal(d.box!.x + d.box!.w, w, "right edge clamped to the frame");
   assert.equal(d.box!.y + d.box!.h, h, "bottom edge clamped to the frame");
+});
+
+test("diffFrames: disjoint changes → one region, never their union (toolbar + hint)", () => {
+  // A 1888×1024 video on the 960-wide raster. Clicking a tool button at the
+  // top highlights it AND swaps a hint line at the bottom centre; the union
+  // of the two is a full-height strip whose centre (944,512) is empty canvas —
+  // the reported "zoom centre on nothing". The seam's job is to report real
+  // regions; which of them is worth a shot is the director's call
+  // (camera.ts: a far sliver never pulls the camera off the control).
+  const w = 960;
+  const h = 521;
+  const a = frame(w, h, 240);
+  const b = frame(w, h, 240);
+  paint(b, w, 418, 10, 438, 30, 40); // the button's active state (2×2 cells)
+  paint(b, w, 418, 503, 542, 515, 40); // the hint text (8 cells wide, straddling 2 rows)
+  const d = diffFrames(a, b, w, h);
+  assert.equal(d.regions.length, 2, "two distinct regions");
+  for (const r of d.regions)
+    assert.ok(r.box.h <= 32, `each region is its own height, never the full strip (h ${r.box.h})`);
+  assert.ok(d.box!.h <= 32 && d.box!.y >= 496, "the box is the larger region (the hint), whole");
+  assert.ok(d.regions[1]!.box.y === 0, "the button's own change is reported too");
+  // total coverage still counts everything (the pull-out rule reads it), and
+  // each region knows its own share (the box-less gate reads that)
+  assert.equal(Math.round(d.coverage * 60 * 33), 4 + 16, "all changed cells counted");
+  assert.equal(Math.round(d.regions[0]!.coverage * 60 * 33), 16);
+  assert.equal(Math.round(d.regions[1]!.coverage * 60 * 33), 4);
+});
+
+test("diffFrames: regions a small margin apart are one region (field + its results)", () => {
+  const w = 320;
+  const h = 192;
+  const a = frame(w, h, 230);
+  const b = frame(w, h, 230);
+  paint(b, w, 64, 32, 192, 48, 20); // the field lights up
+  paint(b, w, 64, 80, 192, 160, 20); // results open two cell rows below it
+  const d = diffFrames(a, b, w, h);
+  assert.equal(d.regions.length, 1, "merged across the margin");
+  assert.ok(d.box!.y <= 32 && d.box!.y + d.box!.h >= 160, "box spans field and results");
+});
+
+test("diffFrames: equal regions → the one nearest the anchor (acted-on element) wins", () => {
+  const w = 320;
+  const h = 192;
+  const a = frame(w, h, 230);
+  const b = frame(w, h, 230);
+  paint(b, w, 16, 16, 48, 48, 20); // top-left
+  paint(b, w, 256, 128, 288, 160, 20); // bottom-right, same size
+  const near = diffFrames(a, b, w, h, undefined, { x: 270, y: 140 });
+  assert.ok(near.box!.x >= 256, "anchored bottom-right → bottom-right region");
+  const far = diffFrames(a, b, w, h, undefined, { x: 20, y: 20 });
+  assert.ok(far.box!.x <= 16, "anchored top-left → top-left region");
 });
 
 const LOG: CaptureLog = {

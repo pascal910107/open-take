@@ -316,3 +316,78 @@ test("look: the named target outranks a noisy effectBox — nothing happened, so
     `camera centers the NAMED box, not the ambient diff (got x=${look.zoom.center.x})`,
   );
 });
+
+test("a far sliver of change (a hint line) does not pull the camera off the clicked control", () => {
+  // A tool button in a top toolbar; selecting it also swaps a one-line hint
+  // at the bottom centre. The hint is the bigger change but no shot: at the
+  // camera's tightest zoom it fills a fraction of the frame. Framing it would
+  // put the click itself off-frame — the control is the subject.
+  const button = { x: 822, y: 20, w: 40, h: 40 };
+  const hint = { x: 818, y: 975, w: 252, h: 49 };
+  const e = planComposition(
+    bareLog([
+      {
+        kind: "click",
+        x: 842,
+        y: 40,
+        box: button,
+        effectBox: hint,
+        tMs: 2600,
+        changeCoverage: 0.01,
+      },
+    ]),
+    { output: { fps: 60 } },
+  ).events[0]!;
+  assert.equal(e.zoom.enabled, true, "the click still earns a punch");
+  assert.ok(e.zoom.center.y < 100, `centred on the button, not the hint (y ${e.zoom.center.y})`);
+  assert.match(
+    e.zoom.reason,
+    /framed the control/,
+    "the reason says why the effect was not framed",
+  );
+});
+
+test("a far but substantial change (a modal) is still the payoff the camera frames", () => {
+  const button = { x: 822, y: 20, w: 40, h: 40 };
+  const modal = { x: 660, y: 340, w: 600, h: 400 };
+  const e = planComposition(
+    bareLog([
+      {
+        kind: "click",
+        x: 842,
+        y: 40,
+        box: button,
+        effectBox: modal,
+        tMs: 2600,
+        changeCoverage: 0.12,
+      },
+    ]),
+    { output: { fps: 60 } },
+  ).events[0]!;
+  assert.equal(e.zoom.enabled, true);
+  assert.ok(
+    Math.abs(e.zoom.center.x - 960) < 2 && Math.abs(e.zoom.center.y - 540) < 2,
+    "centred on the modal",
+  );
+});
+
+test("a change touching the control (a menu opening under it) is framed with it", () => {
+  const button = { x: 822, y: 20, w: 40, h: 40 };
+  const menu = { x: 822, y: 60, w: 240, h: 300 }; // opens right under the button
+  const e = planComposition(
+    bareLog([
+      {
+        kind: "click",
+        x: 842,
+        y: 40,
+        box: button,
+        effectBox: menu,
+        tMs: 2600,
+        changeCoverage: 0.04,
+      },
+    ]),
+    { output: { fps: 60 } },
+  ).events[0]!;
+  assert.equal(e.zoom.enabled, true);
+  assert.ok(e.zoom.center.y > 150, `centred on the menu (y ${e.zoom.center.y})`);
+});

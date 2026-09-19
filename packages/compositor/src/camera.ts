@@ -34,7 +34,7 @@ export type Beat = {
   /** element bbox (for a drag: the path's bbox), video-px — or undefined for a
    *  bare press (no located element). */
   box?: BBox;
-  /** the region that actually changed after the action (frame-diff seam),
+  /** the dominant region that changed after the action (frame-diff seam),
    *  video-px. Framed over `box` when present. */
   effectBox?: BBox;
   /** fraction of the frame that changed after the action, 0..1. */
@@ -80,10 +80,19 @@ function growDown(box: BBox, video: { w: number; h: number }): BBox {
   return { x: box.x, y: box.y, w: box.w, h };
 }
 
+const intersects = (a: BBox, b: BBox): boolean =>
+  a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+
 /** The region a beat is "about" — what the camera should frame. A type is
  *  field-anchored and height-capped (its reveal is open-ended); every other
- *  kind trusts the captured effect region, else shapes one from the bbox. */
-function roiForBeat(b: Beat, video: { w: number; h: number }): BBox | undefined {
+ *  kind trusts the captured effect region, else shapes one from the bbox.
+ *  `fillsFrame` says whether a region is big enough to be a shot of its own
+ *  (see the effectBox branch). */
+function roiForBeat(
+  b: Beat,
+  video: { w: number; h: number },
+  fillsFrame: (roi: BBox) => boolean,
+): { roi?: BBox; note?: string } {
   // A press with an EXPLICIT zoom=always + a located reveal element: the
   // author named exactly what to frame — that box outranks the frame-diff
   // effectBox. A press payoff behind a scrim (modal / command palette) diffs
@@ -92,12 +101,12 @@ function roiForBeat(b: Beat, video: { w: number; h: number }): BBox | undefined 
   // somewhere else entirely (issue #8). click/hover keep effectBox preference:
   // there the payoff usually lands AWAY from the element, which is the whole
   // point of the frame-diff seam.
-  if (b.kind === "press" && b.intent === "always" && b.box) return b.box;
+  if (b.kind === "press" && b.intent === "always" && b.box) return { roi: b.box };
   // A look names exactly what to frame — that IS the beat. Nothing happened on
   // the page, so any effectBox is neighbouring noise (an animation, a ticking
   // number), and preferring it would aim the "show the viewer this" camera at
   // something else entirely.
-  if (b.kind === "look" && b.box) return b.box;
+  if (b.kind === "look" && b.box) return { roi: b.box };
   if (b.kind === "type" && b.box) {
     // Bound the frame to "field + top of results": keep the effectBox's real
     // reveal WIDTH, but cap the HEIGHT to growDown's result-sized window so an
@@ -111,13 +120,27 @@ function roiForBeat(b: Beat, video: { w: number; h: number }): BBox | undefined 
       // (a rare upward-opening autocomplete) can't yield a zero/negative ROI —
       // we then simply frame the field, never punch into the vacated space above.
       const h = Math.max(b.box.h, Math.min(capH, bottom - b.box.y));
-      return { x, y: b.box.y, w: right - x, h };
+      return { roi: { x, y: b.box.y, w: right - x, h } };
     }
-    return growDown(b.box, video);
+    return { roi: growDown(b.box, video) };
   }
-  if (b.effectBox) return b.effectBox;
-  if (!b.box) return undefined;
-  return b.box;
+  if (b.effectBox) {
+    // A change too small to fill the frame even at the camera's tightest zoom
+    // is not a shot of its own — a hint line, a badge, a toast. When it also
+    // lies away from the control, framing it would swing the camera onto a
+    // sliver of the page and leave the click itself off-frame; the control is
+    // the honest subject, exactly as for the tiny incidental effectBox on a
+    // press (issue #8). A change that touches the control (its own active
+    // state, a menu opening under it) or that is large enough to be a shot
+    // (a modal, a results panel) is the payoff and is framed as before.
+    if (b.box && !intersects(b.effectBox, b.box) && !fillsFrame(b.effectBox))
+      return {
+        roi: b.box,
+        note: "effect region is a far sliver (fills no frame at maxScale) → framed the control",
+      };
+    return { roi: b.effectBox };
+  }
+  return { roi: b.box };
 }
 
 function clusterLabel(beats: Beat[], idx: number[]): string {
@@ -159,10 +182,17 @@ export function directCamera(
 ): Framing[] {
   const restC: Pt = { x: video.w / 2, y: video.h / 2 };
   const fit = (roi: BBox) => bboxFitScale(roi, out.w, out.h, cam.fillFrac, cam.maxScale, rest);
+  // a region is a shot when, at the tightest zoom the camera takes, it still
+  // fills the frame's fillFrac in at least one dimension
+  const fillsFrame = (roi: BBox) =>
+    Math.min(
+      (out.w * cam.fillFrac) / Math.max(1, roi.w),
+      (out.h * cam.fillFrac) / Math.max(1, roi.h),
+    ) <= cam.maxScale;
 
   // --- phase 1: per-beat ROI + hard-break classification ---------------------
   const nodes: Node[] = beats.map((b, i) => {
-    const roi = roiForBeat(b, video);
+    const { roi, note } = roiForBeat(b, video, fillsFrame);
     const scale = roi ? fit(roi) : rest;
     const gapBreak =
       i > 0 && b.tMs - (beats[i - 1]!.tMs + beats[i - 1]!.durationMs) > cam.coalesceWindowMs;
@@ -279,7 +309,7 @@ export function directCamera(
       forceFull: false,
       forcePunch: false,
       boundary: gapBreak,
-      reason: `punch ${scale.toFixed(2)}× (ROI-fit)`,
+      reason: `punch ${scale.toFixed(2)}× (ROI-fit)${note ? ` · ${note}` : ""}`,
     };
   });
 
