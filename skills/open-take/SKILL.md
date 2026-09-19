@@ -235,6 +235,14 @@ the app's signature moment; make the wow the hero, not an afterthought.
   full-res capture frame (`ffmpeg -ss <t> -i <base>.take/capture.mp4 -frames:v 1
   -vf scale=<viewportW>:<viewportH> f.png`) — that frame is in viewport px, the
   same space `zoom.center` uses.
+- **A small control whose payoff is elsewhere.** Clicking a toolbar tool
+  (Rectangle, Pen) changes the button and often a hint or status line far
+  away; the real payoff is the *next* beat on the canvas. The auto-camera
+  now stays on the control rather than framing a far sliver, but the honest
+  choices are still yours: `zoom: "never"` on the tool click and let the
+  drag/canvas beat carry the zoom, or a `look` at the canvas region after it.
+  A hand-set `zoom.center`/`scale` on the beat overrides whatever the
+  frame-diff found.
 - Restraint reads as intentional. Reserve zoom for the beats that earn it; many
   great demos are 0-zoom. Don't add a zoom for "variety."
 
@@ -747,11 +755,13 @@ inside it, or a directory holding exactly one take — and resolves the rest. Pa
 `demo.mp4`; that is the name a user knows.
 
 After the capture, `make` frame-diffs the recording around every action and
-writes what each one actually changed into the log (`effectBox` — the changed
-region; `changeCoverage` — how much of the frame it touched). The auto-camera
-frames the PAYOFF region rather than just the clicked control (a search's
-results, a preview that swaps elsewhere) and pulls out to full view on global
-repaints (nav / restyle). Fully automatic; you never write these fields.
+writes what each one actually changed into the log (`effectBox` — the largest
+changed region, never a union of disjoint ones; `changeCoverage` — how much of
+the frame changed in total). The auto-camera frames the PAYOFF region rather
+than just the clicked control (a search's results, a preview that swaps
+elsewhere), stays on the control when the change is a far sliver (a hint
+line, a badge), and pulls out to full view on global repaints (nav /
+restyle). Fully automatic; you never write these fields.
 **`changeCoverage: 0` (or a missing `effectBox`) does NOT mean the beat did
 nothing** — a subtle effect (a 1px outline, a low-opacity highlight) diffs
 below the threshold and is often visually fine. The annotation steers the
@@ -1075,6 +1085,9 @@ loop is yours to drive, and it is bounded:
 - A Chrome to drive: open-take auto-downloads **Chrome-for-Testing** on first
   run (cached under `~/.open-take/browsers`), or set `OPEN_TAKE_CHROME` to a
   Chrome binary. (No agent-browser needed — capture is pure CDP.)
-- `ffmpeg`/`ffprobe`: system binaries if present, else the bundled
-  `@ffmpeg-installer`/`@ffprobe-installer` platform binaries resolve
-  automatically (frame extraction for SHOW still wants a system `ffmpeg`).
+- `ffmpeg`/`ffprobe`: handled like Chrome — the system binaries are used when
+  they are ffmpeg ≥ 6.0; otherwise open-take downloads a pinned static build
+  once (cached under `~/.open-take/ffmpeg`, ~20–30 MB, progress on stderr).
+  `OPEN_TAKE_FFMPEG`/`OPEN_TAKE_FFPROBE` force a binary. The `ffmpeg -ss`
+  frame extraction in SHOW wants a system `ffmpeg` on PATH, or use the
+  downloaded one at `~/.open-take/ffmpeg/<release>/<platform>/ffmpeg`.

@@ -31,8 +31,9 @@ import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { renderVideo } from "@open-take/revideo-renderer";
 import { isCaptureUndecodable } from "./decode-guard";
-import { ffmpegHasEncoder, repairBundledMediaPermissions, resolveFfmpeg } from "./ffmpeg";
+import { ffmpegHasEncoder, resolveFfmpeg, resolveFfprobe } from "./ffmpeg";
 import { type PlanOpts, planComposition } from "./plan";
+import { withRenderLock } from "./render-lock";
 import {
   type CaptureLog,
   type MotionBlurConfig,
@@ -40,7 +41,6 @@ import {
   type TakeComposition,
 } from "./types";
 import { type CompositionIssue, formatIssues, validateComposition } from "./validate";
-import { withRenderLock } from "./render-lock";
 
 // dist/index.js -> package root
 const PKG_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -350,10 +350,9 @@ async function renderTakeExclusive(opts: RenderTakeOpts): Promise<RenderTakeResu
       ? ([composition.startMs / 1000, composition.durationMs / 1000 + 120] as [number, number])
       : undefined);
 
-  // Revideo spawns its bundled ffprobe directly. Repair installer permissions
-  // here so published consumers are protected even though they do not run the
-  // monorepo root's postinstall script.
-  await repairBundledMediaPermissions();
+  // Revideo's exporter spawns ffmpeg/ffprobe itself and would default to the
+  // binaries its own dependency bundles (an old 4.x); point it at ours.
+  const ffmpeg = { ffmpegPath: await resolveFfmpeg(), ffprobePath: await resolveFfprobe() };
 
   // 1. lay out this render's own directory (scene + composition + capture).
   //    The intermediate starts as H.264; the decode-guard retry below swaps
@@ -386,6 +385,7 @@ async function renderTakeExclusive(opts: RenderTakeOpts): Promise<RenderTakeResu
             outFile: "take.mov",
             outDir: RENDER_OUT,
             workers: 1,
+            ffmpeg,
             // ProRes 4444 intermediate, NOT revideo's default wasm exporter: the
             // wasm path encodes H.264 in-browser via WebCodecs at the browser's
             // default bitrate (mp4-wasm passes `bitrate: undefined`, and revideo

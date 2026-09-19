@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { renderVideo } from "@open-take/revideo-renderer";
-import { repairBundledMediaPermissions, resolveFfmpeg, resolveFfprobe } from "./ffmpeg";
+import { resolveFfmpeg, resolveFfprobe } from "./ffmpeg";
 import { launchAudioAtS, launchDurationS } from "./launch-evaluate";
 import type { LaunchAudioTrack, LaunchComposition, LaunchIssue } from "./launch-types";
 import { formatLaunchIssues, validateLaunchComposition } from "./launch-validate";
@@ -876,7 +876,9 @@ async function renderExclusive(opts: RenderLaunchOpts): Promise<RenderLaunchResu
   const out = resolve(opts.outPath);
   await mkdir(dirname(out), { recursive: true });
   assertLaunchOutputSafe(opts.composition, opts.compositionPath, out);
-  await repairBundledMediaPermissions();
+  // Revideo's exporter spawns ffmpeg/ffprobe itself and would default to the
+  // binaries its own dependency bundles (an old 4.x); point it at ours.
+  const ffmpeg = { ffmpegPath: await resolveFfmpeg(), ffprobePath: await resolveFfprobe() };
   const { dir, rendered } = await prepare(opts.composition, opts.compositionPath, !!opts.draft);
   const deps = depsRoot();
   const prev = process.cwd();
@@ -888,6 +890,7 @@ async function renderExclusive(opts: RenderLaunchOpts): Promise<RenderLaunchResu
         outFile: "launch.mov",
         outDir: "out-render",
         workers: 1,
+        ffmpeg,
         projectSettings: {
           // Revideo exports both range endpoints; cap the last frame explicitly
           // instead of including its extra scene-completion frames.

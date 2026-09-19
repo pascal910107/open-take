@@ -15,7 +15,14 @@ export {
   predictCursorTips,
 } from "./audit-cursor";
 export { type Beat, directCamera, type Framing } from "./camera";
-export { resolveBundledFfmpeg, resolveFfmpeg, resolveFfprobe } from "./ffmpeg";
+export {
+  FFMPEG_FLOOR,
+  FFMPEG_RELEASE,
+  resolveFfmpeg,
+  resolveFfprobe,
+  resolveManagedFfmpeg,
+  resolveManagedFfprobe,
+} from "./ffmpeg";
 export {
   evaluateUiMorph,
   launchAudioAtS,

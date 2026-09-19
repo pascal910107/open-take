@@ -20,24 +20,43 @@ pnpm build
 Two things `pnpm install` does that are worth knowing about:
 
 - It runs a root `postinstall` (`scripts/fix-node-pty-perms.mjs`) that chmods
-  `+x` onto node-pty's `spawn-helper` and the bundled ffmpeg/ffprobe binaries.
-  pnpm 10's tarball extraction does not reliably preserve the executable bit,
-  and without it capture dies in `posix_spawnp` and renders die with `EACCES`.
-  It is idempotent — re-run it whenever an install looks half-applied.
-- It does **not** download a browser (`.puppeteerrc.cjs` skips it). Open Take
-  fetches its own Chrome for Testing into `~/.open-take/browsers` the first
-  time you actually record something.
+  `+x` onto node-pty's `spawn-helper` (and the ffmpeg/ffprobe binaries
+  revideo's own dependency carries). pnpm 10's tarball extraction does not
+  reliably preserve the executable bit, and without it capture dies in
+  `posix_spawnp`. It is idempotent — re-run it whenever an install looks
+  half-applied.
+- It does **not** download a browser (`.puppeteerrc.cjs` skips it) or an
+  ffmpeg. Open Take fetches its own Chrome for Testing into
+  `~/.open-take/browsers`, and its own ffmpeg/ffprobe into `~/.open-take/ffmpeg`,
+  the first time something actually needs them.
 
 ### ffmpeg
 
-Optional, recommended. `resolveFfmpeg()` prefers `ffmpeg`/`ffprobe` on PATH and
-falls back to the bundled `@ffmpeg-installer` / `@ffprobe-installer` binaries,
-so the repo works without them. CI installs system ffmpeg, so PATH binaries are
-what the gates actually run against.
+Handled like Chrome. `resolveFfmpeg()`/`resolveFfprobe()`
+(`packages/compositor/src/ffmpeg.ts`) use the `ffmpeg`/`ffprobe` on PATH when
+they are at least `FFMPEG_FLOOR` (6.0 — the oldest of the builds we test on),
+and otherwise fetch a pinned static build (release `FFMPEG_RELEASE` of
+eugeneware/ffmpeg-static, sha256-verified) into `~/.open-take/ffmpeg` once.
+`OPEN_TAKE_FFMPEG` / `OPEN_TAKE_FFPROBE` force a binary. Nothing is bundled in
+the npm package.
+
+The managed build is what a zero-config install runs, so the gates run on
+**both** the resolved binary and the managed one (`resolveManagedFfmpeg()`;
+see `everyFfmpeg()` in `packages/runtime/test/mjpeg-matroska.test.ts`) — a
+flag your newer system ffmpeg accepts cannot ship untried. 0.5.0/0.5.1 rendered
+nothing on machines without a system ffmpeg for exactly that reason. To see
+what a consumer without ffmpeg sees, hide yours:
+
+```sh
+PATH=$(echo "$PATH" | tr ':' '\n' | grep -v -E 'homebrew|/usr/local/bin' | paste -sd: -) \
+  node --test --import tsx/esm test/*.test.ts
+```
+
+A system ffmpeg is still the faster path on a dev machine:
 
 ```sh
 brew install ffmpeg        # macOS
-sudo apt install ffmpeg    # Debian/Ubuntu
+sudo apt install ffmpeg    # Debian/Ubuntu (24.04 ships 6.1; 22.04's 4.4 is below the floor)
 choco install ffmpeg       # Windows
 ```
 

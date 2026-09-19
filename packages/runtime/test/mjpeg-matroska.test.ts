@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import test from "node:test";
 import { promisify } from "node:util";
-import { resolveBundledFfmpeg, resolveFfmpeg, resolveFfprobe } from "@open-take/compositor";
+import { resolveFfmpeg, resolveFfprobe, resolveManagedFfmpeg } from "@open-take/compositor";
 import { encodeFrames, type Frame, frameTimeline } from "../src/cdp";
 import { jpegDimensions, matroskaHead, mjpegMatroska } from "../src/mjpeg-matroska";
 
@@ -48,11 +48,12 @@ async function grayJpegs(dir: string, count: number, ffmpeg: string): Promise<st
 }
 
 /** Every ffmpeg the runtime may end up driving: whatever resolveFfmpeg picks
- *  (the developer's system binary, usually new) AND the bundled floor. */
+ *  (the developer's system binary, usually newer) AND the managed build a
+ *  zero-config install runs — the leg whose absence let 0.5.0 ship. */
 async function everyFfmpeg(): Promise<[string, string][]> {
   const bins: [string, string][] = [["resolved", await resolveFfmpeg()]];
-  const bundled = await resolveBundledFfmpeg();
-  if (bundled && bundled !== bins[0]![1]) bins.push(["bundled", bundled]);
+  const managed = await resolveManagedFfmpeg();
+  if (managed !== bins[0]![1]) bins.push(["managed", managed]);
   return bins;
 }
 

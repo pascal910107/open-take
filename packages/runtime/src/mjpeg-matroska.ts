@@ -5,12 +5,12 @@
 // whose clock ticks at 1/25 s, and it rounds every file's start time onto that
 // clock — frames at 0/17/50/62 ms come out 0/0/40/80 ms, i.e. the 25 Hz judder
 // 6978155 removed. The `option framerate 1000` directive that lifted the clock
-// only exists in FFmpeg ≥ 5.0; the bundled @ffmpeg-installer build (4.4 on
-// macOS, 2018/2019 snapshots on Linux and Windows) and Ubuntu 22.04's 4.4.2
-// die on it ("unknown keyword 'option'"), so every zero-config install
-// rendered nothing. Matroska carries the timestamp on each block, so every
-// ffmpeg version reads exactly the timing Chrome reported, and the decoder is
-// the same mjpeg decoder image2 would have reached (yuvj420p, full range, 601).
+// only exists in FFmpeg ≥ 5.0; the ffmpeg 4.4 that 0.5.0/0.5.1 bundled (and
+// Ubuntu 22.04's 4.4.2) died on it ("unknown keyword 'option'"), so every
+// zero-config install rendered nothing. Matroska carries the timestamp on each
+// block, so every ffmpeg version reads exactly the timing Chrome reported, and
+// the decoder is the same mjpeg decoder image2 would have reached (yuvj420p,
+// full range, 601).
 //
 // Only what libavformat needs is written: an EBML header, a Segment of unknown
 // size (so nothing has to be patched after the fact and the stream can go
