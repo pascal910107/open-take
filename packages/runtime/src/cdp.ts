@@ -360,9 +360,19 @@ function pidAlive(pid: number): boolean {
 // Chrome writes the chosen debugging port to <user-data-dir>/DevToolsActivePort
 // (line 1) once the listener is up. Polling that file is the race-free way to
 // learn a port-0 launch's actual port.
+//
+// How long to wait: a Chrome that has run before is up in well under a second,
+// but the FIRST launch of a freshly downloaded bundle is not — macOS validates
+// the whole bundle's code signature before it runs (measured 4.5 s on a fast
+// M-series Mac for Chrome for Testing 153; slower machines take longer), and
+// that is exactly the launch a new install's first `make` performs, right
+// after ensureChrome. A 5 s window turned that first run into a coin flip
+// ("timed out waiting for DevToolsActivePort", then the retry works). A
+// crashed Chrome still fails fast through exitCode; only a slow start waits.
+const DEVTOOLS_PORT_WAIT_MS = 30_000;
 async function readDevtoolsPort(userDir: string, proc: ChildProcess): Promise<number> {
   const file = join(userDir, "DevToolsActivePort");
-  for (let i = 0; i < 100; i++) {
+  for (let i = 0; i < DEVTOOLS_PORT_WAIT_MS / 50; i++) {
     if (proc.exitCode != null) throw new Error(`chrome exited early (${proc.exitCode})`);
     if (existsSync(file)) {
       const line = readFileSync(file, "utf8").split("\n")[0]?.trim();
@@ -371,7 +381,7 @@ async function readDevtoolsPort(userDir: string, proc: ChildProcess): Promise<nu
     }
     await sleep(50);
   }
-  throw new Error("timed out waiting for DevToolsActivePort");
+  throw new Error(`timed out waiting for DevToolsActivePort (${DEVTOOLS_PORT_WAIT_MS / 1000}s)`);
 }
 
 async function pageTargetWs(port: number): Promise<{ wsUrl: string; id: string }> {
