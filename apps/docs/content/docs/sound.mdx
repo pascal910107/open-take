@@ -1,0 +1,56 @@
+---
+title: Sound
+description: Foley from the event log — deterministic sound design for a take or a launch film, by open-foley.
+---
+
+A take is silent by default. Ask for sound and it is **scored from the same
+event log the camera uses**: a click per click, a keystroke per typed
+character, a whoosh that rides each camera move, a riser under a long typing
+window, a transition breath on a navigation, and — in a launch film — a payoff
+stack on the story's payoff beat.
+
+```sh
+open-take make --plan plan.json --out demos/myapp.mp4 --sound cinematic
+open-take render demos/myapp.mp4 --sound minimal     # change it; re-renders
+open-take render demos/myapp.mp4 --sound off
+open-take launch render launch-film/launch.json --sound cinematic
+```
+
+Nothing listens to the video. The composition already knows every moment to
+the millisecond, so placement is a table, not a guess, and the same take always
+mixes to the same bytes. This is [open-foley](https://www.npmjs.com/package/open-foley),
+published on its own — any timeline that can write an event sheet gets the
+same sound design.
+
+## Styles
+
+| style | language |
+| --- | --- |
+| `cinematic` | the motion-design reference: taps and keys under whooshes, a riser into a four-layer hit (pop · impact · boom · chime) |
+| `minimal` | interface sounds only — no sub, no riser; a small chime for the payoff |
+| `playful` | pops for every arrival, a bright payoff |
+
+`--sound` writes `sound: { style }` into the composition — the composition is
+the source of truth, so every later render (review copy, draft, A/B reel,
+master) carries the same sound. The cue sheet the render spotted lands beside
+it as `foley.cues.json`: every sound, its time, level, pan and seed. Edit a
+cue's `gainDb`, delete one, re-render.
+
+## Inside a launch film
+
+Footage inside a film is scored too: a `footage` scene or a motion `video`
+layer whose recording sits beside its asset (`demo.mp4` + `demo.take/`) gets
+its clicks and keystrokes at the right film time, trim and start offsets
+included. Point a layer at a recording elsewhere with `take: "path/to/capture.json"`.
+A `story` beat with `role: "payoff"` is the film's reveal — the one moment a
+timeline cannot tell from geometry alone.
+
+## Hearing before choosing
+
+```sh
+npx open-foley audition --out audition/
+```
+
+renders every role three ways, plus `all.wav` in order. Sound is judged by ear
+the way the picture is judged by eye — A/B a style, then keep the one that
+reads.

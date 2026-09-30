@@ -4,6 +4,7 @@
 // through viewport→video scaling), so the scene works in one coordinate
 // system.
 
+import type { SoundPalette } from "open-foley";
 export type Pt = { x: number; y: number };
 export type BBox = { x: number; y: number; w: number; h: number };
 
@@ -49,6 +50,17 @@ export type CaptureEventBase = {
    *  branch is skipped (the director can't tell nav from popover on bbox alone —
    *  it says so in the beat's `reason`). */
   changeCoverage?: number;
+  /** DOM STATES (opt-in `--states`): id of the state captured AFTER this
+   *  action settled — `<take>.take/states/<state>/` holds its `state.html` +
+   *  `index.json` (the page's live structure at that moment). Absent when the
+   *  take was made without states. */
+  state?: string;
+  /** DOM STATES: the element id (in the state captured BEFORE this action,
+   *  i.e. the previous event's `state`, or `s0`) whose box best matched this
+   *  action's `box` (IoU ≥ 0.5) — the control that was acted on, addressable
+   *  in that state's `index.json` / `data-ot-id`. Absent when no element
+   *  matched or the event carries no box. */
+  target?: string;
 };
 
 /** A click (or a type's focus-click): an instantaneous action at a point. */
@@ -213,6 +225,30 @@ export type CaptureLog = {
    *  beat's payoff had appeared, and `settleMs` is doing the whole job alone.
    *  Absent on an ordinary DOM app. */
   paintedFrac?: number;
+  /** DOM STATES (opt-in `--states`): the page's UI structure saved at every
+   *  settled moment — `s0` after the warmup, then one after each plan step's
+   *  final hold. `dir` is relative to the take's working dir (`states`); each
+   *  item has `states/<id>/state.html` (a self-contained, script-inert copy of
+   *  the live page), `index.json` (`DomStateIndex`: url, viewport, scroll, the
+   *  visible elements with boxes, the major layers) and `live.png` (the 1×
+   *  reference screenshot). `fidelity` scores the state's re-render against
+   *  that reference — `ok: false` means the film must use the video for this
+   *  moment. Absent when the take was made without states. */
+  states?: {
+    dir: string;
+    items: {
+      id: string;
+      /** capture timeline ms when it was taken */
+      tMs: number;
+      /** plan step index it follows (absent for s0) */
+      step?: number;
+      fidelity?: { psnr: number; diffFrac: number; ok: boolean };
+      /** the page was still moving at this moment (it never went quiet, and
+       *  its pixels moved): nothing was saved — reading a still of a moving
+       *  page would stall the app being filmed, and misrepresent the moment */
+      moving?: true;
+    }[];
+  };
 };
 
 // --- the composition (editable) ----------------------------------------
@@ -275,6 +311,22 @@ export type CompEvent = {
   files?: { name: string; size?: number }[];
   /** ghost-card rendering knobs (kind=dropFiles); absent ⇒ enabled defaults */
   ghostCard?: GhostCardConfig;
+  /** CAPTURE-DERIVED: fraction of the frame the action repainted, 0..1 —
+   *  carried from the log so a later pass (the sound design's `transition`)
+   *  can tell a navigation from a popover without re-reading the capture. */
+  changeCoverage?: number;
+};
+
+/** Sound design, by open-foley. Absent ⇒ silent (the default: audio is a
+ *  choice, never a surprise). `style` is a preset name — cinematic / minimal /
+ *  playful; `seed` varies the per-cue micro-variation. The cue sheet the
+ *  render spotted is written beside the composition as foley.cues.json. */
+export type SoundConfig = {
+  style: string;
+  seed?: number;
+  /** which vetted sound each role gets (open-foley palette); absent ⇒ the
+   *  default palette. Takes use its foley roles; music is for launch films. */
+  palette?: SoundPalette;
 };
 
 export type FramingConfig = {
@@ -526,6 +578,8 @@ export type TakeComposition = {
   captions?: Caption[];
   /** optional opening title card over the establishing hold (see TitleCard) */
   titleCard?: TitleCard;
+  /** optional sound design (see SoundConfig); absent ⇒ silent */
+  sound?: SoundConfig;
   /** render-time review decoration (badges/watermark/label); never persisted
    *  (render strips exactly this field — `captions` above deliberately IS
    *  persisted; it is content, not review scaffolding) */

@@ -509,6 +509,13 @@ export type CaptureOpts = {
    *  Default `DEFAULT_SETTLE_BUDGET_MS`; 0 restores the old fixed sleeps
    *  exactly. */
   settleBudgetMs?: number;
+  /** DOM STATES: save the page's UI structure at every settled moment (after
+   *  the warmup, then after each step's final hold) so a launch film can
+   *  re-render the real interface as live DOM — see runtime/src/dom-state.ts.
+   *  Read-only on the live page; costs a few hundred ms of take time per
+   *  state (reported). Lands in `states/` beside the capture video, and on
+   *  the log as `states` + per-event `state`/`target`. Default false. */
+  states?: boolean;
 };
 
 /** Drive `plan` against the live app over CDP, return the ground-truth log. */

@@ -2,13 +2,16 @@ import { Circle, Line, makeScene2D, Node, Rect, Txt, Video } from "@revideo/2d";
 import { createSignal, linear, tween } from "@revideo/core";
 import {
   evaluateUiMorph,
+  frameCentreS,
   launchEase,
   launchSceneWindows,
+  renderedMotionBlur,
+  sceneSampleS,
+  shutterClock,
   transitionOpacity,
-  frameCentreS,
-  quantizeToFrame,
 } from "../launch-evaluate";
 import comp from "./.launch-composition.json";
+import schedule from "./.launch-shutter.json";
 import { createMotionLayers } from "./motion-layers";
 
 const W = comp.output.width,
@@ -17,6 +20,7 @@ const sx = W / 1920,
   sy = H / 1080,
   k = Math.min(sx, sy);
 const windows = launchSceneWindows(comp);
+const blur = renderedMotionBlur(comp.output);
 const color = (scene, key) => scene.colors?.[key] ?? comp.theme[key];
 const bg = (scene) => (scene.background === "dark" ? color(scene, "dark") : color(scene, "canvas"));
 const fg = (scene) => (scene.background === "dark" ? color(scene, "canvas") : color(scene, "ink"));
@@ -93,6 +97,7 @@ function Icon({ icon, color, size }) {
 
 export default makeScene2D("launch", function* (view) {
   const t = createSignal(0);
+  const frame = createSignal(0);
   const sceneAt = () =>
     windows.find((item) => t() >= item.startS && t() < item.endS)?.scene ?? windows.at(-1).scene;
   view.add(<Rect width={W} height={H} fill={() => bg(sceneAt())} />);
@@ -101,6 +106,7 @@ export default makeScene2D("launch", function* (view) {
     const font = scene.colors?.fontFamily ?? comp.theme.fontFamily;
     const active = () => t() >= win.startS && t() < win.endS;
     const local = () => sceneLocal(t(), win);
+    const frameLocal = () => sceneLocal(frame(), win);
     const opacity = () => (active() ? transitionOpacity(scene, local()) : 0);
     const slide = () =>
       scene.motion !== "off" && scene.transition?.type === "slide"
@@ -168,7 +174,7 @@ export default makeScene2D("launch", function* (view) {
             time={() =>
               frameCentreS(
                 (scene.trimStartS ?? 0) +
-                  Math.max(0, Math.min(scene.durationS - 1 / comp.output.fps, local())),
+                  Math.max(0, Math.min(scene.durationS - 1 / comp.output.fps, frameLocal())),
                 comp.output.fps,
               )
             }
@@ -360,6 +366,7 @@ export default makeScene2D("launch", function* (view) {
         createMotionLayers({
           scene,
           localS: local,
+          frameLocalS: frameLocal,
           output: comp.output,
           theme: {
             ink: scene.colors?.ink ?? comp.theme.ink,
@@ -416,11 +423,23 @@ export default makeScene2D("launch", function* (view) {
     }
     view.add(root);
   }
-  // Snap the accumulated clock to the output frame grid so keyframes authored on
-  // a frame are reached on that frame, not the next.
+  // Snap the accumulated clock to the render grid so keyframes authored on a
+  // frame are reached on that frame, not the next. Under motion blur a moving
+  // frame is rendered several times at shutter offsets around it (averaged
+  // before delivery); `frame` stays on the output frame so footage never smears.
+  const clock = shutterClock(
+    schedule,
+    comp.output.fps,
+    blur?.shutter ?? 0.5,
+    Math.ceil(windows.at(-1).endS * comp.output.fps - 1e-9),
+  );
   yield* tween(
-    windows.at(-1).endS,
-    (v) => t(quantizeToFrame(v * windows.at(-1).endS, comp.output.fps)),
+    clock.renderFrames / clock.renderFps,
+    (v) => {
+      const at = clock.at(Math.min(clock.renderFrames - 1, Math.round(v * clock.renderFrames)));
+      frame(at.frameS);
+      t(sceneSampleS(windows, at.atS, at.frameS));
+    },
     linear,
   );
 });

@@ -27,11 +27,14 @@ import {
   composeLaunchFile,
   type Defect,
   type DefectReport,
+  describeSoundPalette,
+  describeTake,
   emitGithubOutputs,
   emitStepSummary,
   ensureChrome,
   formatIssues,
   formatNotes,
+  formatTakeStates,
   healingWithheld,
   initLaunchProject,
   inspectPage,
@@ -39,6 +42,7 @@ import {
   loadCaptureLogSibling,
   makeTake,
   openPath,
+  outlineState,
   type PostShootPass,
   PrecheckRefusal,
   profileDir,
@@ -58,6 +62,7 @@ import {
   revealPath,
   runPostShootGates,
   SAY_IT_CARD,
+  SOUND_STYLES,
   settleDefects,
   skippedDefects,
   stagePrev,
@@ -95,6 +100,8 @@ const BOOL_FLAGS = new Set([
   "--dry-run",
   "--skip-permissions",
   "--no-teaser",
+  "--states",
+  "--json",
 ]);
 
 const argv = process.argv.slice(2);
@@ -145,8 +152,11 @@ const FLAGS_BY_CMD: Record<string, string[]> = {
     "--profile",
     "--headed",
     "--verbose",
+    "--sound",
+    "--states",
   ],
   render: [
+    "--sound",
     "--review",
     "--draft",
     "--open",
@@ -161,6 +171,7 @@ const FLAGS_BY_CMD: Record<string, string[]> = {
   ],
   check: ["--no-strict", "--verbose"],
   beats: ["--card"],
+  states: ["--state", "--json"],
   frames: ["--beat", "--tile", "--open", "--verbose"],
   ab: ["--set", "--beat", "--full", "--draft", "--before-after", "--no-open", "--verbose"],
   edit: ["--port", "--no-open"],
@@ -187,10 +198,11 @@ const FLAGS_BY_CMD: Record<string, string[]> = {
     "--dry-run",
     "--no-teaser",
     "--verbose",
+    "--states",
   ],
   init: ["--force"],
   skill: ["--force"],
-  launch: ["--video", "--out", "--draft", "--verbose"],
+  launch: ["--video", "--out", "--draft", "--verbose", "--sound"],
 };
 
 function rejectUnknownFlags(cmd: string): void {
@@ -206,6 +218,31 @@ function rejectUnknownFlags(cmd: string): void {
   }
 }
 
+/** `--sound <style>` — a preset name, or `off`. Validated here so a typo
+ *  fails before a capture, not after a render. */
+function parseSound(v: string | undefined): string | undefined {
+  if (v == null || v === "off" || v === "none") return undefined;
+  if (!(v in SOUND_STYLES))
+    throw new Error(
+      `--sound ${v}: unknown style — one of ${Object.keys(SOUND_STYLES).join(", ")}, or off`,
+    );
+  return v;
+}
+
+/** Write `sound` into a composition file (take or launch) — or delete it for
+ *  `off`. The composition is the source of truth; the flag is a way to edit it. */
+async function setCompositionSound(compositionPath: string, value: string): Promise<void> {
+  const style = parseSound(value);
+  const raw = JSON.parse(await readFile(compositionPath, "utf8")) as Record<string, unknown>;
+  if (style)
+    raw.sound = { ...(typeof raw.sound === "object" && raw.sound ? raw.sound : {}), style };
+  else delete raw.sound;
+  await writeFile(compositionPath, JSON.stringify(raw, null, 2));
+  process.stdout.write(
+    style ? `sound: ${style} (written to ${compositionPath})\n` : `sound: off\n`,
+  );
+}
+
 function parseViewport(s?: string): { width: number; height: number } | undefined {
   if (!s) return undefined;
   const [w, h] = s.toLowerCase().split("x").map(Number);
@@ -216,10 +253,11 @@ const USAGE = `open-take — agent-native demo recorder
 
 Usage:
   open-take inspect <url> [--viewport 1920x1080]
-  open-take make   --plan <plan.json> --out <out.mp4> [--fps 60] [--draft] [--no-open]
-  open-take render <take> [--review] [--draft] [--open] [--reveal] [--no-open] [--no-strict]
+  open-take make   --plan <plan.json> --out <out.mp4> [--fps 60] [--draft] [--no-open] [--sound <style>]
+  open-take render <take> [--review] [--draft] [--open] [--reveal] [--no-open] [--no-strict] [--sound <style>|off]
   open-take check  <take> [--no-strict]
   open-take beats  <take> [--card]
+  open-take states <take> [--state <id>] [--json]
   open-take frames <take> [--beat N] [--tile 720]
   open-take ab     <take> --set <knob>=<v1>,<v2>[,<v3>] [--beat N] [--full] [--draft] [--no-open]
   open-take ab     <take> --before-after [--beat N] [--full] [--no-open]
@@ -232,7 +270,7 @@ Usage:
   open-take launch init <directory> --video <existing.mp4>
   open-take launch compose <brief.json> --out <launch.json>
   open-take launch check <launch.json>
-  open-take launch render <launch.json> [--out <movie.mp4>] [--draft]
+  open-take launch render <launch.json> [--out <movie.mp4>] [--draft] [--sound <style>|off]
   open-take skill  [motion | install [--force]]
 
   A take is TWO things on disk: the postable master at exactly your --out path
@@ -270,6 +308,10 @@ Usage:
           --draft renders a clean draft copy to draft.mp4 (30fps cap +
           motion blur off, no badges) — the cheap re-render for frame checks
           mid-refine; never overwrites the master. Does not auto-open.
+          --sound <style> scores the take from its own event log (open-foley:
+          cinematic | minimal | playful; off removes it) — written into the
+          composition, so every later render keeps it. Which sound each role
+          gets is sound.palette in the composition (see \`sound palette\`).
           (legacy flags --composition/--video/--out/--capture-log still work)
   check   judge an existing take without rendering anything: re-run the
           post-shoot gates against the delivered master (cursor audit · dead
@@ -285,6 +327,18 @@ Usage:
 
   beats   print the numbered beat sheet — the shared map for notes like
           "beat 3: no zoom". --card appends the say-it cheat card.
+  states  what a \`make --states\` recording saved: its states s0..sN (the page
+          after the warmup, then after every step) with the actions a1..aN
+          between them — what each action hit, what it changed in the page (a
+          card that appeared, a number that changed, a box that moved) and
+          where pixels changed (a canvas or style change no element shows).
+          The map a launch film is written from: actions are named a<N>,
+          elements per state (s3:e32 — the same button has another id in
+          another state). A state whose saved page does not match the
+          recording is marked FIDELITY FAILED; the film uses the video there.
+          --state <id> outlines one state instead: its regions, the cards a
+          film could lift out, and every control and text with its box.
+          --json prints the same as data.
   frames  extract a beat-aware contact sheet (<take>/frames.png) from the
           delivered mp4: an intro row, one row per beat (a mid-travel cell +
           4 samples across the beat's camera HOLD, timed off the real camera
@@ -401,6 +455,10 @@ Usage:
   skill   print the full agent guide (SKILL.md); \`skill motion\` prints the
           motion composition reference. \`skill install\` remains as a
           backwards-compatible alias for \`init\`.
+  sound palette
+          list the vetted sounds per role (what each feels like, which is the
+          default) and the music options — choose them in the composition's
+          sound.palette.
 
   --out <path>   (make) where the postable master goes — taken literally, and
               its <name>.take/ working dir is created beside it. Default
@@ -409,6 +467,15 @@ Usage:
               fast drafts while iterating.
   --capture-scale <n>   (make/ci) capture pixel density (default 2 — Retina;
               keeps zooms sharp). Drop to 1 if a heavy page can't hold fps.
+  --states    (make/ci) also save the page's UI STRUCTURE at every settled
+              moment (after the warmup, then after each step) into
+              <name>.take/states/ — a self-contained state.html + index.json
+              per moment, so a launch film can re-render the real interface
+              as live, vector-crisp DOM (lift the clicked button, split the
+              page into its regions, zoom without blur). Read-only on the app;
+              adds a few hundred ms of take time per state (reported). Each
+              state is fidelity-checked against a live screenshot; one that
+              fails stays on disk but the film uses the video there.
   --no-strict (make/render/check) exit 0 even when plan steps were skipped
               (target not found, or a navigate destination that didn't
               resolve) or a post-shoot check found an error (mis-drawn cursor,
@@ -744,6 +811,7 @@ async function main() {
         throw new Error(
           "launch render: --video is not accepted; footage paths come from launch.json",
         );
+      if (has("--sound")) await setCompositionSound(target, flag("--sound")!);
       const result = await renderLaunchFile({
         compositionPath: target,
         outPath: flag("--out"),
@@ -849,6 +917,7 @@ async function main() {
       ...(agentTimeoutS != null ? { agentTimeoutMs: agentTimeoutS * 1000 } : {}),
       fps,
       captureScale,
+      states: has("--states"),
       allowedTools: flag("--allowed-tools"),
       allowedOrigins: flag("--allowed-origins"),
       skipPermissions: has("--skip-permissions"),
@@ -941,6 +1010,7 @@ async function main() {
     // repair loop defects that are already fixed (resolveTakePaths is a pure
     // string transform; the master need not exist)
     const takePre = await resolveTakePaths(out).catch(() => null);
+    const soundStyle = parseSound(flag("--sound"));
     const planIssues = lintPlan(parsedPlan);
     {
       const planErrors = planIssues.filter((i) => i.severity === "error");
@@ -997,6 +1067,7 @@ async function main() {
     const captureScale = scaleFlag ? Number(scaleFlag) : undefined;
     const profile = flag("--profile");
     const headed = has("--headed");
+    const states = has("--states");
     // a re-make (re-shoot) is a new generation: keep the old master as prev so
     // --before-after compares against the take the user just reacted to — and
     // keep the old COMPOSITION too: a re-make re-plans from the new capture, so
@@ -1015,6 +1086,7 @@ async function main() {
         logProgress: true,
         verbose: has("--verbose"),
         draft: has("--draft"),
+        ...(soundStyle ? { planOpts: { sound: { style: soundStyle } } } : {}),
         // progressive reveal: the capture exists minutes before the polished
         // mp4 — show the raw footage the moment it lands so the wait is spent
         // watching, not staring at a spinner.
@@ -1024,13 +1096,14 @@ async function main() {
           );
           if (!has("--no-open")) openPath(p);
         },
-        ...(fps || captureScale || profile || headed
+        ...(fps || captureScale || profile || headed || states
           ? {
               capture: {
                 ...(fps ? { fps } : {}),
                 ...(captureScale ? { captureScale } : {}),
                 ...(profile ? { userDataDir: profileDir(profile) } : {}),
                 ...(headed ? { headless: false } : {}),
+                ...(states ? { states: true } : {}),
               },
             }
           : {}),
@@ -1287,6 +1360,9 @@ async function main() {
     const takeArg = positional[0];
     if (!takeArg) throw new Error("render: missing <take> (its .mp4, its .take/ dir, or a dir)");
     const take = await resolveTakePaths(takeArg);
+    // --sound edits the take's composition (the source of truth) and then
+    // renders whichever copy was asked for; every later render keeps it.
+    if (has("--sound")) await setCompositionSound(take.compositionPath, flag("--sound")!);
 
     if (has("--review")) {
       const { reviewPath, sheet, warnings } = await renderReview(take, { logProgress: true });
@@ -1557,6 +1633,22 @@ async function main() {
     return;
   }
 
+  if (cmd === "states") {
+    const takeArg = positional[0];
+    if (!takeArg) throw new Error("states: missing <take> (its .mp4, its .take/ dir, or a dir)");
+    const take = await resolveTakePaths(takeArg);
+    // reads capture.json + states/<id>/index.json; a take made without
+    // --states has neither and gets told so
+    const data = describeTake(take.dir);
+    const state = flag("--state");
+    if (has("--json"))
+      process.stdout.write(
+        `${JSON.stringify(state ? outlineState(data, state) : data, null, 2)}\n`,
+      );
+    else process.stdout.write(`${formatTakeStates(data, state ? { state } : {})}\n`);
+    return;
+  }
+
   if (cmd === "ab") {
     const takeArg = positional[0];
     if (!takeArg) throw new Error("ab: missing <take>");
@@ -1606,6 +1698,13 @@ async function main() {
       if (!text) throw new Error("Motion reference not found (re-run the package build)");
       process.stdout.write(text);
     }
+    return;
+  }
+
+  if (cmd === "sound") {
+    if (positional[0] !== "palette") throw new Error("sound: expected `palette`");
+    process.stdout.write(`${describeSoundPalette()}
+`);
     return;
   }
 

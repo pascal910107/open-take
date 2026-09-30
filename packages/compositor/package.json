@@ -14,7 +14,8 @@
     "dist",
     "src/**/*.ts",
     "src/**/*.tsx",
-    "src/scene/tsconfig.json"
+    "src/scene/tsconfig.json",
+    "dist-browser"
   ],
   "scripts": {
     "build": "tsdown",
@@ -28,7 +29,8 @@
     "@revideo/2d": "0.11.0",
     "@revideo/core": "0.11.0",
     "@revideo/ui": "0.11.0",
-    "@revideo/vite-plugin": "0.11.0"
+    "@revideo/vite-plugin": "0.11.0",
+    "open-foley": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.10.1",

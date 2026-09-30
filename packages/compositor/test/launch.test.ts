@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
-import test from "node:test";
 import { join } from "node:path";
+import test from "node:test";
 import {
   evaluateUiMorph,
   launchAudioAtS,
   launchDurationS,
   launchSceneWindows,
   launchTemplate,
-  uiStateDurationS,
   uiMorphDurationS,
+  uiStateDurationS,
   validateLaunchComposition,
 } from "../src/index";
 

@@ -16,10 +16,12 @@
 // action needs a re-capture, not a JSON edit. Pass the capture log to enforce
 // this; without it the check is skipped (we can't know the ground truth).
 
+// the browser-safe entry: the editor bundles this validator
+import { validatePalette } from "open-foley/palette";
 import { buildLegs, buildStageKeyframes, cameraRampSchedule, restStageScale } from "./math";
 import { CLAMP_TOL_MS, MOTION, motionName } from "./presets";
-import { DEFAULT_CURSOR } from "./types";
 import type { CaptureLog, TakeComposition } from "./types";
+import { DEFAULT_CURSOR } from "./types";
 
 /** Tail past the last beat's settle that still reads as "the shot breathing".
  *  Beyond it the delivered mp4 is a frozen screen — the padded-to-25s failure. */
@@ -617,8 +619,36 @@ export function validateComposition(
       );
   }
 
+  if (comp.sound !== undefined) {
+    if (
+      typeof comp.sound !== "object" ||
+      comp.sound === null ||
+      typeof comp.sound.style !== "string" ||
+      !comp.sound.style.trim()
+    )
+      err(
+        "sound.style",
+        "sound needs a style preset name",
+        "set sound.style to cinematic, minimal or playful — or delete sound for a silent take",
+      );
+    else if (comp.sound.seed !== undefined && !Number.isInteger(comp.sound.seed))
+      err("sound.seed", "sound.seed must be an integer", "use a whole number, or delete seed");
+    else
+      for (const m of validatePalette(comp.sound.palette)) {
+        const cut = m.indexOf(":");
+        err(
+          cut > 0 ? `sound.${m.slice(0, cut)}` : "sound.palette",
+          cut > 0 ? m.slice(cut + 1).trim() : m,
+          "pick an approved entry — `open-foley palette` lists them — or delete it for the default",
+        );
+      }
+  }
   if (comp.titleCard && !comp.titleCard.title?.trim())
-    err("titleCard.title", "empty title on a title card", "give it the app/thesis line, or delete titleCard");
+    err(
+      "titleCard.title",
+      "empty title on a title card",
+      "give it the app/thesis line, or delete titleCard",
+    );
 
   // --- CAPTURE-LOCKED: action tMs must match the recording ---
   // The video is temporal: a beat's tMs is WHEN it is visible in the capture.

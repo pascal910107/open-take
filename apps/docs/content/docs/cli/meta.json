@@ -5,6 +5,7 @@
     "make",
     "render",
     "check",
+    "states",
     "review-tools",
     "edit-notes",
     "auth"

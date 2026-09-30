@@ -819,6 +819,8 @@ test("quality ignores intentional offscreen entrances and handles parent transfo
           keyframes: [
             { atS: 0, value: -3000 },
             { atS: 0.5, value: 100 },
+            // the camera never rests: a slow drift through the hold
+            { atS: 4, value: 112 },
           ],
         },
       ],

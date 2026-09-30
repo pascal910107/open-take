@@ -15,7 +15,8 @@
 // way; changing the choreography (what's clicked/typed, beat order) needs a
 // fresh makeTake (the video is temporal — see validateComposition).
 
-import { copyFile, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { copyFile, cp, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
@@ -39,7 +40,9 @@ export {
   auditCursor,
   type CaptureLog,
   type CompositionIssue,
+  describeSoundPalette,
   formatIssues,
+  SOUND_STYLES,
   type TakeComposition,
   validateComposition,
 } from "@open-take/compositor";
@@ -78,6 +81,31 @@ export {
   startApp,
   waitForHttp,
 } from "./ci";
+export {
+  asDefects,
+  buildDefectReport,
+  DEFECTS_CLOSE,
+  DEFECTS_OPEN,
+  type Defect,
+  type DefectGate,
+  type DefectReport,
+  type GateIssue,
+  renderDefectBlock,
+  settleDefects,
+  skippedDefects,
+} from "./defect-report";
+export {
+  buildRestoreScript,
+  comparePixels,
+  convertMhtml,
+  DOM_STATE_PROBE_JS,
+  type DomStateElement,
+  type DomStateFidelity,
+  type DomStateIndex,
+  type DomStateProbe,
+  matchTarget,
+  parseMhtml,
+} from "./dom-state";
 export { type EditServerOpts, startEditServer } from "./edit-server";
 export {
   type AnnotateOpts,
@@ -116,19 +144,6 @@ export {
 } from "./post-shoot";
 export { type PrecheckIssue, PrecheckRefusal, planTargets, precheckPlan } from "./precheck";
 export {
-  type Defect,
-  type DefectGate,
-  type DefectReport,
-  type GateIssue,
-  DEFECTS_CLOSE,
-  DEFECTS_OPEN,
-  asDefects,
-  buildDefectReport,
-  renderDefectBlock,
-  settleDefects,
-  skippedDefects,
-} from "./defect-report";
-export {
   type AbOpts,
   beatLabel,
   buildBadges,
@@ -143,6 +158,22 @@ export {
   SAY_IT_CARD,
   toDraft,
 } from "./review";
+export {
+  type ActionSummary,
+  type ActionTarget,
+  describeTake,
+  type FormatOpts,
+  formatTakeStates,
+  type OutlineCard,
+  type OutlineLeaf,
+  type OutlineRegion,
+  outlineState,
+  type StateChangeLine,
+  type StateOutline,
+  type StateRegion,
+  type StateSummary,
+  type TakeStates,
+} from "./states-list";
 export {
   ensureTakeDir,
   requireTakeFiles,
@@ -261,6 +292,14 @@ export async function makeTake(plan: TakePlan, opts: MakeTakeOpts): Promise<Make
   await mkdir(dirname(take.mp4Path), { recursive: true });
   await ensureTakeDir(take);
   await copyFile(tmpVideo, capturePath);
+  // DOM states ride along with the capture they describe: the states dir
+  // beside the temp video moves in beside the kept one (replacing whatever an
+  // earlier make left — its tMs belonged to that capture, not this one; a
+  // re-make WITHOUT states clears it for the same reason).
+  const statesDst = join(take.dir, "states");
+  await rm(statesDst, { recursive: true, force: true });
+  const statesSrc = join(work, "states");
+  if (raw.states && existsSync(statesSrc)) await cp(statesSrc, statesDst, { recursive: true });
   try {
     opts.onCaptureReady?.(capturePath);
   } catch {

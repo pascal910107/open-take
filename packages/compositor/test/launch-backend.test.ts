@@ -17,6 +17,7 @@ import {
 import { launchTemplate } from "../src/launch-template";
 import type { LaunchComposition } from "../src/launch-types";
 import { validateLaunchComposition } from "../src/launch-validate";
+import { accumulateShutter } from "../src/shutter";
 
 const exec = promisify(execFile);
 let dir: string, ffmpeg: string, ffprobe: string;
@@ -549,4 +550,69 @@ test("looping repeats only the source after trimStartS", async () => {
     repeated = rms(pcm, 0.52, 0.58);
   assert(first > 0.08);
   assert(Math.abs(repeated / first - 1) < 0.08, `trimmed loop ratio ${repeated / first}`);
+});
+
+test("the shutter averages each output frame's samples — however many it has", async () => {
+  // eight renders whose luma climbs 0, 20, … 140; frames take 1, 4, 2 and 1 samples
+  const raw = join(dir, "shutter-samples.mov");
+  await exec(ffmpeg, [
+    "-v",
+    "error",
+    "-f",
+    "lavfi",
+    "-i",
+    "color=c=black:s=160x90:r=120:d=1",
+    "-vf",
+    "geq=lum='N*20':cb=128:cr=128,format=yuva444p10le",
+    "-frames:v",
+    "8",
+    "-c:v",
+    "prores_ks",
+    "-profile:v",
+    "4444",
+    raw,
+  ]);
+  const out = join(dir, "shutter.mov");
+  await accumulateShutter(raw, out, [1, 4, 2, 1], { width: 160, height: 90, fps: 30 });
+  const { stdout } = await exec(
+    ffmpeg,
+    ["-v", "error", "-i", out, "-vf", "format=gray", "-f", "rawvideo", "-"],
+    { encoding: "buffer", maxBuffer: 64 * 1024 * 1024 },
+  );
+  const size = 160 * 90;
+  assert.equal((stdout as Buffer).length / size, 4);
+  // the renders themselves, read the same way, are the reference
+  const { stdout: renders } = await exec(
+    ffmpeg,
+    ["-v", "error", "-i", raw, "-vf", "format=gray", "-f", "rawvideo", "-"],
+    { encoding: "buffer", maxBuffer: 64 * 1024 * 1024 },
+  );
+  const mean = (buf: Buffer, f: number) =>
+    buf.subarray(f * size, (f + 1) * size).reduce((a, v) => a + v, 0) / size;
+  const r = (f: number) => mean(renders as Buffer, f);
+  const want = [r(0), (r(1) + r(2) + r(3) + r(4)) / 4, (r(5) + r(6)) / 2, r(7)];
+  for (const [f, w] of want.entries()) {
+    const got = mean(stdout as Buffer, f);
+    assert.ok(Math.abs(got - w) < 1.5, `frame ${f}: ${got} vs ${w}`);
+  }
+  const got = await probe(out);
+  assert.equal(got.streams.find((x) => x.codec_type === "video")!.r_frame_rate, "30/1");
+  // a trailing render past the schedule (revideo rounds the range end) is dropped
+  const trailing = join(dir, "shutter-trailing.mov");
+  await accumulateShutter(raw, trailing, [1, 4, 2], { width: 160, height: 90, fps: 30 });
+  const { stdout: kept } = await exec(
+    ffmpeg,
+    ["-v", "error", "-i", trailing, "-vf", "format=gray", "-f", "rawvideo", "-"],
+    { encoding: "buffer", maxBuffer: 64 * 1024 * 1024 },
+  );
+  assert.equal((kept as Buffer).length / size, 3);
+  // a render that disagrees with the schedule by more is refused, not guessed at
+  await assert.rejects(
+    accumulateShutter(raw, join(dir, "bad.mov"), [1, 4, 4, 4], { width: 160, height: 90, fps: 30 }),
+    /schedule/,
+  );
+  await assert.rejects(
+    accumulateShutter(raw, join(dir, "bad2.mov"), [1, 1, 1], { width: 160, height: 90, fps: 30 }),
+    /schedule/,
+  );
 });

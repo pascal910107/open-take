@@ -220,6 +220,9 @@ importers:
       '@revideo/vite-plugin':
         specifier: 0.11.0
         version: 0.11.0
+      open-foley:
+        specifier: workspace:*
+        version: link:../foley
     devDependencies:
       '@types/node':
         specifier: ^22.10.1

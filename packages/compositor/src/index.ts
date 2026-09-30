@@ -7,6 +7,7 @@
 // Edit `comp` (zoom decisions, framing, cursor) and re-render — the
 // composition is the editable source of truth.
 
+export { describePalette as describeSoundPalette, STYLES as SOUND_STYLES } from "open-foley";
 export {
   type AuditCursorOpts,
   type AuditRow,
@@ -24,6 +25,15 @@ export {
   resolveManagedFfprobe,
 } from "./ffmpeg";
 export {
+  captureEventSheet,
+  type FoleyEvent,
+  type FoleyEventSheet,
+  type FootageSource,
+  type LaunchEventSheetOpts,
+  launchEventSheet,
+  takeEventSheet,
+} from "./foley-events";
+export {
   evaluateUiMorph,
   launchAudioAtS,
   launchDurationS,
@@ -32,7 +42,10 @@ export {
   uiMorphDurationS,
   uiStateDurationS,
 } from "./launch-evaluate";
+export { type LaunchMusicInput, launchMusicAnchors } from "./launch-music";
 export {
+  footageSourceFor,
+  launchSoundtrack,
   type RenderLaunchOpts,
   type RenderLaunchResult,
   renderLaunch,
@@ -62,6 +75,23 @@ export { validateMotionScene } from "./motion-validate";
 export { type PlanOpts, planComposition } from "./plan";
 export * from "./presets";
 export { type RenderTakeOpts, type RenderTakeResult, renderTake } from "./render";
+export {
+  changedBoxes,
+  contentOf,
+  diffStates,
+  elementLabel,
+  matchStates,
+  type StateChange,
+  subtree,
+} from "./state-diff";
+export { readStateIndex, type StateElement, type StateIndex } from "./state-index";
+export type {
+  LiftRecipe,
+  ProofRecipe,
+  TakeLoader,
+  TakeMaterial,
+  TakeRecipe,
+} from "./take-recipes";
 export * from "./types";
 export {
   type CompositionIssue,

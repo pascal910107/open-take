@@ -1,14 +1,16 @@
 import { statSync } from "node:fs";
 import { extname, resolve } from "node:path";
 import type { LaunchIssue } from "./launch-types";
-import { motionGraphemes, parseMotionColor } from "./motion-evaluate";
+import { motionGraphemes, parseMotionColor, textUnitsRest } from "./motion-evaluate";
+import { MOTION_EASINGS, type MotionTextUnits } from "./motion-types";
+import { readStateIndex } from "./state-index";
 
 const record = (v: unknown): v is Record<string, unknown> =>
   v !== null && typeof v === "object" && !Array.isArray(v);
 const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
-const transforms = ["x", "y", "opacity", "scaleX", "scaleY", "rotation"];
+const transforms = ["x", "y", "opacity", "scaleX", "scaleY", "rotation", "rotateX", "rotateY", "z"];
 const fields: Record<string, string[]> = {
-  group: ["children", "width", "height", "clip", "radius"],
+  group: ["children", "width", "height", "clip", "radius", "camera"],
   rect: ["width", "height", "fill", "stroke", "strokeWidth", "radius", "shadow"],
   ellipse: ["width", "height", "fill", "stroke", "strokeWidth"],
   text: [
@@ -22,6 +24,7 @@ const fields: Record<string, string[]> = {
     "align",
     "lineHeight",
     "reveal",
+    "units",
   ],
   image: ["asset", "width", "height", "fit", "radius", "crop", "shadow"],
   video: [
@@ -34,8 +37,12 @@ const fields: Record<string, string[]> = {
     "startS",
     "durationS",
     "shadow",
+    "take",
   ],
+  state: ["state", "width", "height", "fit", "radius", "crop", "shadow", "only", "hide"],
+  cursor: [],
   line: ["points", "stroke", "strokeWidth", "end"],
+  wipe: ["atS", "durationS", "holdS", "revealS", "direction", "color"],
 };
 const animated = new Set([
   ...transforms,
@@ -53,6 +60,9 @@ const ranges: Record<string, [number, number]> = {
   x: [-1_000_000, 1_000_000],
   y: [-1_000_000, 1_000_000],
   rotation: [-36000, 36000],
+  rotateX: [-36000, 36000],
+  rotateY: [-36000, 36000],
+  z: [-100_000, 100_000],
   opacity: [0, 1],
   scaleX: [0, 100],
   scaleY: [0, 100],
@@ -108,10 +118,35 @@ export function validateMotionScene(value: unknown, path = "$", baseDir?: string
       "colors",
       "motion",
       "designSize",
+      "perspective",
+      "hits",
       "layers",
     ],
     path,
   );
+  if (value.perspective !== undefined)
+    range(value.perspective, `${path}.perspective`, 100, 100_000);
+  if (value.hits !== undefined) {
+    if (!Array.isArray(value.hits) || value.hits.length > 64)
+      add(`${path}.hits`, "must be an array of at most 64 hits");
+    else
+      for (const [i, hit] of value.hits.entries()) {
+        const h = `${path}.hits[${i}]`;
+        if (!record(hit)) {
+          add(h, "must be { atS, strength?, flash? }");
+          continue;
+        }
+        rejectUnknown(hit, ["atS", "strength", "flash"], h);
+        if (
+          !finite(hit.atS) ||
+          hit.atS < 0 ||
+          (finite(value.durationS) && hit.atS > value.durationS)
+        )
+          add(`${h}.atS`, "must be finite and inside the scene duration");
+        if (hit.strength !== undefined) range(hit.strength, `${h}.strength`, 0, 1);
+        if (hit.flash !== undefined) range(hit.flash, `${h}.flash`, 0, 1);
+      }
+  }
   if (value.type !== "motion") add(`${path}.type`, "must be motion");
   if (!finite(value.durationS) || value.durationS <= 0)
     add(`${path}.durationS`, "must be finite and positive");
@@ -197,9 +232,14 @@ export function validateMotionScene(value: unknown, path = "$", baseDir?: string
         if (
           !Array.isArray(track.keyframes) ||
           track.keyframes.length < 1 ||
-          track.keyframes.length > 128
+          track.keyframes.length > (layer.camera === true ? 8192 : 128)
         ) {
-          add(`${a}.keyframes`, "must contain between 1 and 128 keyframes");
+          add(
+            `${a}.keyframes`,
+            layer.camera === true
+              ? "must contain between 1 and 8192 keyframes (a camera group's sampled path)"
+              : "must contain between 1 and 128 keyframes",
+          );
           continue;
         }
         let previous = -1;
@@ -222,13 +262,7 @@ export function validateMotionScene(value: unknown, path = "$", baseDir?: string
             previous = frame.atS;
           }
           if (frame.easing !== undefined)
-            enumValue(frame.easing, `${f}.easing`, [
-              "linear",
-              "ease-in",
-              "ease-out",
-              "ease-in-out",
-              "step",
-            ]);
+            enumValue(frame.easing, `${f}.easing`, [...MOTION_EASINGS]);
           if (property === "fill" || property === "stroke") {
             if (!parseMotionColor(frame.value)) add(`${f}.value`, "must be a supported color");
           } else if (
@@ -239,6 +273,8 @@ export function validateMotionScene(value: unknown, path = "$", baseDir?: string
         }
       }
       if (kind === "group") {
+        if (layer.camera !== undefined && layer.camera !== true)
+          add(`${q}.camera`, "must be true (or absent)");
         if (layer.clip !== undefined && typeof layer.clip !== "boolean")
           add(`${q}.clip`, "must be a boolean");
         if (layer.clip !== true && layer.radius !== undefined)
@@ -261,9 +297,97 @@ export function validateMotionScene(value: unknown, path = "$", baseDir?: string
                 range(v, `${q}.points[${j}][${k}]`, -1_000_000, 1_000_000);
               });
           }
-      } else {
+      } else if (kind === "wipe") {
+        if (
+          !finite(layer.atS) ||
+          layer.atS < 0 ||
+          (finite(value.durationS) && layer.atS > value.durationS)
+        )
+          add(`${q}.atS`, "must be finite and inside the scene duration");
+        for (const key of ["durationS", "holdS", "revealS"])
+          if (layer[key] !== undefined) range(layer[key], `${q}.${key}`, 0.02, 10);
+        if (layer.direction !== undefined)
+          enumValue(layer.direction, `${q}.direction`, ["right", "left"]);
+        if (layer.color !== undefined && !parseMotionColor(layer.color))
+          add(`${q}.color`, "must be a valid #RRGGBB/#RRGGBBAA/rgb()/rgba() color");
+      } else if (kind !== "cursor") {
+        // a cursor is the program's arrow: its size is fixed (scale it)
         for (const key of ["width", "height"])
           if (layer[key] === undefined) add(`${q}.${key}`, "is required and must be positive");
+      }
+      if (kind === "text" && layer.units !== undefined) {
+        const u = `${q}.units`;
+        const units = layer.units;
+        if (!record(units)) add(u, "must be { by, moves }");
+        else {
+          rejectUnknown(units, ["by", "moves"], u);
+          enumValue(units.by, `${u}.by`, ["word", "grapheme"]);
+          if (!Array.isArray(units.moves) || units.moves.length < 1 || units.moves.length > 2)
+            add(
+              `${u}.moves`,
+              "must list one or two moves: an arrival, an exit, or an arrival then an exit",
+            );
+          else {
+            const names: string[] = [];
+            let previous = -1;
+            for (const [j, m] of units.moves.entries()) {
+              const f = `${u}.moves[${j}]`;
+              if (!record(m)) {
+                add(f, "must be { move, atS, staggerS?, durationS? }");
+                continue;
+              }
+              rejectUnknown(m, ["move", "atS", "staggerS", "durationS"], f);
+              const moves = ["rise", "pop", "fade", "fall", "fade-out"];
+              enumValue(m.move, `${f}.move`, moves);
+              if (typeof m.move === "string" && moves.includes(m.move)) names.push(m.move);
+              if (
+                !finite(m.atS) ||
+                m.atS < 0 ||
+                (finite(value.durationS) && m.atS > value.durationS)
+              )
+                add(`${f}.atS`, "must be finite and inside the scene duration");
+              else {
+                if (m.atS <= previous) add(`${f}.atS`, "moves must be in time order");
+                previous = m.atS;
+              }
+              if (
+                m.staggerS !== undefined &&
+                (!finite(m.staggerS) || m.staggerS < 0 || m.staggerS > 1)
+              )
+                add(`${f}.staggerS`, "must be between 0 and 1 second");
+              if (
+                m.durationS !== undefined &&
+                (!finite(m.durationS) || m.durationS <= 0 || m.durationS > 5)
+              )
+                add(`${f}.durationS`, "must be above 0 and at most 5 seconds");
+            }
+            const arrival = (n: string) => n === "rise" || n === "pop" || n === "fade";
+            if (names.length === 2 && !(arrival(names[0]!) && !arrival(names[1]!)))
+              add(
+                `${u}.moves`,
+                "two moves must be an arrival (rise, pop, fade) then an exit (fall, fade-out)",
+              );
+            else if (
+              names.length === 2 &&
+              typeof layer.text === "string" &&
+              (units.by === "word" || units.by === "grapheme") &&
+              units.moves.every((m) => record(m) && finite(m.atS))
+            ) {
+              // a unit still arriving would jump straight into its exit
+              const rest = textUnitsRest(layer.text, units as unknown as MotionTextUnits);
+              if (rest.untilS < rest.fromS - 1e-6)
+                add(
+                  `${u}.moves[1].atS`,
+                  `the exit starts before the last unit has arrived (${rest.fromS.toFixed(2)}s); start it then or later`,
+                );
+            }
+          }
+        }
+        if (
+          Array.isArray(layer.animations) &&
+          layer.animations.some((t) => record(t) && t.property === "reveal")
+        )
+          add(u, "units animate the copy themselves; drop the reveal track");
       }
       if (kind === "text") {
         const validText = text(layer.text, `${q}.text`, 4000);
@@ -349,7 +473,8 @@ export function validateMotionScene(value: unknown, path = "$", baseDir?: string
             "video active span (startS + durationS) must stay inside the scene duration",
           );
       }
-      if (kind === "rect" || kind === "image" || kind === "video") {
+      if (kind === "state") stateLayer(layer, q);
+      if (kind === "rect" || kind === "image" || kind === "video" || kind === "state") {
         if (layer.shadow !== undefined) {
           const shadowPath = `${q}.shadow`;
           if (!record(layer.shadow)) add(shadowPath, "must be an object");
@@ -366,6 +491,63 @@ export function validateMotionScene(value: unknown, path = "$", baseDir?: string
       }
     }
   };
+  // a saved screen: its folder, and the ids and region it names in it
+  function stateLayer(layer: Record<string, unknown>, q: string): void {
+    if (layer.fit !== undefined) enumValue(layer.fit, `${q}.fit`, ["contain", "cover"]);
+    const crop = layer.crop;
+    if (crop !== undefined) {
+      if (!record(crop)) add(`${q}.crop`, "must be { x, y, width, height } in page CSS px");
+      else {
+        rejectUnknown(crop, ["x", "y", "width", "height"], `${q}.crop`);
+        for (const key of ["x", "y", "width", "height"])
+          range(crop[key], `${q}.crop.${key}`, key === "x" || key === "y" ? 0 : 1, 32768);
+      }
+    }
+    const ids: [string, string][] = [];
+    for (const key of ["only", "hide"]) {
+      const list = layer[key];
+      if (list === undefined) continue;
+      if (!Array.isArray(list) || !list.length || list.length > 512) {
+        add(`${q}.${key}`, "must be a list of 1–512 element ids from the state's index.json");
+        continue;
+      }
+      for (const [i, id] of list.entries())
+        if (typeof id !== "string" || !/^e\d+$/.test(id))
+          add(`${q}.${key}[${i}]`, 'must be an element id like "e42"');
+        else ids.push([`${q}.${key}[${i}]`, id]);
+    }
+    if (!text(layer.state, `${q}.state`, 4096)) return;
+    const state = layer.state as string;
+    if (
+      state.includes("\0") ||
+      (/^[a-z][a-z\d+.-]*:/i.test(state) && !/^[a-z]:[\\/]/i.test(state))
+    ) {
+      add(`${q}.state`, "must be a local saved-state folder (<take>.take/states/s3)");
+      return;
+    }
+    if (!baseDir) return;
+    const index = readStateIndex(resolve(baseDir, state));
+    if (typeof index === "string") {
+      add(`${q}.state`, index);
+      return;
+    }
+    const known = new Set(index.elements.map((e) => e.id));
+    for (const [p, id] of ids) if (!known.has(id)) add(p, `state ${index.id} has no element ${id}`);
+    if (record(crop) && [crop.x, crop.y, crop.width, crop.height].every(finite)) {
+      const { w, h } = index.viewport;
+      if (
+        (crop.x as number) + (crop.width as number) > w + 0.5 ||
+        (crop.y as number) + (crop.height as number) > h + 0.5
+      )
+        add(`${q}.crop`, `must stay inside the page (${w}x${h} CSS px)`);
+    }
+    if (index.fidelity && !index.fidelity.ok)
+      issues.push({
+        severity: "warn",
+        path: `${q}.state`,
+        message: `saved state ${index.id} does not re-render like the recording (PSNR ${index.fidelity.psnr.toFixed(1)} dB, ${(index.fidelity.diffFrac * 100).toFixed(0)}% of pixels differ): compare it with ${state}/live.png by eye, or show the recording instead`,
+      });
+  }
   if (Array.isArray(value.layers) && !value.layers.length)
     add(`${path}.layers`, "must contain at least one layer");
   visit(value.layers, `${path}.layers`, 0);

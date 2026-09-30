@@ -30,8 +30,10 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { renderVideo } from "@open-take/revideo-renderer";
+import { type CueSheet, mixToWav, paletteLibrary, resolveStyle, spot } from "open-foley";
 import { isCaptureUndecodable } from "./decode-guard";
 import { ffmpegHasEncoder, resolveFfmpeg, resolveFfprobe } from "./ffmpeg";
+import { takeEventSheet } from "./foley-events";
 import { type PlanOpts, planComposition } from "./plan";
 import { withRenderLock } from "./render-lock";
 import {
@@ -91,6 +93,9 @@ export type RenderTakeOpts = {
 export type RenderTakeResult = {
   mp4Path: string;
   compositionPath: string;
+  /** the cue sheet the render spotted (composition.sound), written beside
+   *  the composition; absent for a silent take or a disposable copy */
+  foleyCuesPath?: string;
   /** non-fatal validator findings for this composition. The render went ahead,
    *  but each one is something the author has to look at — a zoom that punches
    *  into empty space, a press whose zoom departs before the keypress, a tail
@@ -177,6 +182,7 @@ async function deliverMp4(
   outMp4: string,
   baseFps: number,
   blur: MotionBlurConfig | null,
+  audioWav?: string,
 ): Promise<void> {
   const vf: string[] = [];
   if (blur) {
@@ -188,12 +194,16 @@ async function deliverMp4(
     "format=yuv420p",
     "setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709",
   );
+  // The foley stem (when the composition asks for sound) is muxed in this same
+  // single encode: the stem was mixed on the DELIVERED timeline, so it starts
+  // at the delivered head; -shortest trims its tail to the picture.
   await run(await resolveFfmpeg(), [
     "-y",
     "-loglevel",
     "error",
     "-i",
     resolve(inMov),
+    ...(audioWav ? ["-i", audioWav] : []),
     "-vf",
     vf.join(","),
     "-c:v",
@@ -204,9 +214,25 @@ async function deliverMp4(
     "+faststart",
     "-r",
     String(baseFps),
-    "-an",
+    ...(audioWav
+      ? ["-map", "0:v:0", "-map", "1:a:0", "-c:a", "aac", "-b:a", "192k", "-shortest"]
+      : ["-an"]),
     outMp4,
   ]);
+}
+
+/** Spot the composition's own timeline and mix the foley stem for the
+ *  delivered window. Pure until the write; the cue sheet is returned so the
+ *  caller can persist it beside the composition as the editable artifact. */
+async function mixFoleyStem(
+  composition: TakeComposition,
+  offsetS: number,
+  wavPath: string,
+): Promise<CueSheet> {
+  const sound = composition.sound!;
+  const cues = spot(takeEventSheet(composition), { style: sound.style, seed: sound.seed });
+  await writeFile(wavPath, mixToWav(cues, { offsetS, library: paletteLibrary(sound.palette) }));
+  return cues;
 }
 
 // --- per-render scratch dir --------------------------------------------------
@@ -350,6 +376,9 @@ async function renderTakeExclusive(opts: RenderTakeOpts): Promise<RenderTakeResu
       ? ([composition.startMs / 1000, composition.durationMs / 1000 + 120] as [number, number])
       : undefined);
 
+  // An unknown sound style must fail here, in milliseconds, not after the render.
+  if (composition.sound) resolveStyle(composition.sound.style);
+
   // Revideo's exporter spawns ffmpeg/ffprobe itself and would default to the
   // binaries its own dependency bundles (an old 4.x); point it at ours.
   const ffmpeg = { ffmpegPath: await resolveFfmpeg(), ffprobePath: await resolveFfprobe() };
@@ -489,24 +518,46 @@ async function renderTakeExclusive(opts: RenderTakeOpts): Promise<RenderTakeResu
     //    conversion both happen inside this single encode — see deliverMp4.
     await mkdir(dirname(resolve(opts.outPath)), { recursive: true });
     const producedAbs = resolve(scratch, produced);
+    // sound: the stem is spotted from THIS composition on the delivered
+    // timeline (the head trim / A/B window is the mix offset, exactly as it
+    // is the picture's range), so every render path — master, review, draft,
+    // A/B reel, in-place re-render — carries the same sound for free.
+    let cues: CueSheet | undefined;
+    let foleyWav: string | undefined;
+    if (composition.sound) {
+      foleyWav = resolve(scratch, "foley.wav");
+      cues = await mixFoleyStem(composition, rangeSec?.[0] ?? 0, foleyWav);
+    }
     await deliverMp4(
       producedAbs,
       resolve(opts.outPath),
       composition.output.fps,
       motionBlurActive(composition.motionBlur) ? composition.motionBlur : null,
+      foleyWav,
     );
     const compositionPath = opts.compositionPath
       ? resolve(opts.compositionPath)
       : `${resolve(opts.outPath).replace(/\.mp4$/i, "")}.composition.json`;
+    let foleyCuesPath: string | undefined;
     if (opts.writeCompositionSibling !== false) {
       // strip the render-time review decoration — the editable artifact is the
       // clean composition, never the badged/watermarked variant of it.
       const { review: _review, ...persisted } = composition;
       await mkdir(dirname(compositionPath), { recursive: true });
       await writeFile(compositionPath, JSON.stringify(persisted, null, 2));
+      if (cues) {
+        foleyCuesPath = resolve(dirname(compositionPath), "foley.cues.json");
+        await writeFile(foleyCuesPath, JSON.stringify(cues, null, 2));
+      }
     }
 
-    return { mp4Path: resolve(opts.outPath), compositionPath, warnings, composition };
+    return {
+      mp4Path: resolve(opts.outPath),
+      compositionPath,
+      warnings,
+      composition,
+      ...(foleyCuesPath ? { foleyCuesPath } : {}),
+    };
   } finally {
     await cleanupScratch(scratch);
   }

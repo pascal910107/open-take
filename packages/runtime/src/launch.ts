@@ -1,17 +1,21 @@
 import { spawn } from "node:child_process";
-import { existsSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import {
   analyzeLaunchStory,
   analyzeMotionQuality,
+  type CaptureLog,
   composeMotionStory,
   formatLaunchIssues,
   type LaunchComposition,
   type LaunchIssue,
   launchStarter,
+  readStateIndex,
   renderLaunch,
   resolveFfprobe,
+  type StateIndex,
+  type TakeMaterial,
   validateLaunchAssets,
 } from "@open-take/compositor";
 import { ensureChrome } from "./cdp";
@@ -23,12 +27,34 @@ function visitLaunchAssets(composition: LaunchComposition, visit: (asset: string
     const visitLayers = (layers: typeof scene.layers) => {
       for (const layer of layers) {
         if (layer.type === "image" || layer.type === "video") layer.asset = visit(layer.asset);
+        if (layer.type === "video" && layer.take) layer.take = visit(layer.take);
+        if (layer.type === "state") layer.state = visit(layer.state);
         if (layer.type === "group") visitLayers(layer.children);
       }
     };
     visitLayers(scene.layers);
   }
   for (const track of composition.audio ?? []) track.asset = visit(track.asset);
+}
+
+/** A recording a take recipe names, read relative to the brief: the take
+ *  folder (`<name>.take`, or the master `<name>.mp4` beside it), its capture
+ *  log and every saved screen that reads back. */
+export function readTakeMaterial(briefDir: string, path: string): TakeMaterial | string {
+  const named = path.replace(/[\\/]+$/, "").replace(/\.mp4$/i, ".take");
+  const dir = resolve(briefDir, named);
+  let capture: CaptureLog;
+  try {
+    capture = JSON.parse(readFileSync(join(dir, "capture.json"), "utf8")) as CaptureLog;
+  } catch {
+    return `no recording at ${named} (its capture.json is missing — name the <name>.take folder)`;
+  }
+  const states = new Map<string, StateIndex>();
+  for (const item of capture.states?.items ?? []) {
+    const index = readStateIndex(join(dir, capture.states!.dir, item.id));
+    if (typeof index !== "string") states.set(item.id, index);
+  }
+  return { path: named.split(sep).join("/"), capture, states };
 }
 
 function canonicalPath(path: string): string {
@@ -189,7 +215,7 @@ export async function composeLaunchFile(
     );
   }
 
-  const built = composeMotionStory(value);
+  const built = composeMotionStory(value, { take: (path) => readTakeMaterial(briefDir, path) });
   const buildErrors = built.issues.filter((issue) => issue.severity === "error");
   if (!built.composition || buildErrors.length) {
     throw new Error(`launch compose failed:\n${formatLaunchIssues(built.issues)}`);

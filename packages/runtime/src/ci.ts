@@ -9,7 +9,7 @@
 // cache carries to the next run — run N+1 re-verifies instead of re-exploring,
 // and that is the whole economics of running this on every release.
 import { type ChildProcess, spawn } from "node:child_process";
-import { stat, appendFile, readFile } from "node:fs/promises";
+import { appendFile, readFile, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { resolveFfmpeg, resolveFfprobe } from "@open-take/compositor";
 import { resolveTakePaths } from "./take";
@@ -205,6 +205,8 @@ export type CiBriefOpts = {
   changedPaths?: string | undefined;
   fps?: number | undefined;
   captureScale?: number | undefined;
+  /** `make --states`: save DOM states with the take (see dom-state.ts) */
+  states?: boolean | undefined;
   skillPath?: string | undefined;
   mode?: CiMode | undefined;
 };
@@ -282,6 +284,7 @@ export function buildCiBrief(opts: CiBriefOpts): string {
     `--out ${opts.outPath}`,
     `--fps ${opts.fps ?? 30}`,
     ...(opts.captureScale != null ? [`--capture-scale ${opts.captureScale}`] : []),
+    ...(opts.states ? ["--states"] : []),
     "--no-open",
     "--strict",
   ].join(" ");
@@ -354,22 +357,21 @@ export function buildCiBrief(opts: CiBriefOpts): string {
           : `, in ${captionsMode}`) +
         "). A caption is ONE FULL SENTENCE that tells a first-time viewer what" +
         " is happening AND what it means (~15-30 CJK chars / 8-14 words):" +
-        " \"Applying the filter re-prices every district instantly\" teaches;" +
-        " a terse label like \"Apply filter\" only names — the viewer already" +
+        ' "Applying the filter re-prices every district instantly" teaches;' +
+        ' a terse label like "Apply filter" only names — the viewer already' +
         " SEES the click, so the" +
         " caption must explain it. The cursor is a promise: never hover a" +
         " control you won't activate — frame payoffs with `look` (and END on a" +
         " `look` + caption, never on a hovered button). When a number/state" +
         " changes, show the before, then act — the comparison IS the payoff.",
     titleCardMode === "off"
-      ? "- No opening title card for this run: do not set the composition's" +
-        " `titleCard` field."
+      ? "- No opening title card for this run: do not set the composition's" + " `titleCard` field."
       : "- Open with a title card: after `make`, set the composition's" +
         " `titleCard` field ({title, subtitle}) — title = the app's name as" +
         " the app itself shows it, subtitle = the demo's one-line thesis" +
         " (caption language policy applies) — then `render`. It fades out" +
-        " over the establishing hold and is the cheapest \"produced, not" +
-        " captured\" signal the video can send.",
+        ' over the establishing hold and is the cheapest "produced, not' +
+        ' captured" signal the video can send.',
     `- Shoot with: \`npx open-take make --plan <plan.json> ${makeFlags}\`.`,
     "- Never run the human-loop verbs: edit, notes --wait, ab, auth. Never pass --open or --reveal.",
     "- Never film credentials, admin/billing/settings surfaces, or real user" +
@@ -612,6 +614,8 @@ export type CiOpts = {
   agentTimeoutMs?: number | undefined;
   fps?: number | undefined;
   captureScale?: number | undefined;
+  /** `make --states`: save DOM states with the take (see dom-state.ts) */
+  states?: boolean | undefined;
   allowedTools?: string | undefined;
   allowedOrigins?: string | undefined;
   skipPermissions?: boolean | undefined;
@@ -735,6 +739,7 @@ export async function ciTake(opts: CiOpts): Promise<CiResult> {
     changedPaths: opts.changedPaths,
     fps: opts.fps,
     captureScale: opts.captureScale,
+    states: opts.states,
     skillPath: opts.skillPath,
     mode,
   });

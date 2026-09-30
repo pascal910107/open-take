@@ -1,0 +1,38 @@
+---
+title: states
+description: What a take recorded with --states saved — each action, what it changed, and the screens a launch film can reuse.
+---
+
+```sh
+open-take states demos/myapp.mp4              # every action and saved screen, in order
+open-take states demos/myapp.mp4 --state s3   # one saved screen, element by element
+open-take states demos/myapp.mp4 --json       # the same, as data
+```
+
+A take made with `make --states` keeps the interface itself at every settled
+moment. `states` reads it back the way a film is planned: actions numbered
+`a1`, `a2`, … in the order they were recorded, each followed by the saved
+screen it left behind and what it changed on the page:
+
+```
+a2  click "×2.2" · 16.03s · on s2:e118 "Beat 2 · ×2.2"
+s3  after a2 · 18.29s · ok
+    + s3:e21 card [549,289,468,263] "×2.2"
+    ~ s3:e32 card [1586,141,264,212] "Nothing selected — …" → "Beat 2 · Project Name · Depth · 2.2× · …"
+a3  drag "Depth" → (1726,201) · 18.75s–20.06s · from s3:e39 (slider)
+s4  after a3 · 22.00s · ok
+    ~ s4:e40 "2.2×" → "1.6×" · [1790,193,46,14]
+```
+
+- **ids are per saved screen** — name an element with its screen (`s3:e32`).
+- **`card`** marks a group a film can lift out of its page (a panel, a row).
+- **`pixels`** is where the recording changed; when no element explains it
+  (a canvas, a colour change) it says so — only the recording shows that.
+- **FIDELITY FAILED** — that screen does not re-render like the recording;
+  **MOVING** — the page never went quiet there, so nothing was saved. Show
+  either moment with the recording.
+
+`--state <id>` outlines one screen: its regions back to front, the cards in
+each, and every control and text with its box — what a launch film's `lift`
+recipe names. The launch recipes that use this material (`proof`, `lift`)
+are in the skill's motion-composition reference.

@@ -1,5 +1,6 @@
 import { statSync } from "node:fs";
 import { resolve } from "node:path";
+import { validatePalette } from "open-foley";
 import { validateLaunchStory } from "./launch-story";
 import type { LaunchIssue, LaunchScene } from "./launch-types";
 import { validateMotionScene } from "./motion-validate";
@@ -89,6 +90,23 @@ export function validateLaunchComposition(value: unknown, baseDir?: string): Lau
     if (bounded(output[key], `output.${key}`, 2, 16384) && output[key] % 2 !== 0)
       add(`output.${key}`, "must be an even integer");
   bounded(output.fps, "output.fps", 1, 120);
+  if (output.motionBlur !== undefined && output.motionBlur !== false) {
+    const blur = output.motionBlur;
+    if (!record(blur)) add("output.motionBlur", "must be false or { samples, shutter }");
+    else {
+      for (const key of Object.keys(blur))
+        if (key !== "samples" && key !== "shutter")
+          add(`output.motionBlur.${key}`, "unsupported field");
+      if (
+        !Number.isInteger(blur.samples) ||
+        (blur.samples as number) < 2 ||
+        (blur.samples as number) > 16
+      )
+        add("output.motionBlur.samples", "must be an integer from 2 to 16");
+      if (typeof blur.shutter !== "number" || !(blur.shutter > 0 && blur.shutter <= 1))
+        add("output.motionBlur.shutter", "must be above 0 and at most 1 (0.5 = a 180° shutter)");
+    }
+  }
   theme(value.theme, "theme", false);
   if (!Array.isArray(value.scenes) || value.scenes.length === 0)
     add("scenes", "must contain at least one scene");
@@ -144,6 +162,7 @@ export function validateLaunchComposition(value: unknown, baseDir?: string): Lau
         );
     } else if (scene.type === "footage") {
       asset(scene.asset, `${p}.asset`);
+      if (scene.take !== undefined) text(scene.take, `${p}.take`, 1024);
       if (scene.trimStartS !== undefined) bounded(scene.trimStartS, `${p}.trimStartS`, 0);
       if (scene.fit !== undefined) enumValue(scene.fit, `${p}.fit`, ["contain", "cover"]);
       optionalText(scene, "caption", p, 80);
@@ -302,6 +321,22 @@ export function validateLaunchComposition(value: unknown, baseDir?: string): Lau
   if (!Number.isFinite(total) || total > 86400)
     add("scenes", "total duration must be finite and no more than 86400s");
   if (value.audio !== undefined && !Array.isArray(value.audio)) add("audio", "must be an array");
+  if (value.sound !== undefined) {
+    if (!record(value.sound)) add("sound", "must be an object { style, seed? }");
+    else {
+      if (typeof value.sound.style !== "string" || !value.sound.style.trim())
+        add("sound.style", "must be a preset name (cinematic, minimal, playful)");
+      if (value.sound.seed !== undefined && !Number.isInteger(value.sound.seed))
+        add("sound.seed", "must be an integer");
+      for (const m of validatePalette(value.sound.palette)) {
+        const cut = m.indexOf(":");
+        add(
+          cut > 0 ? `sound.${m.slice(0, cut)}` : "sound.palette",
+          cut > 0 ? m.slice(cut + 1).trim() : m,
+        );
+      }
+    }
+  }
   const audio: unknown[] = Array.isArray(value.audio) ? value.audio : [],
     audioIds = new Set<string>();
   for (const [i, raw] of audio.entries()) {
@@ -355,6 +390,23 @@ export function validateLaunchComposition(value: unknown, baseDir?: string): Lau
     if (fades > duration)
       add(`${p}.fadeOutS`, "fade-in plus fade-out exceeds the resolved track duration");
   }
+  // 3D and saved screens are drawn by the HTML renderer, which renders films
+  // made only of motion scenes; any other scene type sends the whole film to
+  // the 2D renderer
+  if (scenes.some((sc) => record(sc) && sc.type !== "motion"))
+    scenes.forEach((sc, i) => {
+      if (!record(sc) || sc.type !== "motion") return;
+      if (uses3D(sc.layers))
+        add(
+          `scenes[${i}].layers`,
+          "3D layers (rotateX, rotateY, z) need a film made only of motion scenes; turn the other scenes into motion scenes or drop the 3D",
+        );
+      if (usesStates(sc.layers))
+        add(
+          `scenes[${i}].layers`,
+          "state layers (saved screens) need a film made only of motion scenes; turn the other scenes into motion scenes or show the recording instead",
+        );
+    });
   out.push(
     ...validateLaunchStory(
       value.story,
@@ -362,6 +414,26 @@ export function validateLaunchComposition(value: unknown, baseDir?: string): Lau
     ),
   );
   return out;
+}
+
+function uses3D(layers: unknown): boolean {
+  if (!Array.isArray(layers)) return false;
+  return layers.some(
+    (l) =>
+      record(l) &&
+      (["rotateX", "rotateY", "z"].some((k) => number(l[k]) && l[k] !== 0) ||
+        (Array.isArray(l.animations) &&
+          l.animations.some(
+            (t) => record(t) && ["rotateX", "rotateY", "z"].includes(t.property as string),
+          )) ||
+        uses3D(l.children)),
+  );
+}
+
+/** Any layer showing a saved screen (`state`). */
+export function usesStates(layers: unknown): boolean {
+  if (!Array.isArray(layers)) return false;
+  return layers.some((l) => record(l) && (l.type === "state" || usesStates(l.children)));
 }
 
 function estimatedTextWidth(text: string, size: number): number {

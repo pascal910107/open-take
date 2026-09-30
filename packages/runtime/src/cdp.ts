@@ -208,6 +208,10 @@ export type Browser = {
   cdp: CDP;
   /** the page target's id (for browser-level window commands) */
   targetId: string;
+  /** the DevTools port this Chrome listens on — a second page target created
+   *  with `Target.createTarget` is reached at
+   *  `ws://127.0.0.1:<port>/devtools/page/<targetId>` (dom-state fidelity). */
+  port: number;
   /** kill the browser process and remove its temp profile */
   close: () => Promise<void>;
 };
@@ -317,17 +321,26 @@ export async function launchBrowser(opts: {
       /* already gone */
     }
     await exitWithin(2000); // don't hang if exit never fires
-    // Chrome may still be flushing its profile; retry the rm rather than throw.
+    // Chrome's helper processes (GPU, network, a second tab's renderer) can
+    // outlive the killed browser by a few seconds and keep writing into the
+    // profile, so the rm is retried patiently — and a leftover temp dir is
+    // only a warning: it must never fail the take that just finished.
     // A user-supplied (persistent, authenticated) profile is KEPT.
     if (ephemeral)
-      rmSync(userDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      try {
+        rmSync(userDir, { recursive: true, force: true, maxRetries: 12, retryDelay: 250 });
+      } catch (e) {
+        console.error(
+          `open-take: could not remove Chrome's temporary profile ${userDir} (${(e as Error).message}) — safe to delete by hand`,
+        );
+      }
   };
 
   try {
     const port = await readDevtoolsPort(userDir, proc);
     const target = await pageTargetWs(port);
     const cdp = await CDP.connect(target.wsUrl);
-    return { cdp, targetId: target.id, close };
+    return { cdp, targetId: target.id, port, close };
   } catch (e) {
     await close();
     throw new Error(

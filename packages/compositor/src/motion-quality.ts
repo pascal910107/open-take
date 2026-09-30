@@ -1,6 +1,12 @@
 import type { LaunchComposition, LaunchIssue, LaunchTheme } from "./launch-types";
-import { evaluateMotionTrack, motionGraphemes, parseMotionColor } from "./motion-evaluate";
-import type { MotionLayer, MotionScene, MotionTextLayer } from "./motion-types";
+import {
+  evaluateMotionTrack,
+  motionGraphemes,
+  motionTextUnits,
+  parseMotionColor,
+  textUnitsRest,
+} from "./motion-evaluate";
+import type { MotionLayer, MotionScene, MotionTextLayer, MotionTrack } from "./motion-types";
 
 /** Heuristic reading time: roughly three words or six CJK/fullwidth glyphs per second.
  * The character-rate floor also accounts for unusually long unbroken words. */
@@ -143,6 +149,32 @@ function commonWindows(left: Window[], right: Window[]): Window[] {
   }
   return result;
 }
+/** Linear drift slow enough to read through: ≤ 24 design px/s, ≤ 2 %/s of
+ *  scale, ≤ 1°/s — the push a designed film keeps up while the viewer reads. */
+const DRIFT_PER_S: Partial<Record<string, number>> = {
+  x: 24,
+  y: 24,
+  scaleX: 0.02,
+  scaleY: 0.02,
+  rotation: 1,
+};
+function readableDrift(
+  property: string,
+  from: MotionTrack["keyframes"][number],
+  to: MotionTrack["keyframes"][number],
+): boolean {
+  const rate = DRIFT_PER_S[property],
+    span = to.atS - from.atS;
+  return (
+    rate !== undefined &&
+    span > 0 &&
+    (to.easing ?? "linear") === "linear" &&
+    typeof from.value === "number" &&
+    typeof to.value === "number" &&
+    Math.abs(to.value - from.value) / span <= rate
+  );
+}
+
 function usefulHold(scene: MotionScene, item: Item): number {
   if (item.layer.type !== "text") return 0;
   const chain = [...item.parents, item.layer];
@@ -172,12 +204,19 @@ function usefulHold(scene: MotionScene, item: Item): number {
         const from = track.keyframes[i - 1]!,
           to = track.keyframes[i]!;
         if (from.value === to.value || to.easing === "step") add(from.atS, to.atS, from.value);
+        // a slow camera creep keeps copy perfectly readable
+        else if (readableDrift(track.property, from, to)) add(from.atS, to.atS, "drift");
       }
       const last = track.keyframes.at(-1)!;
       add(last.atS, end, last.value);
       available = commonWindows(available, stationary);
       if (!available.length) return 0;
     }
+  if (item.layer.units) {
+    // copy that moves word by word is readable between its last arrival and first exit
+    const rest = textUnitsRest(item.layer.text, item.layer.units);
+    available = commonWindows(available, [{ start: rest.fromS, end: Math.min(end, rest.untilS) }]);
+  }
   let longest = 0;
   for (const window of available) {
     const middle = (window.start + window.end) / 2;
@@ -396,7 +435,10 @@ function revealedSegments(
 
 function connectorWarnings(scene: MotionScene, items: Item[], theme: LaunchTheme): LaunchIssue[] {
   const lines = items.filter((item) => item.layer.type === "line");
-  const media = items.filter((item) => item.layer.type === "image" || item.layer.type === "video");
+  const media = items.filter(
+    (item) =>
+      item.layer.type === "image" || item.layer.type === "video" || item.layer.type === "state",
+  );
   if (!lines.length || !media.length) return [];
   const relevant = new Set<MotionLayer>();
   for (const item of [...lines, ...media, ...items.filter((x) => x.layer.type === "rect")])
@@ -526,7 +568,12 @@ function connectorWarnings(scene: MotionScene, items: Item[], theme: LaunchTheme
           !intersects(item.box, target.box)
         )
           continue;
-        if (target.layer.type !== "image" && target.layer.type !== "video") continue;
+        if (
+          target.layer.type !== "image" &&
+          target.layer.type !== "video" &&
+          target.layer.type !== "state"
+        )
+          continue;
         const bounds = clipBounds(
           target.matrix,
           target.layer.width,
@@ -561,6 +608,180 @@ function connectorWarnings(scene: MotionScene, items: Item[], theme: LaunchTheme
         break;
       }
     }
+  }
+  return warnings;
+}
+
+// ── craft advisories, from a frame-by-frame study of a reference launch film ──
+// (77 % of our v3's frames were pixel-identical while 61 % of the reference's
+// moved; one camera move ran 12 times; every exit was a fade.)
+
+const moving = (a: MotionTrack["keyframes"][number], b: MotionTrack["keyframes"][number]) =>
+  a.value !== b.value && b.easing !== "step";
+
+/** Stretches longer than 3 s in which nothing authored moves. */
+function deadTimeWarnings(scene: MotionScene, prefix: string): LaunchIssue[] {
+  if (scene.motion === "off") return [];
+  const spans: Window[] = [];
+  const visit = (layers: MotionLayer[]) => {
+    for (const layer of layers) {
+      for (const track of layer.animations ?? [])
+        for (let i = 1; i < track.keyframes.length; i++) {
+          const a = track.keyframes[i - 1]!,
+            b = track.keyframes[i]!;
+          if (moving(a, b)) spans.push({ start: a.atS, end: b.atS });
+        }
+      if (layer.type === "text" && layer.units) {
+        const rest = textUnitsRest(layer.text, layer.units);
+        for (const m of layer.units.moves)
+          spans.push(
+            m.move === "fall" || m.move === "fade-out"
+              ? { start: m.atS, end: m.atS + 0.6 }
+              : { start: m.atS, end: rest.fromS },
+          );
+      }
+      if (layer.type === "group") visit(layer.children);
+    }
+  };
+  visit(scene.layers);
+  spans.sort((a, b) => a.start - b.start);
+  const warnings: LaunchIssue[] = [];
+  let cursor = 0;
+  const gap = (from: number, to: number) => {
+    if (to - from > 3)
+      warnings.push({
+        severity: "warn",
+        path: `${prefix}.layers`,
+        message: `Nothing authored moves from ${from.toFixed(2)}s to ${to.toFixed(2)}s (${(to - from).toFixed(1)}s). A designed film never rests: let the camera creep (a linear +2–4 % scale over the hold) or re-frame on the next action; recorded footage alone rarely carries a shot.`,
+      });
+  };
+  for (const span of spans) {
+    if (span.start > cursor) gap(cursor, span.start);
+    cursor = Math.max(cursor, span.end);
+  }
+  gap(cursor, scene.durationS);
+  return warnings;
+}
+
+/** Set pieces used so often they stop meaning anything — the film starts to
+ *  read as a template. Pascal: "不要為了塞而塞". */
+function overusedEffectWarnings(scene: MotionScene, prefix: string): LaunchIssue[] {
+  const warnings: LaunchIssue[] = [];
+  const wipes = walkLayers(scene.layers).filter((l) => l.type === "wipe").length;
+  if (wipes > 2)
+    warnings.push({
+      severity: "warn",
+      path: `${prefix}.layers`,
+      message: `${wipes} wipes in one scene. A transition effect on every change is decoration; keep it for the one real turn in the story and cut onto the next action elsewhere.`,
+    });
+  const hits = scene.hits?.length ?? 0;
+  if (hits > 2)
+    warnings.push({
+      severity: "warn",
+      path: `${prefix}.hits`,
+      message: `${hits} hits in one scene. A hit marks the moment the film builds to; on every beat it marks nothing.`,
+    });
+  return warnings;
+}
+const walkLayers = (layers: MotionLayer[]): MotionLayer[] =>
+  layers.flatMap((l) => (l.type === "group" ? [l, ...walkLayers(l.children)] : [l]));
+
+/** One layer making the same move (same travel, scale change and duration) 3+ times. */
+function repeatedMoveWarnings(items: Item[]): LaunchIssue[] {
+  const warnings: LaunchIssue[] = [];
+  for (const item of items) {
+    // the camera over a recording and its cursor follow the recorded hand:
+    // their sampled tracks are one path, not a move repeated
+    if (item.layer.type === "cursor" || (item.layer.type === "group" && item.layer.camera))
+      continue;
+    const tracks = new Map<string, MotionTrack["keyframes"]>(
+      (item.layer.animations ?? []).map((t) => [t.property, t.keyframes]),
+    );
+    const times = new Set<number>();
+    for (const p of ["x", "y", "scaleX"])
+      for (const [i, k] of (tracks.get(p) ?? []).entries())
+        if (i > 0 && moving(tracks.get(p)![i - 1]!, k)) times.add(k.atS);
+    const signatures = new Map<string, number>();
+    for (const end of times) {
+      const delta = (p: string) => {
+        const kfs = tracks.get(p) ?? [];
+        const i = kfs.findIndex((k) => k.atS === end);
+        if (i <= 0) return { d: 0, span: 0, from: 1 };
+        const a = kfs[i - 1]!,
+          b = kfs[i]!;
+        return {
+          d: (b.value as number) - (a.value as number),
+          span: b.atS - a.atS,
+          from: a.value as number,
+        };
+      };
+      const x = delta("x"),
+        y = delta("y"),
+        s = delta("scaleX");
+      const span = Math.max(x.span, y.span, s.span);
+      if (span <= 0) continue;
+      const ratio = s.span ? (s.from + s.d) / s.from : 1;
+      // a move and its reverse read as the same gesture
+      const key = [
+        Math.round(Math.abs(x.d) / 20),
+        Math.round(Math.abs(y.d) / 20),
+        Math.round(Math.abs(Math.log(ratio)) * 20),
+        Math.round(span * 10),
+      ].join(",");
+      signatures.set(key, (signatures.get(key) ?? 0) + 1);
+    }
+    const most = Math.max(0, ...signatures.values());
+    if (most >= 3)
+      warnings.push({
+        severity: "warn",
+        path: `${item.path}.animations`,
+        message: `The same move happens ${most} times on this layer. Vary it — a push in, a tilt, a re-frame on the subject, or a cut onto a new action — so the camera keeps telling the viewer something new.`,
+      });
+  }
+  return warnings;
+}
+
+/** Multi-word copy that leaves by fading alone, or arrives as one whole line. */
+function fadeOnlyExitWarnings(items: Item[]): LaunchIssue[] {
+  const warnings: LaunchIssue[] = [];
+  for (const item of items) {
+    const layer = item.layer;
+    if (layer.type !== "text" || layer.units || layer.fontSize < 28) continue;
+    if (motionTextUnits(layer.text, "word").flat().length < 2) continue;
+    const chain = [...item.parents, layer];
+    // when the copy fades out (own or a parent's opacity ramping down)…
+    const drops: Window[] = [];
+    for (const l of chain)
+      for (const t of l.animations ?? [])
+        if (t.property === "opacity")
+          t.keyframes.forEach((k, i) => {
+            const prev = t.keyframes[i - 1];
+            if (prev && (k.value as number) < (prev.value as number) && k.easing !== "step")
+              drops.push({ start: prev.atS, end: k.atS });
+          });
+    const fadesOut = drops.length > 0;
+    // …does anything in its chain move at the same time?
+    const leavesByMoving = chain.some((l) =>
+      (l.animations ?? []).some(
+        (t) =>
+          ["x", "y", "scaleX", "scaleY", "rotation"].includes(t.property) &&
+          t.keyframes.some((k, i) => {
+            const prev = t.keyframes[i - 1];
+            return (
+              !!prev &&
+              moving(prev, k) &&
+              drops.some((d) => prev.atS < d.end + 0.1 && k.atS > d.start - 0.1)
+            );
+          }),
+      ),
+    );
+    if (fadesOut && !leavesByMoving)
+      warnings.push({
+        severity: "warn",
+        path: `${item.path}`,
+        message:
+          'This copy leaves by fading only. Exits mirror entrances: animate the words — units: { by: "word", moves: [{ move: "rise", atS }, { move: "fall", atS }] } — or move it off.',
+      });
   }
   return warnings;
 }
@@ -620,6 +841,10 @@ export function analyzeMotionQuality(composition: LaunchComposition): LaunchIssu
           `Text has only ${hold.toFixed(2)}s of stable, fully revealed hold; allow about ${required.toFixed(2)}s for this copy. This reading-time estimate is heuristic.`,
         );
     });
+    issues.push(...deadTimeWarnings(scene, prefix));
+    issues.push(...overusedEffectWarnings(scene, prefix));
+    issues.push(...repeatedMoveWarnings(items));
+    issues.push(...fadeOnlyExitWarnings(items));
     const density = denseAnimation(scene, items);
     if (density > 8)
       warn(

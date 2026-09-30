@@ -11,7 +11,7 @@
 // so robustness is shared, not re-derived.
 
 import { existsSync, rmSync, statSync } from "node:fs";
-import { basename, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import type { CaptureLog } from "@open-take/compositor";
 import type { CaptureOpts } from "./capture";
 import {
@@ -46,6 +46,15 @@ import {
   Screencast,
   waitUntil,
 } from "./cdp";
+import {
+  captureDomState,
+  type DomStateItem,
+  type DomStateRaw,
+  finalizeDomStates,
+  matchTarget,
+  summarizeDomStates,
+  visuallyStill,
+} from "./dom-state";
 import { resolveNavigateUrl } from "./nav";
 import { PrecheckRefusal, precheckPlan } from "./precheck";
 import {
@@ -402,6 +411,64 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
     // canvas app is exactly the wrong conclusion.
     let paintedFrac = 0;
     let paintNoted = false;
+    // DOM states (opt-in): the page's structure at every settled moment — s0
+    // now, after the warmup, then one at the end of each step's final hold.
+    // The per-step capture lives inside hold() so every branch that settles
+    // the page gets one and none of the exit paths has to remember to. Each
+    // capture also stamps the events the step produced with the state that
+    // followed them and the element (in the state BEFORE) they acted on.
+    // Never fails the take: a state that cannot be read is a stderr line.
+    const statesDir = opts.states ? join(dirname(out), "states") : null;
+    const states: DomStateRaw[] = [];
+    // moments the page was still moving at: no still to keep there, and
+    // reading one (the probe, the snapshot) stalls the app being filmed — a
+    // playing video froze, then jumped, in the recording. Logged, not saved.
+    const movingStates: { id: string; tMs: number; step?: number }[] = [];
+    let statesAnnotated = 0; // events[0..n) already carry their `state`
+    let lastState: DomStateRaw | null = null;
+    const captureState = async (step?: number, busy = false) => {
+      if (!statesDir) return;
+      // our screenshot and the pump's forced ones would queue behind each other
+      pumpPaused = true;
+      await sleep(60);
+      try {
+        const id = `s${states.length + movingStates.length}`;
+        const tMs = Date.now() - t0;
+        const annotate = (target: DomStateRaw | null) => {
+          for (; statesAnnotated < events.length; statesAnnotated++) {
+            const ev = events[statesAnnotated]!;
+            ev.state = id;
+            const hit = ev.box && target ? matchTarget(ev.box, target.probe.elements) : undefined;
+            if (hit) ev.target = hit;
+          }
+        };
+        // busy by the settle probe's ear; moving only if the pixels move
+        if (busy && !(await visuallyStill(cdp, inner[0], inner[1]))) {
+          movingStates.push({ id, tMs, ...(step != null ? { step } : {}) });
+          annotate(lastState);
+          return;
+        }
+        const raw = await captureDomState(cdp, {
+          statesDir,
+          id,
+          tMs,
+          ...(step != null ? { step } : {}),
+          vw: inner[0],
+          vh: inner[1],
+          dpr: scale,
+        });
+        states.push(raw);
+        annotate(lastState);
+        lastState = raw;
+      } catch (e) {
+        console.error(
+          `captureTakeCDP: DOM state after ${step == null ? "the warmup" : `step ${step}`} not captured (${(e as Error).message})`,
+        );
+      } finally {
+        pumpPaused = false;
+      }
+    };
+    await captureState();
     for (let stepIdx = 0; stepIdx < plan.steps.length; stepIdx++) {
       const step = plan.steps[stepIdx]!;
       const skip = (action: string, target: string | undefined, reason: string) => {
@@ -415,6 +482,7 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
         // `step` is the un-narrowed union here (every action calls this), and
         // `wait` is the one variant with no settleMs — it IS a hold.
         const heldMs = ("settleMs" in step ? step.settleMs : undefined) ?? defaultMs;
+        const budgeted = governor.budgetMs > 0;
         const r = await settle(cdp, heldMs, { budgetMs: governor.budgetMs });
         paintedFrac = Math.max(paintedFrac, r.paintFrac);
         if (paintedFrac >= PAINT_BLIND_FRAC && !paintNoted) {
@@ -427,6 +495,10 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
           console.error(
             "captureTakeCDP: this page never goes quiet (consecutive beats spent the whole settle budget) — settle waiting is OFF for the rest of the take; set each beat's settleMs explicitly instead",
           );
+        // the page is as settled as it gets: the moment a DOM state describes.
+        // A page that stayed busy through the whole budget is still moving —
+        // its state keeps the structure but reads no pixels (that stalls it)
+        await captureState(stepIdx, budgeted && r.reason === "budget");
         if (r.waitedMs < SETTLE_NOTE_MS) return;
         const waitedMs = Math.round(r.waitedMs);
         settleWaits.push({
@@ -442,6 +514,7 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
       };
       if (step.action === "wait") {
         await sleep(step.ms);
+        await captureState(stepIdx); // a wait has no hold; the state follows the wait
         continue;
       }
 
@@ -1138,7 +1211,33 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
     pumping = false;
     await pump;
     await screencast.stop();
-    await encodeFrames(screencast.frames, tEndMs + 400, out, fps);
+    // The encode and the states' conversion + fidelity pass are independent
+    // (disk + ffmpeg vs. a second page in the still-open browser), so they run
+    // side by side. The encode is awaited below; the early catch only keeps
+    // a rejection from going unhandled while the states finish.
+    const encoded = encodeFrames(screencast.frames, tEndMs + 400, out, fps);
+    encoded.catch(() => {});
+    let stateItems: DomStateItem[] | undefined;
+    if (statesDir && (states.length || movingStates.length)) {
+      try {
+        const saved = states.length
+          ? await finalizeDomStates({
+              browser,
+              statesDir,
+              states,
+              vw: inner[0],
+              vh: inner[1],
+            })
+          : [];
+        stateItems = [...saved, ...movingStates.map((m) => ({ ...m, moving: true as const }))].sort(
+          (a, b) => a.tMs - b.tMs,
+        );
+        console.error(summarizeDomStates(states, stateItems));
+      } catch (e) {
+        console.error(`captureTakeCDP: DOM states not finalized (${(e as Error).message})`);
+      }
+    }
+    await encoded;
 
     const probe = await ffprobe(out);
     // Space-integrity check: the whole pipeline maps coordinates viewport →
@@ -1186,6 +1285,7 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
       ...(paintedFrac >= PAINT_BLIND_FRAC
         ? { paintedFrac: Math.round(paintedFrac * 100) / 100 }
         : {}),
+      ...(stateItems ? { states: { dir: "states", items: stateItems } } : {}),
     };
   } finally {
     await browser?.close();

@@ -26,6 +26,12 @@ Renders a clean draft to `draft.mp4` — 30 fps cap, motion blur off, no
 badges — the cheap re-render for frame checks mid-refine. Never overwrites
 the master, does not auto-open.
 
+## `--sound <style>`
+
+Writes `sound: { style }` into the composition (or removes it with `off`) and
+then renders whichever copy was asked for; every later render keeps it. Styles
+and what they sound like: [Sound](/docs/sound).
+
 ## Warnings land in the summary
 
 The composition validator refuses to hand you a bad take quietly: a camera
