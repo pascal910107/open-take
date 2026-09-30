@@ -1,0 +1,57 @@
+{
+  "name": "open-foley",
+  "version": "0.5.3",
+  "description": "Foley for agents \u2014 deterministic sound design from a cue sheet. It reads the script, not the pixels.",
+  "license": "MIT",
+  "funding": "https://ko-fi.com/pascal18663",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./palette": "./dist/palette.js"
+  },
+  "bin": {
+    "open-foley": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "assets"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test --import tsx/esm test/*.test.ts",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.1",
+    "tsdown": "^0.9.0",
+    "tsx": "^4.22.3",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "foley",
+    "sound-design",
+    "sfx",
+    "sound-effects",
+    "video",
+    "agent",
+    "motion-graphics"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pascal910107/open-take.git",
+    "directory": "packages/foley"
+  },
+  "homepage": "https://github.com/pascal910107/open-take#readme",
+  "bugs": {
+    "url": "https://github.com/pascal910107/open-take/issues"
+  }
+}
