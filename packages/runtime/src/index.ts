@@ -40,8 +40,21 @@ export {
   auditCursor,
   type CaptureLog,
   type CompositionIssue,
+  checkFilm,
   describeSoundPalette,
+  encodeWav,
+  type FilmCheck,
+  type FilmRenderResult,
+  filmSheet,
+  filmStills,
+  formatFilmCheck,
   formatIssues,
+  INSTRUMENT_NOTES,
+  renderFilm,
+  renderScore,
+  SCORE_DRUMS,
+  SCORE_NOTES,
+  type ScoreSheet,
   SOUND_STYLES,
   type TakeComposition,
   validateComposition,
@@ -212,10 +225,17 @@ export type MakeTakeOpts = {
    *  and auto-opens the raw footage so the user watches it while the polish
    *  renders. A throwing callback never fails the take. */
   onCaptureReady?: (capturePath: string) => void;
+  /** false: record only — keep the capture, its log, the saved screens and the
+   *  planned composition, and render no master (a film that only needs the
+   *  recording as material; `render` masters the take later). Default true. */
+  render?: boolean;
 };
 
 export type MakeTakeResult = {
+  /** the master's path — written unless `render: false` asked for none */
   mp4Path: string;
+  /** whether the master was rendered */
+  rendered: boolean;
   compositionPath: string;
   /** the take's working directory (`<out>.take/`) — everything but the master */
   takeDir: string;
@@ -333,6 +353,23 @@ export async function makeTake(plan: TakePlan, opts: MakeTakeOpts): Promise<Make
       ? { ...opts.planOpts, output: { ...opts.planOpts?.output, fps: captureFps } }
       : opts.planOpts;
   const composition = planComposition(log, planOpts);
+  if (opts.render === false) {
+    await writeFile(take.compositionPath, JSON.stringify(composition, null, 2));
+    return {
+      mp4Path: take.mp4Path,
+      rendered: false,
+      compositionPath: take.compositionPath,
+      takeDir: take.dir,
+      capturePath,
+      captureLogPath,
+      composition,
+      skipped: log.skipped ?? [],
+      precheck: log.precheck ?? [],
+      settleWaits: log.settleWaits ?? [],
+      ...(log.paintedFrac != null ? { paintedFrac: log.paintedFrac } : {}),
+      warnings: [],
+    };
+  }
   const { mp4Path, compositionPath, warnings } = await renderTake({
     // A draft take renders fast (30fps cap + no blur) but PLANS at full
     // quality: the sibling written below keeps the real settings, so the
@@ -350,6 +387,7 @@ export async function makeTake(plan: TakePlan, opts: MakeTakeOpts): Promise<Make
 
   return {
     mp4Path,
+    rendered: true,
     compositionPath,
     takeDir: take.dir,
     capturePath,

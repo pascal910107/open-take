@@ -1,0 +1,70 @@
+---
+title: film
+description: Render a film you wrote yourself as a web page — frame-exact, with measured motion blur and your own soundtrack — and measure the result.
+---
+
+```sh
+open-take film render film/index.html --out film.mp4           # 1080p60 master
+open-take film render film/index.html --draft --out draft.mp4  # half size, 30 fps, no blur
+open-take film still  film/index.html --at 3.5,12 --out stills # PNGs as the master shows them
+open-take film sheet  film.mp4                                 # a timed contact sheet
+open-take film check  film.mp4 --size 1920x1080 --fps 60       # measured defects
+```
+
+A launch or promo film does not have to fit a format. Write it the way you
+would build anything for the web — HTML, CSS, SVG, canvas, WebGL, any library —
+and `film` plays it: open-take decides nothing about how it looks or sounds.
+
+## The page
+
+The page declares its length, and its soundtrack if it has one:
+
+```js
+window.__film = { duration: 42.5, audio: "score.wav" };
+```
+
+It either draws any moment on request — `window.__render = (t) => { … }`,
+called in any order — or simply animates: CSS animations and transitions, the
+Web Animations API, `requestAnimationFrame`, GSAP, three.js, `<video>`. For a
+page that animates, every clock it can read (`performance.now`, `Date`,
+timers, rAF) runs on film time and every animation and video is set to the
+exact frame; such a page is played front to back. `Math.random` is seeded.
+Same-origin `<iframe>`s follow the film clock from the moment they were put on
+the page. `__film` may also set `width`/`height` (a vertical cut) and `ready`
+(a promise that holds the first frame).
+
+## What render does
+
+- **Motion blur is measured.** Every frame's shutter (180°, centred on the
+  frame) is probed for how far anything visible moves; the frame gets one
+  sample per 3 px of travel, averaged in linear light. A still frame is one
+  sample; a cut is never blended across.
+- **Missing files fail the render by name** — a font or image the page asks
+  for that is not there. The directory served is the working directory when
+  the page is inside it; `--root` otherwise.
+- **The master** is H.264 High, yuv420p, BT.709, with the soundtrack as AAC.
+  `<audio>` elements on the page are not recorded.
+
+| flag | default | notes |
+| --- | --- | --- |
+| `--out <path>` | `film.mp4` | |
+| `--draft` | — | half size, 30 fps, no blur, fast encode |
+| `--no-blur` | — | one sample per frame |
+| `--size WxH` | page's `__film`, else 1920x1080 | CSS px the page lays out at |
+| `--fps <n>` | 60 (draft 30) | |
+| `--duration <s>` | page's `__film.duration` | |
+| `--from <s>` `--to <s>` | the whole film | render a section |
+| `--audio <file>` / `none` | page's `__film.audio` | |
+| `--root <dir>` | see above | the directory the page's URLs resolve in |
+| `--workers <n>` | 2 | more did not render faster (Chrome's screenshot path is shared); a Chrome that dies mid-render costs only its current 3-second piece |
+
+## check
+
+`film check` measures what an author cannot see or hear, with times: the
+format; a frame that repeats inside motion; motion updating at a lower rate than
+the film; hard cuts; black frames inside the film; loudness (integrated, range,
+true peak); silences; clicks — single-sample jumps in the waveform. It judges
+nothing about taste. `--json` for the data; exit 1 on an error finding.
+
+The sound a film carries can be your own WAV, or a score open-take plays for
+you — see [Sound](/docs/sound#a-score-you-write).

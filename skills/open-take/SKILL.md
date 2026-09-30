@@ -101,15 +101,18 @@ judgment; when skipping, restate the brief so they can correct it.
 - **Ask one grouped presentation choice in the SAME AskUserQuestion call** when it is
   ambiguous: `Recording (recommended)` is real footage with smooth cursor/zoom and no
   title, captions, audio, scene animation, or transitions; `Demo` defaults to a short title
-  plus per-beat captions over the recording; `Launch` is a designed scene composition that may include
-  typography, composed UI layers, and transitions. Ask about sound as one independent choice unless
+  plus per-beat captions over the recording; `Launch` is a designed film you write yourself as a
+  web page — story, typography, the product's own UI and assets, motion and sound are yours;
+  open-take renders and measures it ([film.md](references/film.md)). Ask about sound as one independent choice unless
   the request already specified it. Never interrogate the user about each effect separately.
   Fine-grained explicit instructions always win.
   An exclusive brief such as "just record it with cursor/zoom" or "只要錄影加滑鼠縮放"
   also rules out the unrequested extras, including sound; do not ask about them again.
 - **State the applied settings before capture** in one short sentence: mode, title/captions,
   scene animation/transitions, and sound. This is a correction point, not another approval
-  gate. Route Recording and Demo through `make`/`render`; route Launch through `launch`. If
+  gate. Route Recording and Demo through `make`/`render`; route Launch through `film` (your own
+  page, [film.md](references/film.md)) — the older `launch` JSON composition is for a quick cut
+  built around one finished recording. If
   Recording or Demo includes **sound effects**, that is `--sound <style>` on `make`/`render`
   (see SOUND below) — still a recording, still `make`. Only **music or narration** needs a
   launch composition: capture with `make`, wrap that finished recording as the only `footage`
@@ -698,8 +701,17 @@ The `make` commands produce `<out>.mp4` (1920×1080 @ **60fps default**) — the
 and a working directory `<out>.take/` beside it holding everything else, starting
 with the editable `<out>.take/composition.json`.
 
-For an explicitly requested Launch composition, initialize from a real recording, edit the
-portable JSON, validate cheaply, then render. Scene order and timing come from the JSON; there
+**A launch or promo film is yours to write.** Build it as a web page — HTML, CSS, SVG,
+canvas, WebGL, any library — with the story, copy, typography, motion and sound you decide;
+open-take plays it frame-exactly into a 1080p60 master with measured motion blur, masters a
+score you write note by note (or takes your own WAV), hands you the real product's UI as
+material (`make --states`), and measures what you cannot see or hear (`film check`). Read
+[film.md](references/film.md) (or `npx open-take skill film`) before starting; nothing in it
+is a template.
+
+The older route — a JSON launch composition wrapped around one finished recording — still
+works for a quick cut. Initialize from a real recording, edit the portable JSON, validate
+cheaply, then render. Scene order and timing come from the JSON; there
 is no fixed film length. Audio is absent unless the user chose it.
 
 ```sh

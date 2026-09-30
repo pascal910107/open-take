@@ -7,7 +7,18 @@
 // Edit `comp` (zoom decisions, framing, cursor) and re-render — the
 // composition is the editable source of truth.
 
-export { describePalette as describeSoundPalette, STYLES as SOUND_STYLES } from "open-foley";
+export {
+  DRUMS as SCORE_DRUMS,
+  describePalette as describeSoundPalette,
+  encodeWav,
+  INSTRUMENT_NOTES,
+  NOTES as SCORE_NOTES,
+  renderScore,
+  type ScoreRender,
+  type ScoreSheet,
+  STYLES as SOUND_STYLES,
+  validateScore,
+} from "open-foley";
 export {
   type AuditCursorOpts,
   type AuditRow,
@@ -24,6 +35,23 @@ export {
   resolveManagedFfmpeg,
   resolveManagedFfprobe,
 } from "./ffmpeg";
+export {
+  checkFilm,
+  type FilmCheck,
+  type FilmCheckExpect,
+  type FilmCheckIssue,
+  formatFilmCheck,
+} from "./film/check";
+export { type FilmPageInfo, filmClockSource } from "./film/clock";
+export {
+  type FilmProgress,
+  type FilmRenderOptions,
+  type FilmRenderResult,
+  type FilmStillsOptions,
+  filmStills,
+  renderFilm,
+} from "./film/render";
+export { type FilmSheetOptions, filmSheet } from "./film/sheet";
 export {
   captureEventSheet,
   type FoleyEvent,
@@ -57,6 +85,13 @@ export { launchTemplate } from "./launch-template";
 export * from "./launch-types";
 export { formatLaunchIssues, validateLaunchComposition } from "./launch-validate";
 export * as math from "./math";
+export {
+  jpegDimensions,
+  matroskaCluster,
+  matroskaHead,
+  mjpegMatroska,
+  type TimedFrame,
+} from "./mjpeg-matroska";
 export { evaluateMotionScene, evaluateMotionTrack, motionGraphemes } from "./motion-evaluate";
 export { analyzeMotionQuality } from "./motion-quality";
 export {

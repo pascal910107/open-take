@@ -9,6 +9,7 @@
 //
 // The refine loop is conversational: the user talks, the agent edits
 // composition.json and drives these verbs. See skills/open-take/SKILL.md.
+import { existsSync } from "node:fs";
 import { stat as fsStat, readFile, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,6 +21,7 @@ import {
   buildDefectReport,
   type CaptureLog,
   type CompositionIssue,
+  checkFilm,
   checkLaunchFile,
   checkTake,
   ciAllowedOrigins,
@@ -31,11 +33,16 @@ import {
   describeTake,
   emitGithubOutputs,
   emitStepSummary,
+  encodeWav,
   ensureChrome,
+  filmSheet,
+  filmStills,
+  formatFilmCheck,
   formatIssues,
   formatNotes,
   formatTakeStates,
   healingWithheld,
+  INSTRUMENT_NOTES,
   initLaunchProject,
   inspectPage,
   lintPlan,
@@ -52,9 +59,11 @@ import {
   renderCompositionFile,
   renderDefectBlock,
   renderDraft,
+  renderFilm,
   renderFrames,
   renderLaunchFile,
   renderReview,
+  renderScore,
   renderTeaserGif,
   requireTakeFiles,
   reRenderInPlace,
@@ -62,6 +71,9 @@ import {
   revealPath,
   runPostShootGates,
   SAY_IT_CARD,
+  SCORE_DRUMS,
+  SCORE_NOTES,
+  type ScoreSheet,
   SOUND_STYLES,
   settleDefects,
   skippedDefects,
@@ -102,6 +114,8 @@ const BOOL_FLAGS = new Set([
   "--no-teaser",
   "--states",
   "--json",
+  "--no-blur",
+  "--no-render",
 ]);
 
 const argv = process.argv.slice(2);
@@ -154,6 +168,7 @@ const FLAGS_BY_CMD: Record<string, string[]> = {
     "--verbose",
     "--sound",
     "--states",
+    "--no-render",
   ],
   render: [
     "--sound",
@@ -203,6 +218,24 @@ const FLAGS_BY_CMD: Record<string, string[]> = {
   init: ["--force"],
   skill: ["--force"],
   launch: ["--video", "--out", "--draft", "--verbose", "--sound"],
+  sound: ["--out", "--json"],
+  film: [
+    "--out",
+    "--root",
+    "--audio",
+    "--draft",
+    "--no-blur",
+    "--fps",
+    "--size",
+    "--duration",
+    "--from",
+    "--to",
+    "--workers",
+    "--at",
+    "--every",
+    "--json",
+    "--verbose",
+  ],
 };
 
 function rejectUnknownFlags(cmd: string): void {
@@ -253,7 +286,7 @@ const USAGE = `open-take — agent-native demo recorder
 
 Usage:
   open-take inspect <url> [--viewport 1920x1080]
-  open-take make   --plan <plan.json> --out <out.mp4> [--fps 60] [--draft] [--no-open] [--sound <style>]
+  open-take make   --plan <plan.json> --out <out.mp4> [--fps 60] [--draft] [--no-open] [--sound <style>] [--states] [--no-render]
   open-take render <take> [--review] [--draft] [--open] [--reveal] [--no-open] [--no-strict] [--sound <style>|off]
   open-take check  <take> [--no-strict]
   open-take beats  <take> [--card]
@@ -271,7 +304,14 @@ Usage:
   open-take launch compose <brief.json> --out <launch.json>
   open-take launch check <launch.json>
   open-take launch render <launch.json> [--out <movie.mp4>] [--draft] [--sound <style>|off]
-  open-take skill  [motion | install [--force]]
+  open-take skill  [motion | film | install [--force]]
+  open-take sound render <score.json> [--out score.wav] [--json]
+  open-take sound instruments | palette
+  open-take film render <page.html|dir> [--out film.mp4] [--audio <file>|none] [--draft] [--no-blur]
+                   [--size 1920x1080] [--fps 60] [--duration <s>] [--from <s>] [--to <s>] [--root <dir>]
+  open-take film still  <page.html|dir> --at <s>[,<s>…] [--out <dir>] [--no-blur] [--root <dir>]
+  open-take film sheet  <film.mp4> [--out sheet.png] [--every <s> | --at <s>,<s>…]
+  open-take film check  <film.mp4> [--size 1920x1080] [--fps 60] [--json]
 
   A take is TWO things on disk: the postable master at exactly your --out path
   (<out>.mp4), and a working directory beside it (<out>.take/) holding
@@ -459,6 +499,14 @@ Usage:
           list the vetted sounds per role (what each feels like, which is the
           default) and the music options — choose them in the composition's
           sound.palette.
+  film    a film you write yourself as a web page — open-take only performs
+          it. \`film render\` plays the page on film time (window.__render(t),
+          or its own CSS/WAAPI/rAF/GSAP/video animation, frame-exact) in
+          headless Chrome and writes an H.264 master with measured motion blur
+          and the page's soundtrack (window.__film = { duration, audio }).
+          \`film still\` writes PNG stills at given times; \`film sheet\` a
+          timed contact sheet of any video; \`film check\` measures a finished
+          film: format, hitches, cadence, cuts, black frames, loudness, clicks.
 
   --out <path>   (make) where the postable master goes — taken literally, and
               its <name>.take/ working dir is created beside it. Default
@@ -997,6 +1045,10 @@ async function main() {
 
   if (cmd === "make") {
     const planPath = flag("--plan");
+    if (has("--no-render") && has("--draft"))
+      throw new Error(
+        "make: --no-render records without rendering; --draft has nothing to do with it",
+      );
     const out = normalizeOut(flag("--out") ?? DEFAULT_OUT);
     if (!planPath) throw new Error("make: missing --plan <plan.json>");
     const parsedPlan: unknown = JSON.parse(await readFile(planPath, "utf8"));
@@ -1086,13 +1138,16 @@ async function main() {
         logProgress: true,
         verbose: has("--verbose"),
         draft: has("--draft"),
+        render: !has("--no-render"),
         ...(soundStyle ? { planOpts: { sound: { style: soundStyle } } } : {}),
         // progressive reveal: the capture exists minutes before the polished
         // mp4 — show the raw footage the moment it lands so the wait is spent
         // watching, not staring at a spinner.
         onCaptureReady: (p) => {
           process.stdout.write(
-            `\ncapture landed: ${p}\n  raw footage (unpolished) — the polished render is still cooking\n`,
+            has("--no-render")
+              ? `\ncapture landed: ${p}\n`
+              : `\ncapture landed: ${p}\n  raw footage (unpolished) — the polished render is still cooking\n`,
           );
           if (!has("--no-open")) openPath(p);
         },
@@ -1138,6 +1193,7 @@ async function main() {
     }
     const {
       mp4Path,
+      rendered,
       compositionPath,
       takeDir,
       capturePath,
@@ -1161,18 +1217,30 @@ async function main() {
       : `dossier:     ${dossierPath}      ← missing — write the exploration harvest\n` +
         `             (app thesis · hero candidates tried/rejected · selector map ·\n` +
         `             content answers · hazards) so the next demo skips cold exploration\n`;
-    process.stdout.write(
-      `\nmp4:         ${mp4Path}${draftNote}\n` +
-        `working dir: ${takeDir}/      (everything below lives here)\n` +
-        `composition: ${compositionPath}\n` +
-        `capture:     ${capturePath}\ncapture log: ${captureLogPath}\n` +
-        dossierLine +
-        `\nrefine by asking your agent for changes — or directly:\n` +
-        `  ${INVOKE} frames ${mp4Path}            (beat-aware contact sheet — verify first)\n` +
-        `  ${INVOKE} render ${mp4Path} --review   (draft copy with beat badges, auto-opens)\n` +
-        `  ${INVOKE} beats  ${mp4Path}            (the numbered beat sheet)\n` +
-        `  ${INVOKE} ab     ${mp4Path} --set zoom=light,tight --beat 2   (taste A/B)\n`,
-    );
+    if (!rendered)
+      process.stdout.write(
+        `\nrecorded (no master rendered — --no-render):\n` +
+          `working dir: ${takeDir}/\n` +
+          `capture:     ${capturePath}\ncapture log: ${captureLogPath}\n` +
+          `composition: ${compositionPath}\n` +
+          (existsSync(join(takeDir, "states"))
+            ? `states:      ${join(takeDir, "states")}/      (\`${INVOKE} states ${takeDir}\` lists them)\n`
+            : "") +
+          `master it later: ${INVOKE} render ${takeDir}\n`,
+      );
+    else
+      process.stdout.write(
+        `\nmp4:         ${mp4Path}${draftNote}\n` +
+          `working dir: ${takeDir}/      (everything below lives here)\n` +
+          `composition: ${compositionPath}\n` +
+          `capture:     ${capturePath}\ncapture log: ${captureLogPath}\n` +
+          dossierLine +
+          `\nrefine by asking your agent for changes — or directly:\n` +
+          `  ${INVOKE} frames ${mp4Path}            (beat-aware contact sheet — verify first)\n` +
+          `  ${INVOKE} render ${mp4Path} --review   (draft copy with beat badges, auto-opens)\n` +
+          `  ${INVOKE} beats  ${mp4Path}            (the numbered beat sheet)\n` +
+          `  ${INVOKE} ab     ${mp4Path} --set zoom=light,tight --beat 2   (taste A/B)\n`,
+      );
     printWarnings(warnings);
     // Post-shoot gates: line the delivered video up against the engine's own
     // intent. checkTake reads pixels (dead opening / static tail) and the
@@ -1185,44 +1253,46 @@ async function main() {
     // runPostShootGates).
     let postShootErrors = 0;
     let postShootIssues: CompositionIssue[] = [];
-    try {
-      const captureLogJson = JSON.parse(await readFile(captureLogPath, "utf8")) as CaptureLog;
-      // A take already doomed by skipped steps earns no healing minutes: the
-      // skipped-steps exit 2 below fires regardless of what a re-render fixes.
-      const doomed = healingWithheld(skipped.length, !has("--no-strict"));
-      const result = await runPostShootGates({
-        checkTake: () =>
-          checkTake({
-            composition: made.composition,
-            captureLog: captureLogJson,
-            deliveredMp4: mp4Path,
-            captureMp4: capturePath,
-          }),
-        auditCursor: async () => (await auditCursor(made.composition, mp4Path)).issues,
-        ...(doomed
-          ? {}
-          : {
-              reRender: () =>
-                reRenderInPlace(
-                  takePost,
-                  // draft parity: the master on disk was rendered from the
-                  // draft transform, so the heal must render the same one
-                  has("--draft") ? toDraft(made.composition) : made.composition,
-                  captureLogJson,
-                ),
+    // the post-shoot gates judge the delivered master; a record-only make has none
+    if (rendered)
+      try {
+        const captureLogJson = JSON.parse(await readFile(captureLogPath, "utf8")) as CaptureLog;
+        // A take already doomed by skipped steps earns no healing minutes: the
+        // skipped-steps exit 2 below fires regardless of what a re-render fixes.
+        const doomed = healingWithheld(skipped.length, !has("--no-strict"));
+        const result = await runPostShootGates({
+          checkTake: () =>
+            checkTake({
+              composition: made.composition,
+              captureLog: captureLogJson,
+              deliveredMp4: mp4Path,
+              captureMp4: capturePath,
             }),
-        onFindings: printPostShoot,
-        log: (line) => process.stdout.write(`\n${line}\n`),
-        warn: (line) => process.stderr.write(`${line}\n`),
-      });
-      postShootErrors = result.errors;
-      postShootIssues = result.issues;
-    } catch (e) {
-      // the gate must never turn a delivered take into a crash — report and move on
-      process.stderr.write(
-        `post-shoot checks did not run: ${e instanceof Error ? e.message : e}\n`,
-      );
-    }
+          auditCursor: async () => (await auditCursor(made.composition, mp4Path)).issues,
+          ...(doomed
+            ? {}
+            : {
+                reRender: () =>
+                  reRenderInPlace(
+                    takePost,
+                    // draft parity: the master on disk was rendered from the
+                    // draft transform, so the heal must render the same one
+                    has("--draft") ? toDraft(made.composition) : made.composition,
+                    captureLogJson,
+                  ),
+              }),
+          onFindings: printPostShoot,
+          log: (line) => process.stdout.write(`\n${line}\n`),
+          warn: (line) => process.stderr.write(`${line}\n`),
+        });
+        postShootErrors = result.errors;
+        postShootIssues = result.issues;
+      } catch (e) {
+        // the gate must never turn a delivered take into a crash — report and move on
+        process.stderr.write(
+          `post-shoot checks did not run: ${e instanceof Error ? e.message : e}\n`,
+        );
+      }
     // Pre-capture target findings (ambiguous selectors, late-bound targets).
     // Errors already refused the capture inside the engine; what prints here
     // is the suspect tier — same summary treatment as composition warnings.
@@ -1292,7 +1362,7 @@ async function main() {
           verdict: verdictLine(postShootErrors, skipped.length),
           exitCode: has("--no-strict") ? 0 : 2,
           plan: planPath,
-          master: mp4Path,
+          ...(rendered ? { master: mp4Path } : {}),
           defects: [
             ...asDefects("plan-lint", planWarns),
             ...asDefects("precheck", precheck),
@@ -1688,24 +1758,211 @@ async function main() {
   if (cmd === "skill") {
     if (positional[0] === "install") await runInit();
     else {
-      if (positional.length > 1 || (positional[0] && positional[0] !== "motion"))
-        throw new Error("skill: expected motion or install [--force]");
+      if (positional.length > 1 || (positional[0] && !["motion", "film"].includes(positional[0])))
+        throw new Error("skill: expected motion, film or install [--force]");
       const bundle = await bundledSkill();
       const text =
         positional[0] === "motion"
           ? bundle.resources?.["references/motion-composition.md"]
-          : bundle.skillText;
-      if (!text) throw new Error("Motion reference not found (re-run the package build)");
+          : positional[0] === "film"
+            ? bundle.resources?.["references/film.md"]
+            : bundle.skillText;
+      if (!text)
+        throw new Error(
+          `${positional[0] ?? "skill"} reference not found (re-run the package build)`,
+        );
       process.stdout.write(text);
     }
     return;
   }
 
+  if (cmd === "film") {
+    const action = positional[0];
+    const target = positional[1];
+    if (!action || !target || positional.length !== 2)
+      throw new Error(
+        "film: expected render <page>, still <page> --at <s>, sheet <film.mp4> or check <film.mp4>",
+      );
+    const only = (...allowed: string[]) => {
+      for (const f of Object.keys(flags))
+        if (!allowed.includes(f))
+          throw new Error(
+            `film ${action}: ${f} does not apply here — allowed: ${allowed.join(" ")}`,
+          );
+    };
+    const num = (name: string): number | undefined => {
+      const v = flag(name);
+      if (v == null) return undefined;
+      const n = Number(v);
+      if (!Number.isFinite(n) || n < 0)
+        throw new Error(`film ${action}: ${name} takes a number, got ${v}`);
+      return n;
+    };
+    const times = (v: string | undefined) =>
+      v?.split(",").map((x) => {
+        const n = Number(x);
+        if (!Number.isFinite(n) || n < 0)
+          throw new Error(`film ${action}: --at takes seconds, e.g. 1.5,12`);
+        return n;
+      });
+    const size = parseViewport(flag("--size"));
+    if (has("--size") && !size)
+      throw new Error(`film ${action}: --size is WIDTHxHEIGHT, e.g. 1920x1080`);
+    const onConsole = (level: string, text: string) => {
+      if (level === "error" || level === "warning" || has("--verbose"))
+        process.stderr.write(`[page ${level}] ${text}\n`);
+    };
+    if (action === "render") {
+      only(
+        "--out",
+        "--root",
+        "--audio",
+        "--draft",
+        "--no-blur",
+        "--fps",
+        "--size",
+        "--duration",
+        "--from",
+        "--to",
+        "--workers",
+        "--verbose",
+      );
+      const audio = flag("--audio");
+      let said = "";
+      const result = await renderFilm({
+        page: target,
+        out: flag("--out") ?? "film.mp4",
+        chromePath: await ensureChrome(),
+        root: flag("--root"),
+        width: size?.width,
+        height: size?.height,
+        fps: num("--fps"),
+        duration: num("--duration"),
+        from: num("--from"),
+        to: num("--to"),
+        workers: num("--workers"),
+        audio: audio === "none" ? null : audio,
+        blur: has("--no-blur") ? false : undefined,
+        draft: has("--draft"),
+        onConsole,
+        onProgress: (p) => {
+          if (process.stderr.isTTY)
+            process.stderr.write(`\r${p.phase} ${p.done}/${p.total} frames   `);
+          else {
+            const step = `${p.phase} ${Math.floor((p.done / p.total) * 10) * 10}%`;
+            if (step !== said) {
+              said = step;
+              process.stderr.write(`${step}\n`);
+            }
+          }
+        },
+      });
+      if (process.stderr.isTTY) process.stderr.write("\n");
+      for (const w of result.warnings) process.stdout.write(`warn: ${w}\n`);
+      process.stdout.write(
+        `rendered: ${result.out}\n${result.width}×${result.height} ${result.fps} fps, ${result.durationS.toFixed(2)}s — ` +
+          `${result.frames} frames, ${result.samples} samples (${result.mode} mode), ${(result.wallMs / 1000).toFixed(1)}s\n`,
+      );
+      return;
+    }
+    if (action === "still") {
+      only("--at", "--out", "--root", "--no-blur", "--size", "--verbose");
+      const at = times(flag("--at"));
+      if (!at?.length) throw new Error("film still: --at <seconds>[,<seconds>…] is required");
+      const files = await filmStills({
+        page: target,
+        chromePath: await ensureChrome(),
+        at,
+        outDir: flag("--out") ?? "stills",
+        root: flag("--root"),
+        width: size?.width,
+        height: size?.height,
+        blur: has("--no-blur") ? false : undefined,
+        onConsole,
+      });
+      process.stdout.write(`${files.join("\n")}\n`);
+      return;
+    }
+    if (action === "sheet") {
+      only("--out", "--every", "--at");
+      const r = await filmSheet({
+        input: target,
+        out: flag("--out") ?? `${target.replace(/\.[^./]+$/, "")}.sheet.png`,
+        chromePath: await ensureChrome(),
+        every: num("--every"),
+        at: times(flag("--at")),
+      });
+      process.stdout.write(`sheet: ${r.out} (${r.times.length} frames)\n`);
+      return;
+    }
+    if (action === "check") {
+      only("--size", "--fps", "--json");
+      const c = await checkFilm(target, {
+        width: size?.width,
+        height: size?.height,
+        fps: num("--fps"),
+      });
+      process.stdout.write(
+        has("--json") ? `${JSON.stringify(c, null, 2)}\n` : `${formatFilmCheck(c)}\n`,
+      );
+      if (c.issues.some((i) => i.severity === "error")) process.exitCode = 1;
+      return;
+    }
+    throw new Error(`film: unknown action ${action} — render, still, sheet or check`);
+  }
+
   if (cmd === "sound") {
-    if (positional[0] !== "palette") throw new Error("sound: expected `palette`");
-    process.stdout.write(`${describeSoundPalette()}
-`);
-    return;
+    const action = positional[0];
+    if (action === "palette") {
+      process.stdout.write(`${describeSoundPalette()}\n`);
+      return;
+    }
+    if (action === "instruments") {
+      const lines = [
+        "Instruments a score can play (a track event's `drum` or `note`):",
+        "",
+        "drums (one-shots):",
+        ...SCORE_DRUMS.map((d) => `  ${d.padEnd(15)} ${INSTRUMENT_NOTES[d]}`),
+        "",
+        'notes (pitch: "F#3", a MIDI number, or a list for a chord):',
+        ...SCORE_NOTES.map((d) => `  ${d.padEnd(15)} ${INSTRUMENT_NOTES[d]}`),
+        "",
+        "recordings and voices (a track event's `sound`): `open-take sound palette`",
+        "your own audio (a track event's `file`): any WAV, relative to the score",
+      ];
+      process.stdout.write(`${lines.join("\n")}\n`);
+      return;
+    }
+    if (action === "render") {
+      const sheetPath = positional[1];
+      if (!sheetPath || positional.length !== 2)
+        throw new Error("sound render: expected <score.json>");
+      const out = flag("--out") ?? sheetPath.replace(/\.json$/i, "") + ".wav";
+      const sheet = JSON.parse(await readFile(sheetPath, "utf8")) as ScoreSheet;
+      const { readFileSync } = await import("node:fs");
+      const result = renderScore(sheet, (p) => readFileSync(resolve(dirname(sheetPath), p)));
+      await writeFile(out, encodeWav(result.pcm));
+      if (has("--json")) {
+        process.stdout.write(
+          `${JSON.stringify({ out, before: result.before, after: result.after, masterGainDb: result.masterGainDb, tracks: result.tracks }, null, 2)}\n`,
+        );
+        return;
+      }
+      const f = (x: number) => (Number.isFinite(x) ? x.toFixed(1) : "silent");
+      process.stdout.write(
+        `rendered: ${out}\n` +
+          `mix: ${f(result.before.integrated)} → ${f(result.after.integrated)} LUFS, true peak ${f(result.after.truePeak)} dBTP, range ${f(result.after.range)} LU\n` +
+          result.tracks
+            .map(
+              (t) =>
+                `  ${t.name.padEnd(12)} peak ${f(t.peakDb)} dBFS · ${f(t.loudness.integrated)} LUFS · loudest 3 s ${f(t.loudness.shortTermMax)} LUFS`,
+            )
+            .join("\n") +
+          "\n",
+      );
+      return;
+    }
+    throw new Error("sound: expected `palette`, `instruments` or `render <score.json>`");
   }
 
   if (cmd === "--version" || cmd === "-v") {

@@ -54,3 +54,42 @@ npx open-foley audition --out audition/
 renders every role three ways, plus `all.wav` in order. Sound is judged by ear
 the way the picture is judged by eye — A/B a style, then keep the one that
 reads.
+
+## A score you write
+
+A [film you write yourself](/docs/cli/film) places every sound itself —
+nothing is added for it. Write the score as JSON: tracks of events, each one a
+drum, a tuned note, a recorded sound from the vetted palette, or a WAV of your
+own; open-take renders the instruments, places the recordings, ducks one track
+under another where you ask, and masters the mix.
+
+```json
+{ "version": 1, "durationS": 42.5,
+  "tracks": [
+    { "name": "pad", "duck": { "under": "ui", "depthDb": 4 },
+      "events": [ { "at": 0, "note": "warm-pad", "pitch": ["D3", "F#3", "A3"], "dur": 4, "gainDb": -18 } ] },
+    { "name": "drums", "events": [ { "at": 8, "drum": "kick-long", "gainDb": -6 } ] },
+    { "name": "ui", "events": [ { "at": 18.4, "sound": "key.brown", "gainDb": -14 } ] } ] }
+```
+
+```sh
+open-take sound instruments           # the drums and tuned instruments
+open-take sound palette               # the recorded sounds and what each feels like
+open-take sound render score.json --out score.wav
+```
+
+| event field | meaning |
+| --- | --- |
+| `at` | seconds |
+| `drum` / `note` / `sound` / `file` | exactly one: an instrument, a palette id, or a WAV relative to the score |
+| `pitch` | a note name (`"F#3"`), a MIDI number, or a list for a chord |
+| `dur` | seconds (a note's length; a one-shot is cut there) |
+| `gainDb` | the event's peak level, dBFS (default −12; for a `file`, a trim, default 0) |
+| `pan` | −1 … 1 |
+| `seed` | varies a hit, so two are never identical |
+
+The mix is mastered to −16 LUFS under a −1.5 dBTP ceiling —
+`"master": { "lufs": -14 }` to change it, `false` to keep every level as
+written — and `sound render` prints each track's peak and loudness, the
+balance an author who cannot listen would otherwise have to guess. The same
+score always renders to the same samples.
