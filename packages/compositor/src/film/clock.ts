@@ -492,7 +492,7 @@ function installFilmClock(opts: FilmClockOptions): void {
   Object.defineProperty(HTMLMediaElement.prototype, "src", {
     ...source,
     set(this: HTMLMediaElement, v: string) {
-      const hadNothing = !this.hasAttribute("src");
+      const hadNothing = this.networkState === HTMLMediaElement.NETWORK_EMPTY;
       source.set!.call(this, v);
       startOver(this, hadNothing);
     },
@@ -500,7 +500,8 @@ function installFilmClock(opts: FilmClockOptions): void {
   const realSetAttribute = Element.prototype.setAttribute;
   Element.prototype.setAttribute = function (this: Element, name: string, value: string) {
     const isSource = this instanceof HTMLMediaElement && name.toLowerCase() === "src";
-    const hadNothing = !this.hasAttribute("src");
+    const hadNothing =
+      isSource && (this as HTMLMediaElement).networkState === HTMLMediaElement.NETWORK_EMPTY;
     realSetAttribute.call(this, name, value);
     if (isSource) startOver(this as HTMLMediaElement, hadNothing);
   };
@@ -508,8 +509,10 @@ function installFilmClock(opts: FilmClockOptions): void {
   Element.prototype.removeAttribute = function (this: Element, name: string) {
     const isSource =
       this instanceof HTMLMediaElement && name.toLowerCase() === "src" && this.hasAttribute("src");
+    const hadNothing =
+      isSource && (this as HTMLMediaElement).networkState === HTMLMediaElement.NETWORK_EMPTY;
     realRemoveAttribute.call(this, name);
-    if (isSource) startOver(this as HTMLMediaElement, false);
+    if (isSource) startOver(this as HTMLMediaElement, hadNothing);
   };
   /** when a video that plays by itself started: where it was put on the page */
   const autoBorn = (el: HTMLMediaElement) =>
