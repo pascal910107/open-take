@@ -58,25 +58,34 @@ reads.
 ## A score you write
 
 A [film you write yourself](/docs/cli/film) places every sound itself —
-nothing is added for it. Write the score as JSON: tracks of events, each one a
-drum, a tuned note, a recorded sound from the vetted palette, or a WAV of your
-own; open-take renders the instruments, places the recordings, ducks one track
-under another where you ask, and masters the mix.
+nothing is added for it. A score is tracks of timed events, each one a drum, a
+tuned note, a recorded sound from the vetted palette, or a WAV of your own;
+open-take renders the instruments, places the recordings, ducks one track
+under another where you ask, and masters the mix. Write it by hand as JSON, or
+as a program that returns it — `score.mjs`, whose default export is the score
+(or a function returning it) — so a pulse is a loop, and the score reads the
+same times as the picture:
 
-```json
-{ "version": 1, "durationS": 42.5,
-  "tracks": [
-    { "name": "pad", "duck": { "under": "ui", "depthDb": 4 },
-      "events": [ { "at": 0, "note": "warm-pad", "pitch": ["D3", "F#3", "A3"], "dur": 4, "gainDb": -18 } ] },
-    { "name": "drums", "events": [ { "at": 8, "drum": "kick-long", "gainDb": -6 } ] },
-    { "name": "ui", "events": [ { "at": 18.4, "sound": "key.brown", "gainDb": -14 } ] } ] }
+```js
+// score.mjs — one key sound for each character the page types
+import { typing } from "./film-kit.js";
+const search = typing("World Gym", { at: 5 }); // the page types the same text at the same time
+export default {
+  version: 1,
+  durationS: 42.5,
+  tracks: [{ name: "keys", events: search.times.map((at) => ({ at, sound: "key.brown", gainDb: -16 })) }],
+};
 ```
 
 ```sh
 open-take sound instruments           # the drums and tuned instruments
 open-take sound palette               # the recorded sounds and what each feels like
-open-take sound render score.json --out score.wav
+open-take sound render score.mjs --out score.wav   # or score.json
 ```
+
+A track is `{ "name", "events": [ … ] }`, with its own `gainDb` and, to sit
+under another, `"duck": { "under": "ui", "depthDb": 4 }`; the score is
+`{ "version": 1, "durationS", "tracks": [ … ] }`.
 
 | event field | meaning |
 | --- | --- |

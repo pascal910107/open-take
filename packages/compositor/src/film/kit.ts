@@ -4,10 +4,12 @@
 //
 //   import { tempo, reveal, flight, count, rand } from "./film-kit.js";
 //
-// Every helper is a pure function of its arguments — none keeps state or
-// touches the page, except split(), which wraps text in spans once. They do not
-// decide anything: what moves, when, how far and how it sounds stays yours.
-// Change them, replace them, or ignore them.
+// The helpers in this file are pure functions of their arguments — none keeps
+// state or touches the page, except split(), which wraps text in spans once —
+// so a score written as code can import them too (`sound render score.mjs`).
+// The saved-screen helpers (openScreen, kit-screen.ts) do touch the page.
+// None of them decides anything: what moves, when, how far and how it sounds
+// stays yours. Change them, replace them, or ignore them.
 
 // --- time ------------------------------------------------------------------------
 
@@ -261,6 +263,130 @@ export function flight(
     scale,
     rotate,
     transform: `translate(${(x - from.x).toFixed(3)}px, ${(y - from.y).toFixed(3)}px) rotate(${rotate.toFixed(3)}deg) scale(${scale.toFixed(5)}, ${sy.toFixed(5)})`,
+  };
+}
+
+// --- a camera over a page ----------------------------------------------------------------
+
+/** What a window shows of a page: the centre of the view and its width, in the
+ *  page's CSS px. Its height follows the window's shape (width ÷ aspect). */
+export type View = { cx: number; cy: number; w: number };
+
+/** The view that shows `box` whole, with `pad` (a fraction of the box's own
+ *  size) around it, through a window of `aspect` (width ÷ height). */
+export function frame(box: Box, aspect: number, { pad = 0.08 }: { pad?: number } = {}): View {
+  const w = box.width * (1 + 2 * pad);
+  const h = box.height * (1 + 2 * pad);
+  return { cx: box.x + box.width / 2, cy: box.y + box.height / 2, w: Math.max(w, h * aspect) };
+}
+
+/** From one view to another at progress p: the centre and the width move
+ *  under the same p, so every corner of the view travels in a straight line
+ *  and what is framed heads steadily for its place — it never swings the wrong
+ *  way first, whatever the zoom (a centre-and-scale blend does, past about 2×).
+ *  Measured off a reference recording's camera; open-take's take camera moves
+ *  the same way. p may overshoot 1 (a spring): the width never drops below
+ *  half the narrower view's. */
+export function travel(p: number, a: View, b: View): View {
+  return {
+    cx: lerp(a.cx, b.cx, p),
+    cy: lerp(a.cy, b.cy, p),
+    w: Math.max(lerp(a.w, b.w, p), Math.min(a.w, b.w) * 0.5),
+  };
+}
+
+/** `v` moved so a window of `aspect` shows nothing past the page's edges; on
+ *  an axis where the view is larger than the page, it is centred. */
+export function clampView(v: View, page: { width: number; height: number }, aspect: number): View {
+  const h = v.w / aspect;
+  return {
+    cx: v.w >= page.width ? page.width / 2 : clamp(v.cx, v.w / 2, page.width - v.w / 2),
+    cy: h >= page.height ? page.height / 2 : clamp(v.cy, h / 2, page.height - h / 2),
+    w: v.w,
+  };
+}
+
+// --- typing ----------------------------------------------------------------------------
+
+/** Text split into what a reader sees as characters (a flag or an emoji with a
+ *  skin tone is one). */
+export function graphemes(text: string): string[] {
+  // biome-ignore lint/suspicious/noExplicitAny: Intl.Segmenter is not in every lib target
+  const Segmenter = (Intl as any).Segmenter;
+  if (!Segmenter) return Array.from(text);
+  return Array.from(
+    new Segmenter(undefined, { granularity: "grapheme" }).segment(text),
+    (s: { segment: string }) => s.segment,
+  );
+}
+
+export type Typing = {
+  /** the characters, as a reader counts them */
+  chars: string[];
+  /** when each one is typed, seconds */
+  times: number[];
+  /** the last keystroke */
+  end: number;
+  /** characters typed by t */
+  count: (t: number) => number;
+  /** the text as it stands at t */
+  text: (t: number) => string;
+};
+
+/** When each character of `text` is typed, from `at` on, at a person's pace:
+ *  by default the pace open-take records at (a short word deliberate, a long
+ *  line brisker — 28 to 90 ms a character, slower for CJK), uneven by `jitter`
+ *  and a little longer after a space or a punctuation mark. The same on every
+ *  frame and in every run, so the picture (a field filling in) and the sound
+ *  (one key per character) can read the same times:
+ *
+ *    const k = typing("World Gym", { at: 2 });
+ *    field.value = k.text(t);              // the page
+ *    k.times.map((at) => ({ at, sound: "key.brown" }));   // the score */
+export function typing(
+  text: string,
+  {
+    at = 0,
+    cps,
+    jitter = 0.35,
+    seed = text,
+  }: {
+    at?: number;
+    /** characters a second; default: the recorder's pace for this text */
+    cps?: number;
+    /** how uneven, 0 (a metronome) … 1 */
+    jitter?: number;
+    seed?: string | number;
+  } = {},
+): Typing {
+  const chars = graphemes(text);
+  const cjk = chars.filter((c) =>
+    /[\u2E80-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF\uFF66-\uFF9F]/.test(c),
+  ).length;
+  const step =
+    cps && cps > 0
+      ? 1 / cps
+      : (clamp(1100 / Math.max(1, chars.length), 28, 90) * (cjk * 2 > chars.length ? 1.4 : 1)) /
+        1000;
+  const times: number[] = [];
+  let t = at;
+  for (let i = 0; i < chars.length; i++) {
+    times.push(t);
+    let dt = step * (1 + jitter * (rand(`${seed}:${i}`) * 2 - 1));
+    if (/[\s.,!?;:\u3001\u3002\uFF0C\uFF01\uFF1F]/.test(chars[i]!)) dt *= 1.6;
+    t += dt;
+  }
+  const count = (u: number) => {
+    let n = 0;
+    while (n < times.length && times[n]! <= u) n++;
+    return n;
+  };
+  return {
+    chars,
+    times,
+    end: times.length ? times[times.length - 1]! : at,
+    count,
+    text: (u: number) => chars.slice(0, count(u)).join(""),
   };
 }
 

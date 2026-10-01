@@ -35,17 +35,25 @@ function probeLayout(): unknown {
   type Badge = { el: Element; box: Box; label: string };
   const MIN_OPACITY = 0.6;
 
-  // effective opacity: the element's own times every ancestor's (memoized per probe)
-  const opacities = new Map<Element, number>();
-  const opacityOf = (el: Element | null, view: Window): number => {
+  // effective opacity: none when the element itself is not visible — its own
+  // computed visibility, which a descendant can set back to visible under a
+  // hidden ancestor (a part a lifted screen shows), or a display:none
+  // ancestor — else its opacity times every ancestor's (memoized per probe)
+  const alphas = new Map<Element, number>();
+  const alphaOf = (el: Element | null, view: Window): number => {
     if (!el) return 1;
-    const hit = opacities.get(el);
+    const hit = alphas.get(el);
     if (hit !== undefined) return hit;
     const cs = view.getComputedStyle(el);
-    const own = cs.visibility === "hidden" || cs.display === "none" ? 0 : Number(cs.opacity) || 0;
-    const o = own === 0 ? 0 : own * opacityOf(el.parentElement, view);
-    opacities.set(el, o);
+    const own = cs.display === "none" ? 0 : Number(cs.opacity) || 0;
+    const o = own === 0 ? 0 : own * alphaOf(el.parentElement, view);
+    alphas.set(el, o);
     return o;
+  };
+  const opacityOf = (el: Element | null, view: Window): number => {
+    if (!el) return 1;
+    const v = view.getComputedStyle(el).visibility;
+    return v === "hidden" || v === "collapse" ? 0 : alphaOf(el, view);
   };
   /** the alpha of a computed colour: rgba(…, a) or 1 */
   const alpha = (c: string): number => {

@@ -85,8 +85,33 @@ and what was not measured. It judges nothing about taste.
 ## kit
 
 `film kit` copies `film-kit.js`, a short ES module of optional helpers, next to
-the page: a beat grid (`tempo`, `beat`), entrance and exit styles (`reveal`,
-`split`, `stagger`), an object travelling between two boxes (`flight`), a
-count-up (`count`), curves (`spring`, `ease`, `bezier`) and randomness that is
-the same on every frame and render worker (`rand`, `noise`). They are pure
-functions of time; the copy is the author's to change.
+the page — the author's to change. Pure functions of time (a score written as
+code can import them too): a beat grid (`tempo`, `beat`), entrance and exit
+styles (`reveal`, `split`, `stagger`), an object travelling between two boxes
+(`flight`), a count-up (`count`), keystroke times shared by the picture and
+the score (`typing`), a camera over a page (`frame`, `travel`, `clampView` —
+the centre and width of the view move together, so what is framed heads
+steadily for its place), curves (`spring`, `ease`, `bezier`) and randomness
+that is the same on every frame and render worker (`rand`, `noise`).
+
+And `openScreen`, for the product's real interface: a saved screen (from
+`open-take make --states`) on the film's stage, ready once it stands as
+captured.
+
+```js
+const home = await openScreen("takes/home.take/states/s2/state.html");
+home.window({ x: 160, y: 90, width: 1600, height: 900 }, { radius: 24 });
+home.view(travel(p, home.frameOf(), home.frameOf("e40")));   // a camera over the page
+home.type(t, "e40", "World Gym", { at: 5 });                  // a field filling in, with a caret
+home.press(t, "e41", { at: 6.4 });
+home.set(t, "e52", { at: 6.6, attr: { "aria-expanded": "true" } });
+
+const card = await openScreen(src, { show: ["e16"] });        // only this part paints
+card.place({ box: { x: 1200, y: 300, width: 480, height: 300 } });
+```
+
+Parts are named by their ids in `open-take states --json`. The actions take
+film time and are called on every frame: each sets what it does at `t` from
+the page as saved, so any frame comes out the same in any order. A part that
+the saved page does not show where it was captured is reported on the
+console when the screen opens.

@@ -12,7 +12,7 @@
 import { existsSync } from "node:fs";
 import { stat as fsStat, readFile, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   asDefects,
   auditCursor,
@@ -311,7 +311,7 @@ Usage:
   open-take launch check <launch.json>
   open-take launch render <launch.json> [--out <movie.mp4>] [--draft] [--sound <style>|off]
   open-take skill  [motion | film | install [--force]]
-  open-take sound render <score.json> [--out score.wav] [--json]
+  open-take sound render <score.json|score.mjs> [--out score.wav] [--json]
   open-take sound instruments | palette
   open-take film render <page.html|dir> [--out film.mp4] [--audio <file>|none] [--draft] [--no-blur]
                    [--size 1920x1080] [--fps 60] [--duration <s>] [--from <s>] [--to <s>] [--root <dir>]
@@ -519,7 +519,9 @@ Usage:
           clips, WAVs and frame strips at every measured problem, every layout
           collision read from the page (--page) and the longest quiet stretches.
           \`film kit\` copies optional helpers (beat grid, reveals, flights,
-          count-ups, stable randomness) next to your page.
+          count-ups, typing times, a camera over a page, stable randomness,
+          and openScreen: a saved screen on your stage — framed, lifted,
+          typed into, pressed) next to your page.
 
   --out <path>   (make) where the postable master goes — taken literally, and
               its <name>.take/ working dir is created beside it. Default
@@ -775,6 +777,19 @@ async function defectsDirFor(
  *  defects that are already gone. */
 const clearDefects = async (takeDir: string): Promise<void> =>
   unlink(join(takeDir, "defects.json")).catch(() => {});
+
+/** A score written as code (`sound render score.mjs`): its default export —
+ *  the score itself, or a function (async or not) that returns it. Loops,
+ *  chords and a tempo shared with the film's page are the module's own. */
+async function scoreFromModule(path: string): Promise<unknown> {
+  const mod = (await import(pathToFileURL(resolve(path)).href)) as { default?: unknown };
+  const value = mod.default;
+  if (value === undefined)
+    throw new Error(
+      `sound render: ${path} has no default export — \`export default\` the score, or a function that returns it`,
+    );
+  return typeof value === "function" ? await value() : value;
+}
 
 async function main() {
   if (parseError) throw new Error(`${cmd ?? ""}: ${parseError}`.trim());
@@ -1799,8 +1814,9 @@ async function main() {
       const out = resolve(flag("--out") ?? "film-kit.js");
       const header =
         "// film-kit — optional helpers for a film page, copied by `open-take film kit`.\n" +
-        "// Pure functions of time (only split() touches the page). Yours now: change or delete freely.\n" +
-        "//   import { tempo, beat, reveal, split, stagger, flight, count, spring, ease, rand, noise } from './film-kit.js';\n\n";
+        "// Pure functions of time, except split() and the saved-screen helpers (openScreen),\n" +
+        "// which touch the page. Yours now: change or delete freely.\n" +
+        "//   import { tempo, reveal, flight, count, typing, travel, openScreen } from './film-kit.js';\n\n";
       await writeFile(out, header + (await readFile(filmKitPath(), "utf8")));
       process.stdout.write(
         `wrote ${out}\n` +
@@ -1810,7 +1826,11 @@ async function main() {
           "  flight(p, fromBox, toBox, { arc })        an object travelling between two boxes\n" +
           "  count(t, { at, dur, to })                 a number counting up\n" +
           "  spring(t, opts) · ease.* · bezier(...)    curves\n" +
-          "  rand(key) · noise(key, t)                 randomness that is the same on every frame and worker\n",
+          "  rand(key) · noise(key, t)                 randomness that is the same on every frame and worker\n" +
+          "  typing(text, { at })                      keystroke times the picture and the score can share\n" +
+          "  frame · travel · clampView                a camera over a page: framings, and moves between them\n" +
+          "  openScreen(state.html, { show })          a saved screen on your stage: window + view (a camera),\n" +
+          "                                            place (a lifted part), type · press · set (acting on it)\n",
       );
       return;
     }
@@ -2004,9 +2024,13 @@ async function main() {
     if (action === "render") {
       const sheetPath = positional[1];
       if (!sheetPath || positional.length !== 2)
-        throw new Error("sound render: expected <score.json>");
-      const out = flag("--out") ?? sheetPath.replace(/\.json$/i, "") + ".wav";
-      const sheet = JSON.parse(await readFile(sheetPath, "utf8")) as ScoreSheet;
+        throw new Error("sound render: expected <score.json> or <score.mjs>");
+      const out = flag("--out") ?? sheetPath.replace(/\.(json|mjs|js)$/i, "") + ".wav";
+      const sheet = (
+        /\.m?js$/i.test(sheetPath)
+          ? await scoreFromModule(sheetPath)
+          : JSON.parse(await readFile(sheetPath, "utf8"))
+      ) as ScoreSheet;
       const { readFileSync } = await import("node:fs");
       const result = renderScore(sheet, (p) => readFileSync(resolve(dirname(sheetPath), p)));
       await writeFile(out, encodeWav(result.pcm));
@@ -2030,7 +2054,7 @@ async function main() {
       );
       return;
     }
-    throw new Error("sound: expected `palette`, `instruments` or `render <score.json>`");
+    throw new Error("sound: expected `palette`, `instruments` or `render <score.json|score.mjs>`");
   }
 
   if (cmd === "--version" || cmd === "-v") {
