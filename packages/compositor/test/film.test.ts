@@ -585,12 +585,15 @@ test("a video the page pauses, plays and sets is where the page left it, however
     `<!doctype html><html><body><video id="v" src="clip.webm" autoplay muted></video></body></html>`,
   );
   // a frame's video paused at 0.3 s and played again at 0.4 s; on the page
-  // itself, a video set to 1 s as it loads, and one played and then set to a
-  // time it refuses (its length, before it knows it)
+  // itself, a video set to 1 s as it loads; one played and then set to a time
+  // it refuses (its length, before it knows it); one set before its start and
+  // played; one set and loaded again; one given a new source at 0.3 s
   await writeFile(
     join(page, "index.html"),
     `<!doctype html><html><body><iframe id="p" src="player.html"></iframe>
-<video id="w" src="clip.webm" autoplay muted></video><video id="x" muted></video><script>
+<video id="w" src="clip.webm" autoplay muted></video><video id="x" muted></video>
+<video id="y" src="clip.webm" muted></video><video id="z" src="clip.webm" muted></video>
+<video id="s" src="clip.webm" autoplay muted></video><script>
 window.__film = { duration: 2 };
 const v = () => document.getElementById("p").contentDocument.getElementById("v");
 const w = document.getElementById("w");
@@ -600,13 +603,27 @@ window.first = w.currentTime;
 x.play();
 try { x.currentTime = x.duration; } catch { window.refused = true; }
 x.src = "clip.webm";
+const y = document.getElementById("y");
+y.currentTime = -1;
+window.before0 = y.currentTime;
+y.play();
+const z = document.getElementById("z");
+// once it knows its length (the test waits for that): set, and loaded again
+setTimeout(() => {
+  z.currentTime = 1;
+  z.load();
+  window.loaded = z.currentTime;
+}, 300);
+const sv = document.getElementById("s");
+setTimeout(() => { sv.src = "clip.webm?again"; }, 300);
 window.reads = [];
 const read = () => window.reads.push(Math.round(v().currentTime * 1000));
 setTimeout(() => { v().pause(); read(); }, 300);
 setTimeout(() => { read(); v().play(); }, 400);
 setTimeout(read, 500);
-window.seen = () => [window.reads.join(" "), window.first, window.refused,
-  Math.round(w.currentTime * 1000), Math.round(x.currentTime * 1000)].join();
+const ms = (e) => Math.round(e.currentTime * 1000);
+window.seen = () => [window.reads.join(" "), window.first, window.refused, ms(w), ms(x),
+  window.before0, ms(y), window.loaded, ms(z), ms(sv)].join();
 </script></body></html>`,
   );
   const server = await serveDirectory(page);
@@ -621,6 +638,11 @@ window.seen = () => [window.reads.join(" "), window.first, window.refused,
     });
     try {
       await b.evaluate("window.__ot.prepare()");
+      // polled from here: the page's own timers wait on the film clock
+      for (let i = 0; i < 300; i++) {
+        if (await b.evaluate<boolean>("document.getElementById('z').readyState >= 1")) break;
+        await new Promise((ok) => setTimeout(ok, 10));
+      }
       for (const t of times) await b.evaluate(`window.__ot.seek(${t})`);
       return await b.evaluate<string>("window.seen()");
     } finally {
@@ -628,7 +650,7 @@ window.seen = () => [window.reads.join(" "), window.first, window.refused,
     }
   };
   try {
-    const expected = "300 300 400,1,true,1600,600";
+    const expected = "300 300 400,1,true,1600,600,0,600,0,0,300";
     assert.equal(await seen([0.6]), expected, "straight there");
     assert.equal(await seen([0.2, 0.35, 0.45, 0.6]), expected, "in steps");
   } finally {

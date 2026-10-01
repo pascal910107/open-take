@@ -122,7 +122,11 @@ function installFilmClock(opts: FilmClockOptions): void {
   const unshown = new Set<HTMLIFrameElement>();
   let shown = 0;
   const noteInserted = (records: MutationRecord[]) => {
-    for (const r of records)
+    for (const r of records) {
+      if (r.type === "attributes") {
+        if (r.target instanceof HTMLMediaElement) startOver(r.target, r.oldValue === null);
+        continue;
+      }
       for (const n of Array.from(r.addedNodes)) {
         if (!(n instanceof Element)) continue;
         const els = Array.from(n.querySelectorAll("iframe,video,img"));
@@ -134,9 +138,16 @@ function installFilmClock(opts: FilmClockOptions): void {
           if (lazy.loading === "lazy") lazy.loading = "eager";
         }
       }
+    }
   };
   const watcher = new MutationObserver(noteInserted);
-  watcher.observe(document, { childList: true, subtree: true });
+  watcher.observe(document, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["src"],
+    attributeOldValue: true,
+  });
   const drain = () => noteInserted(watcher.takeRecords());
 
   // an error in the page's own callback fails the render, named, instead of
@@ -464,8 +475,26 @@ function installFilmClock(opts: FilmClockOptions): void {
     }
     return m;
   };
+  // what plays by itself: its autoplay is switched off when it is taken over
+  const autoplay = new WeakSet<HTMLMediaElement>();
   /** a video that will play by itself, untouched by the page */
-  const autoplays = (el: HTMLMediaElement, m: Media) => !m.seen && !m.touched && el.autoplay;
+  const autoplays = (el: HTMLMediaElement, m: Media) =>
+    !m.seen && !m.touched && (el.autoplay || autoplay.has(el));
+  /** a video loaded again (load(), a new source) starts over where it is
+   *  loaded: at 0, playing by itself from there if it does. One that had
+   *  nothing to play keeps playing if the page had played it, as the element
+   *  does; one that had something stops */
+  function startOver(el: HTMLMediaElement, hadNothing: boolean): void {
+    const playing = hadNothing && !!media.get(el)?.playing;
+    media.delete(el);
+    inserted.set(el, clock());
+    if (playing) Object.assign(mediaOf(el), { touched: true, playing: true, born: clock() });
+  }
+  const realLoad = HTMLMediaElement.prototype.load;
+  HTMLMediaElement.prototype.load = function (this: HTMLMediaElement) {
+    startOver(this, this.networkState === HTMLMediaElement.NETWORK_EMPTY);
+    return realLoad.call(this);
+  };
   /** when a video that plays by itself started: where it was put on the page */
   const autoBorn = (el: HTMLMediaElement) =>
     drawn() ? base : Math.max(base, inserted.get(el) ?? clock());
@@ -476,7 +505,7 @@ function installFilmClock(opts: FilmClockOptions): void {
     const known = Number.isFinite(d) && d > 0;
     if (!m.playing && !autoplays(el, m)) {
       if (!m.touched || !Number.isFinite(m.at)) return null;
-      return known ? Math.min(m.at, d) : m.at;
+      return Math.max(0, known ? Math.min(m.at, d) : m.at);
     }
     let at = (clock() - (m.playing ? m.born : autoBorn(el))) / 1000;
     if (known) at = el.loop ? at % d : Math.min(at, d - 0.001);
@@ -491,8 +520,11 @@ function installFilmClock(opts: FilmClockOptions): void {
     set(this: HTMLMediaElement, v: number) {
       // the element's own checks first: a time it refuses changes nothing
       seekTo.set!.call(this, v);
-      const n = Number(v);
+      let n = Number(v);
       if (!Number.isFinite(n)) return;
+      // as the element does: a time before 0 is 0, one past its end its end
+      n = Math.max(0, n);
+      if (Number.isFinite(this.duration) && this.duration > 0) n = Math.min(n, this.duration);
       const m = mediaOf(this);
       // a playing video (or one about to play by itself) plays on from there
       if (m.playing || autoplays(this, m)) {
@@ -545,6 +577,7 @@ function installFilmClock(opts: FilmClockOptions): void {
         if (autoplays(el, m)) {
           m.born = autoBorn(el);
           m.playing = true;
+          autoplay.add(el);
         }
         m.seen = true;
         el.muted = true;
