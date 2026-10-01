@@ -13,6 +13,7 @@ import { findClicks, motionFindings } from "../src/film/check";
 import { filmClockSource } from "../src/film/clock";
 import {
   balancedSlices,
+  drainOrFail,
   filmStills,
   renderFilm,
   samplesFor,
@@ -82,6 +83,27 @@ test("sample times spread over a 180° shutter centred on the frame, never befor
   assert.equal(samplesFor(1000), 16);
 });
 
+test("a full pipe whose ffmpeg has died fails the wait instead of hanging it", async () => {
+  const { PassThrough } = await import("node:stream");
+  // a stream that never drains, its process gone with an error
+  const stream = new PassThrough();
+  let die: (e: Error) => void = () => {};
+  const ended = new Promise((_, fail) => {
+    die = fail;
+  });
+  ended.catch(() => {});
+  const wait = drainOrFail(stream, ended);
+  die(new Error("film: ffmpeg decoder exited 1"));
+  await assert.rejects(wait, /decoder exited 1/);
+  // one that ended cleanly with samples still to come fails too
+  await assert.rejects(drainOrFail(new PassThrough(), Promise.resolve()), /ended before/);
+  // and a drain is a drain
+  const s = new PassThrough();
+  const ok = drainOrFail(s, new Promise(() => {}));
+  s.emit("drain");
+  await ok;
+});
+
 test("frames are cut into contiguous slices of about equal cost", () => {
   const costs = [1, 1, 1, 1, 8, 8, 1, 1, 1, 1];
   const slices = balancedSlices(costs, 3);
@@ -132,16 +154,40 @@ setTimeout(() => { document.getElementById('late').style.transform = 'translateX
   const green = (r: number, g: number) => g > 200 && r < 100;
   const one = await at(0);
   assert.equal(leftEdge(one, 1920, 200, red), 800, "CSS animation at 1.0 s");
-  assert.equal(leftEdge(one, 1920, 500, blue), 850, "rAF canvas at 1.0 s");
+  // requestAnimationFrame runs 60 a second, halfway between frames: at 1.0 s
+  // the canvas shows its frame at 991.7 ms
+  assert.equal(leftEdge(one, 1920, 500, blue), 843, "rAF canvas at 1.0 s");
   assert.equal(leftEdge(one, 1920, 750, green), 0, "the transition starts at 1.0 s");
   const later = await at(1);
   assert.equal(leftEdge(later, 1920, 200, red), 1200);
-  assert.equal(leftEdge(later, 1920, 500, blue), 1275);
+  assert.equal(leftEdge(later, 1920, 500, blue), 1268);
   assert.equal(
     leftEdge(later, 1920, 750, green),
     500,
     "a transition a timer started at 1.0 s, half way",
   );
+});
+
+test("stills of a page that just animates, closer together than a shutter", {
+  skip,
+}, async () => {
+  const page = join(dir, "close-stills");
+  await exec("mkdir", ["-p", page]);
+  await writeFile(
+    join(page, "index.html"),
+    `<!doctype html><html><head><style>body{margin:0;background:#000;width:320px;height:180px;overflow:hidden}
+.b{position:absolute;top:40px;width:40px;height:100px;background:#fff;animation:m 1s linear forwards}
+@keyframes m{to{transform:translateX(280px)}}</style></head><body><div class="b"></div>
+<script>window.__film = { duration: 1, width: 320, height: 180 };</script></body></html>`,
+  );
+  // each one's shutter opens before the one before it closed
+  const files = await filmStills({
+    page,
+    chromePath: chrome!,
+    at: [0.5, 0.501, 0.502],
+    outDir: join(dir, "close-stills-out"),
+  });
+  assert.equal(files.length, 3);
 });
 
 test("an iframe added mid-film starts its own animation where it was inserted", {
@@ -486,6 +532,133 @@ window.__render = (t) => { const g = Math.round(Math.random() * 255); document.b
     );
   } finally {
     await Promise.all([a.close(), b.close(), c.close()]);
+    await server.close();
+  }
+});
+
+test("a page that keeps its own state reaches an instant the same way, however the film is sought", {
+  skip,
+}, async () => {
+  const page = join(dir, "same-state");
+  await exec("mkdir", ["-p", page]);
+  // the renderer reaches an instant in order, around a shutter's samples, or
+  // straight from a fresh page (a piece, a retry): a page that counts frames,
+  // waits with await, or starts an animation from a timer must not tell
+  await writeFile(
+    join(page, "index.html"),
+    `<!doctype html><html><head><style>
+@keyframes go { to { transform: translateX(1000px) } }
+#slide { width: 10px; height: 10px; animation: go 1s linear forwards }
+</style></head><body><script>
+window.__film = { duration: 2 };
+window.steps = 0;
+const loop = () => { window.steps++; requestAnimationFrame(loop); };
+requestAnimationFrame(loop);
+window.marks = [];
+(async () => {
+  for (let i = 0; i < 6; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+    window.marks.push(Math.round(performance.now()));
+  }
+  document.body.insertAdjacentHTML("beforeend", '<div id="slide"></div>');
+})();
+window.state = () => JSON.stringify({
+  steps: window.steps,
+  marks: window.marks,
+  x: Math.round(document.getElementById("slide")?.getBoundingClientRect().left ?? -1),
+});
+</script></body></html>`,
+  );
+  const server = await serveDirectory(page);
+  const open = () =>
+    launchHtmlBrowser({
+      chromePath: chrome!,
+      url: `${server.url}/index.html`,
+      width: 64,
+      height: 64,
+      initScript: filmClockSource({ seed: 3, epochMs: 0 }),
+    });
+  const a = await open();
+  const b = await open();
+  try {
+    await a.evaluate("window.__ot.prepare()");
+    await b.evaluate("window.__ot.prepare()");
+    for (let t = 0.3; t < 1; t += 0.0042) await a.evaluate(`window.__ot.seek(${t})`);
+    await a.evaluate("window.__ot.seek(1)");
+    await b.evaluate("window.__ot.seek(1)");
+    const [sa, sb] = [
+      await a.evaluate<string>("window.state()"),
+      await b.evaluate<string>("window.state()"),
+    ];
+    assert.equal(sa, sb, "the same state at 1 s");
+    const s = JSON.parse(sb) as { steps: number; marks: number[]; x: number };
+    assert.ok(Math.abs(s.steps - 60) <= 1, `60 frames a second (${s.steps})`);
+    assert.deepEqual(
+      s.marks,
+      [100, 200, 300, 400, 500, 600],
+      "each await resumes when its timer is due",
+    );
+    assert.ok(Math.abs(s.x - 8 - 400) <= 20, `the animation started at 0.6 s (${s.x})`);
+  } finally {
+    await Promise.all([a.close(), b.close()]);
+    await server.close();
+  }
+});
+
+test("frames in a film that draws itself: waited on, played again when sought back, never held up", {
+  skip,
+}, async () => {
+  const page = join(dir, "drawn-frames");
+  await exec("mkdir", ["-p", page]);
+  // a frame with its own script: a wait the film can await, and a change of
+  // its own at 0.5 s
+  await writeFile(
+    join(page, "inner.html"),
+    `<!doctype html><html><body><script>
+window.wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
+setTimeout(() => document.body.classList.add("late"), 500);
+</script></body></html>`,
+  );
+  // beside it, frames the film does not drive: an empty one it writes into,
+  // and a cross-origin one
+  await writeFile(
+    join(page, "index.html"),
+    `<!doctype html><html><body>
+<iframe id="live" src="inner.html"></iframe><iframe id="empty"></iframe><iframe src="data:text/html,elsewhere"></iframe>
+<script>
+window.__film = { duration: 2 };
+window.__render = async (t) => {
+  document.getElementById("empty").contentDocument.body.textContent = String(t);
+  await document.getElementById("live").contentWindow.wait(30);
+};
+window.late = () => document.getElementById("live").contentDocument.body.className;
+</script></body></html>`,
+  );
+  const server = await serveDirectory(page);
+  const b = await launchHtmlBrowser({
+    chromePath: chrome!,
+    url: `${server.url}/index.html`,
+    width: 320,
+    height: 180,
+    initScript: filmClockSource({ seed: 3, epochMs: 0 }),
+  });
+  try {
+    const t0 = Date.now();
+    await b.evaluate("window.__ot.prepare()");
+    await b.evaluate("window.__ot.seek(1)");
+    assert.equal(
+      await b.evaluate<string>("window.late()"),
+      "late",
+      "the frame's own change at 0.5 s",
+    );
+    await b.evaluate("window.__ot.seek(0.1)");
+    assert.equal(await b.evaluate<string>("window.late()"), "", "sought back to 0.1 s: not yet");
+    await b.evaluate("window.__ot.seek(0.6)");
+    assert.equal(await b.evaluate<string>("window.late()"), "late");
+    const ms = Date.now() - t0;
+    assert.ok(ms < 8000, `no frame held the film up (${ms} ms)`);
+  } finally {
+    await b.close();
     await server.close();
   }
 });

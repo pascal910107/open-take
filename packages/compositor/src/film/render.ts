@@ -344,14 +344,24 @@ export async function filmStills(opts: FilmStillsOptions): Promise<string[]> {
     });
     const times = [...new Set(opts.at)].sort((a, b) => a - b);
     const half = SHUTTER_FRACTION / film.fps / 2;
+    // a clock film keeps its own state and cannot go back: a still whose
+    // shutter opens before where the page has been is taken on a fresh one
+    let reached = 0;
+    const from = async (t: number) => {
+      if (info.mode === "clock" && t < reached - 1e-9) {
+        await page.close(browser);
+        browser = await page.open(width, height);
+        await prepare(browser);
+      }
+    };
     const counts: number[] = [];
-    for (const t of times)
-      counts.push(film.blur ? samplesFor(await motionAt(browser, t, half)) : 1);
-    if (info.mode === "clock" && film.blur) {
-      // probing moved a clock film's own state on: draw from a fresh page
-      await page.close(browser);
-      browser = await page.open(width, height);
-      await prepare(browser);
+    for (const t of times) {
+      if (!film.blur) counts.push(1);
+      else {
+        await from(Math.max(0, t - half));
+        counts.push(samplesFor(await motionAt(browser, t, half)));
+        reached = t + half;
+      }
     }
     await mkdir(opts.outDir, { recursive: true });
     const ffmpeg = await resolveFfmpeg();
@@ -361,6 +371,9 @@ export async function filmStills(opts: FilmStillsOptions): Promise<string[]> {
       const file = join(opts.outDir, `t${t.toFixed(3).padStart(7, "0")}.png`);
       const n = counts[i]!;
       const label = `the still at ${t}s`;
+      const at = sampleTimes(t, n, film.fps);
+      await from(at[0]!);
+      reached = at.at(-1)!;
       if (n === 1 && ss === 1) {
         await seek(browser, t, label);
         await writeFile(file, await browser.screenshot({ format: "png" }));
@@ -389,7 +402,7 @@ export async function filmStills(opts: FilmStillsOptions): Promise<string[]> {
           { width, height },
         );
         try {
-          for (const ti of sampleTimes(t, n, film.fps)) {
+          for (const ti of at) {
             await seek(browser, ti, label);
             await sink.push(await browser.screenshot({ format: "jpeg", quality: 100 }));
           }
@@ -680,6 +693,26 @@ for (let i = 0; i <= LUT + 1; i++) {
   TO_SRGB[i] = (c <= 0.0031308 ? c * 12.92 : 1.055 * c ** (1 / 2.4) - 0.055) * 255;
 }
 
+/** Wait for a full pipe to drain — or for the processes behind it to end,
+ *  which would leave the wait for "drain" pending forever and the render
+ *  stuck where no retry can reach it. */
+export function drainOrFail(stream: NodeJS.WritableStream, ended: Promise<unknown>): Promise<void> {
+  return new Promise<void>((ok, fail) => {
+    const drained = () => ok();
+    stream.once("drain", drained);
+    ended.then(
+      () => {
+        stream.removeListener("drain", drained);
+        fail(new Error("film: ffmpeg ended before the samples did"));
+      },
+      (e) => {
+        stream.removeListener("drain", drained);
+        fail(e);
+      },
+    );
+  });
+}
+
 /** Screenshots in, finished frames out: JPEG samples are decoded by one ffmpeg,
  *  each output frame's `schedule[n]` samples are averaged in linear light (with
  *  triangular dither back to 8 bits), and the frames go to an encoding ffmpeg
@@ -779,7 +812,7 @@ class ShutterSink {
       stdin.write(matroskaHead(width, height, 0));
     }
     if (!stdin.write(matroskaCluster(this.sampleIndex++, jpeg)))
-      await new Promise<void>((ok) => stdin.once("drain", ok));
+      await drainOrFail(stdin, this.finished);
   }
 
   async end(): Promise<void> {

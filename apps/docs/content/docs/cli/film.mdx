@@ -31,10 +31,13 @@ called in any order — or simply animates: CSS animations and transitions, the
 Web Animations API, `requestAnimationFrame`, GSAP, three.js, `<video>`. For a
 page that animates, every clock it can read (`performance.now`, `Date`,
 timers, rAF) runs on film time and every animation and video is set to the
-exact frame; such a page is played front to back. `Math.random` is seeded.
-Same-origin `<iframe>`s follow the film clock from the moment they were put on
-the page. `__film` may also set `width`/`height` (a vertical cut) and `ready`
-(a promise that holds the first frame).
+exact frame; such a page is played front to back. `requestAnimationFrame`
+runs 60 times a second of film time, as on a 60 Hz screen: what it moves is
+sharp, and motion blur falls on what CSS, the Web Animations API or `__render`
+move. `Math.random` is seeded. Same-origin `<iframe>`s follow the film clock —
+in a page that draws itself, from film time 0; in one that animates, from the
+moment they were put on the page. `__film` may also set `width`/`height` (a
+vertical cut) and `ready` (a promise that holds the first frame).
 
 ## What render does
 

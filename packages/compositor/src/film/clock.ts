@@ -73,14 +73,30 @@ function installFilmClock(opts: FilmClockOptions): void {
   // a timer advances the page's clock before the film starts
   let base = 0;
   let mode: "render" | "clock" = "clock";
-  // a frame inside the film (an <iframe> of a saved screen, say) starts on the
-  // film's clock where the page that holds it is, and follows it from there
+  // a frame inside the film (an <iframe> of a saved screen, say) runs on the
+  // clock of the page that holds it, from where that page put it
+  // biome-ignore lint/suspicious/noExplicitAny: the holding page's film clock
+  let holder: any = null;
   try {
     const up = w.parent;
-    if (up && up !== w && up.__ot) now = up.__ot.bornOf(w.frameElement) * 1000;
+    if (up && up !== w && up.__ot) {
+      holder = up.__ot;
+      now = holder.bornOf(w.frameElement);
+      base = holder.origin();
+    }
   } catch {
     /* a cross-origin parent: this frame keeps its own clock */
   }
+  /** this page, or the page that holds it, draws any moment on request: what
+   *  runs in it runs from film time 0, whichever moment was drawn first */
+  const drawn = (): boolean => mode === "render" || !!holder?.drawn();
+  // requestAnimationFrame runs on one grid of film time (see advance): the
+  // grid's instants, and the next one to run
+  const gridTime = (k: number) => base + (k + 0.5) * STEP_MS;
+  const gridAfter = (t: number) => Math.floor((t - base) / STEP_MS - 0.5 + 1e-9) + 1;
+  let grid = gridAfter(now);
+  // when the page's own timers or animation frames last ran
+  let lastRan = Number.NEGATIVE_INFINITY;
 
   // the film time each <iframe> was put on the page: a frame loads in real
   // time, after the clock has moved on, and must start where it was inserted.
@@ -106,6 +122,27 @@ function installFilmClock(opts: FilmClockOptions): void {
       throw e;
     }, 0);
   };
+
+  // In a browser every timer and animation-frame callback is a task of its
+  // own: the promises it settles run before anything else does, so an `await`
+  // resumes at the time its timer was due. A message on the clock's own
+  // channel is such a task boundary.
+  const channel = new MessageChannel();
+  const flushed: (() => void)[] = [];
+  channel.port1.onmessage = () => flushed.shift()?.();
+  const flush = () =>
+    new Promise<void>((ok) => {
+      flushed.push(ok);
+      channel.port2.postMessage(null);
+    });
+  /** after each of the page's callbacks: what it settled runs on, at its
+   *  time, and an animation it started runs from then */
+  async function after(): Promise<void> {
+    lastRan = Math.max(lastRan, now);
+    await flush();
+    drain();
+    if (!drawn()) for (const a of document.getAnimations()) if (!born.has(a)) born.set(a, now);
+  }
 
   // --- random: seeded (mulberry32) -----------------------------------------
   let seed = opts.seed >>> 0;
@@ -173,7 +210,7 @@ function installFilmClock(opts: FilmClockOptions): void {
   /** run every timer due by `until`, in due order. The clock moves to each
    *  timer's time — unless `hold`: a __render draws one instant, so the timers
    *  it waits on run at that instant (a page reading the clock reads t). */
-  function runTimers(until: number, hold = false): void {
+  async function runTimers(until: number, hold = false): Promise<void> {
     for (let guard = 0; guard < 100_000; guard++) {
       let pickId = 0;
       let pick: Timer | undefined;
@@ -196,11 +233,11 @@ function installFilmClock(opts: FilmClockOptions): void {
       } catch (e) {
         report(e);
       }
-      drain();
+      await after();
     }
   }
 
-  function runFrames(): void {
+  async function runFrames(): Promise<void> {
     const batch = frames;
     frames = new Map();
     for (const fn of batch.values()) {
@@ -209,19 +246,22 @@ function installFilmClock(opts: FilmClockOptions): void {
       } catch (e) {
         report(e);
       }
+      await after();
     }
-    drain();
   }
 
   // --- animations: every one paused and set from film time -------------------
   const born = new WeakMap<Animation, number>();
   function syncAnimations(): void {
+    // a page that draws any moment on request jumps around in time: its
+    // animations all run from film time 0. In one that animates on its own an
+    // animation runs from the callback that started it (or from where it was
+    // first seen)
+    const fromZero = drawn();
     for (const a of document.getAnimations()) {
-      let b = born.get(a);
-      if (b === undefined) {
-        // a render-mode page jumps around in time: its animations all run
-        // from film time 0; a clock-mode one started when it was first seen
-        b = mode === "render" ? base : now;
+      let b = base;
+      if (!fromZero) {
+        b = born.get(a) ?? now;
         born.set(a, b);
       }
       if (a.playState !== "paused") a.pause();
@@ -285,7 +325,7 @@ function installFilmClock(opts: FilmClockOptions): void {
         el.muted = true;
         if (el.autoplay && !m.playing) {
           m.playing = true;
-          m.born = mode === "render" ? base : now;
+          m.born = drawn() ? base : now;
         }
         el.autoplay = false;
         realPause.call(el);
@@ -315,74 +355,110 @@ function installFilmClock(opts: FilmClockOptions): void {
   // same-origin frames on the page: loaded before the frame is taken, and on
   // the film's time (their own animations, timers and videos)
   async function followFrames(): Promise<void> {
-    const frames = Array.from(document.querySelectorAll("iframe"));
-    if (!frames.length) return;
-    await Promise.all(
-      frames.map(async (f) => {
-        let doc: Document | null = null;
-        try {
-          doc = f.contentDocument;
-        } catch {
-          return; // cross-origin: not ours to drive
-        }
-        if (doc?.readyState !== "complete" || doc.URL === "about:blank")
-          await new Promise<void>((ok) => {
-            const done = () => ok();
-            f.addEventListener("load", done, { once: true });
-            realSetTimeout(done, 15_000);
-          });
-        try {
-          // biome-ignore lint/suspicious/noExplicitAny: the frame's own film clock
-          const inner = (f.contentWindow as any)?.__ot;
-          if (inner) await inner.follow((now - base) / 1000);
-        } catch {
-          /* navigated cross-origin meanwhile */
-        }
-      }),
-    );
+    await eachFrame(async (f) => {
+      if (!(await loaded(f))) return;
+      await rewind(f, now);
+      await clockOf(f)?.follow(now, base);
+    });
+  }
+
+  function eachFrame(fn: (f: HTMLIFrameElement) => Promise<unknown>): Promise<unknown> {
+    return Promise.all(Array.from(document.querySelectorAll("iframe")).map(fn));
+  }
+
+  /** a frame's own film clock; null when it is cross-origin or has none */
+  // biome-ignore lint/suspicious/noExplicitAny: the frame's own film clock
+  function clockOf(f: HTMLIFrameElement): any {
+    try {
+      // biome-ignore lint/suspicious/noExplicitAny: the frame's own film clock
+      return (f.contentWindow as any)?.__ot ?? null;
+    } catch {
+      return null; // cross-origin: not ours to drive
+    }
+  }
+
+  /** wait for a frame's document; false when it is not ours to drive */
+  async function loaded(f: HTMLIFrameElement): Promise<boolean> {
+    const doc = f.contentDocument; // null when cross-origin
+    if (!doc) return false;
+    // a frame with a source shows an empty document until that loads
+    const src = f.getAttribute("src");
+    const loading =
+      doc.URL === "about:blank" && (f.hasAttribute("srcdoc") || (!!src && src !== "about:blank"));
+    if (doc.readyState !== "complete" || loading)
+      await new Promise<void>((ok) => {
+        const done = () => ok();
+        f.addEventListener("load", done, { once: true });
+        realSetTimeout(done, 15_000);
+      });
+    return !!f.contentDocument;
+  }
+
+  /** a frame whose own timers or animation frames ran past `at` holds what
+   *  happened after it: it is loaded again, to play up to `at` from its start */
+  async function rewind(f: HTMLIFrameElement, at: number): Promise<void> {
+    if (!clockOf(f)?.ahead(at)) return;
+    const url = f.contentDocument?.URL;
+    if (!url || url === "about:blank") return; // written by the page: nothing to load again
+    await new Promise<void>((ok) => {
+      f.addEventListener("load", () => ok(), { once: true });
+      realSetTimeout(ok, 15_000);
+      f.contentWindow?.location.reload();
+    });
   }
 
   /** while the page waits (its ready promise, an async __render), the frames
    *  inside it run their due timers and animation frames too — a ready promise
-   *  may wait on a frame's requestAnimationFrame. With `jump` (before the film
-   *  starts) a frame also runs its next timer, as the page itself does. */
-  function tickFrames(jump: boolean): void {
-    for (const f of Array.from(document.querySelectorAll("iframe")))
-      try {
-        // biome-ignore lint/suspicious/noExplicitAny: the frame's own film clock
-        (f.contentWindow as any)?.__ot?.tick(jump);
-      } catch {
-        /* cross-origin: not ours to drive */
-      }
+   *  may wait on a frame's requestAnimationFrame. With `jump` a frame also runs
+   *  its next timer, as the page does; with `hold` (a __render drawing one
+   *  instant) its clock stays at that instant meanwhile, as the page's does. */
+  function tickFrames(jump: boolean, hold: boolean): Promise<unknown> {
+    return eachFrame(async (f) => clockOf(f)?.tick(jump, hold));
   }
 
-  /** a frame inside the film: go to the holding page's time */
-  async function follow(tSec: number): Promise<void> {
-    const t = base + tSec * 1000;
-    if (t >= now) advance(t);
+  /** a frame inside the film: go to the holding page's time (ms on its clock;
+   *  `origin` is where film time 0 is) */
+  async function follow(at: number, origin: number): Promise<void> {
+    if (origin !== base) {
+      base = origin;
+      grid = gridAfter(now);
+    }
+    if (at >= now) await advance(at);
     else {
-      now = t;
+      // nothing ran past `at`, or the frame cannot be loaded again
+      now = at;
+      grid = gridAfter(at);
       syncAnimations();
     }
     await settle();
   }
 
   // --- moving time -----------------------------------------------------------
-  function advance(to: number): void {
+  /** requestAnimationFrame runs 60 times a second of film time, on one grid
+   *  from film time 0 — as on a 60 Hz screen — however the film is sought: in
+   *  order, between a shutter's samples, or straight from a fresh page, a page
+   *  that moves a step a frame is where a browser would have it. The grid
+   *  lies halfway between 60 fps frames, so no frame's shutter spans two of
+   *  its instants: what a page draws itself in requestAnimationFrame is sharp;
+   *  what CSS, the Web Animations API or __render move is blurred. */
+  async function advance(to: number): Promise<void> {
     if (to < now - 1e-6)
       throw new Error(
-        `film clock: cannot go back from ${(now / 1000).toFixed(3)}s to ${(to / 1000).toFixed(3)}s — ` +
+        `film clock: cannot go back from ${((now - base) / 1000).toFixed(3)}s to ${((to - base) / 1000).toFixed(3)}s — ` +
           "this film has no window.__render(t), so it keeps its own state and renders front to back",
       );
-    syncAnimations();
-    for (;;) {
-      const next = Math.min(to, now + STEP_MS);
-      runTimers(next);
-      now = next;
-      runFrames();
-      syncAnimations();
-      if (now >= to) return;
+    syncAnimations(); // what is on the page now starts now
+    for (let g = gridTime(grid); g <= to + 1e-6; g = gridTime(++grid)) {
+      await runTimers(g);
+      now = g;
+      if (frames.size) {
+        syncAnimations();
+        await runFrames();
+      }
     }
+    await runTimers(to);
+    now = to;
+    syncAnimations();
   }
 
   /** await a promise the page returned while its timers and frames still run.
@@ -417,18 +493,22 @@ function installFilmClock(opts: FilmClockOptions): void {
     try {
       for (let i = 0; !settled; i++) {
         if (i > 3000) throw new Error("film clock: the page's promise did not settle within ~45 s");
-        runTimers(now, hold);
-        runFrames();
-        tickFrames(false);
+        await runTimers(now, hold);
+        await runFrames();
+        await tickFrames(false, hold);
         await new Promise((ok) => realSetTimeout(ok, i < 20 ? 0 : 15));
         if (settled || i < 3) continue;
         let due = Number.POSITIVE_INFINITY;
         for (const t of timers.values()) due = Math.min(due, t.due);
-        if (due !== Number.POSITIVE_INFINITY && due - start <= MAX_JUMP_MS) runTimers(due, hold);
-        if (!hold) tickFrames(true);
+        if (due !== Number.POSITIVE_INFINITY && due - start <= MAX_JUMP_MS)
+          await runTimers(due, hold);
+        await tickFrames(true, hold);
       }
     } finally {
-      holding = false;
+      if (hold) {
+        holding = false;
+        await eachFrame(async (f) => clockOf(f)?.release());
+      }
     }
     if (failed) throw error;
     return value as T;
@@ -437,13 +517,15 @@ function installFilmClock(opts: FilmClockOptions): void {
   async function seek(tSec: number): Promise<void> {
     const t = base + tSec * 1000;
     if (mode === "render") {
+      // a frame that ran on past t is loaded again before the page draws into it
+      await eachFrame((f) => rewind(f, t));
       now = t;
       reseed(tSec);
       const r = w.__render(tSec);
       if (r && typeof r.then === "function") await pump(r, true);
       drain();
       syncAnimations();
-    } else advance(t);
+    } else await advance(t);
     await settle();
   }
 
@@ -602,8 +684,15 @@ function installFilmClock(opts: FilmClockOptions): void {
     const ready = film.ready ?? w.__ready;
     if (ready) await pump(typeof ready === "function" ? ready() : ready);
     base = now;
+    grid = 0;
     mode = typeof w.__render === "function" ? "render" : "clock";
-    if (mode === "clock") advance(base);
+    if (mode === "clock") {
+      // the page's first frame, which a browser runs before its first paint
+      await runTimers(base);
+      syncAnimations();
+      await runFrames();
+      syncAnimations();
+    }
     await settle();
     const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null);
     return {
@@ -617,25 +706,39 @@ function installFilmClock(opts: FilmClockOptions): void {
     };
   }
 
-  const bornOf = (el: Element | null) => {
-    drain();
-    return (el && inserted.get(el)) ?? now;
-  };
   w.__ot = {
     prepare,
     seek,
     motion,
+    // --- for the frames inside the film (times in ms on this page's clock) ---
     follow,
-    tick: (jump: boolean) => {
-      runTimers(now, holding);
-      runFrames();
-      if (jump && !holding) {
+    tick: async (jump: boolean, hold: boolean) => {
+      if (hold && !holding) {
+        holding = true;
+        timerNow = now;
+      }
+      await runTimers(now, holding);
+      await runFrames();
+      if (jump) {
         let due = Number.POSITIVE_INFINITY;
         for (const t of timers.values()) due = Math.min(due, t.due);
-        if (due - now <= MAX_JUMP_MS) runTimers(due);
+        if (due - now <= MAX_JUMP_MS) await runTimers(due, holding);
       }
-      tickFrames(jump);
+      await tickFrames(jump, holding);
     },
-    bornOf: (el: Element | null) => (bornOf(el) - base) / 1000,
+    release: async () => {
+      holding = false;
+      await eachFrame(async (f) => clockOf(f)?.release());
+    },
+    ahead: (at: number) => lastRan > at + 1e-6,
+    drawn,
+    origin: () => base,
+    // in a film that draws itself, which moment put a frame on the page first
+    // depends on the order they were drawn in: its frames start at film time 0
+    bornOf: (el: Element | null) => {
+      if (drawn()) return base;
+      drain();
+      return (el && inserted.get(el)) ?? now;
+    },
   };
 }

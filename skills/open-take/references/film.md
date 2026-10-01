@@ -28,6 +28,9 @@ Then either:
   every clock the page can read on film time (`performance.now`, `Date`,
   timers, rAF), pauses every animation and video and sets it to the exact
   frame. Such a page keeps its own state, so it is played front to back.
+  `requestAnimationFrame` runs 60 times a second of film time, as on a 60 Hz
+  screen, so what it moves is drawn sharp; motion blur falls on what CSS, the
+  Web Animations API or `__render` move.
 
 `Math.random` is seeded (every render draws the same numbers). The page lays
 out at 1920×1080 CSS px unless `__film` says `width`/`height` (a vertical cut:
