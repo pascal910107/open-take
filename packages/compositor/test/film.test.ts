@@ -413,6 +413,155 @@ window.__render = () => {};
   assert.ok(Date.now() - t0 < 30_000, "well before the 45 s ready timeout");
 });
 
+test("an instant is drawn again until the frames it puts anywhere have shown — and not forever", {
+  skip,
+}, async () => {
+  const page = join(dir, "redraw");
+  await exec("mkdir", ["-p", page]);
+  await writeFile(join(page, "leaf.html"), `<!doctype html><html><body></body></html>`);
+  await writeFile(join(page, "mid.html"), `<!doctype html><html><body></body></html>`);
+  // a frame put into a frame of the page, and a chain of ten frames, each put
+  // there once the one before has loaded; then a page that puts a new frame
+  // there every time it draws
+  await writeFile(
+    join(page, "nested.html"),
+    `<!doctype html><html><body><iframe id="mid" src="mid.html"></iframe><script>
+window.__film = { duration: 2 };
+window.__render = (t) => {
+  const d = document.getElementById("mid").contentDocument;
+  let g = d.getElementById("g");
+  if (!g) { g = d.createElement("iframe"); g.id = "g"; g.src = "leaf.html"; d.body.append(g); }
+  g.contentDocument.body.dataset.t = String(t);
+};
+window.seen = () => document.getElementById("mid").contentDocument.getElementById("g").contentDocument.body.dataset.t;
+</script></body></html>`,
+  );
+  await writeFile(
+    join(page, "chain.html"),
+    `<!doctype html><html><body><script>
+window.__film = { duration: 2 };
+window.__render = (t) => {
+  for (let i = 0; i < 10; i++) {
+    let f = document.getElementById("f" + i);
+    if (!f) { f = document.createElement("iframe"); f.id = "f" + i; f.src = "leaf.html"; document.body.append(f); }
+    if (!f.contentDocument.URL.endsWith("leaf.html")) return;
+  }
+  document.getElementById("f9").contentDocument.body.dataset.t = String(t);
+};
+window.seen = () => document.getElementById("f9").contentDocument.body.dataset.t;
+</script></body></html>`,
+  );
+  await writeFile(
+    join(page, "endless.html"),
+    `<!doctype html><html><body><script>
+window.__film = { duration: 2 };
+window.__render = () => { const f = document.createElement("iframe"); f.src = "leaf.html"; document.body.append(f); };
+</script></body></html>`,
+  );
+  const server = await serveDirectory(page);
+  const open = (name: string) =>
+    launchHtmlBrowser({
+      chromePath: chrome!,
+      url: `${server.url}/${name}`,
+      width: 64,
+      height: 64,
+      initScript: filmClockSource({ seed: 3, epochMs: 0 }),
+      stillAnimations: true,
+      timeoutMs: 120_000,
+    });
+  const seen = async (name: string) => {
+    const b = await open(name);
+    try {
+      await b.evaluate("window.__ot.prepare()");
+      await b.evaluate("window.__ot.seek(1)");
+      return await b.evaluate<string>("window.seen()");
+    } finally {
+      await b.close();
+    }
+  };
+  try {
+    assert.equal(await seen("nested.html"), "1", "a frame inside a frame");
+    assert.equal(await seen("chain.html"), "1", "ten frames, one after the other");
+    const b = await open("endless.html");
+    try {
+      await b.evaluate("window.__ot.prepare()");
+      await assert.rejects(
+        b.evaluate("window.__ot.seek(1)"),
+        /put a new frame on the page 32 times/,
+      );
+    } finally {
+      await b.close();
+    }
+  } finally {
+    await server.close();
+  }
+});
+
+test("a page reads a video in a frame where it is on film time, however the film is sought", {
+  skip,
+}, async () => {
+  const page = join(dir, "frame-video");
+  await exec("mkdir", ["-p", page]);
+  const ffmpeg = await resolveFfmpeg();
+  await exec(ffmpeg, [
+    "-v",
+    "error",
+    "-f",
+    "lavfi",
+    "-i",
+    "testsrc=size=64x64:rate=30:duration=2",
+    "-c:v",
+    "libvpx",
+    "-y",
+    join(page, "clip.webm"),
+  ]);
+  await writeFile(
+    join(page, "player.html"),
+    `<!doctype html><html><body><video id="v" src="clip.webm" autoplay muted></video></body></html>`,
+  );
+  const video = `document.getElementById("p").contentDocument.getElementById("v")`;
+  await writeFile(
+    join(page, "drawn.html"),
+    `<!doctype html><html><body><iframe id="p" src="player.html"></iframe><script>
+window.__film = { duration: 2 };
+window.__render = () => { window.seen = ${video}.currentTime; };
+</script></body></html>`,
+  );
+  await writeFile(
+    join(page, "animated.html"),
+    `<!doctype html><html><body><iframe id="p" src="player.html"></iframe><script>
+window.__film = { duration: 2 };
+setTimeout(() => { window.seen = ${video}.currentTime; }, 300);
+</script></body></html>`,
+  );
+  const server = await serveDirectory(page);
+  const seen = async (name: string, times: number[]) => {
+    const b = await launchHtmlBrowser({
+      chromePath: chrome!,
+      url: `${server.url}/${name}`,
+      width: 64,
+      height: 64,
+      initScript: filmClockSource({ seed: 3, epochMs: 0 }),
+      stillAnimations: true,
+    });
+    try {
+      await b.evaluate("window.__ot.prepare()");
+      for (const t of times) await b.evaluate(`window.__ot.seek(${t})`);
+      return Math.round((await b.evaluate<number>("window.seen")) * 1000);
+    } finally {
+      await b.close();
+    }
+  };
+  try {
+    assert.equal(await seen("drawn.html", [1]), 1000, "drawn, straight there");
+    assert.equal(await seen("drawn.html", [0.5, 1]), 1000, "drawn, in steps");
+    assert.equal(await seen("animated.html", [0.5]), 300, "animated, straight there");
+    assert.equal(await seen("animated.html", [0.1, 0.2, 0.5]), 300, "animated, in steps");
+  } finally {
+    await server.close();
+  }
+});
+
 test("an animation frame a page asks of a frame runs at the page's time, before the frame shows", {
   skip,
 }, async () => {

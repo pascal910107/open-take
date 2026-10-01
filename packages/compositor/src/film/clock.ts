@@ -63,6 +63,8 @@ function installFilmClock(opts: FilmClockOptions): void {
   const MAX_JUMP_MS = 10_000;
   // how long the ready wait holds the clock for loading that does not end
   const LOADING_PATIENCE_MS = 10_000;
+  // how many times one instant is drawn while new frames keep showing up in it
+  const MAX_DRAWS = 32;
   const warn = console.warn.bind(console);
 
   let now = 0; // the page's clock, ms
@@ -163,7 +165,7 @@ function installFilmClock(opts: FilmClockOptions): void {
   async function after(): Promise<void> {
     await flush();
     stamp();
-    if (unshown.size) await showFrames();
+    await showFrames();
   }
   /** animations not seen before start now */
   function stamp(): void {
@@ -391,7 +393,7 @@ function installFilmClock(opts: FilmClockOptions): void {
     }
     await eachFrame(async (f) => clockOf(f)?.runAsked(at));
     // what those put on this page shows before the clock moves on, too
-    if (unshown.size) await showFrames();
+    await showFrames();
   }
   // A frame runs its own animation frames only where it was put on the page,
   // but a page may ask one for its next animation frame — to wait until it
@@ -447,11 +449,43 @@ function installFilmClock(opts: FilmClockOptions): void {
     }
     return m;
   };
+  /** when a video that has not been seen yet starts playing (autoplay) */
+  const autoBorn = (el: HTMLMediaElement) =>
+    drawn() ? base : Math.max(base, inserted.get(el) ?? clock());
+  /** where a video that plays on film time is, at this page's time: from
+   *  where it started, looped or held at its end; null for one that does not
+   *  play. It is read from here, not from the element: what the page reads
+   *  of a video does not wait for the video to have been sought there */
+  function position(el: HTMLMediaElement): number | null {
+    const m = mediaOf(el);
+    let b = m.born;
+    if (!m.playing) {
+      if (m.seen || !el.autoplay) return null;
+      b = autoBorn(el);
+    }
+    let at = (clock() - b) / 1000;
+    const d = el.duration;
+    if (Number.isFinite(d) && d > 0) at = el.loop ? at % d : Math.min(at, d - 0.001);
+    return Math.max(0, at);
+  }
+  const seekTo = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "currentTime")!;
+  Object.defineProperty(HTMLMediaElement.prototype, "currentTime", {
+    ...seekTo,
+    get(this: HTMLMediaElement) {
+      return position(this) ?? seekTo.get!.call(this);
+    },
+    set(this: HTMLMediaElement, v: number) {
+      // a playing video set to a time plays on from there
+      const m = media.get(this);
+      if (m?.playing) m.born = clock() - Number(v) * 1000;
+      seekTo.set!.call(this, v);
+    },
+  });
   HTMLMediaElement.prototype.play = function (this: HTMLMediaElement) {
     const m = mediaOf(this);
     if (!m.playing) {
-      m.playing = true;
       m.born = clock() - this.currentTime * 1000;
+      m.playing = true;
     }
     return Promise.resolve();
   };
@@ -470,7 +504,7 @@ function installFilmClock(opts: FilmClockOptions): void {
       };
       const go = () => {
         el.addEventListener("seeked", done);
-        el.currentTime = at;
+        seekTo.set!.call(el, at);
       };
       if (el.readyState >= 1) go();
       else el.addEventListener("loadedmetadata", go, { once: true });
@@ -485,18 +519,16 @@ function installFilmClock(opts: FilmClockOptions): void {
         m.seen = true;
         el.muted = true;
         if (el.autoplay && !m.playing) {
+          m.born = autoBorn(el);
           m.playing = true;
-          m.born = drawn() ? base : Math.max(base, inserted.get(el) ?? clock());
         }
         el.autoplay = false;
         realPause.call(el);
       }
-      if (!m.playing) continue;
-      let at = (clock() - m.born) / 1000;
-      const d = el.duration;
-      if (Number.isFinite(d) && d > 0) at = el.loop ? at % d : Math.min(at, d - 0.001);
-      if (Math.abs(el.currentTime - at) > 0.0005 || el.readyState < 2)
-        waits.push(seekVideo(el, Math.max(0, at)));
+      const at = position(el);
+      if (at === null) continue;
+      if (Math.abs(seekTo.get!.call(el) - at) > 0.0005 || el.readyState < 2)
+        waits.push(seekVideo(el, at));
     }
     await Promise.all(waits);
   }
@@ -527,6 +559,7 @@ function installFilmClock(opts: FilmClockOptions): void {
    *  first frame — before its clock moves on: however the film is sought, a
    *  frame starts at the same moment of the film */
   async function showFrames(): Promise<void> {
+    drain(); // what was put here since this page last looked
     while (unshown.size) {
       const fresh = [...unshown];
       unshown.clear();
@@ -538,7 +571,15 @@ function installFilmClock(opts: FilmClockOptions): void {
         }),
       );
     }
+    // one the page put into a frame of its own shows too
+    await eachFrame(async (f) => clockOf(f)?.showFrames());
   }
+  /** how many frames have shown, here and inside the frames */
+  const shownHere = (): number =>
+    Array.from(document.querySelectorAll("iframe")).reduce(
+      (n, f) => n + (clockOf(f)?.shown() ?? 0),
+      shown,
+    );
 
   function eachFrame(fn: (f: HTMLIFrameElement) => Promise<unknown>): Promise<unknown> {
     return Promise.all(Array.from(document.querySelectorAll("iframe")).map(fn));
@@ -738,14 +779,18 @@ function installFilmClock(opts: FilmClockOptions): void {
       // drawn again — into that one too — until no new one shows up
       await showFrames();
       syncAnimations();
-      for (let pass = 0; pass < 8; pass++) {
-        const before = shown;
+      for (let pass = 0; ; pass++) {
+        if (pass === MAX_DRAWS)
+          throw new Error(
+            `film clock: drawing ${tSec}s put a new frame on the page ${MAX_DRAWS} times over — draw the same frames for the same t`,
+          );
+        const before = shownHere();
         reseed(tSec);
         const r = w.__render(tSec);
         if (r && typeof r.then === "function") await pump(r, true);
         drain();
         await showFrames();
-        if (shown === before) break;
+        if (shownHere() === before) break;
         syncAnimations();
       }
       syncAnimations();
@@ -931,6 +976,8 @@ function installFilmClock(opts: FilmClockOptions): void {
     // --- for the frames inside the film (times in ms on the top page's clock) ---
     follow,
     stamp,
+    showFrames,
+    shown: shownHere,
     sync: syncAnimations,
     busy,
     asked: askedHere,
