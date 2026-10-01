@@ -116,7 +116,7 @@ export async function filmReview(opts: FilmReviewOptions): Promise<FilmReview> {
       `${(q.end - q.start).toFixed(1)} s with no hard cut and no fast motion (${q.start}–${q.end} s)`,
     );
   const moments: ReviewMoment[] = [];
-  const times = [...picked.keys()].sort((a, b) => a - b).slice(0, MAX_MOMENTS);
+  const { kept: times, left } = packMoments(picked, MAX_MOMENTS);
   let k = 0;
   for (const t of times) {
     k++;
@@ -215,6 +215,9 @@ export async function filmReview(opts: FilmReviewOptions): Promise<FilmReview> {
       (m) =>
         `| ${m.t.toFixed(2)} s | ${compactWhy(m.why).join("; ")} | ${basename(m.clip)} | ${basename(m.wav)} | ${basename(m.strip)} (${frames} frames over ${span} s) |`,
     ),
+    left.length
+      ? `\n${left.length} more moment${left.length === 1 ? "" : "s"} did not fit in the pack (it holds ${MAX_MOMENTS}): ${left.map((t) => `${t.toFixed(2)} s (${compactWhy(picked.get(t)!).join("; ")})`).join(", ")} — ask for any of them with --at.`
+      : "",
     "",
     "## Layout",
     "",
@@ -243,6 +246,35 @@ export async function filmReview(opts: FilmReviewOptions): Promise<FilmReview> {
   const index = join(dir, "review.md");
   await writeFile(index, md);
   return { dir, index, moments, layout, check };
+}
+
+/** Which moments go into a pack that holds `max`: what was asked for first,
+ *  then measured defects, then the (at most two) longest quiet stretches —
+ *  where a film goes flat, which no other measure points at — then layout
+ *  problems. A kind that does not fit spreads over the whole film rather than
+ *  taking its earliest moments. Returns both, in time order. */
+export function packMoments(
+  picked: Map<number, string[]>,
+  max: number,
+): { kept: number[]; left: number[] } {
+  const rank = (why: string[]) =>
+    Math.min(
+      ...why.map((w) =>
+        w === "asked for" ? 0 : / with no hard cut /.test(w) ? 2 : w.startsWith("layout:") ? 3 : 1,
+      ),
+    );
+  const all = [...picked.keys()].sort((a, b) => a - b);
+  const kept: number[] = [];
+  for (let r = 0; r <= 3 && kept.length < max; r++) {
+    const tier = all.filter((t) => rank(picked.get(t)!) === r);
+    const room = max - kept.length;
+    if (tier.length <= room) kept.push(...tier);
+    else
+      for (let i = 0; i < room; i++)
+        kept.push(tier[Math.round((i * (tier.length - 1)) / Math.max(1, room - 1))]!);
+  }
+  kept.sort((a, b) => a - b);
+  return { kept, left: all.filter((t) => !kept.includes(t)) };
 }
 
 /** A moment's reasons, a layout problem named once per piece of text. */

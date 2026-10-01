@@ -22,7 +22,7 @@ import {
 } from "../src/film/kit";
 import { filmKitPath } from "../src/film/kit-file";
 import { filmStills, renderFilm } from "../src/film/render";
-import { filmReview } from "../src/film/review";
+import { filmReview, packMoments } from "../src/film/review";
 import { findChrome } from "./fixtures/find-chrome";
 
 const chrome = findChrome();
@@ -265,7 +265,10 @@ body{margin:0;width:640px;height:360px;background:#123}
 test("a ready promise that waits on a frame inside an iframe does not hang", { skip }, async () => {
   const page = join(dir, "frame-ready");
   await mkdir(page, { recursive: true });
-  await writeFile(join(page, "inner.html"), `<!doctype html><html><body style="margin:0;background:#0a0"></body></html>`);
+  await writeFile(
+    join(page, "inner.html"),
+    `<!doctype html><html><body style="margin:0;background:#0a0"></body></html>`,
+  );
   await writeFile(
     join(page, "index.html"),
     `<!doctype html><html><head><style>body{margin:0;width:160px;height:90px}iframe{width:160px;height:90px;border:0}</style></head><body>
@@ -277,7 +280,44 @@ window.__render = () => {};
 </script></body></html>`,
   );
   const t0 = Date.now();
-  const files = await filmStills({ page, chromePath: chrome!, at: [0.2], outDir: join(dir, "frame-ready-stills"), blur: false });
+  const files = await filmStills({
+    page,
+    chromePath: chrome!,
+    at: [0.2],
+    outDir: join(dir, "frame-ready-stills"),
+    blur: false,
+  });
   assert.equal(files.length, 1);
   assert.ok(Date.now() - t0 < 30_000, "well before the 45 s ready timeout");
+});
+
+test("review: a full pack keeps asked, measured and quiet moments, and spreads layout over the film", () => {
+  const picked = new Map<number, string[]>();
+  // twenty layout problems, one every 2 s, a measured stall at 39 s, a time asked
+  // for at 30.5 s, a quiet stretch at 41 s
+  for (let i = 0; i < 20; i++) picked.set(i * 2, [`layout: caption ${i}`]);
+  picked.set(39, ["a frame repeats inside motion (measured)"]);
+  picked.set(30.5, ["asked for"]);
+  picked.set(41, ["6.0 s with no hard cut and no fast motion (38–44 s)"]);
+  const { kept, left } = packMoments(picked, 8);
+  assert.equal(kept.length, 8);
+  assert.ok(
+    kept.includes(30.5) && kept.includes(39) && kept.includes(41),
+    "asked, measured and quiet moments are kept",
+  );
+  assert.ok(
+    kept.some((t) => t >= 20 && t < 39),
+    "layout moments come from late in the film too",
+  );
+  assert.ok(kept[0] === 0 && kept.includes(38), "spread from the first to the last");
+  assert.deepEqual(
+    [...kept].sort((a, b) => a - b),
+    kept,
+    "in time order",
+  );
+  assert.equal(kept.length + left.length, picked.size);
+  assert.ok(
+    left.every((t) => picked.get(t)![0]!.startsWith("layout:")),
+    "layout is what gives way",
+  );
 });
