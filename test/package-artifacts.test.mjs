@@ -10,6 +10,7 @@ import { gunzipSync } from "node:zlib";
 const workspaceRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const packages = {
   bridge: "packages/revideo-renderer",
+  foley: "packages/foley",
   compositor: "packages/compositor",
   runtime: "packages/runtime",
   cli: "packages/cli",
@@ -99,6 +100,7 @@ test("packed release artifacts form a browser-download-free dependency chain", a
     manifests.compositor.dependencies["@open-take/revideo-renderer"],
     manifests.bridge.version,
   );
+  assert.equal(manifests.compositor.dependencies["open-foley"], manifests.foley.version);
   assert.equal(
     manifests.runtime.dependencies["@open-take/compositor"],
     manifests.compositor.version,
@@ -109,7 +111,7 @@ test("packed release artifacts form a browser-download-free dependency chain", a
   // unit, but a package legitimately sitting on an older version is fine as
   // long as the pin above resolves to it (revideo-renderer did exactly that
   // through 0.2.0). Asserting the policy here would fail a correct tree.
-  for (const name of ["bridge", "compositor", "runtime", "cli"]) {
+  for (const name of ["bridge", "foley", "compositor", "runtime", "cli"]) {
     assert.match(manifests[name].version, /^\d+\.\d+\.\d+/, `${name} needs a real version`);
   }
 
@@ -152,9 +154,19 @@ test("packed release artifacts form a browser-download-free dependency chain", a
   // engine; it lives beside dist/, not in it, so dist/ alone is not enough.
   entryText(entries.compositor, "package/dist-browser/html-engine.js");
 
+  // The sound palette's recordings are read at run time from the package itself;
+  // a tarball without them plays nothing it promises.
+  entryText(entries.foley, "package/dist/index.js");
+  entryText(entries.foley, "package/dist/palette.js");
+  const recordings = [...entries.foley.keys()].filter((p) =>
+    /^package\/assets\/palette\/.+\.wav$/.test(p),
+  );
+  assert.ok(recordings.length > 0, "the palette's recordings ship in the foley package");
+
   const readme = entryText(entries.cli, "package/README.md");
   entryText(entries.cli, "package/skill/SKILL.md");
   entryText(entries.cli, "package/skill/references/motion-composition.md");
+  entryText(entries.cli, "package/skill/references/film.md");
   assert.doesNotMatch(readme, /PUPPETEER_SKIP_DOWNLOAD/);
   assert.doesNotMatch(readme, /open-take make/);
 });

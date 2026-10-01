@@ -60,6 +60,7 @@ the page. `__film` may also set `width`/`height` (a vertical cut) and `ready`
 | `--audio <file>` / `none` | page's `__film.audio` | |
 | `--root <dir>` | see above | the directory the page's URLs resolve in |
 | `--workers <n>` | 2 | more did not render faster (Chrome's screenshot path is shared); a Chrome that dies mid-render costs only its current 3-second piece |
+| `--supersample <n>` | 1 | draws each frame at n× the pixels each way and averages it down (also for `film still`): Chrome puts glyphs on whole pixels, so text in a slow zoom steps; at 2 the steps halve, at 3 they are a third — for about 1.3–4× the render time |
 
 ## check
 

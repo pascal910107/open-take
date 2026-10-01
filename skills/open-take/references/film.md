@@ -51,6 +51,13 @@ through untouched. The master is H.264 High, yuv420p, BT.709, 60 fps, with the
 soundtrack as AAC. `<audio>` elements on the page are not recorded — the
 soundtrack is `__film.audio` (or `--audio <file>`).
 
+Text that moves slowly — a slow push or drift across an interface — steps a
+pixel at a time, because Chrome places each glyph on a whole pixel. `--supersample
+2` (render and `film still`) draws every frame at twice the pixels each way
+and averages it down, which halves the steps; `3` cuts them to a third. It
+costs about 1.3–4× the render time (more on heavy pages), so use it for the
+master of a film that moves text slowly.
+
 ## Look at it
 
 You cannot watch the film; these are the next best things:
@@ -84,7 +91,7 @@ names come from the two commands below; any program can write the file):
 
 ```sh
 npx open-take sound instruments   # drums and tuned instruments (pitch "F#3", MIDI, or a chord)
-npx open-take sound palette       # recorded sounds (real keyboards, clicks, whooshes) and what each feels like
+npx open-take sound palette       # vetted sounds (real keyboard and click recordings, synthesized whooshes and hits) and what each feels like
 npx open-take sound render score.json --out score.wav
 ```
 

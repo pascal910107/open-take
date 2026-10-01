@@ -9,7 +9,7 @@
 //
 // The refine loop is conversational: the user talks, the agent edits
 // composition.json and drives these verbs. See skills/open-take/SKILL.md.
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { stat as fsStat, readFile, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -213,30 +213,11 @@ const FLAGS_BY_CMD: Record<string, string[]> = {
     "--dry-run",
     "--no-teaser",
     "--verbose",
-    "--states",
   ],
   init: ["--force"],
   skill: ["--force"],
   launch: ["--video", "--out", "--draft", "--verbose", "--sound"],
   sound: ["--out", "--json"],
-  film: [
-    "--out",
-    "--root",
-    "--audio",
-    "--draft",
-    "--no-blur",
-    "--fps",
-    "--size",
-    "--duration",
-    "--from",
-    "--to",
-    "--workers",
-    "--supersample",
-    "--at",
-    "--every",
-    "--json",
-    "--verbose",
-  ],
 };
 
 function rejectUnknownFlags(cmd: string): void {
@@ -310,9 +291,9 @@ Usage:
   open-take sound instruments | palette
   open-take film render <page.html|dir> [--out film.mp4] [--audio <file>|none] [--draft] [--no-blur]
                    [--size 1920x1080] [--fps 60] [--duration <s>] [--from <s>] [--to <s>] [--root <dir>]
-                   [--supersample 2]
+                   [--workers 2] [--supersample 2]
   open-take film still  <page.html|dir> --at <s>[,<s>…] [--out <dir>] [--no-blur] [--root <dir>]
-                   [--supersample 2]
+                   [--size 1920x1080] [--supersample 2]
   open-take film sheet  <film.mp4> [--out sheet.png] [--every <s> | --at <s>,<s>…]
   open-take film check  <film.mp4> [--size 1920x1080] [--fps 60] [--json]
 
@@ -378,7 +359,7 @@ Usage:
           The map a launch film is written from: actions are named a<N>,
           elements per state (s3:e32 — the same button has another id in
           another state). A state whose saved page does not match the
-          recording is marked FIDELITY FAILED; the film uses the video there.
+          recording is marked FIDELITY FAILED — use the recording there.
           --state <id> outlines one state instead: its regions, the cards a
           film could lift out, and every control and text with its box.
           --json prints the same as data.
@@ -495,13 +476,14 @@ Usage:
           \`make\` quietly refreshes an unmodified skill the same way, so npm
           upgrades reach the project without re-running init.
 
-  skill   print the full agent guide (SKILL.md); \`skill motion\` prints the
-          motion composition reference. \`skill install\` remains as a
+  skill   print the full agent guide (SKILL.md); \`skill film\` prints the
+          guide to films written as web pages, \`skill motion\` the motion
+          composition reference. \`skill install\` remains as a
           backwards-compatible alias for \`init\`.
-  sound palette
-          list the vetted sounds per role (what each feels like, which is the
-          default) and the music options — choose them in the composition's
-          sound.palette.
+  sound   \`sound render <score.json>\` plays a score you wrote (every sound
+          with its time) to a mastered WAV; \`sound instruments\` lists the
+          drums and tuned instruments a score can play, \`sound palette\` the
+          vetted sounds per role (what each feels like, which is the default).
   film    a film you write yourself as a web page — open-take only performs
           it. \`film render\` plays the page on film time (window.__render(t),
           or its own CSS/WAAPI/rAF/GSAP/video animation, frame-exact) in
@@ -510,23 +492,28 @@ Usage:
           \`film still\` writes PNG stills at given times; \`film sheet\` a
           timed contact sheet of any video; \`film check\` measures a finished
           film: format, hitches, cadence, cuts, black frames, loudness, clicks.
+          --supersample 2 (render, still) draws each frame at twice the pixels
+          each way and averages it down: text in a slow zoom or drift glides
+          instead of stepping a pixel at a time (Chrome places glyphs on whole
+          pixels), for about 1.3–2× the render time; 3 smooths further.
 
   --out <path>   (make) where the postable master goes — taken literally, and
               its <name>.take/ working dir is created beside it. Default
               demos/take.mp4.
-  --fps <n>   (make only) capture AND render fps (default 60). Drop to 30 for
-              fast drafts while iterating.
+  --fps <n>   (make/ci) capture AND render fps (default 60). Drop to 30 for
+              fast drafts while iterating. (film render: the film's frame
+              rate, default the page's, else 60.)
   --capture-scale <n>   (make/ci) capture pixel density (default 2 — Retina;
               keeps zooms sharp). Drop to 1 if a heavy page can't hold fps.
-  --states    (make/ci) also save the page's UI STRUCTURE at every settled
+  --states    (make) also save the page's UI STRUCTURE at every settled
               moment (after the warmup, then after each step) into
               <name>.take/states/ — a self-contained state.html + index.json
-              per moment, so a launch film can re-render the real interface
-              as live, vector-crisp DOM (lift the clicked button, split the
-              page into its regions, zoom without blur). Read-only on the app;
+              per moment, so a film can show the real interface as live,
+              vector-crisp DOM (in an <iframe>, sharp at any zoom). Read-only
+              on the app;
               adds a few hundred ms of take time per state (reported). Each
               state is fidelity-checked against a live screenshot; one that
-              fails stays on disk but the film uses the video there.
+              fails stays on disk, marked failed — use the recording there.
   --no-strict (make/render/check) exit 0 even when plan steps were skipped
               (target not found, or a navigate destination that didn't
               resolve) or a post-shoot check found an error (mis-drawn cursor,
@@ -968,7 +955,6 @@ async function main() {
       ...(agentTimeoutS != null ? { agentTimeoutMs: agentTimeoutS * 1000 } : {}),
       fps,
       captureScale,
-      states: has("--states"),
       allowedTools: flag("--allowed-tools"),
       allowedOrigins: flag("--allowed-origins"),
       skipPermissions: has("--skip-permissions"),
@@ -1797,8 +1783,12 @@ async function main() {
       const v = flag(name);
       if (v == null) return undefined;
       const n = Number(v);
-      if (!Number.isFinite(n) || n < 0)
-        throw new Error(`film ${action}: ${name} takes a number, got ${v}`);
+      // only a time (--from, --to) can be 0; a rate, a length, a count cannot
+      const time = name === "--from" || name === "--to";
+      if (!Number.isFinite(n) || n < 0 || (n === 0 && !time))
+        throw new Error(
+          `film ${action}: ${name} takes ${time ? "a number of seconds" : "a number above 0"}, got ${v}`,
+        );
       return n;
     };
     const times = (v: string | undefined) =>
@@ -1919,11 +1909,20 @@ async function main() {
 
   if (cmd === "sound") {
     const action = positional[0];
+    const only = (...allowed: string[]) => {
+      for (const f of Object.keys(flags))
+        if (!allowed.includes(f))
+          throw new Error(
+            `sound ${action}: ${f} does not apply here${allowed.length ? ` — allowed: ${allowed.join(" ")}` : ""}`,
+          );
+    };
     if (action === "palette") {
+      only();
       process.stdout.write(`${describeSoundPalette()}\n`);
       return;
     }
     if (action === "instruments") {
+      only();
       const lines = [
         "Instruments a score can play (a track event's `drum` or `note`):",
         "",
@@ -1940,12 +1939,12 @@ async function main() {
       return;
     }
     if (action === "render") {
+      only("--out", "--json");
       const sheetPath = positional[1];
       if (!sheetPath || positional.length !== 2)
         throw new Error("sound render: expected <score.json>");
       const out = flag("--out") ?? sheetPath.replace(/\.json$/i, "") + ".wav";
       const sheet = JSON.parse(await readFile(sheetPath, "utf8")) as ScoreSheet;
-      const { readFileSync } = await import("node:fs");
       const result = renderScore(sheet, (p) => readFileSync(resolve(dirname(sheetPath), p)));
       await writeFile(out, encodeWav(result.pcm));
       if (has("--json")) {
