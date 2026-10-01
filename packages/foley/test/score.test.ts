@@ -85,6 +85,18 @@ test("master: false leaves every level as written", () => {
   assert.equal(raw.after.integrated, raw.before.integrated);
 });
 
+test("a palette sound judged wrong by ear is refused; an approved one plays", () => {
+  const sheet = (sound: string): ScoreSheet => ({
+    version: 1,
+    durationS: 2,
+    tracks: [{ name: "ui", events: [{ at: 0.5, sound }] }],
+  });
+  assert.deepEqual(validateScore(sheet("whoosh.medium")), []);
+  const refused = validateScore(sheet("whoosh.deep")).join("\n");
+  assert.match(refused, /"whoosh.deep" was judged wrong by ear/);
+  assert.match(validateScore(sheet("whoosh.nope")).join("\n"), /is not a palette id or a role/);
+});
+
 test("a malformed score is reported, never thrown", () => {
   assert.doesNotThrow(() => validateScore({ version: 1, durationS: 2, tracks: {} }));
   assert.match(

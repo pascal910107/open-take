@@ -10,7 +10,7 @@
 //     "tracks": [
 //       { "name": "drums", "events": [ { "at": 0, "drum": "kick" }, { "at": 0.5, "drum": "hat", "gainDb": -20 } ] },
 //       { "name": "pad", "gainDb": -4, "events": [ { "at": 0, "note": "pad", "pitch": ["D3", "F#3", "A3"], "dur": 4 } ] },
-//       { "name": "ui", "events": [ { "at": 2.3, "sound": "key.brown" }, { "at": 3.1, "sound": "whoosh.deep", "dur": 0.8 } ] } ] }
+//       { "name": "ui", "events": [ { "at": 2.3, "sound": "key.brown" }, { "at": 3.1, "sound": "whoosh.medium", "dur": 0.8 } ] } ] }
 
 import { FOLEY_ROLES, type FoleyRole } from "./cues";
 import { dbToLin, SR } from "./dsp";
@@ -243,13 +243,17 @@ export function validateScore(value: unknown): string[] {
         out.push(
           `${where}: exactly one of sound / file / drum / note (got ${kinds.join(", ") || "none"})`,
         );
+      // only what a person has heard and approved: a palette entry judged
+      // wrong by ear is listed (so the judgement is kept), never playable
       if (
         e.sound != null &&
-        !PALETTE.some((p) => p.id === e.sound) &&
+        !PALETTE.some((p) => p.id === e.sound && p.approved) &&
         !FOLEY_ROLES.includes(e.sound as FoleyRole)
       )
         out.push(
-          `${where}.sound: "${e.sound}" is not a palette id or a role — see \`open-take sound palette\``,
+          PALETTE.some((p) => p.id === e.sound)
+            ? `${where}.sound: "${e.sound}" was judged wrong by ear and is not playable — see \`open-take sound palette\``
+            : `${where}.sound: "${e.sound}" is not a palette id or a role — see \`open-take sound palette\``,
         );
       if (e.drum != null && !DRUMS.includes(e.drum))
         out.push(`${where}.drum: one of ${DRUMS.join(", ")}`);
