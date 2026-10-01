@@ -61,6 +61,9 @@ function installFilmClock(opts: FilmClockOptions): void {
   const OPAQUE_PX = 12;
   const STEP_MS = 1000 / 60;
   const MAX_JUMP_MS = 10_000;
+  // how long the ready wait holds the clock for loading that does not end
+  const LOADING_PATIENCE_MS = 10_000;
+  const warn = console.warn.bind(console);
 
   let now = 0; // the page's clock, ms
   // the timers' own clock: equal to `now`, except while a __render holds its
@@ -238,21 +241,52 @@ function installFilmClock(opts: FilmClockOptions): void {
   const realSend = XMLHttpRequest.prototype.send;
   XMLHttpRequest.prototype.send = function (this: XMLHttpRequest, ...a: unknown[]) {
     loading++;
-    this.addEventListener(
-      "loadend",
-      () => {
-        loading--;
-      },
-      { once: true },
-    );
+    let counted = true;
+    const done = () => {
+      if (counted) loading--;
+      counted = false;
+    };
+    // added first: a synchronous request ends inside send
+    this.addEventListener("loadend", done, { once: true });
     try {
       // biome-ignore lint/suspicious/noExplicitAny: send's one optional body
       return realSend.apply(this, a as any);
     } catch (e) {
-      loading--;
+      this.removeEventListener("loadend", done);
+      done();
       throw e;
     }
   };
+  // a body read as a stream counts while each read waits
+  // biome-ignore lint/suspicious/noExplicitAny: the stream readers, by name
+  const streams: any[] = [
+    w.ReadableStreamDefaultReader?.prototype,
+    w.ReadableStreamBYOBReader?.prototype,
+  ];
+  for (const proto of streams) {
+    const real = proto?.read;
+    if (typeof real === "function")
+      proto.read = function (this: unknown, ...a: unknown[]) {
+        return track(real.apply(this, a));
+      };
+  }
+  const stream = ReadableStream.prototype;
+  const realPipe = stream.pipeTo;
+  stream.pipeTo = function (this: ReadableStream, ...a: Parameters<typeof realPipe>) {
+    return track(realPipe.apply(this, a));
+  };
+  for (const k of ["values", Symbol.asyncIterator]) {
+    // biome-ignore lint/suspicious/noExplicitAny: the stream's iterator, by name
+    const proto = stream as any;
+    const real = proto[k];
+    if (typeof real !== "function") continue;
+    proto[k] = function (this: ReadableStream, ...a: unknown[]) {
+      const it = real.apply(this, a);
+      const next = it.next.bind(it);
+      it.next = () => track(next());
+      return it;
+    };
+  }
   // an image made in script (a texture, say) counts while it loads; the
   // document's own images are looked at directly (see busy)
   for (const k of ["src", "srcset"]) {
@@ -318,9 +352,12 @@ function installFilmClock(opts: FilmClockOptions): void {
     }
   }
 
-  async function runFrames(): Promise<void> {
-    const batch = frames;
-    frames = new Map();
+  async function runFrames(only?: (fn: unknown) => boolean): Promise<void> {
+    let batch = frames;
+    if (only) {
+      batch = new Map([...frames].filter(([, fn]) => only(fn)));
+      for (const id of batch.keys()) frames.delete(id);
+    } else frames = new Map();
     for (const fn of batch.values()) {
       try {
         fn(now);
@@ -436,7 +473,9 @@ function installFilmClock(opts: FilmClockOptions): void {
   }
 
   // same-origin frames on the page: loaded before the frame is taken, and on
-  // the film's time (their own animations, timers and videos)
+  // the film's time (their own animations, timers and videos). They catch up
+  // after the page has: a timer of the page that reads a frame's own state
+  // sees it as it was before
   async function followFrames(): Promise<void> {
     await rewindFrames(now);
     await eachFrame(async (f) => {
@@ -482,6 +521,7 @@ function installFilmClock(opts: FilmClockOptions): void {
     return !!f.contentDocument;
   }
 
+  let keptLater = false;
   /** frames whose own timers or animation frames ran past `at` hold what
    *  happened after it: each is loaded again, with what is inside it, to play
    *  up to `at` from its start */
@@ -490,8 +530,16 @@ function installFilmClock(opts: FilmClockOptions): void {
       const ot = clockOf(f);
       if (!ot) return;
       const url = f.contentDocument?.URL;
-      // a frame the page wrote itself has nothing to load again
-      if (!ot.ahead(at) || !url || url === "about:blank") return ot.rewindFrames(at);
+      if (!ot.ahead(at)) return ot.rewindFrames(at);
+      if (!url || url === "about:blank") {
+        // a frame the page wrote itself has nothing to load again
+        if (!keptLater)
+          warn(
+            "film clock: a frame the page wrote itself ran its own timers past the moment the film went back to; it keeps what happened later",
+          );
+        keptLater = true;
+        return ot.rewindFrames(at);
+      }
       await new Promise<void>((ok) => {
         f.addEventListener("load", () => ok(), { once: true });
         realSetTimeout(ok, 15_000);
@@ -617,6 +665,7 @@ function installFilmClock(opts: FilmClockOptions): void {
     );
     const start = now;
     const began = RealDate.now();
+    let impatient = false;
     if (hold) {
       holding = true;
       timerNow = now;
@@ -639,9 +688,16 @@ function installFilmClock(opts: FilmClockOptions): void {
           for (const t of timers.values()) due = Math.min(due, t.due);
           if (due - start <= MAX_JUMP_MS) await runTimers(due, true);
           await tickFrames(true);
-        } else if (!busy()) {
+        } else {
+          const stillLoading = busy();
+          if (stillLoading && RealDate.now() - began < LOADING_PATIENCE_MS) continue;
           const next = nextEvent();
           if (next - start <= MAX_JUMP_MS) {
+            if (stillLoading && !impatient)
+              warn(
+                `film clock: the page was still loading after ${LOADING_PATIENCE_MS / 1000} s while it waited on its own clock; its clock went on, so renders of it may start differently`,
+              );
+            impatient ||= stillLoading;
             await advance(Math.max(now, next));
             await followFrames();
             stepped = true;
@@ -664,7 +720,9 @@ function installFilmClock(opts: FilmClockOptions): void {
       now = t;
       // the frames inside the page are at t before it draws — it may read
       // them, or write into them — and one whose own script ran past t has
-      // been loaded again
+      // been loaded again. What a frame draws itself, it draws on its own
+      // animation frames: a size the page gives it here shows in that drawing
+      // at the next one
       await followFrames();
       reseed(tSec);
       const r = w.__render(tSec);
@@ -866,7 +924,14 @@ function installFilmClock(opts: FilmClockOptions): void {
         let due = Number.POSITIVE_INFINITY;
         for (const t of timers.values()) due = Math.min(due, t.due);
         if (due - now <= MAX_JUMP_MS) await runTimers(due, true);
-        else if (frames.size) await runFrames();
+        else if (frames.size) {
+          // the page waits on this frame's next animation frame: what it asked
+          // for runs at the held instant, while the frame's own animation
+          // moves only on its grid, so an instant drawn twice is drawn the
+          // same. Only when the page waits on the frame's own does that run.
+          const asked = (fn: unknown) => !(fn instanceof w.Function);
+          await runFrames([...frames.values()].some(asked) ? asked : undefined);
+        }
       }
       await tickFrames(jump);
     },

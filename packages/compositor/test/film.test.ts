@@ -689,7 +689,11 @@ window.wait = (ms) => new Promise((ok) => setTimeout(() => { window.readAt = per
     join(page, "index.html"),
     `<!doctype html><html><body><iframe src="inner.html"></iframe><script>
 window.__film = { duration: 2 };
-window.__render = (t) => document.querySelector("iframe").contentWindow.wait(30);
+window.__render = async (t) => {
+  const inner = document.querySelector("iframe").contentWindow;
+  await inner.wait(30);
+  await new Promise((ok) => inner.requestAnimationFrame(ok));
+};
 window.inner = () => document.querySelector("iframe").contentWindow;
 </script></body></html>`,
   );
@@ -824,6 +828,59 @@ setTimeout(() => { window.read = Math.round(document.getAnimations()[0].currentT
   }
 });
 
+test("loading that never ends holds the ready wait for a while, not for good", {
+  skip,
+  timeout: 60_000,
+}, async () => {
+  // a request the server never answers, beside a ready that waits on a timer;
+  // before it, a request that failed to send and was sent again, which must
+  // count as loading once, not less
+  const html = `<!doctype html><html><body><script>
+const x = new XMLHttpRequest();
+try { x.send(); } catch {}
+x.open("GET", "/ok");
+x.onloadend = () => { fetch("/never"); window.sent = true; };
+x.send();
+window.__film = { duration: 1, ready: new Promise((ok) => setTimeout(ok, 100)) };
+</script></body></html>`;
+  const server = createServer((req, res) => {
+    if (req.url === "/ok") res.end("ok");
+    else if (req.url !== "/never") res.writeHead(200, { "content-type": "text/html" }).end(html);
+  });
+  await new Promise<void>((ok) => server.listen(0, "127.0.0.1", () => ok()));
+  const { port } = server.address() as { port: number };
+  const warnings: string[] = [];
+  const b = await launchHtmlBrowser({
+    chromePath: chrome!,
+    url: `http://127.0.0.1:${port}/`,
+    width: 64,
+    height: 64,
+    initScript: filmClockSource({ seed: 3, epochMs: 0 }),
+    stillAnimations: true,
+    onConsole: (level, text) => {
+      if (level === "warning") warnings.push(text);
+    },
+  });
+  try {
+    // polled from here: the page's own timers wait on the film clock
+    for (let i = 0; i < 200 && !(await b.evaluate<boolean>("!!window.sent")); i++)
+      await new Promise((ok) => setTimeout(ok, 10));
+    assert.equal(await b.evaluate<boolean>("window.__ot.busy()"), true, "the request is loading");
+    const t0 = Date.now();
+    await b.evaluate("window.__ot.prepare()", { timeoutMs: 40_000 });
+    const ms = Date.now() - t0;
+    assert.ok(ms > 9_000 && ms < 20_000, `ready after the loading patience (${ms} ms)`);
+    assert.ok(
+      warnings.some((w) => /still loading after 10 s/.test(w)),
+      `said so: ${JSON.stringify(warnings)}`,
+    );
+  } finally {
+    await b.close();
+    server.closeAllConnections();
+    server.close();
+  }
+});
+
 test("an animation shorter than the page's loading still plays in the film", {
   skip,
 }, async () => {
@@ -865,21 +922,29 @@ window.__render = () => {};
 test("a page reaches film time 0 in the same state however long its loading took", {
   skip,
 }, async () => {
-  // a page that moves a step a frame and becomes ready after a fetch and a
-  // wait of its own: how long the fetch takes must not change film time 0
+  // a page that moves a step a frame and becomes ready after two fetches (one
+  // body read as a stream) and a wait of its own: how long the fetches take
+  // must not change film time 0
   const html = `<!doctype html><html><body><script>
 window.steps = 0;
 const loop = () => { window.steps++; requestAnimationFrame(loop); };
 requestAnimationFrame(loop);
 window.__film = {
   duration: 1,
-  ready: fetch("/data").then((r) => r.text()).then(() => new Promise((ok) => setTimeout(ok, 100))),
+  ready: fetch("/data")
+    .then((r) => r.body.getReader().read())
+    .then(() => fetch("/data"))
+    .then((r) => r.text())
+    .then(() => new Promise((ok) => setTimeout(ok, 100))),
 };
 </script></body></html>`;
   const at = async (delayMs: number) => {
     const server = createServer((req, res) => {
-      if (req.url === "/data") setTimeout(() => res.end("ok"), delayMs);
-      else res.writeHead(200, { "content-type": "text/html" }).end(html);
+      if (req.url === "/data") {
+        // the headers at once, the body late
+        res.flushHeaders();
+        setTimeout(() => res.end("ok"), delayMs);
+      } else res.writeHead(200, { "content-type": "text/html" }).end(html);
     });
     await new Promise<void>((ok) => server.listen(0, "127.0.0.1", () => ok()));
     const { port } = server.address() as { port: number };
