@@ -502,19 +502,21 @@ function installFilmClock(opts: FilmClockOptions): void {
   });
   const realSetAttribute = Element.prototype.setAttribute;
   Element.prototype.setAttribute = function (this: Element, name: string, value: string) {
-    const isSource = this instanceof HTMLMediaElement && name.toLowerCase() === "src";
+    const n = `${name}`; // as the element converts it: once, and an error as its own
+    const isSource = this instanceof HTMLMediaElement && n.toLowerCase() === "src";
     const hadNothing =
       isSource && (this as HTMLMediaElement).networkState === HTMLMediaElement.NETWORK_EMPTY;
-    realSetAttribute.call(this, name, value);
+    realSetAttribute.call(this, n, value);
     if (isSource) startOver(this as HTMLMediaElement, hadNothing);
   };
   const realRemoveAttribute = Element.prototype.removeAttribute;
   Element.prototype.removeAttribute = function (this: Element, name: string) {
+    const n = `${name}`;
     const isSource =
-      this instanceof HTMLMediaElement && name.toLowerCase() === "src" && this.hasAttribute("src");
+      this instanceof HTMLMediaElement && n.toLowerCase() === "src" && this.hasAttribute("src");
     const hadNothing =
       isSource && (this as HTMLMediaElement).networkState === HTMLMediaElement.NETWORK_EMPTY;
-    realRemoveAttribute.call(this, name);
+    realRemoveAttribute.call(this, n);
     if (isSource) startOver(this as HTMLMediaElement, hadNothing);
   };
   /** when a video that plays by itself started: where it was put on the page */

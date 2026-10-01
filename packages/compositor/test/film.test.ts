@@ -651,6 +651,8 @@ window.__render = (t) => {
   }
   if (t >= 0.5 && !u.src) u.src = "clip.webm?c";
   if (t >= 0.5 && !e.src) e.src = "clip.webm?d";
+  // a name the element converts itself
+  v.setAttribute({ toString: () => "data-t" }, String(t));
 };
 const e = document.getElementById("e");
 window.seen = () => [v, u, e].map((x) => Math.round(x.currentTime * 1000)).join();
