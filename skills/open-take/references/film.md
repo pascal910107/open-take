@@ -49,6 +49,21 @@ through untouched. The master is H.264 High, yuv420p, BT.709, 60 fps, with the
 soundtrack as AAC. `<audio>` elements on the page are not recorded — the
 soundtrack is `__film.audio` (or `--audio <file>`).
 
+## A way to work (yours to change)
+
+What separated the films people liked from the flat ones was not the number
+of effects: it was that **the motion carried the story** — an object the
+viewer follows from one scene into the next, things making room for what
+arrives, an interface moving because something was done to it, the music
+pulling back before the moment it lands. A way of working that tends to get
+there:
+
+1. Before code, a short shot list: for each part, what the viewer should
+   understand, which object changes and how, and how the sound carries it.
+2. Build it.
+3. Review it at the moments that matter — `film review` (below) gathers them.
+4. Fix what you find, and review again.
+
 ## Look at it
 
 You cannot watch the film; these are the next best things:
@@ -63,6 +78,19 @@ npx open-take film check film.mp4 --size 1920x1080 --fps 60              # forma
 motion, motion updating at a lower rate than the film, black frames inside the
 film, true peak above −1 dBFS, clicks (single-sample jumps in the waveform).
 It judges nothing about taste.
+
+```sh
+npx open-take film review film.mp4 --page film/index.html   # what to look at and listen to
+```
+
+`film review` writes a folder: for every measured problem, every layout
+collision it reads from your page (a caption over the interface's own text,
+a number growing into a badge, text cut by the frame — inside iframes too),
+the longest stretches where nothing cuts or moves fast, and any times you ask
+for (`--at`), it saves the real-speed clip with its sound, the WAV and a strip
+of consecutive frames, indexed in `review.md` with why each was picked and what
+was not measured. Look at the strips; they are what a frame looks like in
+motion.
 
 ## Sound
 
@@ -92,6 +120,22 @@ ceiling (`"master": { "lufs": -14 }` to change it, `false` to leave levels as
 written). `sound render` prints each track's peak and loudness — the balance
 you would otherwise judge by ear. Sounds of real things (keys, clicks) should
 be recordings from the palette; synthesized imitations of them read as fake.
+
+## Small helpers (optional)
+
+```sh
+npx open-take film kit --out film/film-kit.js
+```
+
+copies a short ES module next to your page — pure functions of time, yours to
+change: `tempo(bpm)` / `beat(n)` (a beat grid the picture and the score can
+share), `reveal(t, { at, dur, kind })` (entrance and exit styles), `split` +
+`stagger` (per-character reveals), `flight(p, from, to, { arc })` (an object
+travelling between two boxes), `count(t, …)` (a number counting up),
+`spring`, `ease`, `bezier`, and `rand(key)` / `noise(key, t)` — randomness that
+is the same on every frame and in every render worker. (In a `__render` page,
+`Math.random` is reseeded for each frame from its time; use `rand`/`noise` for
+values that must hold still or drift smoothly across frames.)
 
 ## Material from the real product
 

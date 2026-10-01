@@ -35,6 +35,8 @@ import {
   emitStepSummary,
   encodeWav,
   ensureChrome,
+  filmKitPath,
+  filmReview,
   filmSheet,
   filmStills,
   formatFilmCheck,
@@ -235,6 +237,10 @@ const FLAGS_BY_CMD: Record<string, string[]> = {
     "--every",
     "--json",
     "--verbose",
+    "--page",
+    "--span",
+    "--frames",
+    "--clip",
   ],
 };
 
@@ -312,6 +318,8 @@ Usage:
   open-take film still  <page.html|dir> --at <s>[,<s>…] [--out <dir>] [--no-blur] [--root <dir>]
   open-take film sheet  <film.mp4> [--out sheet.png] [--every <s> | --at <s>,<s>…]
   open-take film check  <film.mp4> [--size 1920x1080] [--fps 60] [--json]
+  open-take film review <film.mp4> [--page <page.html>] [--at <s>,…] [--out <dir>] [--root <dir>]
+  open-take film kit    [--out film-kit.js]
 
   A take is TWO things on disk: the postable master at exactly your --out path
   (<out>.mp4), and a working directory beside it (<out>.take/) holding
@@ -507,6 +515,11 @@ Usage:
           \`film still\` writes PNG stills at given times; \`film sheet\` a
           timed contact sheet of any video; \`film check\` measures a finished
           film: format, hitches, cadence, cuts, black frames, loudness, clicks.
+          \`film review\` gathers what to look at and listen to: real-speed
+          clips, WAVs and frame strips at every measured problem, every layout
+          collision read from the page (--page) and the longest quiet stretches.
+          \`film kit\` copies optional helpers (beat grid, reveals, flights,
+          count-ups, stable randomness) next to your page.
 
   --out <path>   (make) where the postable master goes — taken literally, and
               its <name>.take/ working dir is created beside it. Default
@@ -1779,9 +1792,31 @@ async function main() {
   if (cmd === "film") {
     const action = positional[0];
     const target = positional[1];
+    if (action === "kit") {
+      if (positional.length !== 1) throw new Error("film kit: takes no arguments, only --out");
+      for (const f of Object.keys(flags))
+        if (f !== "--out") throw new Error(`film kit: ${f} does not apply here — allowed: --out`);
+      const out = resolve(flag("--out") ?? "film-kit.js");
+      const header =
+        "// film-kit — optional helpers for a film page, copied by `open-take film kit`.\n" +
+        "// Pure functions of time (only split() touches the page). Yours now: change or delete freely.\n" +
+        "//   import { tempo, beat, reveal, split, stagger, flight, count, spring, ease, rand, noise } from './film-kit.js';\n\n";
+      await writeFile(out, header + (await readFile(filmKitPath(), "utf8")));
+      process.stdout.write(
+        `wrote ${out}\n` +
+          "  tempo(bpm).at(bar, beat) / beat(n, bpm)   a beat grid picture and score can share\n" +
+          "  reveal(t, { at, dur, kind })              entrance/exit styles: fade rise drop scale mask-up mask-left blur\n" +
+          "  split(el) + stagger(i, step, start)       per-character or per-word reveals\n" +
+          "  flight(p, fromBox, toBox, { arc })        an object travelling between two boxes\n" +
+          "  count(t, { at, dur, to })                 a number counting up\n" +
+          "  spring(t, opts) · ease.* · bezier(...)    curves\n" +
+          "  rand(key) · noise(key, t)                 randomness that is the same on every frame and worker\n",
+      );
+      return;
+    }
     if (!action || !target || positional.length !== 2)
       throw new Error(
-        "film: expected render <page>, still <page> --at <s>, sheet <film.mp4> or check <film.mp4>",
+        "film: expected render <page>, still <page> --at <s>, sheet <film.mp4>, check <film.mp4>, review <film.mp4> or kit",
       );
     const only = (...allowed: string[]) => {
       for (const f of Object.keys(flags))
@@ -1908,7 +1943,40 @@ async function main() {
       if (c.issues.some((i) => i.severity === "error")) process.exitCode = 1;
       return;
     }
-    throw new Error(`film: unknown action ${action} — render, still, sheet or check`);
+    if (action === "review") {
+      only(
+        "--page",
+        "--root",
+        "--at",
+        "--out",
+        "--span",
+        "--frames",
+        "--clip",
+        "--every",
+        "--verbose",
+      );
+      const r = await filmReview({
+        film: target,
+        chromePath: await ensureChrome(),
+        page: flag("--page"),
+        root: flag("--root"),
+        at: times(flag("--at")),
+        out: flag("--out"),
+        span: num("--span"),
+        frames: num("--frames"),
+        clip: num("--clip"),
+        every: num("--every"),
+      });
+      process.stdout.write(
+        `review: ${r.index}\n${r.moments.length} moment${r.moments.length === 1 ? "" : "s"}` +
+          (r.layout
+            ? `, ${r.layout.length} layout finding${r.layout.length === 1 ? "" : "s"}`
+            : ", layout not checked (--page)") +
+          "\n",
+      );
+      return;
+    }
+    throw new Error(`film: unknown action ${action} — render, still, sheet, check, review or kit`);
   }
 
   if (cmd === "sound") {

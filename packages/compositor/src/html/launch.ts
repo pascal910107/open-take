@@ -28,7 +28,7 @@ import { serveDirectory } from "./server";
 /** This package's root (package.json, dist-browser/): the nearest directory
  *  up from this module holding a package.json — src/html/ in a checkout,
  *  dist/ in a build or an npm install, where the path depth differs. */
-const PKG_ROOT = (() => {
+export const PKG_ROOT = (() => {
   let dir = dirname(fileURLToPath(import.meta.url));
   while (!existsSync(join(dir, "package.json"))) {
     const up = dirname(dir);

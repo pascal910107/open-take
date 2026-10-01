@@ -151,6 +151,7 @@ test("packed release artifacts form a browser-download-free dependency chain", a
   // Films of motion scenes render as DOM in Chrome from this prebuilt page
   // engine; it lives beside dist/, not in it, so dist/ alone is not enough.
   entryText(entries.compositor, "package/dist-browser/html-engine.js");
+  entryText(entries.compositor, "package/dist-browser/film-kit.js");
 
   const readme = entryText(entries.cli, "package/README.md");
   entryText(entries.cli, "package/skill/SKILL.md");

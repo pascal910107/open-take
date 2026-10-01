@@ -352,7 +352,8 @@ function capture(bin: string, args: string[], stderr = false): Promise<string> {
   });
 }
 
-function pcm(ffmpeg: string, file: string): Promise<Float32Array> {
+/** a film's sound as mono 48 kHz samples */
+export function pcm(ffmpeg: string, file: string): Promise<Float32Array> {
   return new Promise((ok, fail) => {
     const p = spawn(
       ffmpeg,
@@ -372,4 +373,120 @@ function pcm(ffmpeg: string, file: string): Promise<Float32Array> {
       ok(f);
     });
   });
+}
+
+/** Per-frame mean change (0–255) between consecutive frames, small and grey:
+ *  `diffs[i]` compares frames i and i+1. */
+export async function frameDiffs(ffmpeg: string, file: string): Promise<number[]> {
+  const tmp = await mkdtemp(join(tmpdir(), "open-take-diffs-"));
+  try {
+    const out = join(tmp, "diff.txt");
+    await capture(
+      ffmpeg,
+      [
+        "-nostats",
+        "-v",
+        "error",
+        "-i",
+        file,
+        "-an",
+        "-vf",
+        `scale=320:-2,format=gray,tblend=all_mode=difference,signalstats,metadata=print:key=lavfi.signalstats.YAVG:file=${out.replace(/[\\:']/g, "\\$&")}`,
+        "-f",
+        "null",
+        "-",
+      ],
+      true,
+    );
+    return [...(await readFile(out, "utf8")).matchAll(/YAVG=([-+]?[\d.]+(?:[eE][-+]?\d+)?)/g)].map(
+      (m) => Number(m[1]),
+    );
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+}
+
+/** The longest stretches with no hard cut and no frame change above `level`
+ *  (a slow push, a hold, a dissolve all count as quiet) — longest first. */
+export function quietStretches(
+  diffs: readonly number[],
+  fps: number,
+  level = 1.5,
+): { start: number; end: number }[] {
+  const n = diffs.length;
+  const sm = diffs.map(
+    (_, i) => (diffs[Math.max(0, i - 1)]! + diffs[i]! + diffs[Math.min(n - 1, i + 1)]!) / 3,
+  );
+  const cut = new Set(motionFindings(diffs, fps).cuts.map((t) => Math.round(t * fps) - 1));
+  const out: { start: number; end: number }[] = [];
+  let from = -1;
+  for (let i = 0; i <= n; i++) {
+    const quiet = i < n && sm[i]! < level && !cut.has(i);
+    if (quiet && from < 0) from = i;
+    if (!quiet && from >= 0) {
+      out.push({
+        start: Math.round((from / fps) * 100) / 100,
+        end: Math.round((i / fps) * 100) / 100,
+      });
+      from = -1;
+    }
+  }
+  return out.sort((a, b) => b.end - b.start - (a.end - a.start));
+}
+
+/** The sound's onsets (attacks: a hit, a pluck, a key) and how clearly it
+ *  repeats a beat (autocorrelation of the onset envelope over 60–180 BPM,
+ *  0 none … 1 a metronome). A measurement of pulse, not of whether the music
+ *  serves the film. */
+export function audioRhythm(
+  x: Float32Array,
+  sr: number,
+): { onsets: number[]; onsetsPerSec: number; pulseBpm: number; pulseClarity: number } {
+  const hop = Math.round(sr * 0.01);
+  const win = hop * 2;
+  const env: number[] = [];
+  let prev = 0;
+  for (let i = 0; i + win < x.length; i += hop) {
+    let e = 0;
+    for (let k = i + 1; k < i + win; k++) {
+      const d = x[k]! - x[k - 1]!;
+      e += d * d;
+    }
+    const l = Math.log10(e / win + 1e-10);
+    env.push(Math.max(0, l - prev));
+    prev = l;
+  }
+  const median = (a: number[]) => [...a].sort((p, q) => p - q)[Math.floor(a.length / 2)] ?? 0;
+  const onsets: number[] = [];
+  for (let i = 1; i < env.length - 1; i++) {
+    const local = env.slice(Math.max(0, i - 50), Math.min(env.length, i + 50));
+    const m = median(local);
+    const mad = median(local.map((v) => Math.abs(v - m)));
+    if (env[i]! > env[i - 1]! && env[i]! >= env[i + 1]! && env[i]! > m + 4 * mad + 0.15) {
+      const t = (i * hop) / sr;
+      if (!onsets.length || t - onsets[onsets.length - 1]! > 0.08)
+        onsets.push(Math.round(t * 1000) / 1000);
+    }
+  }
+  const mean = env.reduce((a, b) => a + b, 0) / (env.length || 1);
+  const e = env.map((v) => v - mean);
+  const r0 = e.reduce((a, v) => a + v * v, 0) || 1;
+  let clarity = 0;
+  let bpm = 0;
+  for (let b = 60; b <= 180; b += 0.5) {
+    const lag = Math.round((60 / b) * (sr / hop));
+    let r = 0;
+    for (let i = 0; i + lag < e.length; i++) r += e[i]! * e[i + lag]!;
+    if (r / r0 > clarity) {
+      clarity = r / r0;
+      bpm = b;
+    }
+  }
+  const dur = x.length / sr;
+  return {
+    onsets,
+    onsetsPerSec: dur ? Math.round((onsets.length / dur) * 10) / 10 : 0,
+    pulseBpm: bpm,
+    pulseClarity: Math.round(Math.max(0, clarity) * 100) / 100,
+  };
 }

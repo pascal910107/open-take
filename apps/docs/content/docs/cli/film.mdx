@@ -9,6 +9,8 @@ open-take film render film/index.html --draft --out draft.mp4  # half size, 30 f
 open-take film still  film/index.html --at 3.5,12 --out stills # PNGs as the master shows them
 open-take film sheet  film.mp4                                 # a timed contact sheet
 open-take film check  film.mp4 --size 1920x1080 --fps 60       # measured defects
+open-take film review film.mp4 --page film/index.html          # what to look at and listen to
+open-take film kit --out film/film-kit.js                      # optional helpers for the page
 ```
 
 A launch or promo film does not have to fit a format. Write it the way you
@@ -68,3 +70,23 @@ nothing about taste. `--json` for the data; exit 1 on an error finding.
 
 The sound a film carries can be your own WAV, or a score open-take plays for
 you — see [Sound](/docs/sound#a-score-you-write).
+
+## review
+
+`film review` gathers what to look at and listen to into one folder: for
+every defect `film check` measures, every layout collision read from the page
+(`--page`: text over text, text running into a small painted element, text cut
+by the frame's edge — inside same-origin iframes too), the longest stretches
+with no hard cut and no fast motion, and any `--at` times, it writes the
+real-speed clip with its sound, the WAV, and a strip of consecutive frames
+(`--span`, `--frames`), indexed in `review.md` with why each moment was picked
+and what was not measured. It judges nothing about taste.
+
+## kit
+
+`film kit` copies `film-kit.js`, a short ES module of optional helpers, next to
+the page: a beat grid (`tempo`, `beat`), entrance and exit styles (`reveal`,
+`split`, `stagger`), an object travelling between two boxes (`flight`), a
+count-up (`count`), curves (`spring`, `ease`, `bezier`) and randomness that is
+the same on every frame and render worker (`rand`, `noise`). They are pure
+functions of time; the copy is the author's to change.

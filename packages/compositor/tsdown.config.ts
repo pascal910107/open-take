@@ -12,7 +12,8 @@ export default defineConfig([
   },
   {
     // its own directory: the node build cleans dist/ and the two run together
-    entry: { "html-engine": "src/html/engine.ts" },
+    // film-kit.js: the optional helpers a film page may copy in (`open-take film kit`)
+    entry: { "html-engine": "src/html/engine.ts", "film-kit": "src/film/kit.ts" },
     outDir: "dist-browser",
     format: ["esm"],
     platform: "browser",
