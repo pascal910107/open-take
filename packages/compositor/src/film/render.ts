@@ -447,6 +447,7 @@ async function servePage(
       height,
       deviceScaleFactor: dpr,
       initScript: clock,
+      stillAnimations: true,
       onConsole: opts.onConsole,
       timeoutMs: 120_000,
       profilePrefix: "open-take-film-",

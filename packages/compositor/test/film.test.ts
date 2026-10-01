@@ -4,6 +4,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
@@ -506,6 +507,7 @@ window.__render = (t) => { const g = Math.round(Math.random() * 255); document.b
       width: w,
       height: h,
       initScript: filmClockSource({ seed: 7, epochMs: 0 }),
+      stillAnimations: true,
     });
   const pixel = async (b: Awaited<ReturnType<typeof open>>, t: number) => {
     await b.evaluate(`window.__ot.seek(${t})`);
@@ -577,6 +579,7 @@ window.state = () => JSON.stringify({
       width: 64,
       height: 64,
       initScript: filmClockSource({ seed: 3, epochMs: 0 }),
+      stillAnimations: true,
     });
   const a = await open();
   const b = await open();
@@ -620,11 +623,12 @@ setTimeout(() => document.body.classList.add("late"), 500);
 </script></body></html>`,
   );
   // beside it, frames the film does not drive: an empty one it writes into,
-  // and a cross-origin one
+  // a cross-origin one, and a lazy one far below the picture
   await writeFile(
     join(page, "index.html"),
     `<!doctype html><html><body>
 <iframe id="live" src="inner.html"></iframe><iframe id="empty"></iframe><iframe src="data:text/html,elsewhere"></iframe>
+<iframe loading="lazy" src="inner.html" style="position:absolute;top:5000px"></iframe>
 <script>
 window.__film = { duration: 2 };
 window.__render = async (t) => {
@@ -641,6 +645,7 @@ window.late = () => document.getElementById("live").contentDocument.body.classNa
     width: 320,
     height: 180,
     initScript: filmClockSource({ seed: 3, epochMs: 0 }),
+    stillAnimations: true,
   });
   try {
     const t0 = Date.now();
@@ -661,6 +666,246 @@ window.late = () => document.getElementById("live").contentDocument.body.classNa
     await b.close();
     await server.close();
   }
+});
+
+test("a frame inside a film that draws itself is at the film's instant, and stays there while it is drawn", {
+  skip,
+}, async () => {
+  const page = join(dir, "held-frames");
+  await exec("mkdir", ["-p", page]);
+  // a frame that draws its canvas in requestAnimationFrame, counting its
+  // frames, with a wait the film awaits
+  await writeFile(
+    join(page, "inner.html"),
+    `<!doctype html><html><body><canvas id="c" width="4" height="4"></canvas><script>
+window.steps = 0;
+const ctx = document.getElementById("c").getContext("2d");
+const loop = () => { window.steps++; ctx.fillStyle = "#0f0"; ctx.fillRect(0, 0, 4, 4); requestAnimationFrame(loop); };
+requestAnimationFrame(loop);
+window.wait = (ms) => new Promise((ok) => setTimeout(() => { window.readAt = performance.now(); ok(); }, ms));
+</script></body></html>`,
+  );
+  await writeFile(
+    join(page, "index.html"),
+    `<!doctype html><html><body><iframe src="inner.html"></iframe><script>
+window.__film = { duration: 2 };
+window.__render = (t) => document.querySelector("iframe").contentWindow.wait(30);
+window.inner = () => document.querySelector("iframe").contentWindow;
+</script></body></html>`,
+  );
+  const server = await serveDirectory(page);
+  const b = await launchHtmlBrowser({
+    chromePath: chrome!,
+    url: `${server.url}/index.html`,
+    width: 64,
+    height: 64,
+    initScript: filmClockSource({ seed: 3, epochMs: 0 }),
+    stillAnimations: true,
+  });
+  try {
+    await b.evaluate("window.__ot.prepare()");
+    await b.evaluate("window.__ot.seek(0)");
+    assert.equal(
+      await b.evaluate<number>(
+        "window.inner().document.getElementById('c').getContext('2d').getImageData(1, 1, 1, 1).data[1]",
+      ),
+      255,
+      "the frame has had its first animation frame at film time 0",
+    );
+    await b.evaluate("window.__ot.seek(1)");
+    assert.equal(
+      await b.evaluate<number>("window.inner().readAt"),
+      await b.evaluate<number>("performance.now()"),
+      "what the film waited on ran at the instant it draws",
+    );
+    const steps = await b.evaluate<number>("window.inner().steps");
+    await b.evaluate("window.__ot.seek(1)");
+    assert.equal(await b.evaluate<number>("window.inner().steps"), steps, "the same instant twice");
+  } finally {
+    await b.close();
+    await server.close();
+  }
+});
+
+test("frames within frames, sought back: played again before the film draws into them", {
+  skip,
+}, async () => {
+  const page = join(dir, "nested-frames");
+  await exec("mkdir", ["-p", page]);
+  // the middle frame has no script; the one inside it starts an animation
+  // of its own at 0.5 s
+  await writeFile(
+    join(page, "leaf.html"),
+    `<!doctype html><html><head><style>.late{animation:m 1s linear forwards}@keyframes m{to{transform:translateX(1000px)}}</style></head><body><div id="d"></div><script>
+setTimeout(() => document.getElementById("d").className = "late", 500);
+</script></body></html>`,
+  );
+  await writeFile(
+    join(page, "mid.html"),
+    `<!doctype html><html><body><iframe src="leaf.html"></iframe></body></html>`,
+  );
+  await writeFile(
+    join(page, "index.html"),
+    `<!doctype html><html><body><iframe src="mid.html"></iframe><script>
+window.__film = { duration: 2 };
+const leaf = () => document.querySelector("iframe").contentDocument.querySelector("iframe").contentDocument;
+window.__render = (t) => { leaf().body.dataset.t = String(t); };
+window.leaf = () => {
+  const d = leaf(), a = d.getAnimations()[0];
+  return [d.getElementById("d").className, d.body.dataset.t, a ? Math.round(a.currentTime) : -1].join();
+};
+</script></body></html>`,
+  );
+  const server = await serveDirectory(page);
+  const b = await launchHtmlBrowser({
+    chromePath: chrome!,
+    url: `${server.url}/index.html`,
+    width: 64,
+    height: 64,
+    initScript: filmClockSource({ seed: 3, epochMs: 0 }),
+    stillAnimations: true,
+  });
+  try {
+    await b.evaluate("window.__ot.prepare()");
+    await b.evaluate("window.__ot.seek(1)");
+    assert.equal(
+      await b.evaluate<string>("window.leaf()"),
+      "late,1,500",
+      "its own animation, 0.5 s in",
+    );
+    await b.evaluate("window.__ot.seek(0.1)");
+    assert.equal(
+      await b.evaluate<string>("window.leaf()"),
+      ",0.1,-1",
+      "before 0.5 s, and what the film wrote stays",
+    );
+    await b.evaluate("window.__ot.seek(0.6)");
+    assert.equal(await b.evaluate<string>("window.leaf()"), "late,0.6,100");
+  } finally {
+    await b.close();
+    await server.close();
+  }
+});
+
+test("a timer reads an animation where it is at the timer's time, however the film is sought", {
+  skip,
+}, async () => {
+  const page = join(dir, "timer-reads");
+  await exec("mkdir", ["-p", page]);
+  await writeFile(
+    join(page, "index.html"),
+    `<!doctype html><html><head><style>#a{width:4px;height:4px;animation:m 1s linear}@keyframes m{to{transform:translateX(100px)}}</style></head><body><div id="a"></div><script>
+window.__film = { duration: 1 };
+setTimeout(() => { window.read = Math.round(document.getAnimations()[0].currentTime); }, 100);
+</script></body></html>`,
+  );
+  const server = await serveDirectory(page);
+  const open = () =>
+    launchHtmlBrowser({
+      chromePath: chrome!,
+      url: `${server.url}/index.html`,
+      width: 64,
+      height: 64,
+      initScript: filmClockSource({ seed: 3, epochMs: 0 }),
+      stillAnimations: true,
+    });
+  const a = await open();
+  const b = await open();
+  try {
+    await a.evaluate("window.__ot.prepare()");
+    await b.evaluate("window.__ot.prepare()");
+    for (let t = 0.01; t <= 0.2; t += 0.01) await a.evaluate(`window.__ot.seek(${t})`);
+    await b.evaluate("window.__ot.seek(0.2)");
+    assert.equal(await a.evaluate<number>("window.read"), 100);
+    assert.equal(await b.evaluate<number>("window.read"), 100);
+  } finally {
+    await Promise.all([a.close(), b.close()]);
+    await server.close();
+  }
+});
+
+test("an animation shorter than the page's loading still plays in the film", {
+  skip,
+}, async () => {
+  // the image takes 600 ms, so the page's load does; the animation is 300 ms
+  // and keeps nothing when it ends — played in real time it would be gone
+  const html = `<!doctype html><html><head><style>body{margin:0}#a{width:4px;height:4px;animation:m .3s linear}@keyframes m{to{transform:translateX(300px)}}</style></head><body><div id="a"></div><img src="/slow.png"><script>
+window.__film = { duration: 1 };
+window.__render = () => {};
+</script></body></html>`;
+  const server = createServer((req, res) => {
+    if (req.url === "/slow.png") setTimeout(() => res.writeHead(404).end(), 600);
+    else res.writeHead(200, { "content-type": "text/html" }).end(html);
+  });
+  await new Promise<void>((ok) => server.listen(0, "127.0.0.1", () => ok()));
+  const { port } = server.address() as { port: number };
+  const b = await launchHtmlBrowser({
+    chromePath: chrome!,
+    url: `http://127.0.0.1:${port}/`,
+    width: 400,
+    height: 64,
+    initScript: filmClockSource({ seed: 3, epochMs: 0 }),
+    stillAnimations: true,
+  });
+  try {
+    await b.evaluate("window.__ot.prepare()");
+    await b.evaluate("window.__ot.seek(0.15)");
+    assert.equal(
+      await b.evaluate<number>(
+        "Math.round(document.getElementById('a').getBoundingClientRect().left)",
+      ),
+      150,
+    );
+  } finally {
+    await b.close();
+    server.close();
+  }
+});
+
+test("a page reaches film time 0 in the same state however long its loading took", {
+  skip,
+}, async () => {
+  // a page that moves a step a frame and becomes ready after a fetch and a
+  // wait of its own: how long the fetch takes must not change film time 0
+  const html = `<!doctype html><html><body><script>
+window.steps = 0;
+const loop = () => { window.steps++; requestAnimationFrame(loop); };
+requestAnimationFrame(loop);
+window.__film = {
+  duration: 1,
+  ready: fetch("/data").then((r) => r.text()).then(() => new Promise((ok) => setTimeout(ok, 100))),
+};
+</script></body></html>`;
+  const at = async (delayMs: number) => {
+    const server = createServer((req, res) => {
+      if (req.url === "/data") setTimeout(() => res.end("ok"), delayMs);
+      else res.writeHead(200, { "content-type": "text/html" }).end(html);
+    });
+    await new Promise<void>((ok) => server.listen(0, "127.0.0.1", () => ok()));
+    const { port } = server.address() as { port: number };
+    const b = await launchHtmlBrowser({
+      chromePath: chrome!,
+      url: `http://127.0.0.1:${port}/`,
+      width: 64,
+      height: 64,
+      initScript: filmClockSource({ seed: 3, epochMs: 0 }),
+      stillAnimations: true,
+    });
+    try {
+      await b.evaluate("window.__ot.prepare()");
+      return await b.evaluate<number>("window.steps");
+    } finally {
+      await b.close();
+      server.close();
+    }
+  };
+  const quick = await at(20);
+  const slow = await at(700);
+  assert.equal(quick, slow, `the same frames by film time 0 (${quick} and ${slow})`);
+  assert.ok(
+    quick >= 6 && quick <= 8,
+    `the 100 ms wait at 60 a second, and the first frame (${quick})`,
+  );
 });
 
 test("inside a __render, timers run in due order and the page still reads the instant it draws", {
@@ -692,6 +937,7 @@ window.__render = async (t) => {
     width: 64,
     height: 64,
     initScript: filmClockSource({ seed: 1, epochMs: 0 }),
+    stillAnimations: true,
   });
   try {
     await b.evaluate("window.__ot.prepare()");

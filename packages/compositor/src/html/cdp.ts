@@ -52,6 +52,11 @@ export type LaunchHtmlBrowserOpts = {
   deviceScaleFactor?: number;
   /** the page's console calls: level (log, warning, error…) and text */
   onConsole?: (level: string, text: string) => void;
+  /** CSS animations and transitions and the Web Animations API stand still
+   *  from the moment the page starts, until the page's own code (the film
+   *  clock) sets them: one shorter than the page's load would otherwise play
+   *  out in real time before the film begins, and be gone */
+  stillAnimations?: boolean;
 };
 
 // Chrome writes the port of a `--remote-debugging-port=0` launch to
@@ -245,6 +250,11 @@ export async function launchHtmlBrowser(opts: LaunchHtmlBrowserOpts): Promise<Ht
     }
     if (opts.initScript)
       await s.send("Page.addScriptToEvaluateOnNewDocument", { source: opts.initScript }, timeoutMs);
+    if (opts.stillAnimations) {
+      // the rate holds for every document the page opens, frames included
+      await s.send("Animation.enable", {}, timeoutMs);
+      await s.send("Animation.setPlaybackRate", { playbackRate: 0 }, timeoutMs);
+    }
     await s.send("Page.setLifecycleEventsEnabled", { enabled: true }, timeoutMs);
     await s.send(
       "Emulation.setDeviceMetricsOverride",
