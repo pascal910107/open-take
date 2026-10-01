@@ -587,13 +587,14 @@ test("a video the page pauses, plays and sets is where the page left it, however
   // a frame's video paused at 0.3 s and played again at 0.4 s; on the page
   // itself, a video set to 1 s as it loads; one played and then set to a time
   // it refuses (its length, before it knows it); one set before its start and
-  // played; one set and loaded again; one given a new source at 0.3 s
+  // played; one set and loaded again; one given a new source at 0.3 s; one
+  // played and given a source the element refuses at 0.3 s
   await writeFile(
     join(page, "index.html"),
     `<!doctype html><html><body><iframe id="p" src="player.html"></iframe>
 <video id="w" src="clip.webm" autoplay muted></video><video id="x" muted></video>
 <video id="y" src="clip.webm" muted></video><video id="z" src="clip.webm" muted></video>
-<video id="s" src="clip.webm" autoplay muted></video><script>
+<video id="s" src="clip.webm" autoplay muted></video><video id="q" src="clip.webm" muted></video><script>
 window.__film = { duration: 2 };
 const v = () => document.getElementById("p").contentDocument.getElementById("v");
 const w = document.getElementById("w");
@@ -616,6 +617,11 @@ setTimeout(() => {
 }, 300);
 const sv = document.getElementById("s");
 setTimeout(() => { sv.src = "clip.webm?again"; }, 300);
+const q = document.getElementById("q");
+q.play();
+setTimeout(() => {
+  try { q.src = { toString() { throw new Error("no source"); } }; } catch {}
+}, 300);
 window.reads = [];
 const read = () => window.reads.push(Math.round(v().currentTime * 1000));
 setTimeout(() => { v().pause(); read(); }, 300);
@@ -623,7 +629,7 @@ setTimeout(() => { read(); v().play(); }, 400);
 setTimeout(read, 500);
 const ms = (e) => Math.round(e.currentTime * 1000);
 window.seen = () => [window.reads.join(" "), window.first, window.refused, ms(w), ms(x),
-  window.before0, ms(y), window.loaded, ms(z), ms(sv)].join();
+  window.before0, ms(y), window.loaded, ms(z), ms(sv), ms(q)].join();
 </script></body></html>`,
   );
   // a film that draws itself gives a video a new source the first time it
@@ -666,7 +672,7 @@ window.seen = () => String(Math.round(v.currentTime * 1000));
     }
   };
   try {
-    const expected = "300 300 400,1,true,1600,600,0,600,0,0,300";
+    const expected = "300 300 400,1,true,1600,600,0,600,0,0,300,600";
     assert.equal(await seen([0.6]), expected, "straight there");
     assert.equal(await seen([0.2, 0.35, 0.45, 0.6]), expected, "in steps");
     assert.equal(await seen([1], "drawn.html"), "500", "a new source, then a time: straight there");

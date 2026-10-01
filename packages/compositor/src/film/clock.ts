@@ -486,30 +486,30 @@ function installFilmClock(opts: FilmClockOptions): void {
     return realLoad.call(this);
   };
   // a new source loads it again too — at once, so what the page sets on the
-  // video right after applies to the new one
+  // video right after applies to the new one; one the element refuses
+  // changes nothing (the element's own checks come first)
   const source = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "src")!;
   Object.defineProperty(HTMLMediaElement.prototype, "src", {
     ...source,
     set(this: HTMLMediaElement, v: string) {
-      startOver(this, !this.hasAttribute("src"));
+      const hadNothing = !this.hasAttribute("src");
       source.set!.call(this, v);
+      startOver(this, hadNothing);
     },
   });
   const realSetAttribute = Element.prototype.setAttribute;
   Element.prototype.setAttribute = function (this: Element, name: string, value: string) {
-    if (this instanceof HTMLMediaElement && name.toLowerCase() === "src")
-      startOver(this, !this.hasAttribute("src"));
-    return realSetAttribute.call(this, name, value);
+    const isSource = this instanceof HTMLMediaElement && name.toLowerCase() === "src";
+    const hadNothing = !this.hasAttribute("src");
+    realSetAttribute.call(this, name, value);
+    if (isSource) startOver(this as HTMLMediaElement, hadNothing);
   };
   const realRemoveAttribute = Element.prototype.removeAttribute;
   Element.prototype.removeAttribute = function (this: Element, name: string) {
-    if (
-      this instanceof HTMLMediaElement &&
-      name.toLowerCase() === "src" &&
-      this.hasAttribute("src")
-    )
-      startOver(this, false);
-    return realRemoveAttribute.call(this, name);
+    const isSource =
+      this instanceof HTMLMediaElement && name.toLowerCase() === "src" && this.hasAttribute("src");
+    realRemoveAttribute.call(this, name);
+    if (isSource) startOver(this as HTMLMediaElement, false);
   };
   /** when a video that plays by itself started: where it was put on the page */
   const autoBorn = (el: HTMLMediaElement) =>
