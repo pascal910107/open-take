@@ -26,8 +26,7 @@ import { createRequire } from "node:module";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Writable } from "node:stream";
-import { resolveFfmpeg } from "@open-take/compositor";
-import { mjpegMatroska, type TimedFrame } from "./mjpeg-matroska";
+import { mjpegMatroska, resolveFfmpeg, type TimedFrame } from "@open-take/compositor";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const require = createRequire(import.meta.url);
@@ -593,7 +592,7 @@ export async function pumpIdleRaster(
 
 // --- encode timestamped frames -> video --------------------------------
 // The frames go to ffmpeg as an MJPEG Matroska stream over stdin, each block
-// stamped with the millisecond Chrome swapped it (mjpeg-matroska.ts explains
+// stamped with the millisecond Chrome swapped it (the compositor's mjpeg-matroska.ts explains
 // why not a concat list). `-fps_mode cfr -r <fps>` then resamples that real
 // wall-clock pacing onto a constant grid the web/MP4 decoders downstream read
 // cleanly (static stretches naturally hold one frame). Codec follows the

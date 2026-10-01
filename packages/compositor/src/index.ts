@@ -14,10 +14,8 @@ export {
   INSTRUMENT_NOTES,
   NOTES as SCORE_NOTES,
   renderScore,
-  type ScoreRender,
   type ScoreSheet,
   STYLES as SOUND_STYLES,
-  validateScore,
 } from "open-foley";
 export {
   type AuditCursorOpts,
@@ -42,7 +40,6 @@ export {
   type FilmCheckIssue,
   formatFilmCheck,
 } from "./film/check";
-export { type FilmPageInfo, filmClockSource } from "./film/clock";
 export {
   type FilmProgress,
   type FilmRenderOptions,
@@ -87,7 +84,6 @@ export { formatLaunchIssues, validateLaunchComposition } from "./launch-validate
 export * as math from "./math";
 export {
   jpegDimensions,
-  matroskaCluster,
   matroskaHead,
   mjpegMatroska,
   type TimedFrame,

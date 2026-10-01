@@ -1,13 +1,12 @@
 // `open-take film sheet`: a film (or any video) as one image — frames on a
 // grid, each captioned with its time — for looking at a whole cut at once.
 
-import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { resolveFfmpeg, resolveFfprobe } from "../ffmpeg";
+import { resolveFfmpeg, resolveFfprobe, runTool } from "../ffmpeg";
 import { launchHtmlBrowser } from "../html/cdp";
 
 export type FilmSheetOptions = {
@@ -20,15 +19,12 @@ export type FilmSheetOptions = {
   every?: number;
   /** exact times instead (seconds) */
   at?: readonly number[];
-  columns?: number;
-  /** px per frame across */
-  tileWidth?: number;
 };
 
 export async function filmSheet(opts: FilmSheetOptions): Promise<{ out: string; times: number[] }> {
   const [ffmpeg, ffprobe] = await Promise.all([resolveFfmpeg(), resolveFfprobe()]);
   const info = JSON.parse(
-    await run(ffprobe, [
+    await runTool(ffprobe, [
       "-v",
       "error",
       "-select_streams",
@@ -62,8 +58,8 @@ export async function filmSheet(opts: FilmSheetOptions): Promise<{ out: string; 
       );
   if (!opts.at?.length && last - times[times.length - 1]! > every / 2)
     times.push(Math.round(last * 1000) / 1000);
-  const columns = opts.columns ?? (vw >= vh ? 6 : 10);
-  const tileW = opts.tileWidth ?? (vw >= vh ? 480 : 216);
+  const columns = vw >= vh ? 6 : 10;
+  const tileW = vw >= vh ? 480 : 216;
   const tileH = Math.round((tileW * vh) / vw);
 
   const tmp = await mkdtemp(join(tmpdir(), "open-take-sheet-"));
@@ -77,7 +73,7 @@ export async function filmSheet(opts: FilmSheetOptions): Promise<{ out: string; 
           const i = times.indexOf(t);
           const file = join(tmp, `f${String(i).padStart(4, "0")}.jpg`);
           for (const at of [t, Math.max(0, t - 1 / fps)]) {
-            await run(ffmpeg, [
+            await runTool(ffmpeg, [
               "-v",
               "error",
               "-ss",
@@ -157,22 +153,4 @@ function chunked<T>(xs: readonly T[], n: number): T[][] {
     out[i % n]!.push(x);
   });
   return out.filter((g) => g.length);
-}
-
-function run(bin: string, args: string[]): Promise<string> {
-  return new Promise((ok, fail) => {
-    const p = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"] });
-    let out = "";
-    let err = "";
-    p.stdout.on("data", (d: Buffer) => {
-      out += d.toString();
-    });
-    p.stderr.on("data", (d: Buffer) => {
-      err += d.toString();
-    });
-    p.on("error", fail);
-    p.on("close", (code) =>
-      code === 0 ? ok(out) : fail(new Error(`${bin} exited ${code}: ${err.slice(-400)}`)),
-    );
-  });
 }

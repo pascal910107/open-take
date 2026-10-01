@@ -23,7 +23,7 @@
 // This function is serialized into the page (Function#toString): it must not
 // reference anything outside its own body.
 
-export type FilmClockOptions = {
+type FilmClockOptions = {
   /** Math.random's seed — the same in every worker */
   seed: number;
   /** what Date says at film time 0 (ms since the epoch) */
@@ -41,8 +41,6 @@ export type FilmPageInfo = {
   audio: string | null;
   /** the page has <audio> elements — they are not recorded */
   audioElements: number;
-  /** the page provides its own motion estimate (window.__film.motion) */
-  motionHook: boolean;
 };
 
 export function filmClockSource(opts: FilmClockOptions): string {
@@ -51,10 +49,6 @@ export function filmClockSource(opts: FilmClockOptions): string {
   return `(() => { const __name = (f) => f; (${installFilmClock.toString()})(${JSON.stringify(opts)}); })();`;
 }
 
-/** motion (px) credited to a canvas whose pixels changed or a playing video —
- *  their content moves in ways no element box shows */
-export const OPAQUE_MOTION_PX = 12;
-
 function installFilmClock(opts: FilmClockOptions): void {
   // biome-ignore lint/suspicious/noExplicitAny: the page's globals are untyped
   const w = window as any;
@@ -62,7 +56,9 @@ function installFilmClock(opts: FilmClockOptions): void {
   const realSetTimeout = w.setTimeout.bind(w) as typeof setTimeout;
   const RealDate = w.Date as DateConstructor;
   const realPause = HTMLMediaElement.prototype.pause;
-  const OPAQUE_PX = 12; // = OPAQUE_MOTION_PX (the body can't see module scope)
+  // motion (px) credited to a canvas whose pixels changed or a playing video —
+  // their content moves in ways no element box shows
+  const OPAQUE_PX = 12;
   const STEP_MS = 1000 / 60;
   const MAX_JUMP_MS = 10_000;
 
@@ -618,7 +614,6 @@ function installFilmClock(opts: FilmClockOptions): void {
       fps: num(film.fps),
       audio: typeof film.audio === "string" ? film.audio : null,
       audioElements: document.querySelectorAll("audio").length,
-      motionHook: typeof film.motion === "function",
     };
   }
 
@@ -641,7 +636,6 @@ function installFilmClock(opts: FilmClockOptions): void {
       }
       tickFrames(jump);
     },
-    now: () => (now - base) / 1000,
     bornOf: (el: Element | null) => (bornOf(el) - base) / 1000,
   };
 }

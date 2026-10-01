@@ -21,17 +21,17 @@ import { existsSync, statSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { cpus, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { resolveFfmpeg } from "../ffmpeg";
+import { resolveFfmpeg, runTool } from "../ffmpeg";
 import { type HtmlBrowser, launchHtmlBrowser } from "../html/cdp";
 import { serveDirectory } from "../html/server";
 import { jpegDimensions, matroskaCluster, matroskaHead } from "../mjpeg-matroska";
 import { type FilmPageInfo, filmClockSource } from "./clock";
 
 /** the shutter is open for this fraction of the frame interval (180°) */
-export const SHUTTER_FRACTION = 0.5;
+const SHUTTER_FRACTION = 0.5;
 /** one blur sample per this many px an edge travels while the shutter is open */
-export const SPACING_PX = 3;
-export const MAX_SAMPLES = 16;
+const SPACING_PX = 3;
+const MAX_SAMPLES = 16;
 const DEFAULT_SIZE = { width: 1920, height: 1080 } as const;
 /** frames per re-renderable piece (3 s at 60 fps) */
 const PIECE_FRAMES = 180;
@@ -40,7 +40,7 @@ const PIECE_RETRIES = 2;
 
 /** Chrome died, hung or lost its socket — worth a fresh Chrome. An error the
  *  film itself threw is not: it would throw again. */
-export const browserTrouble = (e: Error): boolean =>
+const browserTrouble = (e: Error): boolean =>
   !/page error:|page threw:|film clock: cannot go back|asked for files that are not there/.test(
     e.message,
   );
@@ -92,26 +92,15 @@ export type FilmRenderResult = {
   /** screenshots taken (a blurred frame takes several) */
   samples: number;
   durationS: number;
-  audio: string | null;
-  workers: number;
   wallMs: number;
-  probeMs: number;
-  renderMs: number;
   warnings: string[];
 };
 
 type Film = {
-  root: string;
-  url: string;
-  pageFile: string;
-  info: FilmPageInfo;
   width: number;
   height: number;
   fps: number;
   scale: number;
-  /** device pixels drawn per output pixel, each way (supersampling) */
-  ss: number;
-  durationS: number;
   f0: number;
   f1: number;
   audio: string | null;
@@ -125,7 +114,7 @@ const inside = (file: string, dir: string) => {
 };
 
 /** the page file, the directory served, and the page's path in it */
-export function resolveFilmPage(
+function resolveFilmPage(
   page: string,
   root?: string,
 ): { root: string; pageFile: string; urlPath: string } {
@@ -178,83 +167,42 @@ export function balancedSlices(costs: readonly number[], workers: number): [numb
 
 export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderResult> {
   const t0 = Date.now();
-  const { root, pageFile, urlPath } = resolveFilmPage(opts.page, opts.root);
-  const missing = new Set<string>();
-  const server = await serveDirectory(root, {}, (p) => {
-    if (!p.endsWith("/favicon.ico")) missing.add(decodeURIComponent(p));
-  });
-  const browsers = new Set<HtmlBrowser>();
+  const draft = !!opts.draft;
+  const scale = draft ? 0.5 : 1;
+  // every browser that draws frames draws at the same density
+  const ss = draft ? 1 : supersampleOf(opts.supersample);
+  const page = await servePage(opts, scale * ss);
   const tmp = await mkdtemp(join(tmpdir(), "open-take-film-"));
-  const epochMs = Date.now();
-  const clock = filmClockSource({ seed: 0x5eed, epochMs });
-  const open = async (film: { width: number; height: number; scale: number; ss: number }) => {
-    const b = await launchHtmlBrowser({
-      chromePath: opts.chromePath,
-      url: `${server.url}${urlPath}`,
-      width: film.width,
-      height: film.height,
-      deviceScaleFactor: film.scale * film.ss,
-      initScript: clock,
-      onConsole: opts.onConsole,
-      timeoutMs: 120_000,
-      profilePrefix: "open-take-film-",
-    });
-    browsers.add(b);
-    return b;
-  };
-  const close = async (b: HtmlBrowser) => {
-    browsers.delete(b);
-    await b.close();
-  };
   try {
     // --- what the page is -----------------------------------------------------
-    const draft = !!opts.draft;
-    const scale = draft ? 0.5 : 1;
-    // every browser that draws frames draws at the same density — the first too
-    const ss = draft ? 1 : supersampleOf(opts.supersample);
-    let width = opts.width ?? DEFAULT_SIZE.width;
-    let height = opts.height ?? DEFAULT_SIZE.height;
-    let first = await open({ width, height, scale, ss });
-    let info = await prepare(first);
-    if (!opts.width && !opts.height && info.width && info.height) {
-      if (info.width !== width || info.height !== height) {
-        width = info.width;
-        height = info.height;
-        await close(first);
-        first = await open({ width, height, scale, ss });
-        info = await prepare(first);
-      }
-    }
-    if (missing.size) throw missingError(missing, root);
-    const film = describe(opts, info, { root, pageFile, width, height, scale, draft });
+    const { browser: first, info, width, height } = await page.openDeclared(opts);
+    page.checkFiles();
+    const film = describe(opts, info, { pageFile: page.pageFile, width, height, scale, draft });
     const frames = film.f1 - film.f0;
     const workers = Math.max(1, Math.min(opts.workers ?? defaultWorkers(), frames));
 
     // --- probe: how many shutter samples each frame needs --------------------
-    const tProbe = Date.now();
     let samples = new Array<number>(frames).fill(1);
     let pool: HtmlBrowser[] = [first];
     if (film.blur) {
-      if (info.mode === "render") {
+      // a clock film keeps its own state, so only a render film probes in parallel
+      if (info.mode === "render")
         while (pool.length < workers) {
-          const b = await open(film);
+          const b = await page.open(width, height);
           await prepare(b);
           pool.push(b);
         }
-        samples = await probeParallel(pool, film, opts.onProgress);
-      } else {
-        samples = await probeSequential(first, film, opts.onProgress);
-      }
+      samples = await probe(pool, film, opts.onProgress);
     }
-    const probeMs = Date.now() - tProbe;
 
     // --- render ------------------------------------------------------------------
-    const tRender = Date.now();
     if (info.mode === "clock") {
       // a clock film keeps its own state: every worker starts from a fresh page
-      for (const b of pool) await close(b);
+      for (const b of pool) await page.close(b);
       pool = [];
     }
+    // a frame costs its samples plus its own seek and encode — counted, as
+    // an estimate, as 0.4 of a screenshot
     const slices = balancedSlices(
       samples.map((n) => n + 0.4),
       workers,
@@ -288,7 +236,7 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
               let piece = 0;
               try {
                 if (!browser) {
-                  browser = await open(film);
+                  browser = await page.open(width, height);
                   await prepare(browser);
                 }
                 const sink = new ShutterSink(
@@ -300,10 +248,10 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
                 try {
                   for (let i = a; i < b; i++) {
                     if (failed) throw failed;
-                    if (missing.size) throw missingError(missing, root);
+                    page.checkFiles();
                     const t = (film.f0 + i) / film.fps;
                     for (const ti of sampleTimes(t, samples[i]!, film.fps)) {
-                      await seek(browser, ti, film.f0 + i);
+                      await seek(browser, ti, `frame ${film.f0 + i}`);
                       await sink.push(
                         await browser.screenshot({ format: "jpeg", quality: draft ? 85 : 100 }),
                       );
@@ -326,7 +274,7 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
                     `frames ${film.f0 + a}–${film.f0 + b - 1} rendered again on a fresh one`,
                 );
                 done -= piece;
-                if (browser) await close(browser);
+                if (browser) await page.close(browser);
                 browser = undefined;
               }
             }
@@ -339,28 +287,25 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
     ).catch((e) => {
       throw failed ?? e;
     });
-    for (const b of [...browsers]) await close(b);
-    if (missing.size) throw missingError(missing, root);
+    await page.closeAll();
+    page.checkFiles();
     await deliver(ffmpeg, chunks, film, opts.out, tmp);
+    const { width: w, height: h } = outSize(film);
     return {
       out: resolve(opts.out),
       mode: info.mode,
-      width: even(film.width * film.scale),
-      height: even(film.height * film.scale),
+      // as encoded: an odd side is padded to even
+      width: w + (w % 2),
+      height: h + (h % 2),
       fps: film.fps,
       frames,
       samples: samples.reduce((x, y) => x + y, 0),
       durationS: frames / film.fps,
-      audio: film.audio,
-      workers: slices.length,
       wallMs: Date.now() - t0,
-      probeMs,
-      renderMs: Date.now() - tRender,
       warnings: film.warnings,
     };
   } finally {
-    await Promise.all([...browsers].map((b) => b.close()));
-    await server.close();
+    await page.shut();
     await rm(tmp, { recursive: true, force: true });
   }
 }
@@ -384,46 +329,13 @@ export type FilmStillsOptions = {
 /** PNG stills of the film at the given times — `t012.500.png` … — as the
  *  master would show them. */
 export async function filmStills(opts: FilmStillsOptions): Promise<string[]> {
-  const { root, pageFile, urlPath } = resolveFilmPage(opts.page, opts.root);
-  const server = await serveDirectory(root);
-  const browsers: HtmlBrowser[] = [];
-  const clock = filmClockSource({ seed: 0x5eed, epochMs: Date.now() });
   const ss = supersampleOf(opts.supersample);
-  const open = async (width: number, height: number) => {
-    const b = await launchHtmlBrowser({
-      chromePath: opts.chromePath,
-      url: `${server.url}${urlPath}`,
-      width,
-      height,
-      deviceScaleFactor: ss,
-      initScript: clock,
-      onConsole: opts.onConsole,
-      timeoutMs: 120_000,
-      profilePrefix: "open-take-film-",
-    });
-    browsers.push(b);
-    return b;
-  };
+  const page = await servePage(opts, ss);
   try {
-    let width = opts.width ?? DEFAULT_SIZE.width;
-    let height = opts.height ?? DEFAULT_SIZE.height;
-    let browser = await open(width, height);
-    let info = await prepare(browser);
-    if (
-      !opts.width &&
-      !opts.height &&
-      info.width &&
-      info.height &&
-      (info.width !== width || info.height !== height)
-    ) {
-      width = info.width;
-      height = info.height;
-      browser = await open(width, height);
-      info = await prepare(browser);
-    }
-    const film = describe({ ...opts, out: "", draft: false }, info, {
-      root,
-      pageFile,
+    let { browser, info, width, height } = await page.openDeclared(opts);
+    page.checkFiles();
+    const film = describe(opts, info, {
+      pageFile: page.pageFile,
       width,
       height,
       scale: 1,
@@ -436,7 +348,9 @@ export async function filmStills(opts: FilmStillsOptions): Promise<string[]> {
     for (const t of times)
       counts.push(film.blur ? samplesFor(await motionAt(browser, t, half)) : 1);
     if (info.mode === "clock" && film.blur) {
-      browser = await open(width, height);
+      // probing moved a clock film's own state on: draw from a fresh page
+      await page.close(browser);
+      browser = await page.open(width, height);
       await prepare(browser);
     }
     await mkdir(opts.outDir, { recursive: true });
@@ -446,8 +360,9 @@ export async function filmStills(opts: FilmStillsOptions): Promise<string[]> {
       const t = times[i]!;
       const file = join(opts.outDir, `t${t.toFixed(3).padStart(7, "0")}.png`);
       const n = counts[i]!;
+      const label = `the still at ${t}s`;
       if (n === 1 && ss === 1) {
-        await seek(browser, t, i);
+        await seek(browser, t, label);
         await writeFile(file, await browser.screenshot({ format: "png" }));
       } else {
         const sink = new ShutterSink(
@@ -473,19 +388,101 @@ export async function filmStills(opts: FilmStillsOptions): Promise<string[]> {
           ],
           { width, height },
         );
-        for (const ti of sampleTimes(t, n, film.fps)) {
-          await seek(browser, ti, i);
-          await sink.push(await browser.screenshot({ format: "jpeg", quality: 100 }));
+        try {
+          for (const ti of sampleTimes(t, n, film.fps)) {
+            await seek(browser, ti, label);
+            await sink.push(await browser.screenshot({ format: "jpeg", quality: 100 }));
+          }
+          await sink.end();
+        } catch (e) {
+          sink.kill();
+          throw e;
         }
-        await sink.end();
       }
       files.push(file);
     }
+    page.checkFiles();
     return files;
   } finally {
-    await Promise.all(browsers.map((b) => b.close()));
-    await server.close();
+    await page.shut();
   }
+}
+
+/** The film's page, served, and the Chromes that open it — each one with the
+ *  film clock installed, drawing `dpr` device pixels per CSS px. */
+async function servePage(
+  opts: {
+    page: string;
+    root?: string;
+    chromePath: string;
+    onConsole?: (level: string, text: string) => void;
+  },
+  dpr: number,
+) {
+  const { root, pageFile, urlPath } = resolveFilmPage(opts.page, opts.root);
+  const missing = new Set<string>();
+  const server = await serveDirectory(root, {}, (p) => {
+    if (!p.endsWith("/favicon.ico")) missing.add(decodeURIComponent(p));
+  });
+  const clock = filmClockSource({ seed: 0x5eed, epochMs: Date.now() });
+  const browsers = new Set<HtmlBrowser>();
+  const open = async (width: number, height: number) => {
+    const b = await launchHtmlBrowser({
+      chromePath: opts.chromePath,
+      url: `${server.url}${urlPath}`,
+      width,
+      height,
+      deviceScaleFactor: dpr,
+      initScript: clock,
+      onConsole: opts.onConsole,
+      timeoutMs: 120_000,
+      profilePrefix: "open-take-film-",
+    });
+    browsers.add(b);
+    return b;
+  };
+  const close = async (b: HtmlBrowser) => {
+    browsers.delete(b);
+    await b.close();
+  };
+  return {
+    pageFile,
+    open,
+    close,
+    /** open the page and read what it is; a page that declares its own size,
+     *  when none was asked for, is opened again at that size */
+    async openDeclared(asked: { width?: number; height?: number }) {
+      let width = asked.width ?? DEFAULT_SIZE.width;
+      let height = asked.height ?? DEFAULT_SIZE.height;
+      let browser = await open(width, height);
+      let info = await prepare(browser);
+      if (
+        !asked.width &&
+        !asked.height &&
+        info.width &&
+        info.height &&
+        (info.width !== width || info.height !== height)
+      ) {
+        width = info.width;
+        height = info.height;
+        await close(browser);
+        browser = await open(width, height);
+        info = await prepare(browser);
+      }
+      return { browser, info, width, height };
+    },
+    /** a file the page asked for that is not there fails the film, by name */
+    checkFiles() {
+      if (missing.size) throw missingError(missing, root);
+    },
+    async closeAll() {
+      for (const b of [...browsers]) await close(b);
+    },
+    async shut() {
+      await Promise.all([...browsers].map((b) => b.close()));
+      await server.close();
+    },
+  };
 }
 
 // --- the page ---------------------------------------------------------------------
@@ -496,11 +493,11 @@ async function prepare(b: HtmlBrowser): Promise<FilmPageInfo> {
   return b.evaluate<FilmPageInfo>("window.__ot.prepare()", { timeoutMs: 120_000 });
 }
 
-async function seek(b: HtmlBrowser, t: number, frame: number): Promise<void> {
+async function seek(b: HtmlBrowser, t: number, what: string): Promise<void> {
   try {
     await b.evaluate(`window.__ot.seek(${t})`);
   } catch (e) {
-    throw new Error(`film: frame ${frame} (${t.toFixed(3)}s): ${(e as Error).message}`, {
+    throw new Error(`film: ${what} (${t.toFixed(3)}s): ${(e as Error).message}`, {
       cause: e,
     });
   }
@@ -511,15 +508,15 @@ async function motionAt(b: HtmlBrowser, t: number, half: number): Promise<number
 }
 
 function describe(
-  opts: Omit<FilmRenderOptions, "out" | "chromePath"> & { out: string },
+  opts: Pick<FilmRenderOptions, "fps" | "duration" | "from" | "to" | "audio" | "blur">,
   info: FilmPageInfo,
   at: {
-    root: string;
     pageFile: string;
     width: number;
     height: number;
     scale: number;
     draft: boolean;
+    /** stills: no length needed, and no soundtrack */
     stills?: boolean;
   },
 ): Film {
@@ -537,28 +534,25 @@ function describe(
   if (!at.stills && !(f1 > f0))
     throw new Error(`film: nothing to render between ${from}s and ${end}s`);
   let audio: string | null = null;
-  if (opts.audio === null) audio = null;
-  else if (typeof opts.audio === "string") audio = resolve(opts.audio);
-  else if (info.audio) audio = resolve(dirname(at.pageFile), decodeURI(info.audio.split("?")[0]!));
-  if (audio && !existsSync(audio)) throw new Error(`film: the soundtrack ${audio} does not exist`);
-  if (!audio && !at.stills)
-    warnings.push("no soundtrack — the film is silent (window.__film.audio or --audio)");
+  if (!at.stills) {
+    if (typeof opts.audio === "string") audio = resolve(opts.audio);
+    else if (opts.audio !== null && info.audio)
+      audio = resolve(dirname(at.pageFile), decodeURI(info.audio.split("?")[0]!));
+    if (audio && !existsSync(audio))
+      throw new Error(`film: the soundtrack ${audio} does not exist`);
+    if (!audio)
+      warnings.push("no soundtrack — the film is silent (window.__film.audio or --audio)");
+  }
   if (info.audioElements)
     warnings.push(
       `the page has ${info.audioElements} <audio> element(s); a render records picture only — ` +
         "declare the soundtrack instead (window.__film.audio or --audio)",
     );
   return {
-    root: at.root,
-    url: "",
-    pageFile: at.pageFile,
-    info,
     width: at.width,
     height: at.height,
     fps,
     scale: at.scale,
-    ss: at.draft ? 1 : supersampleOf(opts.supersample),
-    durationS: durationS ?? 0,
     f0,
     f1,
     audio,
@@ -582,7 +576,8 @@ function defaultWorkers(): number {
   return Math.max(1, Math.min(2, Math.floor(cpus().length / 2)));
 }
 
-async function probeParallel(
+/** every frame's shutter samples, probed by the pool's browsers in turn */
+async function probe(
   pool: HtmlBrowser[],
   film: Film,
   onProgress?: (p: FilmProgress) => void,
@@ -607,25 +602,7 @@ async function probeParallel(
   return out;
 }
 
-async function probeSequential(
-  b: HtmlBrowser,
-  film: Film,
-  onProgress?: (p: FilmProgress) => void,
-): Promise<number[]> {
-  const frames = film.f1 - film.f0;
-  const out = new Array<number>(frames);
-  const half = SHUTTER_FRACTION / film.fps / 2;
-  for (let i = 0; i < frames; i++) {
-    out[i] = samplesFor(await motionAt(b, (film.f0 + i) / film.fps, half));
-    if ((i + 1) % 30 === 0 || i + 1 === frames)
-      onProgress?.({ phase: "probe", done: i + 1, total: frames });
-  }
-  return out;
-}
-
 // --- encoding -------------------------------------------------------------------------
-
-const even = (x: number) => 2 * Math.round(x / 2);
 
 /** the film's frames, in pixels (screenshots are this × the supersampling) */
 const outSize = (film: Film) => ({
@@ -687,21 +664,7 @@ async function deliver(
   if (film.audio)
     args.push("-map", "1:a", "-af", "apad", "-c:a", "aac", "-b:a", "256k", "-ar", "48000");
   args.push("-t", durationS.toFixed(6), "-movflags", "+faststart", resolve(out));
-  await run(ffmpeg, args);
-}
-
-function run(bin: string, args: string[]): Promise<void> {
-  return new Promise((ok, fail) => {
-    const p = spawn(bin, args, { stdio: ["ignore", "ignore", "pipe"] });
-    let err = "";
-    p.stderr?.on("data", (d: Buffer) => {
-      err = (err + d.toString()).slice(-4000);
-    });
-    p.on("error", fail);
-    p.on("close", (code) =>
-      code === 0 ? ok() : fail(new Error(`ffmpeg exited ${code}: ${err.trim().slice(-800)}`)),
-    );
-  });
+  await runTool(ffmpeg, args);
 }
 
 // sRGB ↔ linear light, for averaging samples the way light adds up
@@ -721,7 +684,7 @@ for (let i = 0; i <= LUT + 1; i++) {
  *  each output frame's `schedule[n]` samples are averaged in linear light (with
  *  triangular dither back to 8 bits), and the frames go to an encoding ffmpeg
  *  run with `encodeArgs`. Backpressure flows end to end. */
-export class ShutterSink {
+class ShutterSink {
   private decoder: ChildProcess;
   private encoder: ChildProcess;
   private headWritten = false;
@@ -787,6 +750,8 @@ export class ShutterSink {
       });
     const decoded = watch(this.decoder, "decoder");
     const encoded = watch(this.encoder, "encoder");
+    // a write after ffmpeg has gone (EPIPE) is not the error worth reporting:
+    // its exit code is, through watch() above
     this.decoder.stdin?.on("error", () => {});
     this.encoder.stdin?.on("error", () => {});
     this.decoder.stdout?.on("data", (chunk: Buffer) => this.onData(chunk));
@@ -799,6 +764,8 @@ export class ShutterSink {
           `film: ${this.frame} of ${this.schedule.length} frames came out of the shutter`,
         );
     });
+    // push() and end() report a failure; a piece given up without end() must
+    // not leave it unhandled
     this.finished.catch(() => {});
   }
 

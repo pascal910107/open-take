@@ -23,12 +23,9 @@ import { join } from "node:path";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export type HtmlBrowser = {
-  /** Run `expression` in the page. A returned promise is awaited by default;
-   *  a throw or rejection (Runtime.evaluate exceptionDetails) rejects. */
-  evaluate<T = unknown>(
-    expression: string,
-    opts?: { awaitPromise?: boolean; timeoutMs?: number },
-  ): Promise<T>;
+  /** Run `expression` in the page. A returned promise is awaited; a throw or
+   *  rejection (Runtime.evaluate exceptionDetails) rejects. */
+  evaluate<T = unknown>(expression: string, opts?: { timeoutMs?: number }): Promise<T>;
   /** The viewport as PNG (default) or JPEG bytes. */
   screenshot(opts?: { format?: "png" | "jpeg"; quality?: number }): Promise<Buffer>;
   /** Kill Chrome and remove its profile. Idempotent; never throws. */
@@ -286,12 +283,12 @@ export async function launchHtmlBrowser(opts: LaunchHtmlBrowserOpts): Promise<Ht
   return {
     async evaluate<T = unknown>(
       expression: string,
-      evalOpts: { awaitPromise?: boolean; timeoutMs?: number } = {},
+      evalOpts: { timeoutMs?: number } = {},
     ): Promise<T> {
       const r = await guarded(
         s.send<{ result?: { value?: unknown }; exceptionDetails?: ExceptionDetails }>(
           "Runtime.evaluate",
-          { expression, awaitPromise: evalOpts.awaitPromise ?? true, returnByValue: true },
+          { expression, awaitPromise: true, returnByValue: true },
           evalOpts.timeoutMs ?? timeoutMs,
         ),
       );

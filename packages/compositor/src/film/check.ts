@@ -12,7 +12,7 @@ import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { resolveFfmpeg, resolveFfprobe } from "../ffmpeg";
+import { resolveFfmpeg, resolveFfprobe, runTool } from "../ffmpeg";
 
 export type FilmCheckIssue = { severity: "error" | "warn" | "info"; message: string };
 
@@ -52,12 +52,12 @@ export type FilmCheck = {
   issues: FilmCheckIssue[];
 };
 
-export type FilmCheckExpect = { width?: number; height?: number; fps?: number; audio?: boolean };
+export type FilmCheckExpect = { width?: number; height?: number; fps?: number };
 
 export async function checkFilm(file: string, expect: FilmCheckExpect = {}): Promise<FilmCheck> {
   const [ffmpeg, ffprobe] = await Promise.all([resolveFfmpeg(), resolveFfprobe()]);
   const probe = JSON.parse(
-    await capture(ffprobe, ["-v", "error", "-show_streams", "-show_format", "-of", "json", file]),
+    await runTool(ffprobe, ["-v", "error", "-show_streams", "-show_format", "-of", "json", file]),
   ) as {
     streams?: Record<string, string | number | undefined>[];
     format?: { duration?: string };
@@ -100,7 +100,7 @@ export async function checkFilm(file: string, expect: FilmCheckExpect = {}): Pro
     };
     if (video) {
       const diffFile = join(tmp, "diff.txt");
-      const log = await capture(
+      const log = await runTool(
         ffmpeg,
         [
           "-nostats",
@@ -122,7 +122,7 @@ export async function checkFilm(file: string, expect: FilmCheckExpect = {}): Pro
           "null",
           "-",
         ],
-        true,
+        { stderr: true },
       );
       const diffs = [
         ...(await readFile(diffFile, "utf8")).matchAll(/YAVG=([-+]?[\d.]+(?:[eE][-+]?\d+)?)/g),
@@ -132,7 +132,7 @@ export async function checkFilm(file: string, expect: FilmCheckExpect = {}): Pro
         result.black.push({ start: Number(m[1]), end: Number(m[2]) });
     }
     if (as) {
-      const log = await capture(
+      const log = await runTool(
         ffmpeg,
         [
           "-nostats",
@@ -147,7 +147,7 @@ export async function checkFilm(file: string, expect: FilmCheckExpect = {}): Pro
           "null",
           "-",
         ],
-        true,
+        { stderr: true },
       );
       const summary = log.slice(log.lastIndexOf("Summary:"));
       const num = (re: RegExp) => {
@@ -187,10 +187,15 @@ export function motionFindings(
   fps: number,
 ): Pick<FilmCheck, "stalls" | "cadence" | "cuts"> {
   const at = (i: number) => Math.round(((i + 1) / fps) * 1000) / 1000;
+  // the differences are means over a small grey copy (0–255): below 0.02 two
+  // frames are the same picture (encoder noise aside), above 0.4 something
+  // visibly moved
   const still = (v: number) => v < 0.02;
   const stalls: number[] = [];
   for (let i = 2; i < diffs.length - 2; i++)
     if (still(diffs[i]!) && diffs[i - 1]! > 0.4 && diffs[i + 1]! > 0.4) stalls.push(at(i));
+  // a cut: most of the picture changes at once (a mean change of 30 of 255),
+  // three times more than the frames on either side of it
   const cuts: number[] = [];
   for (let i = 1; i < diffs.length - 1; i++) {
     const v = diffs[i]!;
@@ -205,6 +210,8 @@ export function motionFindings(
       Math.max(diffs[i]!, diffs[i - 1]!) > 0.3;
     if (flips) run++;
     else {
+      // moving and still frames taking turns for 8 frames and more: motion
+      // updating at a lower rate than the film, not one repeated frame
       if (run >= 8) cadence.push({ at: at(i - run - 1), frames: run });
       run = 0;
     }
@@ -228,6 +235,8 @@ export function findClicks(x: Float32Array, rate: number): number[] {
   const rms = (a: number, b: number) => Math.sqrt((sq[b + 1]! - sq[a]!) / (b - a + 1));
   let last = -1;
   for (let n = half + 3; n < x.length - half - 3; n++) {
+    // a step of 8 % of full scale or more, 8 times what the waveform does
+    // around it (by its rms step), is a click; below that it is the sound
     const d = Math.abs(x[n]! - x[n - 1]!);
     if (d < 0.08) continue;
     const around = Math.max(rms(n - half, n - 3), rms(n + 3, n + half));
@@ -279,8 +288,7 @@ function judge(c: FilmCheck, expect: FilmCheckExpect): FilmCheckIssue[] {
         message: `black frames ${b.start}–${b.end}s inside the film`,
       });
   if (!c.audio) {
-    if (expect.audio !== false)
-      issues.push({ severity: "warn", message: "no audio stream — the film is silent" });
+    issues.push({ severity: "warn", message: "no audio stream — the film is silent" });
   } else {
     const a = c.audio;
     if (a.truePeak != null && a.truePeak > -1)
@@ -330,26 +338,6 @@ export function formatFilmCheck(c: FilmCheck): string {
   for (const i of c.issues)
     lines.push(`${i.severity === "info" ? "note" : i.severity}: ${i.message}`);
   return lines.join("\n");
-}
-
-function capture(bin: string, args: string[], stderr = false): Promise<string> {
-  return new Promise((ok, fail) => {
-    const p = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"] });
-    let out = "";
-    let err = "";
-    p.stdout.on("data", (d: Buffer) => {
-      out += d.toString();
-    });
-    p.stderr.on("data", (d: Buffer) => {
-      err += d.toString();
-    });
-    p.on("error", fail);
-    p.on("close", (code) =>
-      code === 0
-        ? ok(stderr ? err : out)
-        : fail(new Error(`${bin} exited ${code}: ${err.slice(-600)}`)),
-    );
-  });
 }
 
 function pcm(ffmpeg: string, file: string): Promise<Float32Array> {

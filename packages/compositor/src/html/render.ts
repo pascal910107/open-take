@@ -157,7 +157,7 @@ export async function renderHtmlFrames(opts: HtmlRenderOpts): Promise<HtmlRender
     try {
       if (failure) return;
       try {
-        await browser.evaluate(PAGE_READY_EXPRESSION, { awaitPromise: true, timeoutMs });
+        await browser.evaluate(PAGE_READY_EXPRESSION, { timeoutMs });
       } catch (e) {
         throw new Error(`html render: ${url} did not become ready: ${(e as Error).message}`, {
           cause: e,
@@ -168,10 +168,7 @@ export async function renderHtmlFrames(opts: HtmlRenderOpts): Promise<HtmlRender
         try {
           await browser.evaluate(
             `(async () => { await window.__seek(${t.atS}, ${t.frameS}); })()`,
-            {
-              awaitPromise: true,
-              timeoutMs,
-            },
+            { timeoutMs },
           );
           const bytes = await browser.screenshot({ format, quality });
           await writeFile(join(outDir, frameFileName(i, format)), bytes);

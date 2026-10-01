@@ -88,7 +88,13 @@ test("frames are cut into contiguous slices of about equal cost", () => {
   assert.equal(slices[0]![0], 0);
   assert.equal(slices.at(-1)![1], costs.length);
   for (let i = 1; i < slices.length; i++) assert.equal(slices[i]![0], slices[i - 1]![1]);
-  assert.ok(slices.length <= 3);
+  assert.equal(slices.length, 3);
+  // each slice within one frame's cost of an equal share
+  const total = costs.reduce((a, b) => a + b, 0);
+  for (const [a, b] of slices) {
+    const cost = costs.slice(a, b).reduce((x, y) => x + y, 0);
+    assert.ok(Math.abs(cost - total / 3) <= Math.max(...costs), `slice ${a}–${b} costs ${cost}`);
+  }
 });
 
 test("a page that just animates runs on film time: CSS, requestAnimationFrame, timers", {
@@ -281,7 +287,7 @@ window.__render = (t) => {
   // with Chromes of their own — looked up as soon as rendering starts so the
   // kill itself is immediate
   let pid: Promise<number | undefined> | undefined;
-  const findChrome = async () => {
+  const chromePid = async () => {
     const { stdout } = await exec("ps", ["-axo", "pid=,ppid=,command="], { maxBuffer: 1 << 24 });
     for (const l of stdout.split("\n")) {
       const [p, parent] = l.trim().split(/\s+/).map(Number);
@@ -302,7 +308,7 @@ window.__render = (t) => {
     blur: false,
     onProgress: (p) => {
       if (p.phase !== "render") return;
-      pid ??= findChrome();
+      pid ??= chromePid();
       if (p.done >= 30 && !killed) {
         killed = true;
         kill();
@@ -580,16 +586,21 @@ test("supersampling draws more pixels and keeps the film's size, in the master a
     `<!doctype html><html><head><style>body{margin:0;width:320px;height:180px;background:#fff;font:700 24px sans-serif}
 #t{position:absolute;left:40px;top:60px}</style></head><body><div id="t">台北南京店 1,188</div><script>
 window.__film = { duration: 0.25, width: 320, height: 180 };
-window.__render = (t) => { document.getElementById('t').style.transform = 'scale(' + (1 + t * 0.2) + ')'; };
+window.__render = (t) => { document.getElementById('t').style.transform = 'scale(' + (1 + t * 0.2) + ')'; console.log('dpr ' + devicePixelRatio); };
 </script></body></html>`,
   );
+  // the page itself says how densely it is drawn
+  const said = new Set<string>();
+  const onConsole = (_level: string, text: string) => said.add(text);
   const r = await renderFilm({
     page,
     out: join(dir, "supersample.mp4"),
     chromePath: chrome!,
     workers: 1,
     supersample: 2,
+    onConsole,
   });
+  assert.deepEqual([...said], ["dpr 2"], "drawn at twice the pixels each way");
   assert.deepEqual([r.width, r.height], [320, 180]);
   const ffprobe = await resolveFfprobe();
   const { stdout } = await exec(ffprobe, [
@@ -604,13 +615,16 @@ window.__render = (t) => { document.getElementById('t').style.transform = 'scale
     join(dir, "supersample.mp4"),
   ]);
   assert.equal(stdout.trim(), "320,180");
+  said.clear();
   const [still] = await filmStills({
     page,
     chromePath: chrome!,
     at: [0.1],
     outDir: join(dir, "supersample-stills"),
     supersample: 2,
+    onConsole,
   });
+  assert.deepEqual([...said], ["dpr 2"], "stills are drawn as the master is");
   const probe = await exec(ffprobe, [
     "-v",
     "error",

@@ -7,9 +7,15 @@ import { join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import test from "node:test";
 import { promisify } from "node:util";
-import { resolveFfmpeg, resolveFfprobe, resolveManagedFfmpeg } from "@open-take/compositor";
+import {
+  jpegDimensions,
+  matroskaHead,
+  mjpegMatroska,
+  resolveFfmpeg,
+  resolveFfprobe,
+  resolveManagedFfmpeg,
+} from "@open-take/compositor";
 import { encodeFrames, type Frame, frameTimeline } from "../src/cdp";
-import { jpegDimensions, matroskaHead, mjpegMatroska } from "../src/mjpeg-matroska";
 
 const exec = promisify(execFile);
 
