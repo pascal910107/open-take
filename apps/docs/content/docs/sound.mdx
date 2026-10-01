@@ -66,11 +66,14 @@ under another where you ask, and masters the mix.
 ```json
 { "version": 1, "durationS": 42.5,
   "tracks": [
-    { "name": "pad", "duck": { "under": "ui", "depthDb": 4 },
-      "events": [ { "at": 0, "note": "warm-pad", "pitch": ["D3", "F#3", "A3"], "dur": 4, "gainDb": -18 } ] },
-    { "name": "drums", "events": [ { "at": 8, "drum": "kick-long", "gainDb": -6 } ] },
-    { "name": "ui", "events": [ { "at": 18.4, "sound": "key.brown", "gainDb": -14 } ] } ] }
+    { "name": "…", "gainDb": 0, "duck": { "under": "…", "depthDb": 4 },
+      "events": [ { "at": 3.2, "drum": "…" },
+                  { "at": 4.0, "note": "…", "pitch": "C4", "dur": 1.5 },
+                  { "at": 6.1, "sound": "…" },
+                  { "at": 9.0, "file": "voice.wav" } ] } ] }
 ```
+
+The names come from the two commands below; any program can write the file.
 
 ```sh
 open-take sound instruments           # the drums and tuned instruments

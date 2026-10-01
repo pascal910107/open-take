@@ -5,7 +5,9 @@ moves and how it sounds. Write it the way you would build anything for the web
 — a page, with HTML, CSS, SVG, canvas, WebGL, any library — and let open-take
 do the parts that are plumbing: playing the page frame-exactly, motion blur,
 encoding, mixing and mastering sound, measuring what you cannot see or hear.
-Nothing below is required; use what helps.
+open-take adds nothing anyone sees or hears: the story, the motion and the
+music are the film's author's, and so is how good the film is. Nothing below
+is required; use what helps.
 
 ## The page
 
@@ -67,16 +69,17 @@ It judges nothing about taste.
 ## Sound
 
 Bring any WAV you made, or write a score and let open-take play it. A score
-places every sound yourself — nothing is added for you:
+is every sound with its time — nothing is added for you. Its shape (the
+names come from the two commands below; any program can write the file):
 
 ```json
 { "version": 1, "durationS": 42.5,
   "tracks": [
-    { "name": "pad", "gainDb": -2, "duck": { "under": "ui", "depthDb": 4 },
-      "events": [ { "at": 0, "note": "warm-pad", "pitch": ["D3", "F#3", "A3"], "dur": 4, "gainDb": -18 } ] },
-    { "name": "drums", "events": [ { "at": 8, "drum": "kick-long", "gainDb": -6 } ] },
-    { "name": "ui", "events": [ { "at": 18.4, "sound": "key.brown", "gainDb": -14 },
-                                { "at": 21.0, "sound": "whoosh.deep", "dur": 0.8, "gainDb": -10 } ] } ] }
+    { "name": "…", "gainDb": 0, "duck": { "under": "…", "depthDb": 4 },
+      "events": [ { "at": 3.2, "drum": "…" },
+                  { "at": 4.0, "note": "…", "pitch": "C4", "dur": 1.5 },
+                  { "at": 6.1, "sound": "…" },
+                  { "at": 9.0, "file": "voice.wav" } ] } ] }
 ```
 
 ```sh
@@ -104,8 +107,9 @@ be recordings from the palette; synthesized imitations of them read as fake.
   it was (scripts inert). Put it in an `<iframe>` and it is the real UI, sharp
   at any scale; same-origin, so your page can reach into
   `iframe.contentDocument` to hide, restyle or animate single elements.
-  `npx open-take states takes/x.mp4 --state s3 --json` lists every element
-  with its box.
+  `npx open-take states takes/x.mp4 --state s3 --json` outlines it — its
+  regions and the parts worth naming, each with an id and a box —
+  and `states/s3/index.json` beside the saved page lists every element.
 - The recording itself (`takes/x.take/capture.mp4`) plays as a `<video>` on
   film time, frame-exact, and `capture.json` holds every click, keystroke and
   cursor position with its time.
