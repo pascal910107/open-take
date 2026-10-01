@@ -10,9 +10,9 @@ import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import type { StateIndex } from "@open-take/compositor";
 import { resolveChrome } from "../src/cdp";
 import { captureTakeCDP } from "../src/cdp-capture";
-import type { DomStateIndex } from "../src/dom-state";
 import type { TakePlan } from "../src/types";
 
 const chrome = process.env.OPEN_TAKE_E2E_CHROME ?? resolveChrome();
@@ -74,7 +74,7 @@ test("captureTakeCDP: states on → s0..sN with index.json, events stamped; stat
         ["index.json", "live.png", "state.html"],
         `${item.id} holds exactly the contract files`,
       );
-      const index = JSON.parse(readFileSync(join(d, "index.json"), "utf8")) as DomStateIndex;
+      const index = JSON.parse(readFileSync(join(d, "index.json"), "utf8")) as StateIndex;
       assert.equal(index.id, item.id);
       assert.equal(index.tMs, item.tMs);
       assert.equal(index.step, item.step);
@@ -89,7 +89,7 @@ test("captureTakeCDP: states on → s0..sN with index.json, events stamped; stat
     assert.equal(type.state, "s2");
     const s0 = JSON.parse(
       readFileSync(join(onDir, "states", "s0", "index.json"), "utf8"),
-    ) as DomStateIndex;
+    ) as StateIndex;
     const button = s0.elements.find((e) => e.id === click.target);
     assert.ok(
       button && button.tag === "button",
@@ -97,7 +97,7 @@ test("captureTakeCDP: states on → s0..sN with index.json, events stamped; stat
     );
     const s1 = JSON.parse(
       readFileSync(join(onDir, "states", "s1", "index.json"), "utf8"),
-    ) as DomStateIndex;
+    ) as StateIndex;
     const field = s1.elements.find((e) => e.id === type.target);
     assert.ok(
       field && field.tag === "input",

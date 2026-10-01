@@ -143,10 +143,11 @@ const HITTABLE_JS =
 // on: the commonest case is not an overlay at all but a field inside a
 // closed <details> (a "use your phone instead" disclosure) — its content is
 // laid out but neither painted nor hit-testable until the <summary> is
-// clicked. Next, an ancestor that hides it (the centre lands on the field's
-// own container); last, whatever really covers it.
+// clicked. A field with no size is not shown yet at all; one whose centre
+// lands on its own container is hidden by it; otherwise something covers it.
 const UNREACHABLE_JS =
   `function unreachable(m){` +
+  `var z=m.getBoundingClientRect();if(!z.width||!z.height)return 'it has no size — not shown yet (display:none?)';` +
   `function d(e){var s=e.tagName.toLowerCase();if(e.id)s+='#'+e.id;` +
   `var c=typeof e.className==='string'?e.className.trim().split(/\\s+/).slice(0,2).join('.'):'';if(c)s+='.'+c;` +
   `var t=(e.textContent||'').replace(/\\s+/g,' ').trim().slice(0,40);return t?s+' "'+t+'"':s;}` +

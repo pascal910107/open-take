@@ -20,7 +20,7 @@
 //      reference screenshot; a state that does not match stays on disk with
 //      `fidelity.ok: false` so the film falls back to the video.
 //   3. `index.json` per state is the contract the film side reads
-//      (`DomStateIndex` below — exactly these keys).
+//      (the compositor's `StateIndex` — exactly these keys).
 //
 // Element PATHS. Chrome's MHTML serializer (measured on 149) drops `<script>`,
 // `<noscript>`, `[hidden]` and `<input type=hidden>` outright, so a path is
@@ -33,54 +33,26 @@
 // custom-elements shim `<script>` to `<head>` — nothing visible lives in
 // `<head>`, so no path points there.
 
-import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { extname, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { type CaptureLog, resolveFfmpeg } from "@open-take/compositor";
+import {
+  type CaptureLog,
+  resolveFfmpeg,
+  type StateElement,
+  type StateIndex,
+} from "@open-take/compositor";
 import { type Browser, CDP } from "./cdp";
+import { runBuffer } from "./tool";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // --- the contract ---------------------------------------------------------
 
-/** One visible element of a state, as the film side addresses it. `path` is
- *  the chain of child indices from `<html>` (see the module header for what
- *  is counted); `box` is `[x, y, w, h]` in viewport CSS px. */
-export type DomStateElement = {
-  id: string;
-  path: number[];
-  tag: string;
-  role?: string;
-  name?: string;
-  text?: string;
-  box: [number, number, number, number];
-  fixed?: true;
-  interactive?: true;
-};
-
-export type DomStateFidelity = { psnr: number; diffFrac: number; ok: boolean };
-
-/** `states/<id>/index.json` — what the film side reads. */
-export type DomStateIndex = {
-  version: 1;
-  id: string;
-  url: string;
-  title: string;
-  /** capture timeline ms when it was taken */
-  tMs: number;
-  /** plan step index it follows (absent for s0) */
-  step?: number;
-  viewport: { w: number; h: number; dpr: number };
-  scroll: { x: number; y: number };
-  elements: DomStateElement[];
-  /** element ids, back to front */
-  layers: string[];
-  fidelity?: DomStateFidelity;
-};
+type StateFidelity = NonNullable<StateIndex["fidelity"]>;
 
 /** What the page-side probe returns (JSON). Everything the markup cannot
  *  carry: live `.value`s, scroll offsets, canvas/video pixels, the computed
@@ -91,7 +63,7 @@ export type DomStateProbe = {
   title: string;
   viewport: { w: number; h: number; dpr: number };
   scroll: { x: number; y: number };
-  elements: DomStateElement[];
+  elements: StateElement[];
   layers: string[];
   scrolled: { path: number[]; top: number; left: number }[];
   inputs: { path: number[]; value?: string; checked?: boolean; selectedIndex?: number }[];
@@ -115,17 +87,17 @@ export type DomStateProbe = {
 };
 
 /** Hard cap on the element index — a page past it is a data table, not a UI. */
-export const DOM_STATE_MAX_ELEMENTS = 3000;
+const DOM_STATE_MAX_ELEMENTS = 3000;
 /** A state whose re-render reaches this PSNR against the live screenshot is
  *  trusted; below it the film uses the video. */
-export const DOM_STATE_PSNR_OK = 30;
+const DOM_STATE_PSNR_OK = 30;
 
 // --- the page-side probe ----------------------------------------------------
 
 /** Runs in the live page (Runtime.evaluate, returnByValue) and returns the
  *  probe as a JSON string. Reads only: no attribute, style or node is touched
  *  — the app is being filmed and must behave exactly as without states. */
-export const DOM_STATE_PROBE_JS = `(() => {
+const DOM_STATE_PROBE_JS = `(() => {
   try {
     const vw = innerWidth, vh = innerHeight, dpr = devicePixelRatio || 1;
     const CAP = ${DOM_STATE_MAX_ELEMENTS};
@@ -377,14 +349,13 @@ export const DOM_STATE_PROBE_JS = `(() => {
 
 // --- MHTML parsing ------------------------------------------------------------
 
-export type MhtmlPart = {
+type MhtmlPart = {
   /** media type, lowercased, parameters stripped ("text/html") */
   contentType: string;
   /** Content-Location as written (Chrome writes absolute URLs, or `cid:…`) */
   location?: string;
   /** Content-ID without its angle brackets */
   id?: string;
-  encoding: string;
   /** the decoded bytes */
   body: Buffer;
 };
@@ -429,10 +400,7 @@ export function decodeQuotedPrintable(text: string): Buffer {
 }
 
 /** Parse a multipart/related MHTML file (what `Page.captureSnapshot` returns). */
-export function parseMhtml(raw: Buffer | string): {
-  headers: Record<string, string>;
-  parts: MhtmlPart[];
-} {
+export function parseMhtml(raw: Buffer | string): MhtmlPart[] {
   // MHTML is 7-bit: a latin1 view keeps byte offsets and byte values intact
   const text = typeof raw === "string" ? raw : raw.toString("latin1");
   const headEnd = text.search(/\r?\n\r?\n/);
@@ -467,11 +435,10 @@ export function parseMhtml(raw: Buffer | string): {
         .toLowerCase(),
       ...(h["content-location"] ? { location: h["content-location"] } : {}),
       ...(idRaw ? { id: idRaw.replace(/^<|>$/g, "") } : {}),
-      encoding,
       body,
     });
   }
-  return { headers, parts };
+  return parts;
 }
 
 // --- MHTML → state.html -----------------------------------------------------
@@ -524,7 +491,7 @@ const stripFragment = (u: string): string => u.replace(/#.*$/, "");
 /** The freeze rule: the saved page runs no animation or transition (each
  *  animated property's live value is re-applied by the restore script) and
  *  shows no caret. Appended at the END of <head>. */
-export const DOM_STATE_FREEZE_CSS =
+const DOM_STATE_FREEZE_CSS =
   "*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important}";
 const FREEZE_STYLE = `<style data-ot-freeze>${DOM_STATE_FREEZE_CSS}</style>`;
 /** What every `<script>` becomes: same element, same index, no behaviour. */
@@ -606,9 +573,9 @@ function parseTag(html: string, pos: number): { attrs: Attr[]; end: number; self
 
 /** Rewrite `url(…)` and `@import "…"` references in CSS text. `resolve`
  *  returns the local reference, or null to leave the original as is. */
-export function rewriteCss(css: string, resolve: (ref: string) => string | null): string {
+function rewriteCss(css: string, resolve: (ref: string) => string | null): string {
   const url = (ref: string, quote: string): string | null => {
-    const r = resolve(decodeEntitiesInCss(ref));
+    const r = resolve(ref);
     return r == null ? null : `url(${quote}${r}${quote})`;
   };
   return css
@@ -626,9 +593,6 @@ export function rewriteCss(css: string, resolve: (ref: string) => string | null)
       return r == null ? m : `@import ${d != null ? '"' : "'"}${r}${d != null ? '"' : "'"}`;
     });
 }
-// CSS carries no entities; kept as a hook in case a `style` attribute's
-// decoded text ever needs a second pass
-const decodeEntitiesInCss = (s: string): string => s;
 
 /** Parse a `srcset` value into candidates (url + descriptor), the way the
  *  HTML spec does: a URL runs to the next whitespace (so a data URL keeps
@@ -867,7 +831,7 @@ function rewriteHtml(html: string, ctx: RewriteCtx): string {
  *  page loads. Plain JS, the only script that runs; the probe data rides
  *  inline as JSON. Sets `document.documentElement.dataset.otReady = "1"`
  *  once fonts and images are in (bounded — a hung image never blocks it). */
-export function buildRestoreScript(probe: DomStateProbe): string {
+function buildRestoreScript(probe: DomStateProbe): string {
   const data = {
     scroll: probe.scroll,
     scrolled: probe.scrolled,
@@ -893,7 +857,7 @@ function run(){
   for(i=0;i<P.custom.length;i++){var c=P.custom[i];try{if(!customElements.get(c.name)){if(c.extends){var Base=doc.createElement(c.extends).constructor;customElements.define(c.name,class extends Base{},{extends:c.extends});}else customElements.define(c.name,class extends HTMLElement{});}}catch(e){}}
   for(i=0;i<P.elements.length;i++){var e=P.elements[i];el=resolve(e.path);if(el&&el.localName===e.tag)el.setAttribute("data-ot-id",e.id);else misses++;}
   for(i=0;i<P.inputs.length;i++){var x=P.inputs[i];el=resolve(x.path);if(!el)continue;try{if("checked" in x)el.checked=x.checked;if("selectedIndex" in x)el.selectedIndex=x.selectedIndex;if("value" in x)el.value=x.value;}catch(e){}}
-  for(i=0;i<P.canvases.length;i++){var cv=P.canvases[i];el=resolve(cv.path);if(!el||el.localName!=="canvas")continue;el.setAttribute("data-ot-canvas","1");waits.push(paint(el,cv.dataUrl));}
+  for(i=0;i<P.canvases.length;i++){var cv=P.canvases[i];el=resolve(cv.path);if(!el||el.localName!=="canvas")continue;waits.push(paint(el,cv.dataUrl));}
   for(i=0;i<P.videos.length;i++){var vd=P.videos[i];el=resolve(vd.path);if(!el||el.localName!=="video")continue;try{el.removeAttribute("autoplay");el.removeAttribute("src");var ss=el.querySelectorAll("source");for(j=0;j<ss.length;j++)ss[j].remove();el.setAttribute("preload","none");el.setAttribute("poster",vd.dataUrl);el.load();}catch(e){}}
   for(i=0;i<P.animated.length;i++){var an=P.animated[i];el=resolve(an.path);if(!el)continue;for(var k in an.styles){try{el.style.setProperty(k,an.styles[k],"important");}catch(e){}}}
   var lazy=doc.querySelectorAll("img[loading=lazy]");for(i=0;i<lazy.length;i++)lazy[i].loading="eager";
@@ -913,7 +877,7 @@ if(doc.readyState==="loading")doc.addEventListener("DOMContentLoaded",run);else 
 })();</script>`;
 }
 
-export type ConvertResult = {
+type ConvertResult = {
   /** the self-contained document (write it as `state.html`) */
   html: string;
   /** asset files this state references, relative to the assets dir */
@@ -933,7 +897,7 @@ export function convertMhtml(
   probe: DomStateProbe,
   opts: { assetsDir: string },
 ): ConvertResult {
-  const { parts } = parseMhtml(raw);
+  const parts = parseMhtml(raw);
   const doc = parts.find((p) => p.contentType === "text/html");
   if (!doc) throw new Error("mhtml: no text/html part");
   mkdirSync(opts.assetsDir, { recursive: true });
@@ -1050,7 +1014,7 @@ function withFreeze(html: string): string {
 // --- fidelity -------------------------------------------------------------------
 
 /** Boxes (x, y, w, h — image px) left out of a comparison. */
-export type PixelMask = { width: number; boxes: [number, number, number, number][] };
+type PixelMask = { width: number; boxes: [number, number, number, number][] };
 
 /** PSNR (dB, capped at 99 for identical images) and the fraction of pixels
  *  differing by more than 8 on any channel, over two rgb24 buffers — pixels
@@ -1099,55 +1063,40 @@ function maskBits(mask: PixelMask, pixels: number): Uint8Array {
 }
 
 /** width/height from a PNG's IHDR */
-export function pngSize(png: Buffer): { w: number; h: number } {
+function pngSize(png: Buffer): { w: number; h: number } {
   if (png.length < 24 || png.readUInt32BE(12) !== 0x49484452) throw new Error("not a PNG");
   return { w: png.readUInt32BE(16), h: png.readUInt32BE(20) };
 }
 
 /** Decode an image file to raw rgb24 at `w`×`h` through ffmpeg. */
-export function decodeRgb(
+function decodeRgb(
   ffmpeg: string,
   file: string,
   w: number,
   h: number,
   flags: "neighbor" | "area" = "neighbor",
 ): Promise<Uint8Array> {
-  return new Promise((res, rej) => {
-    const c = spawn(
-      ffmpeg,
-      [
-        "-v",
-        "error",
-        "-i",
-        file,
-        "-vf",
-        `scale=${w}:${h}:flags=${flags}`,
-        "-f",
-        "rawvideo",
-        "-pix_fmt",
-        "rgb24",
-        "-",
-      ],
-      { stdio: ["ignore", "pipe", "pipe"] },
-    );
-    const chunks: Buffer[] = [];
-    let err = "";
-    c.stdout.on("data", (d: Buffer) => chunks.push(d));
-    c.stderr.on("data", (d: Buffer) => {
-      err += d;
-    });
-    c.on("error", rej);
-    c.on("close", (code) => {
-      const buf = Buffer.concat(chunks);
-      if (code !== 0 || buf.length !== w * h * 3)
-        rej(new Error(`ffmpeg decode of ${file} failed (${code}): ${err.slice(-300)}`));
-      else res(new Uint8Array(buf));
-    });
+  return runBuffer(ffmpeg, [
+    "-v",
+    "error",
+    "-i",
+    file,
+    "-vf",
+    `scale=${w}:${h}:flags=${flags}`,
+    "-f",
+    "rawvideo",
+    "-pix_fmt",
+    "rgb24",
+    "-",
+  ]).then((buf) => {
+    if (buf.length !== w * h * 3)
+      throw new Error(`ffmpeg decoded ${file} to ${buf.length} bytes, not ${w}×${h} rgb`);
+    return new Uint8Array(buf);
   });
 }
 
 /** `box` (CSS px) of a PNG as a PNG data URL, clamped to the image. */
-export async function cropPng(
+async function cropPng(
   ffmpeg: string,
   png: string,
   box: [number, number, number, number],
@@ -1158,48 +1107,31 @@ export async function cropPng(
   const cw = Math.min(w - x, Math.ceil(box[0] + box[2]) - x);
   const ch = Math.min(h - y, Math.ceil(box[1] + box[3]) - y);
   if (cw < 1 || ch < 1) throw new Error("the box is off the image");
-  return new Promise((res, rej) => {
-    const c = spawn(
-      ffmpeg,
-      [
-        "-v",
-        "error",
-        "-i",
-        png,
-        "-vf",
-        `crop=${cw}:${ch}:${x}:${y}`,
-        "-f",
-        "image2pipe",
-        "-vcodec",
-        "png",
-        "-",
-      ],
-      { stdio: ["ignore", "pipe", "pipe"] },
-    );
-    const chunks: Buffer[] = [];
-    let err = "";
-    c.stdout.on("data", (d: Buffer) => chunks.push(d));
-    c.stderr.on("data", (d: Buffer) => {
-      err += d;
-    });
-    c.on("error", rej);
-    c.on("close", (code) =>
-      code === 0
-        ? res(`data:image/png;base64,${Buffer.concat(chunks).toString("base64")}`)
-        : rej(new Error(`ffmpeg crop failed (${code}): ${err.slice(-300)}`)),
-    );
-  });
+  const out = await runBuffer(ffmpeg, [
+    "-v",
+    "error",
+    "-i",
+    png,
+    "-vf",
+    `crop=${cw}:${ch}:${x}:${y}`,
+    "-f",
+    "image2pipe",
+    "-vcodec",
+    "png",
+    "-",
+  ]);
+  return `data:image/png;base64,${out.toString("base64")}`;
 }
 
 /** Compare a state's re-render against the live reference, both PNG files. */
-export async function measureFidelity(
+async function measureFidelity(
   ffmpeg: string,
   livePng: string,
   statePng: string,
   /** CSS-px boxes to leave out: canvases and videos whose moving content the
    *  still froze a moment apart from the reference screenshot */
   moving: [number, number, number, number][] = [],
-): Promise<DomStateFidelity> {
+): Promise<StateFidelity> {
   const { w, h } = pngSize(await readFile(livePng));
   const [a, b] = await Promise.all([
     decodeRgb(ffmpeg, livePng, w, h),
@@ -1214,7 +1146,7 @@ export async function measureFidelity(
 /** The element whose box best matches `box` (IoU ≥ 0.5), or undefined. */
 export function matchTarget(
   box: { x: number; y: number; w: number; h: number },
-  elements: DomStateElement[],
+  elements: StateElement[],
 ): string | undefined {
   let best: string | undefined;
   let bestIou = 0.5;
@@ -1243,7 +1175,8 @@ export type DomStateRaw = {
   /** `states/<id>/` */
   dir: string;
   probe: DomStateProbe;
-  ms: { probe: number; shot: number; snap: number; total: number };
+  /** what reading it cost the take */
+  ms: number;
 };
 
 /** Visible canvases and videos (CSS px): content that moves on its own — a
@@ -1314,7 +1247,7 @@ async function decodeSmall(
   jpegs: Buffer[],
   w: number,
   h: number,
-): Promise<DecodedPng[]> {
+): Promise<DecodedImage[]> {
   const dir = await mkdtemp(join(tmpdir(), "open-take-still-"));
   try {
     const files = await Promise.all(
@@ -1338,12 +1271,12 @@ const STILL_TOLERANCE = { pixels: 2, level: 12 };
 /** Two decoded screenshots of a `vw`-wide viewport show the same page outside
  *  the CSS-px `boxes` (grown by a screenshot pixel for antialiased edges). */
 export function stillOutside(
-  a: DecodedPng,
-  b: DecodedPng,
+  a: DecodedImage,
+  b: DecodedImage,
   boxes: [number, number, number, number][],
   vw: number,
   /** image px of margin around each box (antialiased edges, JPEG blocks) */
-  margin = 1,
+  margin: number,
 ): boolean {
   if (a.w !== b.w || a.h !== b.h || a.ch !== b.ch) return false;
   const k = a.w / vw; // image px per CSS px
@@ -1372,7 +1305,7 @@ export function stillOutside(
 }
 
 /** A decoded image: `ch` bytes per pixel, row by row. */
-export type DecodedPng = { w: number; h: number; ch: number; data: Uint8Array };
+type DecodedImage = { w: number; h: number; ch: number; data: Uint8Array };
 
 /** One settled moment: probe, reference screenshot, MHTML — raw files into
  *  `<statesDir>/<id>/` (`probe.json`, `live.png`, `page.mhtml`). Read-only on
@@ -1404,21 +1337,19 @@ export async function captureDomState(
         expression: DOM_STATE_PROBE_JS,
         returnByValue: true,
       })
-      .then((x) => ({ value: x.result?.value, ms: Date.now() - t0 })),
+      .then((x) => ({ value: x.result?.value })),
     cdp
       .send<{ data: string }>("Page.captureScreenshot", {
         format: "png",
         clip: { x: 0, y: 0, width: args.vw, height: args.vh, scale: 1 / Math.max(1, args.dpr) },
       })
-      .then((s) => ({ data: s.data, ms: Date.now() - t0 })),
+      .then((s) => ({ data: s.data })),
   ]);
   const v = r.value;
   if (typeof v !== "string") throw new Error("dom-state probe returned nothing");
   const probe = JSON.parse(v) as DomStateProbe & { error?: string };
   if (probe.error) throw new Error(`dom-state probe failed in page: ${probe.error}`);
-  const tSnap = Date.now();
   const snap = await cdp.send<{ data: string }>("Page.captureSnapshot", { format: "mhtml" });
-  const snapMs = Date.now() - tSnap;
   writeFileSync(join(dir, "live.png"), Buffer.from(shot.data, "base64"));
   writeFileSync(join(dir, "page.mhtml"), snap.data, "utf8");
   writeFileSync(join(dir, "probe.json"), v, "utf8");
@@ -1428,7 +1359,7 @@ export async function captureDomState(
     ...(args.step != null ? { step: args.step } : {}),
     dir,
     probe,
-    ms: { probe: r.ms, shot: shot.ms, snap: snapMs, total: Date.now() - t0 },
+    ms: Date.now() - t0,
   };
 }
 
@@ -1437,7 +1368,7 @@ export async function captureDomState(
 export type DomStateItem = NonNullable<CaptureLog["states"]>["items"][number];
 
 /** `states/<id>/index.json` from a raw capture (fidelity filled in later) */
-export function buildIndex(raw: DomStateRaw): DomStateIndex {
+function buildIndex(raw: DomStateRaw): StateIndex {
   return {
     version: 1,
     id: raw.id,
@@ -1466,16 +1397,14 @@ export async function finalizeDomStates(args: {
   states: DomStateRaw[];
   vw: number;
   vh: number;
-  ffmpeg?: string;
-  warn?: (line: string) => void;
 }): Promise<DomStateItem[]> {
-  const warn = args.warn ?? ((l: string) => console.error(l));
+  const warn = (l: string) => console.error(l);
   const assetsDir = join(args.statesDir, "assets");
   const items: DomStateItem[] = [];
-  const converted: { raw: DomStateRaw; index: DomStateIndex }[] = [];
-  let ffmpeg: string | undefined = args.ffmpeg;
+  const converted: { raw: DomStateRaw; index: StateIndex }[] = [];
+  let ffmpeg: string | undefined;
   try {
-    ffmpeg ??= await resolveFfmpeg();
+    ffmpeg = await resolveFfmpeg();
   } catch (e) {
     warn(`dom-state: no ffmpeg for the fidelity check (${(e as Error).message})`);
   }
@@ -1526,7 +1455,7 @@ export async function finalizeDomStates(args: {
       warn(`dom-state: could not open a page for the fidelity check (${(e as Error).message})`);
     }
     for (const { raw, index } of converted) {
-      let fidelity: DomStateFidelity = { psnr: 0, diffFrac: 1, ok: false };
+      let fidelity: StateFidelity = { psnr: 0, diffFrac: 1, ok: false };
       if (page && ffmpeg) {
         const statePng = join(raw.dir, "render.png");
         try {
@@ -1601,20 +1530,22 @@ async function openFidelityPage(
 }
 
 /** Open a state.html (file://), wait for the restore script's ready flag, screenshot at 1×. */
-export async function renderState(
+async function renderState(
   cdp: CDP,
   stateHtml: string,
   vw: number,
   vh: number,
-  opts: { readyTimeoutMs?: number } = {},
 ): Promise<{ png: Buffer; misses: number }> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   const loaded = new Promise<void>((res) => {
     cdp.on("Page.loadEventFired", () => res());
-    setTimeout(res, 15000);
+    timer = setTimeout(res, 15000);
   });
   await cdp.send("Page.navigate", { url: pathToFileURL(stateHtml).href });
   await loaded;
-  const deadline = Date.now() + (opts.readyTimeoutMs ?? 10000);
+  // a pending 15 s timer would hold the process open after the last state
+  clearTimeout(timer);
+  const deadline = Date.now() + 10000;
   let misses = 0;
   for (;;) {
     const r = await cdp.send<{ result?: { value?: string } }>("Runtime.evaluate", {
@@ -1640,16 +1571,19 @@ export async function renderState(
 
 /** One stderr line: what the states cost the take and how they scored. */
 export function summarizeDomStates(states: DomStateRaw[], items: DomStateItem[]): string {
-  if (!states.length) return "captureTakeCDP: DOM states — none captured";
-  const total = states.reduce((s, r) => s + r.ms.total, 0);
-  const each = states.map((r) => `${r.id} ${r.ms.total}ms`).join(", ");
+  const moving = items.filter((i) => i.moving).map((i) => i.id);
+  if (!states.length)
+    return moving.length
+      ? `captureTakeCDP: DOM states — none saved: the page was still moving at ${moving.join(", ")} (use the recording)`
+      : "captureTakeCDP: DOM states — none captured";
+  const total = states.reduce((s, r) => s + r.ms, 0);
+  const each = states.map((r) => `${r.id} ${r.ms}ms`).join(", ");
   const scored = items.filter((i) => i.fidelity);
   const ok = scored.filter((i) => i.fidelity!.ok).length;
   const worst = scored.reduce<DomStateItem | null>(
     (w, i) => (!w || i.fidelity!.psnr < w.fidelity!.psnr ? i : w),
     null,
   );
-  const moving = items.filter((i) => i.moving).map((i) => i.id);
   return (
     `captureTakeCDP: DOM states — ${states.length} captured, +${(total / 1000).toFixed(1)}s on the take (${each}); ` +
     (moving.length

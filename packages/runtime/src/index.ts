@@ -43,8 +43,6 @@ export {
   checkFilm,
   describeSoundPalette,
   encodeWav,
-  type FilmCheck,
-  type FilmRenderResult,
   filmSheet,
   filmStills,
   formatFilmCheck,
@@ -107,18 +105,6 @@ export {
   settleDefects,
   skippedDefects,
 } from "./defect-report";
-export {
-  buildRestoreScript,
-  comparePixels,
-  convertMhtml,
-  DOM_STATE_PROBE_JS,
-  type DomStateElement,
-  type DomStateFidelity,
-  type DomStateIndex,
-  type DomStateProbe,
-  matchTarget,
-  parseMhtml,
-} from "./dom-state";
 export { type EditServerOpts, startEditServer } from "./edit-server";
 export {
   type AnnotateOpts,
@@ -172,19 +158,10 @@ export {
   toDraft,
 } from "./review";
 export {
-  type ActionSummary,
-  type ActionTarget,
   describeTake,
   type FormatOpts,
   formatTakeStates,
-  type OutlineCard,
-  type OutlineLeaf,
-  type OutlineRegion,
   outlineState,
-  type StateChangeLine,
-  type StateOutline,
-  type StateRegion,
-  type StateSummary,
   type TakeStates,
 } from "./states-list";
 export {
@@ -292,7 +269,21 @@ export async function loadCaptureLogSibling(capturePath: string): Promise<Captur
 }
 
 export async function makeTake(plan: TakePlan, opts: MakeTakeOpts): Promise<MakeTakeResult> {
+  // the raw screencast and its saved states land here first; what is kept is
+  // copied into the take, and the rest goes when the take is made
   const work = await mkdtemp(join(tmpdir(), "open-take-"));
+  try {
+    return await makeTakeIn(work, plan, opts);
+  } finally {
+    await rm(work, { recursive: true, force: true });
+  }
+}
+
+async function makeTakeIn(
+  work: string,
+  plan: TakePlan,
+  opts: MakeTakeOpts,
+): Promise<MakeTakeResult> {
   const tmpVideo = join(work, "capture.mp4"); // CDP screencast → h264 mp4
 
   // Resolve (and, first run, download) Chrome ONCE, then hand the same binary
@@ -313,8 +304,8 @@ export async function makeTake(plan: TakePlan, opts: MakeTakeOpts): Promise<Make
   await ensureTakeDir(take);
   await copyFile(tmpVideo, capturePath);
   // DOM states ride along with the capture they describe: the states dir
-  // beside the temp video moves in beside the kept one (replacing whatever an
-  // earlier make left — its tMs belonged to that capture, not this one; a
+  // beside the temp video is copied in beside the kept one (replacing whatever
+  // an earlier make left — its tMs belonged to that capture, not this one; a
   // re-make WITHOUT states clears it for the same reason).
   const statesDst = join(take.dir, "states");
   await rm(statesDst, { recursive: true, force: true });
@@ -355,6 +346,9 @@ export async function makeTake(plan: TakePlan, opts: MakeTakeOpts): Promise<Make
   const composition = planComposition(log, planOpts);
   if (opts.render === false) {
     await writeFile(take.compositionPath, JSON.stringify(composition, null, 2));
+    // a master an earlier make rendered belongs to that capture, not this one
+    // (the CLI has already kept it as prev.mp4)
+    await rm(take.mp4Path, { force: true });
     return {
       mp4Path: take.mp4Path,
       rendered: false,

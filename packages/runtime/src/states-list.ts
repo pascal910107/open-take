@@ -88,11 +88,10 @@ export type StateSummary = {
   /** the action it follows ("a2") — absent for s0 and for a wait / navigate step */
   after?: string;
   /** ok · failed (state.html does not match the recording — use the video
-   *  there) · missing (no readable index.json) */
-  status: "ok" | "failed" | "missing";
+   *  there) · missing (no readable index.json) · moving (the page never went
+   *  quiet here, a video playing: nothing was saved) */
+  status: "ok" | "failed" | "missing" | "moving";
   fidelity?: { psnr: number; diffFrac: number; ok: boolean };
-  /** the page never went quiet here (a video playing): structure only, not a still */
-  moving?: true;
   /** why the index could not be read (status missing) */
   error?: string;
   url?: string;
@@ -160,7 +159,9 @@ export type TakeStates = {
   /** the states folder, absolute */
   dir: string;
   viewport: { w: number; h: number; dpr?: number };
-  fidelity: { ok: number; total: number; failed: string[] };
+  /** of the states a page was saved for: how many match the recording; and
+   *  the moments with no saved page (moving) or no readable one (missing) */
+  fidelity: { ok: number; total: number; failed: string[]; moving: string[]; missing: string[] };
   actions: ActionSummary[];
   states: StateSummary[];
 };
@@ -713,6 +714,8 @@ export function describeTake(takeDir: string): TakeStates {
   const states: StateSummary[] = [];
   let ok = 0;
   const failed: string[] = [];
+  const moving: string[] = [];
+  const missing: string[] = [];
   items.forEach((it, k) => {
     const ix = loaded.get(it.id)!;
     const action = afterOf.get(it.id);
@@ -725,11 +728,13 @@ export function describeTake(takeDir: string): TakeStates {
     };
     if (it.moving) {
       // nothing saved: the page was still moving here (by design, not a failure)
-      states.push({ ...base, status: "failed", moving: true });
+      states.push({ ...base, status: "moving" });
+      moving.push(it.id);
       return;
     }
     if (typeof ix === "string") {
       states.push({ ...base, status: "missing", error: ix });
+      missing.push(it.id);
       return;
     }
     const fidelity = ix.index.fidelity ?? it.fidelity;
@@ -770,7 +775,7 @@ export function describeTake(takeDir: string): TakeStates {
     take: basename(dir),
     dir: statesDir,
     viewport: { ...log.viewport, ...(first ? { dpr: first.index.viewport.dpr } : {}) },
-    fidelity: { ok, total: items.length, failed },
+    fidelity: { ok, total: ok + failed.length, failed, moving, missing },
     actions,
     states,
   };
@@ -1004,7 +1009,8 @@ function changeText(l: StateChangeLine): string {
 
 function statusText(s: StateSummary): string {
   if (s.status === "missing") return `MISSING — ${s.error}`;
-  if (s.moving) return "MOVING — not saved: the page never went quiet here; use the recording";
+  if (s.status === "moving")
+    return "MOVING — not saved: the page never went quiet here; use the recording";
   if (s.status === "failed")
     return `FIDELITY FAILED ${s.fidelity?.psnr.toFixed(1)} dB — use the recording here`;
   return "ok";
@@ -1073,19 +1079,20 @@ function actionText(x: ActionSummary): string {
 export type FormatOpts = {
   /** outline this one state instead of the listing */
   state?: string;
-  /** change lines per state before "… N more" (default 8) */
-  maxChanges?: number;
 };
 
 /** The listing (or, with `state`, one state's outline) as text. */
 export function formatTakeStates(data: TakeStates, opts: FormatOpts = {}): string {
   if (opts.state) return formatOutline(outlineState(data, opts.state));
-  const cap = opts.maxChanges ?? 8;
+  const cap = 8; // change lines per state before "… N more"
   const n = data.states.length;
-  const { ok, total, failed } = data.fidelity;
+  const { ok, total, failed, moving, missing } = data.fidelity;
+  const saved = n - moving.length;
   const out: string[] = [
-    `${data.take} — ${n} saved state${n === 1 ? "" : "s"} · page ${data.viewport.w}×${data.viewport.h} CSS px · ` +
-      `fidelity ${ok}/${total} ok${failed.length ? ` (${failed.join(", ")} FAILED)` : ""}`,
+    `${data.take} — ${saved} saved state${saved === 1 ? "" : "s"} · page ${data.viewport.w}×${data.viewport.h} CSS px · ` +
+      `fidelity ${ok}/${total} ok${failed.length ? ` (${failed.join(", ")} FAILED)` : ""}` +
+      (moving.length ? ` · ${moving.join(", ")} moving, not saved` : "") +
+      (missing.length ? ` · ${missing.join(", ")} missing` : ""),
     `ids are per state: name an element together with its state (s3:e32) · --state <id> outlines one state`,
     "",
   ];

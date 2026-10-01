@@ -426,7 +426,9 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
     const movingStates: { id: string; tMs: number; step?: number }[] = [];
     let statesAnnotated = 0; // events[0..n) already carry their `state`
     let lastState: DomStateRaw | null = null;
-    const captureState = async (step?: number, busy = false) => {
+    // `mayMove`: the page may still be moving here (no settle said it is quiet):
+    // look at the pixels before reading anything
+    const captureState = async (step: number | undefined, mayMove: boolean) => {
       if (!statesDir) return;
       // our screenshot and the pump's forced ones would queue behind each other
       pumpPaused = true;
@@ -442,8 +444,8 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
             if (hit) ev.target = hit;
           }
         };
-        // busy by the settle probe's ear; moving only if the pixels move
-        if (busy && !(await visuallyStill(cdp, inner[0], inner[1]))) {
+        // moving only if the pixels move
+        if (mayMove && !(await visuallyStill(cdp, inner[0], inner[1]))) {
           movingStates.push({ id, tMs, ...(step != null ? { step } : {}) });
           annotate(lastState);
           return;
@@ -468,7 +470,7 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
         pumpPaused = false;
       }
     };
-    await captureState();
+    await captureState(undefined, true);
     for (let stepIdx = 0; stepIdx < plan.steps.length; stepIdx++) {
       const step = plan.steps[stepIdx]!;
       const skip = (action: string, target: string | undefined, reason: string) => {
@@ -496,9 +498,10 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
             "captureTakeCDP: this page never goes quiet (consecutive beats spent the whole settle budget) — settle waiting is OFF for the rest of the take; set each beat's settleMs explicitly instead",
           );
         // the page is as settled as it gets: the moment a DOM state describes.
-        // A page that stayed busy through the whole budget is still moving —
-        // its state keeps the structure but reads no pixels (that stalls it)
-        await captureState(stepIdx, budgeted && r.reason === "budget");
+        // Unless settling said it went quiet — it stayed busy through the
+        // whole budget, or settle waiting is off — it may still be moving, and
+        // a moving moment saves nothing (reading it would stall the page)
+        await captureState(stepIdx, !budgeted || r.reason === "budget");
         if (r.waitedMs < SETTLE_NOTE_MS) return;
         const waitedMs = Math.round(r.waitedMs);
         settleWaits.push({
@@ -514,7 +517,7 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
       };
       if (step.action === "wait") {
         await sleep(step.ms);
-        await captureState(stepIdx); // a wait has no hold; the state follows the wait
+        await captureState(stepIdx, true); // a wait has no settle; the state follows it
         continue;
       }
 

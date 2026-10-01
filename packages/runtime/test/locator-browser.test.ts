@@ -98,20 +98,13 @@ test("a field the page does not show says why it cannot be typed into", {
     const loaded = new Promise<void>((r) => cdp.on("Page.loadEventFired", () => r()));
     await cdp.send("Page.navigate", { url });
     await loaded;
-    // drop focus the way a background tab would have it: typing must come
-    // from a click, and the click cannot reach these fields
+    // a field in a closed <details> cannot even take focus: the capture says why
     const phone = JSON.parse(await evaluate<string>(cdp, focusFieldByTextJs("0912 345 678")));
-    if (phone.f !== 1) {
-      assert.equal(phone.hit, 0);
-      assert.match(phone.why, /inside a closed <details>/);
-      assert.match(phone.why, /"Use your phone instead"/);
-    }
-    const email = JSON.parse(await evaluate<string>(cdp, focusFieldByTextJs("you@example.com")));
-    if (email.f !== 1) {
-      assert.equal(email.hit, 0);
-      assert.match(email.why, /covered by div#sheet\.cover "Cookie notice"/);
-    }
-    // whichever way focus went, the reasons themselves are right
+    assert.equal(phone.f, 0);
+    assert.equal(phone.hit, 0);
+    assert.match(phone.why, /inside a closed <details>/);
+    assert.match(phone.why, /"Use your phone instead"/);
+    // the reasons themselves, for every way a field can be out of reach
     const why = await evaluate<string[]>(
       cdp,
       `(() => {
@@ -119,7 +112,10 @@ test("a field the page does not show says why it cannot be typed into", {
         const js = ${JSON.stringify(focusFieldByTextJs("x"))};
         const fn = js.match(/function unreachable\\(m\\)\\{[\\s\\S]*?return 'its centre is covered by '\\+d\\(top\\);\\}/)[0];
         const unreachable = new Function(fn + "; return unreachable;")();
-        return [unreachable(document.getElementById("phone")), unreachable(document.getElementById("email"))];
+        const hidden = document.createElement("input");
+        hidden.style.display = "none";
+        document.body.append(hidden);
+        return [unreachable(document.getElementById("phone")), unreachable(document.getElementById("email")), unreachable(hidden)];
       })()`,
     );
     assert.match(
@@ -127,6 +123,7 @@ test("a field the page does not show says why it cannot be typed into", {
       /inside a closed <details> — open it first: click its summary "Use your phone instead"/,
     );
     assert.match(why[1]!, /its centre is covered by div#sheet\.cover "Cookie notice"/);
+    assert.match(why[2]!, /it has no size — not shown yet/);
   } finally {
     await browser?.close();
     server.close();

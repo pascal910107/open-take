@@ -20,6 +20,7 @@ import {
   matchTarget,
   parseMhtml,
   parseSrcset,
+  stillOutside,
 } from "../src/dom-state";
 
 const PNG = Buffer.from(
@@ -185,9 +186,8 @@ const probe: DomStateProbe = {
   custom: [{ name: "my-el" }],
 };
 
-test("parseMhtml: boundary, headers, quoted-printable + base64 bodies", () => {
-  const { headers, parts } = parseMhtml(archive());
-  assert.match(headers["content-type"] ?? "", /multipart\/related/);
+test("parseMhtml: boundary, part headers, quoted-printable + base64 bodies", () => {
+  const parts = parseMhtml(archive());
   assert.equal(parts.length, 9);
   assert.equal(parts[0]!.contentType, "text/html");
   assert.equal(parts[0]!.id, "frame-main@mhtml.blink");
@@ -375,7 +375,6 @@ test("matchTarget: the best IoU ≥ 0.5 wins, below it nothing matches", () => {
 });
 
 test("comparePixels leaves out masked boxes; stillOutside ignores what moves on its own", async () => {
-  const { comparePixels, stillOutside } = await import("../src/dom-state");
   // 4×2 RGB, one pixel (x=3, y=1) differs
   const a = new Uint8Array(4 * 2 * 3).fill(100);
   const b = new Uint8Array(a);

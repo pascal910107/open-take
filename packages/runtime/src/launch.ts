@@ -40,7 +40,7 @@ function visitLaunchAssets(composition: LaunchComposition, visit: (asset: string
 /** A recording a take recipe names, read relative to the brief: the take
  *  folder (`<name>.take`, or the master `<name>.mp4` beside it), its capture
  *  log and every saved screen that reads back. */
-export function readTakeMaterial(briefDir: string, path: string): TakeMaterial | string {
+function readTakeMaterial(briefDir: string, path: string): TakeMaterial | string {
   const named = path.replace(/[\\/]+$/, "").replace(/\.mp4$/i, ".take");
   const dir = resolve(briefDir, named);
   let capture: CaptureLog;

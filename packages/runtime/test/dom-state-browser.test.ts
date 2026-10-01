@@ -15,14 +15,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { promisify } from "node:util";
-import { resolveFfmpeg } from "@open-take/compositor";
+import { resolveFfmpeg, type StateIndex } from "@open-take/compositor";
 import { type Browser, CDP, fitViewport, launchBrowser, resolveChrome } from "../src/cdp";
-import {
-  captureDomState,
-  type DomStateIndex,
-  finalizeDomStates,
-  visuallyStill,
-} from "../src/dom-state";
+import { captureDomState, finalizeDomStates, visuallyStill } from "../src/dom-state";
 
 const exec = promisify(execFile);
 const chrome = process.env.OPEN_TAKE_E2E_CHROME ?? resolveChrome();
@@ -187,9 +182,7 @@ test("probe → snapshot → state.html → offline re-render matches the live p
       vh: inner[1],
       dpr: 2,
     });
-    console.error(
-      `dom-state fixture: probe ${raw.ms.probe}ms, screenshot ${raw.ms.shot}ms, snapshot ${raw.ms.snap}ms, total ${raw.ms.total}ms, ${raw.probe.elements.length} elements`,
-    );
+    console.error(`dom-state fixture: ${raw.ms}ms, ${raw.probe.elements.length} elements`);
     const p = raw.probe;
     assert.ok(p.canvases.length >= 1, "a still page's canvas is read");
     assert.equal(p.viewport.w, inner[0]);
@@ -248,7 +241,6 @@ test("probe → snapshot → state.html → offline re-render matches the live p
       states: [raw],
       vw: inner[0],
       vh: inner[1],
-      warn: (l) => console.error(l),
     });
     assert.equal(items.length, 1);
     const fid = items[0]!.fidelity!;
@@ -268,7 +260,7 @@ test("probe → snapshot → state.html → offline re-render matches the live p
     assert.ok(readdirSync(join(statesDir, "assets")).length >= (woff2 ? 1 : 0), "assets written");
     const index = JSON.parse(
       readFileSync(join(statesDir, "s0", "index.json"), "utf8"),
-    ) as DomStateIndex;
+    ) as StateIndex;
     assert.deepEqual(Object.keys(index).sort(), [
       "elements",
       "fidelity",
@@ -315,7 +307,6 @@ test("probe → snapshot → state.html → offline re-render matches the live p
           delTag: document.getElementById('b2').getAttribute('data-ot-id'),
           inputTag: document.getElementById('txt').getAttribute('data-ot-id'),
           canvasNow: document.getElementById('cv').localName,
-          canvasMarked: document.getElementById('cv').getAttribute('data-ot-canvas'),
           canvasPixels: (() => { const x = document.getElementById('cv').getContext('2d'); return [Array.from(x.getImageData(5, 5, 1, 1).data), Array.from(x.getImageData(40, 30, 1, 1).data)]; })(),
           fadeOpacity: getComputedStyle(document.getElementById('fade')).opacity,
           scripts: Array.from(document.scripts).map(s => s.type || (s.hasAttribute('data-ot-restore') ? 'restore' : 'other')),
@@ -342,7 +333,6 @@ test("probe → snapshot → state.html → offline re-render matches the live p
     // the canvas stays a canvas (every CSS rule that targets it still applies),
     // painted with the pixels it showed: green with a black middle
     assert.equal(state.canvasNow, "canvas", "the canvas element stays");
-    assert.equal(state.canvasMarked, "1");
     const [edge, middle] = state.canvasPixels as number[][];
     assert.ok(edge![1]! > 180 && edge![0]! < 40, `painted edge ${edge}`);
     assert.ok(middle![0]! < 30 && middle![1]! < 30, `painted middle ${middle}`);

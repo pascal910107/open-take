@@ -10,9 +10,9 @@
 // must never fail a take. Each pixel check silently skips when its video is
 // absent or unreadable; the structural checks are pure.
 
-import { spawn } from "node:child_process";
 import type { CaptureLog, CompositionIssue, TakeComposition } from "@open-take/compositor";
 import { resolveFfmpeg, resolveFfprobe } from "@open-take/compositor";
+import { runBuffer } from "./tool";
 
 /** dead-opening: a capture frame whose grayscale std reaches this share of the
  *  take's OWN steady-state baseline counts as painted. Relative, never
@@ -275,23 +275,11 @@ async function staticTailIssue(
 
 type VideoMeta = { durationS: number; width: number; height: number };
 
-function runBuf(bin: string, args: string[]): Promise<Buffer> {
-  return new Promise((res, rej) => {
-    const c = spawn(bin, args, { stdio: ["ignore", "pipe", "ignore"] });
-    const chunks: Buffer[] = [];
-    c.stdout.on("data", (b: Buffer) => chunks.push(b));
-    c.on("error", rej);
-    c.on("close", (code) =>
-      code === 0 ? res(Buffer.concat(chunks)) : rej(new Error(`${bin} exited ${code}`)),
-    );
-  });
-}
-
 async function probeVideo(path: string): Promise<VideoMeta | undefined> {
   try {
     const bin = await resolveFfprobe();
     const out = (
-      await runBuf(bin, [
+      await runBuffer(bin, [
         "-v",
         "error",
         "-select_streams",
@@ -340,7 +328,7 @@ async function grayFrame(
       cropFrac != null && cropFrac < 1
         ? `crop=floor(iw*${cropFrac.toFixed(3)}/2)*2:floor(ih*${cropFrac.toFixed(3)}/2)*2,`
         : "";
-    const buf = await runBuf(bin, [
+    const buf = await runBuffer(bin, [
       "-v",
       "error",
       "-ss",
@@ -373,7 +361,7 @@ async function grayStrip(
   aw: number,
   ah: number,
 ): Promise<Uint8Array[]> {
-  const buf = await runBuf(bin, [
+  const buf = await runBuffer(bin, [
     "-v",
     "error",
     "-i",

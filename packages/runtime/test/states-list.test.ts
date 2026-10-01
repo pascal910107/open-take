@@ -233,7 +233,7 @@ test("actions are numbered a1..aN in capture order and sit between the states th
     );
     assert.match(
       text,
-      /^mail\.take — 5 saved states · page 1280×720 CSS px · fidelity 3\/5 ok \(s2 FAILED\)$/m,
+      /^mail\.take — 5 saved states · page 1280×720 CSS px · fidelity 3\/4 ok \(s2 FAILED\) · s4 missing$/m,
     );
     assert.match(text, /ids are per state/, "the per-state id contract is stated up front");
   } finally {
@@ -362,7 +362,7 @@ test("a moment the page was still moving at is named as such, and the next state
     await writeTake(dir, { movingS2: true });
     const data = describeTake(dir);
     const text = formatTakeStates(data);
-    assert.equal(data.states[2]!.moving, true);
+    assert.equal(data.states[2]!.status, "moving");
     assert.match(
       text,
       /^s2 {2}after a2 · 8\.00s · MOVING — not saved: the page never went quiet here; use the recording$/m,
@@ -420,7 +420,7 @@ test("--state outlines one state: regions, the cards a film could lift, and ever
   }
 });
 
-test("--json is the same data: plain JSON with the actions, the states and their changes", async () => {
+test("the listing is plain data: as JSON it keeps the actions, the states and their changes", async () => {
   const { dir, data } = await scene();
   try {
     const json = JSON.parse(JSON.stringify(data)) as typeof data;
@@ -433,7 +433,13 @@ test("--json is the same data: plain JSON with the actions, the states and their
       "viewport",
     ]);
     assert.equal(json.take, "mail.take");
-    assert.deepEqual(json.fidelity, { ok: 3, total: 5, failed: ["s2"] });
+    assert.deepEqual(json.fidelity, {
+      ok: 3,
+      total: 4,
+      failed: ["s2"],
+      moving: [],
+      missing: ["s4"],
+    });
     assert.deepEqual(json.viewport, { w: 1280, h: 720, dpr: 1 });
     assert.equal(json.actions[0]!.target?.ref, "s0:e4");
     assert.equal(json.actions[1]!.endMs, 5800);
