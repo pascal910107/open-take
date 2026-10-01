@@ -231,6 +231,7 @@ const FLAGS_BY_CMD: Record<string, string[]> = {
     "--from",
     "--to",
     "--workers",
+    "--supersample",
     "--at",
     "--every",
     "--json",
@@ -309,7 +310,9 @@ Usage:
   open-take sound instruments | palette
   open-take film render <page.html|dir> [--out film.mp4] [--audio <file>|none] [--draft] [--no-blur]
                    [--size 1920x1080] [--fps 60] [--duration <s>] [--from <s>] [--to <s>] [--root <dir>]
+                   [--supersample 2]
   open-take film still  <page.html|dir> --at <s>[,<s>…] [--out <dir>] [--no-blur] [--root <dir>]
+                   [--supersample 2]
   open-take film sheet  <film.mp4> [--out sheet.png] [--every <s> | --at <s>,<s>…]
   open-take film check  <film.mp4> [--size 1920x1080] [--fps 60] [--json]
 
@@ -1825,6 +1828,7 @@ async function main() {
         "--from",
         "--to",
         "--workers",
+        "--supersample",
         "--verbose",
       );
       const audio = flag("--audio");
@@ -1841,6 +1845,7 @@ async function main() {
         from: num("--from"),
         to: num("--to"),
         workers: num("--workers"),
+        supersample: num("--supersample"),
         audio: audio === "none" ? null : audio,
         blur: has("--no-blur") ? false : undefined,
         draft: has("--draft"),
@@ -1866,7 +1871,7 @@ async function main() {
       return;
     }
     if (action === "still") {
-      only("--at", "--out", "--root", "--no-blur", "--size", "--verbose");
+      only("--at", "--out", "--root", "--no-blur", "--size", "--supersample", "--verbose");
       const at = times(flag("--at"));
       if (!at?.length) throw new Error("film still: --at <seconds>[,<seconds>…] is required");
       const files = await filmStills({
@@ -1878,6 +1883,7 @@ async function main() {
         width: size?.width,
         height: size?.height,
         blur: has("--no-blur") ? false : undefined,
+        supersample: num("--supersample"),
         onConsole,
       });
       process.stdout.write(`${files.join("\n")}\n`);

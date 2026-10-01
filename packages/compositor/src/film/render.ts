@@ -71,6 +71,11 @@ export type FilmRenderOptions = {
   blur?: boolean;
   /** half size, 30 fps, no blur, fast encode — for looking, not for delivery */
   draft?: boolean;
+  /** draw every frame at this many times the pixels each way and scale it down
+   *  to the film's size. Chrome puts each glyph on a whole device pixel, so text
+   *  in a slow zoom or drift steps instead of gliding; finer pixels make the
+   *  steps finer. 1 (the default) draws at the film's size; ignored in drafts. */
+  supersample?: number;
   workers?: number;
   onProgress?: (p: FilmProgress) => void;
   onConsole?: (level: string, text: string) => void;
@@ -104,6 +109,8 @@ type Film = {
   height: number;
   fps: number;
   scale: number;
+  /** device pixels drawn per output pixel, each way (supersampling) */
+  ss: number;
   durationS: number;
   f0: number;
   f1: number;
@@ -180,13 +187,13 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
   const tmp = await mkdtemp(join(tmpdir(), "open-take-film-"));
   const epochMs = Date.now();
   const clock = filmClockSource({ seed: 0x5eed, epochMs });
-  const open = async (film: { width: number; height: number; scale: number }) => {
+  const open = async (film: { width: number; height: number; scale: number; ss: number }) => {
     const b = await launchHtmlBrowser({
       chromePath: opts.chromePath,
       url: `${server.url}${urlPath}`,
       width: film.width,
       height: film.height,
-      deviceScaleFactor: film.scale,
+      deviceScaleFactor: film.scale * film.ss,
       initScript: clock,
       onConsole: opts.onConsole,
       timeoutMs: 120_000,
@@ -203,16 +210,18 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
     // --- what the page is -----------------------------------------------------
     const draft = !!opts.draft;
     const scale = draft ? 0.5 : 1;
+    // every browser that draws frames draws at the same density — the first too
+    const ss = draft ? 1 : supersampleOf(opts.supersample);
     let width = opts.width ?? DEFAULT_SIZE.width;
     let height = opts.height ?? DEFAULT_SIZE.height;
-    let first = await open({ width, height, scale });
+    let first = await open({ width, height, scale, ss });
     let info = await prepare(first);
     if (!opts.width && !opts.height && info.width && info.height) {
       if (info.width !== width || info.height !== height) {
         width = info.width;
         height = info.height;
         await close(first);
-        first = await open({ width, height, scale });
+        first = await open({ width, height, scale, ss });
         info = await prepare(first);
       }
     }
@@ -286,6 +295,7 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
                   ffmpeg,
                   samples.slice(a, b),
                   encodeArgs(film, chunkOf[w]![k]!, draft),
+                  outSize(film),
                 );
                 try {
                   for (let i = a; i < b; i++) {
@@ -366,6 +376,8 @@ export type FilmStillsOptions = {
   height?: number;
   /** with the shutter's motion blur, as in the master (default on) */
   blur?: boolean;
+  /** as the master is rendered (see FilmRenderOptions.supersample) */
+  supersample?: number;
   onConsole?: (level: string, text: string) => void;
 };
 
@@ -376,12 +388,14 @@ export async function filmStills(opts: FilmStillsOptions): Promise<string[]> {
   const server = await serveDirectory(root);
   const browsers: HtmlBrowser[] = [];
   const clock = filmClockSource({ seed: 0x5eed, epochMs: Date.now() });
+  const ss = supersampleOf(opts.supersample);
   const open = async (width: number, height: number) => {
     const b = await launchHtmlBrowser({
       chromePath: opts.chromePath,
       url: `${server.url}${urlPath}`,
       width,
       height,
+      deviceScaleFactor: ss,
       initScript: clock,
       onConsole: opts.onConsole,
       timeoutMs: 120_000,
@@ -432,7 +446,7 @@ export async function filmStills(opts: FilmStillsOptions): Promise<string[]> {
       const t = times[i]!;
       const file = join(opts.outDir, `t${t.toFixed(3).padStart(7, "0")}.png`);
       const n = counts[i]!;
-      if (n === 1) {
+      if (n === 1 && ss === 1) {
         await seek(browser, t, i);
         await writeFile(file, await browser.screenshot({ format: "png" }));
       } else {
@@ -457,6 +471,7 @@ export async function filmStills(opts: FilmStillsOptions): Promise<string[]> {
             "-y",
             file,
           ],
+          { width, height },
         );
         for (const ti of sampleTimes(t, n, film.fps)) {
           await seek(browser, ti, i);
@@ -542,6 +557,7 @@ function describe(
     height: at.height,
     fps,
     scale: at.scale,
+    ss: at.draft ? 1 : supersampleOf(opts.supersample),
     durationS: durationS ?? 0,
     f0,
     f1,
@@ -549,6 +565,14 @@ function describe(
     blur: opts.blur ?? !at.draft,
     warnings,
   };
+}
+
+/** the supersampling factor asked for: a whole number of pixels each way, 1–4 */
+function supersampleOf(v: number | undefined): number {
+  if (v === undefined) return 1;
+  if (!Number.isFinite(v) || v < 1 || v > 4 || Math.round(v) !== v)
+    throw new Error(`film: supersample is a whole number from 1 to 4, not ${v}`);
+  return v;
 }
 
 function defaultWorkers(): number {
@@ -603,10 +627,15 @@ async function probeSequential(
 
 const even = (x: number) => 2 * Math.round(x / 2);
 
+/** the film's frames, in pixels (screenshots are this × the supersampling) */
+const outSize = (film: Film) => ({
+  width: Math.round(film.width * film.scale),
+  height: Math.round(film.height * film.scale),
+});
+
 function encodeArgs(film: Film, out: string, draft: boolean): string[] {
-  // the screenshots' own size; H.264 wants even sides, so an odd one is padded
-  const w = Math.round(film.width * film.scale);
-  const h = Math.round(film.height * film.scale);
+  // H.264 wants even sides, so an odd one is padded
+  const { width: w, height: h } = outSize(film);
   return [
     "-f",
     "rawvideo",
@@ -711,7 +740,10 @@ export class ShutterSink {
     ffmpeg: string,
     private readonly schedule: readonly number[],
     encodeArgs: string[],
+    /** the film's frame: samples drawn at more pixels are scaled down to it */
+    size: { width: number; height: number },
   ) {
+    this.frameBytes = size.width * size.height * 3;
     this.decoder = spawn(
       ffmpeg,
       [
@@ -724,7 +756,8 @@ export class ShutterSink {
         "-fps_mode",
         "passthrough",
         "-vf",
-        "scale=in_range=pc:in_color_matrix=bt601:flags=accurate_rnd+full_chroma_int,format=rgb24",
+        // area averaging: a supersampled frame's 2×2 (3×3…) device pixels become one
+        `scale=${size.width}:${size.height}:in_range=pc:in_color_matrix=bt601:flags=area+accurate_rnd+full_chroma_int,format=rgb24`,
         "-f",
         "rawvideo",
         "-",
@@ -775,7 +808,6 @@ export class ShutterSink {
     const stdin = this.decoder.stdin!;
     if (!this.headWritten) {
       const { width, height } = jpegDimensions(jpeg);
-      this.frameBytes = width * height * 3;
       this.headWritten = true;
       stdin.write(matroskaHead(width, height, 0));
     }

@@ -570,6 +570,63 @@ window.__render = (t) => { const g = Math.round(Math.random() * 255); document.b
   assert.ok(min > 35, `every frame matches across worker counts (min PSNR ${min} dB)`);
 });
 
+test("supersampling draws more pixels and keeps the film's size, in the master and in stills", {
+  skip,
+}, async () => {
+  const page = join(dir, "supersample");
+  await exec("mkdir", ["-p", page]);
+  await writeFile(
+    join(page, "index.html"),
+    `<!doctype html><html><head><style>body{margin:0;width:320px;height:180px;background:#fff;font:700 24px sans-serif}
+#t{position:absolute;left:40px;top:60px}</style></head><body><div id="t">台北南京店 1,188</div><script>
+window.__film = { duration: 0.25, width: 320, height: 180 };
+window.__render = (t) => { document.getElementById('t').style.transform = 'scale(' + (1 + t * 0.2) + ')'; };
+</script></body></html>`,
+  );
+  const r = await renderFilm({
+    page,
+    out: join(dir, "supersample.mp4"),
+    chromePath: chrome!,
+    workers: 1,
+    supersample: 2,
+  });
+  assert.deepEqual([r.width, r.height], [320, 180]);
+  const ffprobe = await resolveFfprobe();
+  const { stdout } = await exec(ffprobe, [
+    "-v",
+    "error",
+    "-select_streams",
+    "v:0",
+    "-show_entries",
+    "stream=width,height",
+    "-of",
+    "csv=p=0",
+    join(dir, "supersample.mp4"),
+  ]);
+  assert.equal(stdout.trim(), "320,180");
+  const [still] = await filmStills({
+    page,
+    chromePath: chrome!,
+    at: [0.1],
+    outDir: join(dir, "supersample-stills"),
+    supersample: 2,
+  });
+  const probe = await exec(ffprobe, [
+    "-v",
+    "error",
+    "-show_entries",
+    "stream=width,height",
+    "-of",
+    "csv=p=0",
+    still!,
+  ]);
+  assert.equal(probe.stdout.trim(), "320,180");
+  await assert.rejects(
+    renderFilm({ page, out: join(dir, "x.mp4"), chromePath: chrome!, supersample: 1.5 }),
+    /supersample is a whole number from 1 to 4/,
+  );
+});
+
 test("a file the page asks for that is not there fails the render by name", { skip }, async () => {
   const page = join(dir, "missing");
   await exec("mkdir", ["-p", page]);
