@@ -362,11 +362,18 @@ export class Screen {
 
   /** The View that frames a part (`pad` around it, a fraction of its size)
    *  through this screen's window — for travel() between two framings. With
-   *  no part and nothing lifted: the whole page, filling the window. */
-  frameOf(target?: Target, { pad }: { pad?: number } = {}): View {
+   *  no part and nothing lifted: the whole page, filling the window. Never
+   *  wider than the page: a part too tall to show whole at the page's own
+   *  width is framed at that width — or, with `fit: "width"`, by its own
+   *  width, read from its top. */
+  frameOf(target?: Target, { pad, fit }: { pad?: number; fit?: "contain" | "width" } = {}): View {
     const win = this.#window();
     const whole = target === undefined && !this.#show.length;
-    return frameView(this.box(target), win.width / win.height, { pad: pad ?? (whole ? 0 : 0.08) });
+    const v = frameView(this.box(target), win.width / win.height, {
+      pad: pad ?? (whole ? 0 : 0.08),
+      fit,
+    });
+    return v.w > this.width ? { ...v, w: this.width } : v;
   }
 
   /** What the window shows: a View ({ cx, cy, w } in page px — frameOf(),

@@ -272,11 +272,26 @@ export function flight(
  *  page's CSS px. Its height follows the window's shape (width ÷ aspect). */
 export type View = { cx: number; cy: number; w: number };
 
-/** The view that shows `box` whole, with `pad` (a fraction of the box's own
- *  size) around it, through a window of `aspect` (width ÷ height). */
-export function frame(box: Box, aspect: number, { pad = 0.08 }: { pad?: number } = {}): View {
+/** The view that shows `box`, with `pad` (a fraction of the box's own size)
+ *  around it, through a window of `aspect` (width ÷ height): whole (`fit:
+ *  "contain"`, the default — a tall part in a wide window means a wide view),
+ *  or filling the window with its width (`fit: "width"`) — a part taller
+ *  than that view (a long list, a portrait panel) is then read from its top. */
+export function frame(
+  box: Box,
+  aspect: number,
+  { pad = 0.08, fit = "contain" }: { pad?: number; fit?: "contain" | "width" } = {},
+): View {
   const w = box.width * (1 + 2 * pad);
   const h = box.height * (1 + 2 * pad);
+  if (fit === "width") {
+    const tall = h > w / aspect;
+    return {
+      cx: box.x + box.width / 2,
+      cy: tall ? box.y - box.height * pad + w / aspect / 2 : box.y + box.height / 2,
+      w,
+    };
+  }
   return { cx: box.x + box.width / 2, cy: box.y + box.height / 2, w: Math.max(w, h * aspect) };
 }
 

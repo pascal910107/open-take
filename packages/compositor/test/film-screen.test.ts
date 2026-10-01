@@ -42,6 +42,14 @@ test("frame: a part with room around it, at the window's shape", () => {
   // a square part: its height sets it, 120 × 16/9
   const sq = frame({ x: 0, y: 0, width: 100, height: 100 }, 16 / 9, { pad: 0.1 });
   assert.ok(Math.abs(sq.w - (120 * 16) / 9) < 1e-9);
+  // a long list framed by its width: the window filled with it, its top at the top
+  const list = frame({ x: 100, y: 200, width: 400, height: 1500 }, 16 / 9, {
+    pad: 0,
+    fit: "width",
+  });
+  assert.equal(list.w, 400);
+  assert.equal(list.cx, 300);
+  assert.ok(Math.abs(list.cy - (200 + 400 / (16 / 9) / 2)) < 1e-9, "read from its top");
 });
 
 test("travel: what is framed heads for its place without swinging back", () => {
@@ -269,6 +277,12 @@ test("acting on a saved screen: typed, pressed, switched — the same frame in a
       `[S.card.$("e1"), S.card.$(".price"), S.card.$(".secret")].map((e) => getComputedStyle(e).visibility)`,
     );
     assert.deepEqual(vis, ["hidden", "visible", "hidden"]);
+    // a framing is never wider than the page: a part too tall for the window
+    // at the page's width is framed at that width
+    const tall = await a.evaluate<number>(
+      "S.page.frameOf({ getBoundingClientRect: () => ({ left: 0, top: 0, right: 100, bottom: 2000, width: 100, height: 2000 }) }).w",
+    );
+    assert.equal(tall, 640);
     // where the part is on the stage, as place() put it
     const box = await a.evaluate<number[]>(
       "(() => { const b = S.card.stageBox(); return [b.x, b.y, b.width, b.height]; })()",

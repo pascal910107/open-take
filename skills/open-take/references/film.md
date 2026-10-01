@@ -176,8 +176,10 @@ real interface on your stage, below.
   and saves the interface itself at every settled moment:
   `takes/x.take/states/s3/state.html` is a self-contained copy of the page as
   it was (scripts inert), sharp at any scale.
-  `npx open-take states takes/x.mp4 --state s3 --json` lists every element
-  with its id (`e16`) and box.
+  `npx open-take states takes/x.mp4 --state s3 --json` outlines it: its
+  regions, the cards a film can lift and their labelled parts, each with its
+  id (`e16`) and box; `states/s3/index.json` beside the saved page lists
+  every element.
 - The recording itself (`takes/x.take/capture.mp4`) plays as a `<video>` on
   film time, frame-exact, and `capture.json` holds every click, keystroke and
   cursor position with its time.
@@ -197,6 +199,10 @@ needs from the interface decides how to use it:
   const all = home.frameOf(), field = home.frameOf("e40");          // framings
   home.view(travel(ease.inOut(progress(t, 4, 1.2)), all, field));    // in __render(t)
   ```
+
+  A framing shows the part whole and is never wider than the page; a long
+  list or a portrait panel reads better framed by its width from its top:
+  `home.frameOf("e52", { fit: "width" })`.
 
 - **Something happening in the interface** — act on it, from film time:
 
@@ -224,7 +230,11 @@ needs from the interface decides how to use it:
   const from = card.stageBox();                                     // where it is now
   ```
 
-A lifted part is its own copy of the page: what you typed or switched on the
+A screen keeps what was last set on it — where it is, its view, its
+opacity. When scenes share one, decide every screen's state on every frame
+in one place (hide them all at the top of `__render`, then let the scene at
+t show its own), or a scene that is not playing leaves its last word on a
+scene that is. A lifted part is its own copy of the page: what you typed or switched on the
 page, do on the copy too, and it leaves the page seamlessly — start it at the
 page's `stageBox("e16")` and hide the original there (`set(t, "e16", { at,
 style: { visibility: "hidden" } })`). `openScreen` warns on the console when
