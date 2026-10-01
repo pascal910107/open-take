@@ -115,8 +115,10 @@ function installFilmClock(opts: FilmClockOptions): void {
   // lazy loads at once. Records are drained synchronously after every
   // callback that could insert.
   const inserted = new WeakMap<Element, number>();
-  // frames put on the page that have not shown yet (see after)
+  // frames put on the page that have not shown yet (see after), and how many
+  // have
   const unshown = new Set<HTMLIFrameElement>();
+  let shown = 0;
   const noteInserted = (records: MutationRecord[]) => {
     for (const r of records)
       for (const n of Array.from(r.addedNodes)) {
@@ -373,7 +375,7 @@ function installFilmClock(opts: FilmClockOptions): void {
 
   /** the page's animation frame: its callbacks, then the ones it asked the
    *  frames inside it for (see asked) */
-  async function runFrames(only?: (fn: unknown) => boolean): Promise<void> {
+  async function runFrames(only?: (fn: unknown) => boolean, at = clock()): Promise<void> {
     let batch = frames;
     if (only) {
       batch = new Map([...frames].filter(([, fn]) => only(fn)));
@@ -381,13 +383,15 @@ function installFilmClock(opts: FilmClockOptions): void {
     } else frames = new Map();
     for (const fn of batch.values()) {
       try {
-        fn(clock());
+        fn(at);
       } catch (e) {
         report(e);
       }
       await after();
     }
-    await eachFrame(async (f) => clockOf(f)?.runAsked());
+    await eachFrame(async (f) => clockOf(f)?.runAsked(at));
+    // what those put on this page shows before the clock moves on, too
+    if (unshown.size) await showFrames();
   }
   // A frame runs its own animation frames only where it was put on the page,
   // but a page may ask one for its next animation frame — to wait until it
@@ -428,6 +432,8 @@ function installFilmClock(opts: FilmClockOptions): void {
       svg.pauseAnimations();
       svg.setCurrentTime((t - base) / 1000);
     }
+    // a page that reads a frame's animation reads it at its time too
+    for (const f of Array.from(document.querySelectorAll("iframe"))) clockOf(f)?.sync();
   }
 
   // --- media: a video plays on film time, seeked frame by frame ---------------
@@ -521,13 +527,17 @@ function installFilmClock(opts: FilmClockOptions): void {
    *  first frame — before its clock moves on: however the film is sought, a
    *  frame starts at the same moment of the film */
   async function showFrames(): Promise<void> {
-    const fresh = [...unshown];
-    unshown.clear();
-    await Promise.all(
-      fresh.map(async (f) => {
-        if (f.isConnected && (await loaded(f))) await clockOf(f)?.follow(base);
-      }),
-    );
+    while (unshown.size) {
+      const fresh = [...unshown];
+      unshown.clear();
+      await Promise.all(
+        fresh.map(async (f) => {
+          if (!f.isConnected || !(await loaded(f))) return;
+          await clockOf(f)?.follow(base);
+          shown++;
+        }),
+      );
+    }
   }
 
   function eachFrame(fn: (f: HTMLIFrameElement) => Promise<unknown>): Promise<unknown> {
@@ -723,16 +733,20 @@ function installFilmClock(opts: FilmClockOptions): void {
     if (mode === "render") {
       now = t;
       // the frames the page draws into have shown before it does (their first
-      // frame would otherwise come after what it writes); a frame it puts on
-      // the page loads, and the instant is drawn again, into it too
+      // frame would otherwise come after what it writes), and are at t; a
+      // frame it puts on the page while drawing loads, and the instant is
+      // drawn again — into that one too — until no new one shows up
       await showFrames();
-      for (let pass = 0; pass < 2; pass++) {
+      syncAnimations();
+      for (let pass = 0; pass < 8; pass++) {
+        const before = shown;
         reseed(tSec);
         const r = w.__render(tSec);
         if (r && typeof r.then === "function") await pump(r, true);
         drain();
-        if (!unshown.size) break;
         await showFrames();
+        if (shown === before) break;
+        syncAnimations();
       }
       syncAnimations();
     } else await advance(t);
@@ -917,9 +931,10 @@ function installFilmClock(opts: FilmClockOptions): void {
     // --- for the frames inside the film (times in ms on the top page's clock) ---
     follow,
     stamp,
+    sync: syncAnimations,
     busy,
     asked: askedHere,
-    runAsked: () => runFrames(asked),
+    runAsked: (at: number) => runFrames(asked, at),
     drawn,
     clock,
     origin: () => base,

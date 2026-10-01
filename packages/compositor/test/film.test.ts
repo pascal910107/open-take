@@ -413,6 +413,42 @@ window.__render = () => {};
   assert.ok(Date.now() - t0 < 30_000, "well before the 45 s ready timeout");
 });
 
+test("an animation frame a page asks of a frame runs at the page's time, before the frame shows", {
+  skip,
+}, async () => {
+  const page = join(dir, "asked-time");
+  await exec("mkdir", ["-p", page]);
+  await writeFile(join(page, "inner.html"), `<!doctype html><html><body></body></html>`);
+  await writeFile(
+    join(page, "index.html"),
+    `<!doctype html><html><body><iframe id="f" src="inner.html"></iframe><script>
+const f = document.getElementById("f");
+window.__film = {
+  duration: 1,
+  ready: new Promise((ok) => f.addEventListener("load", () =>
+    f.contentWindow.requestAnimationFrame((ts) => { window.got = [ts, performance.now()]; ok(); }))),
+};
+</script></body></html>`,
+  );
+  const server = await serveDirectory(page);
+  const b = await launchHtmlBrowser({
+    chromePath: chrome!,
+    url: `${server.url}/index.html`,
+    width: 64,
+    height: 64,
+    initScript: filmClockSource({ seed: 3, epochMs: 0 }),
+    stillAnimations: true,
+  });
+  try {
+    await b.evaluate("window.__ot.prepare()");
+    const [ts, at] = await b.evaluate<[number, number]>("window.got");
+    assert.equal(ts, at, `the page's time (${ts} and ${at})`);
+  } finally {
+    await b.close();
+    await server.close();
+  }
+});
+
 test("a page whose promises wait on timers still renders: film time starts when it is ready", {
   skip,
 }, async () => {
@@ -833,6 +869,91 @@ window.seen = () => document.getElementById("f").contentDocument.body.dataset.t;
     assert.equal(await seen("drawn.html", [0.3, 0.6]), "0.6");
     assert.equal(await seen("animated.html", [1]), "written", "straight there");
     assert.equal(await seen("animated.html", [0.12, 0.2, 1]), "written", "in steps");
+  } finally {
+    await server.close();
+  }
+});
+
+test("what a page reads and asks of its frames is at its own time, however the film is sought", {
+  skip,
+}, async () => {
+  const page = join(dir, "frame-reads");
+  await exec("mkdir", ["-p", page]);
+  await writeFile(join(page, "leaf.html"), `<!doctype html><html><body></body></html>`);
+  await writeFile(
+    join(page, "frame.html"),
+    `<!doctype html><html><head><style>#a{width:4px;height:4px;animation:m 2s linear}@keyframes m{to{transform:translateX(100px)}}</style></head><body><div id="a"></div></body></html>`,
+  );
+  // a film that draws itself reads a frame's animation as it draws
+  await writeFile(
+    join(page, "drawn.html"),
+    `<!doctype html><html><body><iframe src="frame.html"></iframe><script>
+window.__film = { duration: 2 };
+window.__render = () => {
+  window.seen = Math.round(document.querySelector("iframe").contentDocument.getAnimations()[0].currentTime);
+};
+</script></body></html>`,
+  );
+  // one that animates reads it from a timer, and at 0.1 s asks the frame for
+  // its next animation frame with a callback that puts another frame on the
+  // page — loaded by 0.2 s, as any frame the page puts there
+  await writeFile(
+    join(page, "animated.html"),
+    `<!doctype html><html><body><iframe id="host" src="frame.html"></iframe><script>
+window.__film = { duration: 2 };
+setTimeout(() => {
+  window.read = Math.round(document.getElementById("host").contentDocument.getAnimations()[0].currentTime);
+  document.getElementById("host").contentWindow.requestAnimationFrame((ts) => {
+    window.asked = Math.round(ts) === Math.round(performance.now());
+    const f = document.createElement("iframe"); f.id = "added"; f.src = "leaf.html"; document.body.append(f);
+  });
+}, 100);
+setTimeout(() => { window.there = document.getElementById("added").contentDocument.URL.endsWith("leaf.html"); }, 200);
+window.seen = () => [window.read, window.asked, window.there].join();
+</script></body></html>`,
+  );
+  // and one that draws itself after a wait, putting a frame on the page,
+  // then — once that has loaded — a second one, which it writes into
+  await writeFile(
+    join(page, "chain.html"),
+    `<!doctype html><html><body><script>
+window.__film = { duration: 2 };
+const make = (id) => {
+  let f = document.getElementById(id);
+  if (!f) { f = document.createElement("iframe"); f.id = id; f.src = "leaf.html"; document.body.append(f); }
+  return f;
+};
+window.__render = async (t) => {
+  await new Promise((ok) => setTimeout(ok, 30));
+  if (make("a").contentDocument.URL.endsWith("leaf.html")) make("b").contentDocument.body.dataset.t = String(t);
+};
+window.seen = () => document.getElementById("b")?.contentDocument.body.dataset.t;
+</script></body></html>`,
+  );
+  const server = await serveDirectory(page);
+  const seen = async (name: string, times: number[], read = "window.seen()") => {
+    const b = await launchHtmlBrowser({
+      chromePath: chrome!,
+      url: `${server.url}/${name}`,
+      width: 64,
+      height: 64,
+      initScript: filmClockSource({ seed: 3, epochMs: 0 }),
+      stillAnimations: true,
+    });
+    try {
+      await b.evaluate("window.__ot.prepare()");
+      for (const t of times) await b.evaluate(`window.__ot.seek(${t})`);
+      return String(await b.evaluate(read));
+    } finally {
+      await b.close();
+    }
+  };
+  try {
+    assert.equal(await seen("drawn.html", [1], "window.seen"), "1000", "drawn, straight there");
+    assert.equal(await seen("drawn.html", [0.5, 1], "window.seen"), "1000", "drawn, in steps");
+    assert.equal(await seen("animated.html", [0.3]), "100,true,true", "animated, straight there");
+    assert.equal(await seen("animated.html", [0.15, 0.3]), "100,true,true", "animated, in steps");
+    assert.equal(await seen("chain.html", [1]), "1", "drawn into on the first instant");
   } finally {
     await server.close();
   }
