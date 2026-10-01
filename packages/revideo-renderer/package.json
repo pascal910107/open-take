@@ -21,7 +21,7 @@
     "@revideo/telemetry": "0.11.0",
     "@revideo/vite-plugin": "0.11.0",
     "puppeteer-core": "25.4.0",
-    "uuid": "^14.0.1",
+    "uuid": "^14.0.2",
     "vite": "^8.1.2"
   },
   "peerDependencies": {
