@@ -12,7 +12,7 @@
 import { existsSync } from "node:fs";
 import { stat as fsStat, readFile, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import {
   asDefects,
   auditCursor,
@@ -35,8 +35,6 @@ import {
   emitStepSummary,
   encodeWav,
   ensureChrome,
-  filmKitPath,
-  filmReview,
   filmSheet,
   filmStills,
   formatFilmCheck,
@@ -237,10 +235,6 @@ const FLAGS_BY_CMD: Record<string, string[]> = {
     "--every",
     "--json",
     "--verbose",
-    "--page",
-    "--span",
-    "--frames",
-    "--clip",
   ],
 };
 
@@ -311,15 +305,13 @@ Usage:
   open-take launch check <launch.json>
   open-take launch render <launch.json> [--out <movie.mp4>] [--draft] [--sound <style>|off]
   open-take skill  [motion | film | install [--force]]
-  open-take sound render <score.json|score.mjs> [--out score.wav] [--json]
+  open-take sound render <score.json> [--out score.wav] [--json]
   open-take sound instruments | palette
   open-take film render <page.html|dir> [--out film.mp4] [--audio <file>|none] [--draft] [--no-blur]
                    [--size 1920x1080] [--fps 60] [--duration <s>] [--from <s>] [--to <s>] [--root <dir>]
   open-take film still  <page.html|dir> --at <s>[,<s>…] [--out <dir>] [--no-blur] [--root <dir>]
   open-take film sheet  <film.mp4> [--out sheet.png] [--every <s> | --at <s>,<s>…]
   open-take film check  <film.mp4> [--size 1920x1080] [--fps 60] [--json]
-  open-take film review <film.mp4> [--page <page.html>] [--at <s>,…] [--out <dir>] [--root <dir>]
-  open-take film kit    [--out film-kit.js]
 
   A take is TWO things on disk: the postable master at exactly your --out path
   (<out>.mp4), and a working directory beside it (<out>.take/) holding
@@ -515,13 +507,6 @@ Usage:
           \`film still\` writes PNG stills at given times; \`film sheet\` a
           timed contact sheet of any video; \`film check\` measures a finished
           film: format, hitches, cadence, cuts, black frames, loudness, clicks.
-          \`film review\` gathers what to look at and listen to: real-speed
-          clips, WAVs and frame strips at every measured problem, every layout
-          collision read from the page (--page) and the longest quiet stretches.
-          \`film kit\` copies optional helpers (beat grid, reveals, flights,
-          count-ups, typing times, a camera over a page, stable randomness,
-          and openScreen: a saved screen on your stage — framed, lifted,
-          typed into, pressed) next to your page.
 
   --out <path>   (make) where the postable master goes — taken literally, and
               its <name>.take/ working dir is created beside it. Default
@@ -777,19 +762,6 @@ async function defectsDirFor(
  *  defects that are already gone. */
 const clearDefects = async (takeDir: string): Promise<void> =>
   unlink(join(takeDir, "defects.json")).catch(() => {});
-
-/** A score written as code (`sound render score.mjs`): its default export —
- *  the score itself, or a function (async or not) that returns it. Loops,
- *  chords and a tempo shared with the film's page are the module's own. */
-async function scoreFromModule(path: string): Promise<unknown> {
-  const mod = (await import(pathToFileURL(resolve(path)).href)) as { default?: unknown };
-  const value = mod.default;
-  if (value === undefined)
-    throw new Error(
-      `sound render: ${path} has no default export — \`export default\` the score, or a function that returns it`,
-    );
-  return typeof value === "function" ? await value() : value;
-}
 
 async function main() {
   if (parseError) throw new Error(`${cmd ?? ""}: ${parseError}`.trim());
@@ -1807,36 +1779,9 @@ async function main() {
   if (cmd === "film") {
     const action = positional[0];
     const target = positional[1];
-    if (action === "kit") {
-      if (positional.length !== 1) throw new Error("film kit: takes no arguments, only --out");
-      for (const f of Object.keys(flags))
-        if (f !== "--out") throw new Error(`film kit: ${f} does not apply here — allowed: --out`);
-      const out = resolve(flag("--out") ?? "film-kit.js");
-      const header =
-        "// film-kit — optional helpers for a film page, copied by `open-take film kit`.\n" +
-        "// Pure functions of time, except split() and the saved-screen helpers (openScreen),\n" +
-        "// which touch the page. Yours now: change or delete freely.\n" +
-        "//   import { tempo, reveal, flight, count, typing, travel, openScreen } from './film-kit.js';\n\n";
-      await writeFile(out, header + (await readFile(filmKitPath(), "utf8")));
-      process.stdout.write(
-        `wrote ${out}\n` +
-          "  tempo(bpm).at(bar, beat) / beat(n, bpm)   a beat grid picture and score can share\n" +
-          "  reveal(t, { at, dur, kind })              entrance/exit styles: fade rise drop scale mask-up mask-left blur\n" +
-          "  split(el) + stagger(i, step, start)       per-character or per-word reveals\n" +
-          "  flight(p, fromBox, toBox, { arc })        an object travelling between two boxes\n" +
-          "  count(t, { at, dur, to })                 a number counting up\n" +
-          "  spring(t, opts) · ease.* · bezier(...)    curves\n" +
-          "  rand(key) · noise(key, t)                 randomness that is the same on every frame and worker\n" +
-          "  typing(text, { at })                      keystroke times the picture and the score can share\n" +
-          "  frame · travel · clampView                a camera over a page: framings, and moves between them\n" +
-          "  openScreen(state.html, { show })          a saved screen on your stage: window + view (a camera),\n" +
-          "                                            place (a lifted part), type · press · set (acting on it)\n",
-      );
-      return;
-    }
     if (!action || !target || positional.length !== 2)
       throw new Error(
-        "film: expected render <page>, still <page> --at <s>, sheet <film.mp4>, check <film.mp4>, review <film.mp4> or kit",
+        "film: expected render <page>, still <page> --at <s>, sheet <film.mp4> or check <film.mp4>",
       );
     const only = (...allowed: string[]) => {
       for (const f of Object.keys(flags))
@@ -1963,40 +1908,7 @@ async function main() {
       if (c.issues.some((i) => i.severity === "error")) process.exitCode = 1;
       return;
     }
-    if (action === "review") {
-      only(
-        "--page",
-        "--root",
-        "--at",
-        "--out",
-        "--span",
-        "--frames",
-        "--clip",
-        "--every",
-        "--verbose",
-      );
-      const r = await filmReview({
-        film: target,
-        chromePath: await ensureChrome(),
-        page: flag("--page"),
-        root: flag("--root"),
-        at: times(flag("--at")),
-        out: flag("--out"),
-        span: num("--span"),
-        frames: num("--frames"),
-        clip: num("--clip"),
-        every: num("--every"),
-      });
-      process.stdout.write(
-        `review: ${r.index}\n${r.moments.length} moment${r.moments.length === 1 ? "" : "s"}` +
-          (r.layout
-            ? `, ${r.layout.length} layout finding${r.layout.length === 1 ? "" : "s"}`
-            : ", layout not checked (--page)") +
-          "\n",
-      );
-      return;
-    }
-    throw new Error(`film: unknown action ${action} — render, still, sheet, check, review or kit`);
+    throw new Error(`film: unknown action ${action} — render, still, sheet or check`);
   }
 
   if (cmd === "sound") {
@@ -2024,13 +1936,9 @@ async function main() {
     if (action === "render") {
       const sheetPath = positional[1];
       if (!sheetPath || positional.length !== 2)
-        throw new Error("sound render: expected <score.json> or <score.mjs>");
-      const out = flag("--out") ?? sheetPath.replace(/\.(json|mjs|js)$/i, "") + ".wav";
-      const sheet = (
-        /\.m?js$/i.test(sheetPath)
-          ? await scoreFromModule(sheetPath)
-          : JSON.parse(await readFile(sheetPath, "utf8"))
-      ) as ScoreSheet;
+        throw new Error("sound render: expected <score.json>");
+      const out = flag("--out") ?? sheetPath.replace(/\.json$/i, "") + ".wav";
+      const sheet = JSON.parse(await readFile(sheetPath, "utf8")) as ScoreSheet;
       const { readFileSync } = await import("node:fs");
       const result = renderScore(sheet, (p) => readFileSync(resolve(dirname(sheetPath), p)));
       await writeFile(out, encodeWav(result.pcm));
@@ -2054,7 +1962,7 @@ async function main() {
       );
       return;
     }
-    throw new Error("sound: expected `palette`, `instruments` or `render <score.json|score.mjs>`");
+    throw new Error("sound: expected `palette`, `instruments` or `render <score.json>`");
   }
 
   if (cmd === "--version" || cmd === "-v") {

@@ -331,6 +331,35 @@ window.__render = (t) => {
   assert.equal(Number(stdout.trim()), 240, "every frame is in the film once");
 });
 
+test("a ready promise that waits on a frame inside an iframe does not hang", { skip }, async () => {
+  const page = join(dir, "frame-ready");
+  await exec("mkdir", ["-p", page]);
+  await writeFile(
+    join(page, "inner.html"),
+    `<!doctype html><html><body style="margin:0;background:#0a0"></body></html>`,
+  );
+  await writeFile(
+    join(page, "index.html"),
+    `<!doctype html><html><head><style>body{margin:0;width:160px;height:90px}iframe{width:160px;height:90px;border:0}</style></head><body>
+<iframe id="f" src="inner.html"></iframe><script>
+const f = document.getElementById('f');
+window.__film = { duration: 0.5, width: 160, height: 90,
+  ready: new Promise((ok) => f.addEventListener('load', () => f.contentWindow.requestAnimationFrame(() => ok()))) };
+window.__render = () => {};
+</script></body></html>`,
+  );
+  const t0 = Date.now();
+  const files = await filmStills({
+    page,
+    chromePath: chrome!,
+    at: [0.2],
+    outDir: join(dir, "frame-ready-stills"),
+    blur: false,
+  });
+  assert.equal(files.length, 1);
+  assert.ok(Date.now() - t0 < 30_000, "well before the 45 s ready timeout");
+});
+
 test("a page whose promises wait on timers still renders: film time starts when it is ready", {
   skip,
 }, async () => {

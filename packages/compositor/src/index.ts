@@ -43,7 +43,6 @@ export {
   formatFilmCheck,
 } from "./film/check";
 export { type FilmPageInfo, filmClockSource } from "./film/clock";
-export { filmKitPath } from "./film/kit-file";
 export {
   type FilmProgress,
   type FilmRenderOptions,
@@ -52,7 +51,6 @@ export {
   filmStills,
   renderFilm,
 } from "./film/render";
-export { type FilmReview, type FilmReviewOptions, filmReview } from "./film/review";
 export { type FilmSheetOptions, filmSheet } from "./film/sheet";
 export {
   captureEventSheet,

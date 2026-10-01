@@ -45,8 +45,6 @@ export {
   encodeWav,
   type FilmCheck,
   type FilmRenderResult,
-  filmKitPath,
-  filmReview,
   filmSheet,
   filmStills,
   formatFilmCheck,
