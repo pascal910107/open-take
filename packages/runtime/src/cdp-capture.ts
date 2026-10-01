@@ -599,10 +599,11 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
         // covers the field as a REAL click — state mutated on camera — and
         // the beat would skip anyway. Name it and move on.
         if (!focused && (focusRaw as Record<string, unknown>).hit !== 1) {
+          const why = (focusRaw as Record<string, unknown>).why;
           skip(
             "type",
             label,
-            "focus never reached the target — its centre is covered, so no click could arm it",
+            `focus never reached the target — ${typeof why === "string" ? why : "its centre is covered"}, so no click could arm it`,
           );
           await hold(600);
           continue;

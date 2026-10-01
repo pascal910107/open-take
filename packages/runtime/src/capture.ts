@@ -139,6 +139,26 @@ const HITTABLE_JS =
   `ok=!!top&&(top===m||(m.contains&&m.contains(top)));}` +
   `return ok?{cx:cx,cy:cy}:null;}`;
 
+// Why a target's centre does not reach it, in words a plan author can act
+// on: the commonest case is not an overlay at all but a field inside a
+// closed <details> (a "use your phone instead" disclosure) — its content is
+// laid out but neither painted nor hit-testable until the <summary> is
+// clicked. Next, an ancestor that hides it (the centre lands on the field's
+// own container); last, whatever really covers it.
+const UNREACHABLE_JS =
+  `function unreachable(m){` +
+  `function d(e){var s=e.tagName.toLowerCase();if(e.id)s+='#'+e.id;` +
+  `var c=typeof e.className==='string'?e.className.trim().split(/\\s+/).slice(0,2).join('.'):'';if(c)s+='.'+c;` +
+  `var t=(e.textContent||'').replace(/\\s+/g,' ').trim().slice(0,40);return t?s+' "'+t+'"':s;}` +
+  `var x=m.closest('details:not([open])');` +
+  `if(x){var sm=x.querySelector('summary');if(!sm||!sm.contains(m)){` +
+  `var st=sm?(sm.textContent||'').replace(/\\s+/g,' ').trim().slice(0,40):'';` +
+  `return 'it is inside a closed <details> — open it first: click its summary'+(st?' "'+st+'"':'');}}` +
+  `var r=m.getBoundingClientRect(),top=document.elementsFromPoint?document.elementsFromPoint(r.x+r.width/2,r.y+r.height/2)[0]:null;` +
+  `if(!top)return 'its centre is outside the page';` +
+  `if(top.contains(m))return 'its centre reaches only its container ('+d(top)+'), so something there hides it';` +
+  `return 'its centre is covered by '+d(top);}`;
+
 const CLICK_TAIL_JS =
   `if(m.tagName==='SELECT')return 'SELECTINERT';` +
   HITTABLE_JS +
@@ -155,6 +175,12 @@ const CLICK_TAIL_JS =
 // tighter one would refuse targets it finds.
 export const CLICK_CANDIDATES =
   "button,a,[role=button],[role=link],[role=menuitem],input[type=submit],input[type=button]";
+/** Clicked by text only when nothing in CLICK_CANDIDATES carries the name, so
+ *  nothing that resolved before resolves differently: a <label> wrapping a
+ *  checkbox or a radio — clicking it toggles its control, and its text is
+ *  the only name such a control has ("I agree to the terms"). */
+export const CLICK_FALLBACK_CANDIDATES =
+  "label:has(input[type=checkbox]),label:has(input[type=radio])";
 export const FIELD_CANDIDATES =
   "input,textarea,[contenteditable],[contenteditable=true],[role=textbox],[role=searchbox]";
 export const BOX_CANDIDATES =
@@ -173,7 +199,7 @@ export function clickByTextJs(text: string): string {
     `(function(){var t=${t};` +
     `var els=Array.prototype.slice.call(document.querySelectorAll('${CLICK_CANDIDATES}'));` +
     NAME_JS +
-    `var m=pick(els,t);` +
+    `var m=pick(els,t)||pick(Array.prototype.slice.call(document.querySelectorAll('${CLICK_FALLBACK_CANDIDATES}')),t);` +
     `if(!m)return 'NOTFOUND';` +
     CLICK_TAIL_JS +
     `})()`
@@ -238,13 +264,14 @@ const FOCUS_STATE_JS =
 // skip.
 const FOCUS_TAIL_JS =
   HITTABLE_JS +
+  UNREACHABLE_JS +
   `var r=m.getBoundingClientRect();` +
   `if(r.top<0||r.bottom>window.innerHeight){m.scrollIntoView({block:'center',behavior:'instant'});r=m.getBoundingClientRect();}` +
   `var b={x:Math.round(r.x),y:Math.round(r.y),w:Math.round(r.width),h:Math.round(r.height)};` +
   `m.focus();m.click();m.focus();` +
   FOCUS_STATE_JS +
   `b.f=ok?1:0;` +
-  `if(!ok){b.hit=hittable(m,m.getBoundingClientRect())?1:0;}` +
+  `if(!ok){b.hit=hittable(m,m.getBoundingClientRect())?1:0;if(!b.hit)b.why=unreachable(m);}` +
   `return JSON.stringify(b);`;
 
 export function focusFieldByTextJs(text: string): string {

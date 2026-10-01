@@ -20,6 +20,7 @@
 import {
   BOX_CANDIDATES,
   CLICK_CANDIDATES,
+  CLICK_FALLBACK_CANDIDATES,
   FIELD_CANDIDATES,
   NAME_JS,
   SCROLL_CANDIDATES,
@@ -249,6 +250,9 @@ export function probeJs(kind: "selector" | "text", value: string, action: string
     `(function(){${desc}${NAME_JS}` +
     `var els=Array.prototype.slice.call(document.querySelectorAll('${set}'));` +
     `var m=pick(els,${v});` +
+    (action === "click"
+      ? `if(!m)m=pick(Array.prototype.slice.call(document.querySelectorAll('${CLICK_FALLBACK_CANDIDATES}')),${v});`
+      : "") +
     `var exact=0;for(var i=0;i<els.length;i++){if(names(els[i]).indexOf(${v})!==-1)exact++;}` +
     `var how=m?(names(m).indexOf(${v})!==-1?'exact':'substring'):'none';` +
     // How much of the pick's own (shortest containing) name the value covers.
@@ -492,10 +496,16 @@ export async function precheckPlan(
       continue;
     }
     if (p.first && (p.first.w === 0 || p.first.h === 0)) {
+      // graded on the page as loaded: after a step that changes the page,
+      // no size usually means "hidden until then" (a later step of a form),
+      // which is fine — only a target the page has to show at load is certain
+      // to have nowhere to land
       issues.push({
         severity: "warn",
         path,
-        message: `${name}: resolves to a zero-size element — the cursor has nowhere real to land`,
+        message: t.cold
+          ? `${name}: resolves to a zero-size element — the cursor has nowhere real to land`
+          : `${name}: has no size in the page as loaded (hidden until an earlier step shows it?) — fine if one does; if none does, the step lands on nothing`,
       });
     }
   }
