@@ -224,9 +224,14 @@ needs from the interface decides how to use it:
   const from = card.stageBox();                                     // where it is now
   ```
 
-`screen.doc` and `screen.$("e16")` reach into the saved page for anything
-else. Every open screen follows the film's clock; `close()` the ones a film
-is done with.
+A lifted part is its own copy of the page: what you typed or switched on the
+page, do on the copy too, and it leaves the page seamlessly — start it at the
+page's `stageBox("e16")` and hide the original there (`set(t, "e16", { at,
+style: { visibility: "hidden" } })`). `openScreen` warns on the console when
+a part is not where it was captured (a saved screen that does not reproduce
+it lifts as nothing or the wrong thing). `screen.doc` and `screen.$("e16")`
+reach into the saved page for anything else. Every open screen follows the
+film's clock; `close()` the ones a film is done with.
 
 ## Numbers that are facts, not taste
 
