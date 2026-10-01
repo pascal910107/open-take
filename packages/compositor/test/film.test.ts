@@ -626,11 +626,27 @@ window.seen = () => [window.reads.join(" "), window.first, window.refused, ms(w)
   window.before0, ms(y), window.loaded, ms(z), ms(sv)].join();
 </script></body></html>`,
   );
+  // a film that draws itself gives a video a new source the first time it
+  // draws 0.5 s or later, and sets it to how far past 0.5 s that is
+  await writeFile(
+    join(page, "drawn.html"),
+    `<!doctype html><html><body><video id="v" src="clip.webm" autoplay muted></video><script>
+window.__film = { duration: 2 };
+const v = document.getElementById("v");
+window.__render = (t) => {
+  if (t >= 0.5 && !v.src.endsWith("?b")) {
+    v.src = "clip.webm?b";
+    v.currentTime = t - 0.5;
+  }
+};
+window.seen = () => String(Math.round(v.currentTime * 1000));
+</script></body></html>`,
+  );
   const server = await serveDirectory(page);
-  const seen = async (times: number[]) => {
+  const seen = async (times: number[], name = "index.html") => {
     const b = await launchHtmlBrowser({
       chromePath: chrome!,
-      url: `${server.url}/index.html`,
+      url: `${server.url}/${name}`,
       width: 64,
       height: 64,
       initScript: filmClockSource({ seed: 3, epochMs: 0 }),
@@ -639,7 +655,7 @@ window.seen = () => [window.reads.join(" "), window.first, window.refused, ms(w)
     try {
       await b.evaluate("window.__ot.prepare()");
       // polled from here: the page's own timers wait on the film clock
-      for (let i = 0; i < 300; i++) {
+      for (let i = 0; i < 300 && name === "index.html"; i++) {
         if (await b.evaluate<boolean>("document.getElementById('z').readyState >= 1")) break;
         await new Promise((ok) => setTimeout(ok, 10));
       }
@@ -653,6 +669,8 @@ window.seen = () => [window.reads.join(" "), window.first, window.refused, ms(w)
     const expected = "300 300 400,1,true,1600,600,0,600,0,0,300";
     assert.equal(await seen([0.6]), expected, "straight there");
     assert.equal(await seen([0.2, 0.35, 0.45, 0.6]), expected, "in steps");
+    assert.equal(await seen([1], "drawn.html"), "500", "a new source, then a time: straight there");
+    assert.equal(await seen([0.75, 1], "drawn.html"), "500", "and in steps");
   } finally {
     await server.close();
   }

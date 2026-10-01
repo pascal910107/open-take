@@ -123,10 +123,6 @@ function installFilmClock(opts: FilmClockOptions): void {
   let shown = 0;
   const noteInserted = (records: MutationRecord[]) => {
     for (const r of records) {
-      if (r.type === "attributes") {
-        if (r.target instanceof HTMLMediaElement) startOver(r.target, r.oldValue === null);
-        continue;
-      }
       for (const n of Array.from(r.addedNodes)) {
         if (!(n instanceof Element)) continue;
         const els = Array.from(n.querySelectorAll("iframe,video,img"));
@@ -141,13 +137,7 @@ function installFilmClock(opts: FilmClockOptions): void {
     }
   };
   const watcher = new MutationObserver(noteInserted);
-  watcher.observe(document, {
-    childList: true,
-    subtree: true,
-    attributes: true,
-    attributeFilter: ["src"],
-    attributeOldValue: true,
-  });
+  watcher.observe(document, { childList: true, subtree: true });
   const drain = () => noteInserted(watcher.takeRecords());
 
   // an error in the page's own callback fails the render, named, instead of
@@ -494,6 +484,32 @@ function installFilmClock(opts: FilmClockOptions): void {
   HTMLMediaElement.prototype.load = function (this: HTMLMediaElement) {
     startOver(this, this.networkState === HTMLMediaElement.NETWORK_EMPTY);
     return realLoad.call(this);
+  };
+  // a new source loads it again too — at once, so what the page sets on the
+  // video right after applies to the new one
+  const source = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "src")!;
+  Object.defineProperty(HTMLMediaElement.prototype, "src", {
+    ...source,
+    set(this: HTMLMediaElement, v: string) {
+      startOver(this, !this.hasAttribute("src"));
+      source.set!.call(this, v);
+    },
+  });
+  const realSetAttribute = Element.prototype.setAttribute;
+  Element.prototype.setAttribute = function (this: Element, name: string, value: string) {
+    if (this instanceof HTMLMediaElement && name.toLowerCase() === "src")
+      startOver(this, !this.hasAttribute("src"));
+    return realSetAttribute.call(this, name, value);
+  };
+  const realRemoveAttribute = Element.prototype.removeAttribute;
+  Element.prototype.removeAttribute = function (this: Element, name: string) {
+    if (
+      this instanceof HTMLMediaElement &&
+      name.toLowerCase() === "src" &&
+      this.hasAttribute("src")
+    )
+      startOver(this, false);
+    return realRemoveAttribute.call(this, name);
   };
   /** when a video that plays by itself started: where it was put on the page */
   const autoBorn = (el: HTMLMediaElement) =>
