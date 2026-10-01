@@ -116,7 +116,9 @@ be recordings from the palette; synthesized imitations of them read as fake.
   `takes/x.take/states/s3/state.html` is a self-contained copy of the page as
   it was (scripts inert). Put it in an `<iframe>` and it is the real UI, sharp
   at any scale; same-origin, so your page can reach into
-  `iframe.contentDocument` to hide, restyle or animate single elements.
+  `iframe.contentDocument` to hide, restyle or animate single elements — what
+  moves inside a frame, your page moves (a frame runs its own timers and
+  animation frames only where it is put on the page).
   `npx open-take states takes/x.mp4 --state s3 --json` outlines it — its
   regions and the parts worth naming, each with an id and a box —
   and `states/s3/index.json` beside the saved page lists every element.
