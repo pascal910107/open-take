@@ -64,8 +64,18 @@ function installFilmClock(opts: FilmClockOptions): void {
   const realPause = HTMLMediaElement.prototype.pause;
   const OPAQUE_PX = 12; // = OPAQUE_MOTION_PX (the body can't see module scope)
   const STEP_MS = 1000 / 60;
+  const MAX_JUMP_MS = 10_000;
 
-  let now = 0; // film time, ms
+  let now = 0; // the page's clock, ms
+  // the timers' own clock: equal to `now`, except while a __render holds its
+  // instant — then timers still run in due order and schedule from their own
+  // due time (a timer set inside a timer lands after the earlier ones)
+  let holding = false;
+  let timerNow = 0;
+  const schedNow = () => (holding ? timerNow : now);
+  // film time 0 is where the page became ready: a ready promise that waits on
+  // a timer advances the page's clock before the film starts
+  let base = 0;
   let mode: "render" | "clock" = "clock";
   // a frame inside the film (an <iframe> of a saved screen, say) starts on the
   // film's clock where the page that holds it is, and follows it from there
@@ -103,6 +113,13 @@ function installFilmClock(opts: FilmClockOptions): void {
 
   // --- random: seeded (mulberry32) -----------------------------------------
   let seed = opts.seed >>> 0;
+  /** a page that draws any moment on request draws each moment with the same
+   *  numbers, whichever worker draws it and in whatever order */
+  const reseed = (tSec: number) => {
+    let h = (opts.seed ^ Math.round(tSec * 1e6)) >>> 0;
+    h = Math.imul(h ^ (h >>> 16), 0x45d9f3b) >>> 0;
+    seed = (h ^ (h >>> 16)) >>> 0;
+  };
   Math.random = () => {
     seed = (seed + 0x6d2b79f5) >>> 0;
     let t = seed;
@@ -130,13 +147,13 @@ function installFilmClock(opts: FilmClockOptions): void {
   let nextTimer = 1;
   w.setTimeout = (fn: unknown, delay?: number, ...args: unknown[]) => {
     const id = nextTimer++;
-    timers.set(id, { due: now + Math.max(0, Number(delay) || 0), fn, args, every: 0 });
+    timers.set(id, { due: schedNow() + Math.max(0, Number(delay) || 0), fn, args, every: 0 });
     return id;
   };
   w.setInterval = (fn: unknown, delay?: number, ...args: unknown[]) => {
     const id = nextTimer++;
     const every = Math.max(1, Number(delay) || 0);
-    timers.set(id, { due: now + every, fn, args, every });
+    timers.set(id, { due: schedNow() + every, fn, args, every });
     return id;
   };
   w.clearTimeout = w.clearInterval = (id: number) => {
@@ -157,7 +174,10 @@ function installFilmClock(opts: FilmClockOptions): void {
     frames.delete(id);
   };
 
-  function runTimers(until: number): void {
+  /** run every timer due by `until`, in due order. The clock moves to each
+   *  timer's time — unless `hold`: a __render draws one instant, so the timers
+   *  it waits on run at that instant (a page reading the clock reads t). */
+  function runTimers(until: number, hold = false): void {
     for (let guard = 0; guard < 100_000; guard++) {
       let pickId = 0;
       let pick: Timer | undefined;
@@ -167,7 +187,8 @@ function installFilmClock(opts: FilmClockOptions): void {
           pickId = id;
         }
       if (!pick) return;
-      now = Math.max(now, pick.due);
+      if (hold) timerNow = Math.max(timerNow, pick.due);
+      else now = Math.max(now, pick.due);
       if (pick.every) pick.due += pick.every;
       else timers.delete(pickId);
       try {
@@ -204,7 +225,7 @@ function installFilmClock(opts: FilmClockOptions): void {
       if (b === undefined) {
         // a render-mode page jumps around in time: its animations all run
         // from film time 0; a clock-mode one started when it was first seen
-        b = mode === "render" ? 0 : now;
+        b = mode === "render" ? base : now;
         born.set(a, b);
       }
       if (a.playState !== "paused") a.pause();
@@ -214,7 +235,7 @@ function installFilmClock(opts: FilmClockOptions): void {
       if (svg.ownerSVGElement) continue;
       if (!svg.querySelector("animate,animateTransform,animateMotion,set")) continue;
       svg.pauseAnimations();
-      svg.setCurrentTime(now / 1000);
+      svg.setCurrentTime((now - base) / 1000);
     }
   }
 
@@ -268,7 +289,7 @@ function installFilmClock(opts: FilmClockOptions): void {
         el.muted = true;
         if (el.autoplay && !m.playing) {
           m.playing = true;
-          m.born = mode === "render" ? 0 : now;
+          m.born = mode === "render" ? base : now;
         }
         el.autoplay = false;
         realPause.call(el);
@@ -317,7 +338,7 @@ function installFilmClock(opts: FilmClockOptions): void {
         try {
           // biome-ignore lint/suspicious/noExplicitAny: the frame's own film clock
           const inner = (f.contentWindow as any)?.__ot;
-          if (inner) await inner.follow(now / 1000);
+          if (inner) await inner.follow((now - base) / 1000);
         } catch {
           /* navigated cross-origin meanwhile */
         }
@@ -327,7 +348,7 @@ function installFilmClock(opts: FilmClockOptions): void {
 
   /** a frame inside the film: go to the holding page's time */
   async function follow(tSec: number): Promise<void> {
-    const t = tSec * 1000;
+    const t = base + tSec * 1000;
     if (t >= now) advance(t);
     else {
       now = t;
@@ -354,9 +375,15 @@ function installFilmClock(opts: FilmClockOptions): void {
     }
   }
 
-  /** await a promise the page returned while its timers and frames still run
-   *  (a __render that waits for a frame or a timeout must not hang) */
-  async function pump<T>(p: PromiseLike<T>): Promise<T> {
+  /** await a promise the page returned while its timers and frames still run.
+   *  A promise that waits on a timer (a __render that waits a few ms, a ready
+   *  promise behind a setTimeout) would never settle on a clock that only moves
+   *  when asked: when real waiting does not settle it, the next timer due runs
+   *  — at most MAX_JUMP_MS past where the wait began. Before the film starts
+   *  (`hold` false: the ready wait) the clock moves with it, and film time 0
+   *  is where the page became ready; inside a __render (`hold` true) the clock
+   *  stays at the instant being drawn. */
+  async function pump<T>(p: PromiseLike<T>, hold = false): Promise<T> {
     let settled = false;
     let value: T | undefined;
     let error: unknown;
@@ -372,22 +399,36 @@ function installFilmClock(opts: FilmClockOptions): void {
         error = e;
       },
     );
-    for (let i = 0; !settled; i++) {
-      if (i > 3000) throw new Error("film clock: the page's promise did not settle within ~45 s");
-      runTimers(now);
-      runFrames();
-      await new Promise((ok) => realSetTimeout(ok, i < 20 ? 0 : 15));
+    const start = now;
+    if (hold) {
+      holding = true;
+      timerNow = now;
+    }
+    try {
+      for (let i = 0; !settled; i++) {
+        if (i > 3000) throw new Error("film clock: the page's promise did not settle within ~45 s");
+        runTimers(now, hold);
+        runFrames();
+        await new Promise((ok) => realSetTimeout(ok, i < 20 ? 0 : 15));
+        if (settled || i < 3) continue;
+        let due = Number.POSITIVE_INFINITY;
+        for (const t of timers.values()) due = Math.min(due, t.due);
+        if (due !== Number.POSITIVE_INFINITY && due - start <= MAX_JUMP_MS) runTimers(due, hold);
+      }
+    } finally {
+      holding = false;
     }
     if (failed) throw error;
     return value as T;
   }
 
   async function seek(tSec: number): Promise<void> {
-    const t = tSec * 1000;
+    const t = base + tSec * 1000;
     if (mode === "render") {
       now = t;
+      reseed(tSec);
       const r = w.__render(tSec);
-      if (r && typeof r.then === "function") await pump(r);
+      if (r && typeof r.then === "function") await pump(r, true);
       drain();
       syncAnimations();
     } else advance(t);
@@ -548,8 +589,9 @@ function installFilmClock(opts: FilmClockOptions): void {
     const film = w.__film ?? {};
     const ready = film.ready ?? w.__ready;
     if (ready) await pump(typeof ready === "function" ? ready() : ready);
+    base = now;
     mode = typeof w.__render === "function" ? "render" : "clock";
-    if (mode === "clock") advance(0);
+    if (mode === "clock") advance(base);
     await settle();
     const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null);
     return {
@@ -573,7 +615,7 @@ function installFilmClock(opts: FilmClockOptions): void {
     seek,
     motion,
     follow,
-    now: () => now / 1000,
-    bornOf: (el: Element | null) => bornOf(el) / 1000,
+    now: () => (now - base) / 1000,
+    bornOf: (el: Element | null) => (bornOf(el) - base) / 1000,
   };
 }

@@ -149,6 +149,9 @@ export const INSTRUMENT_NOTES: Record<DrumName | NoteName, string> = {
 
 type Bus = { L: Float32Array; R: Float32Array };
 
+/** a score longer than this is a mistake (an hour of 48 kHz stereo is 1.4 GB of floats) */
+const MAX_SCORE_S = 3600;
+
 // a palette entry's recordings are decoded once per process
 const libraries = new Map<string, ReturnType<typeof paletteLibrary>>();
 
@@ -166,7 +169,11 @@ const NOTE_NAMES: Record<string, number> = { c: 0, d: 2, e: 4, f: 5, g: 7, a: 9,
 
 /** "C4" → 60, "F#3" → 54, "Bb2" → 46; numbers are MIDI already. */
 export function midiOf(p: string | number): number {
-  if (typeof p === "number") return p;
+  if (typeof p === "number") {
+    if (!(Number.isFinite(p) && p >= 0 && p <= 127))
+      throw new Error(`pitch ${p}: a MIDI number is 0 … 127`);
+    return p;
+  }
   const m = /^([a-gA-G])(#|b|♯|♭)?(-?\d)$/.exec(p.trim());
   if (!m)
     throw new Error(`pitch ${JSON.stringify(p)}: write a note name like "F#3" or a MIDI number`);
@@ -179,18 +186,56 @@ export function validateScore(value: unknown): string[] {
   const s = value as ScoreSheet;
   if (!s || typeof s !== "object") return ["a score is an object"];
   if (s.version !== 1) out.push("version: must be 1");
-  if (!(typeof s.durationS === "number" && s.durationS > 0)) out.push("durationS: seconds > 0");
-  if (!Array.isArray(s.tracks) || !s.tracks.length) out.push("tracks: at least one");
+  if (
+    !(
+      typeof s.durationS === "number" &&
+      Number.isFinite(s.durationS) &&
+      s.durationS > 0 &&
+      s.durationS <= MAX_SCORE_S
+    )
+  )
+    out.push(`durationS: seconds, more than 0 and at most ${MAX_SCORE_S}`);
+  const finite = (v: unknown) => typeof v === "number" && Number.isFinite(v);
+  if (s.master != null && s.master !== false) {
+    if (typeof s.master !== "object") out.push("master: an object, or false");
+    else {
+      const m = s.master;
+      if (m.lufs != null && !(finite(m.lufs) && m.lufs >= -60 && m.lufs <= 0))
+        out.push("master.lufs: a loudness in LUFS, -60 … 0");
+      if (
+        m.truePeakDb != null &&
+        !(finite(m.truePeakDb) && m.truePeakDb >= -20 && m.truePeakDb <= 0)
+      )
+        out.push("master.truePeakDb: dBTP, -20 … 0");
+    }
+  }
+  if (!Array.isArray(s.tracks) || !s.tracks.length) {
+    out.push("tracks: a list of at least one track");
+    return out;
+  }
   const names = new Set<string>();
-  (s.tracks ?? []).forEach((t, ti) => {
+  s.tracks.forEach((t, ti) => {
     const at = `tracks[${ti}]`;
+    if (!t || typeof t !== "object") {
+      out.push(`${at}: a track object`);
+      return;
+    }
     if (!t.name) out.push(`${at}.name: required`);
     else if (names.has(t.name)) out.push(`${at}.name: "${t.name}" is used twice`);
     names.add(t.name);
-    if (!Array.isArray(t.events)) out.push(`${at}.events: a list`);
-    (t.events ?? []).forEach((e, ei) => {
+    if (t.gainDb != null && !finite(t.gainDb)) out.push(`${at}.gainDb: a number`);
+    if (!Array.isArray(t.events)) {
+      out.push(`${at}.events: a list`);
+      return;
+    }
+    t.events.forEach((e, ei) => {
       const where = `${at}.events[${ei}]`;
-      if (!(typeof e.at === "number" && e.at >= 0)) out.push(`${where}.at: seconds ≥ 0`);
+      if (!e || typeof e !== "object") {
+        out.push(`${where}: an event object`);
+        return;
+      }
+      if (!(finite(e.at) && e.at >= 0)) out.push(`${where}.at: seconds ≥ 0`);
+      if (e.gainDb != null && !finite(e.gainDb)) out.push(`${where}.gainDb: a number`);
       const kinds = ["sound", "file", "drum", "note"].filter(
         (k) => (e as Record<string, unknown>)[k] != null,
       );
@@ -218,11 +263,26 @@ export function validateScore(value: unknown): string[] {
             out.push(`${where}.${(err as Error).message}`);
           }
       }
-      if (e.pan != null && !(e.pan >= -1 && e.pan <= 1)) out.push(`${where}.pan: -1 … 1`);
-      if (e.dur != null && !(e.dur > 0)) out.push(`${where}.dur: seconds > 0`);
-      if (e.rate != null && !(e.rate > 0)) out.push(`${where}.rate: > 0`);
+      if (e.pan != null && !(finite(e.pan) && e.pan >= -1 && e.pan <= 1))
+        out.push(`${where}.pan: -1 … 1`);
+      if (e.dur != null && !(finite(e.dur) && e.dur > 0)) out.push(`${where}.dur: seconds > 0`);
+      if (e.rate != null && !(finite(e.rate) && e.rate > 0)) out.push(`${where}.rate: > 0`);
+      if (e.seed != null && !finite(e.seed)) out.push(`${where}.seed: a number`);
+      if (Array.isArray(e.pitch) && !e.pitch.length) out.push(`${where}.pitch: at least one note`);
     });
-    if (t.duck && !(s.tracks ?? []).some((o) => o.name === t.duck!.under))
+    if (
+      t.duck &&
+      (!(
+        t.duck.depthDb == null ||
+        (finite(t.duck.depthDb) && t.duck.depthDb >= 0 && t.duck.depthDb <= 60)
+      ) ||
+        !(
+          t.duck.releaseS == null ||
+          (finite(t.duck.releaseS) && t.duck.releaseS > 0 && t.duck.releaseS <= 5)
+        ))
+    )
+      out.push(`${at}.duck: depthDb 0 … 60, releaseS 0 … 5 s`);
+    if (t.duck && !s.tracks.some((o) => o?.name === t.duck!.under))
       out.push(`${at}.duck.under: no track named "${t.duck.under}"`);
   });
   return out;
@@ -391,13 +451,56 @@ function play(
       addInto(bus.R, mono, at, gr);
     } else if (note === "pad" || note === "airy-pad" || note === "warm-pad") {
       const kind: PadKind = note === "airy-pad" ? "airy" : note === "warm-pad" ? "warm" : "pulse";
-      padChord(bus.L, bus.R, at, len, pitches, g, seed, Math.min(0.35, len / 3), 0.7, kind);
-    } else if (note === "keys") keysChord(bus.L, bus.R, at, pitches, g, seed, len);
-    else if (note === "mallet") for (const p of pitches) malletNote(bus.L, bus.R, at, p, g, pan);
-    else if (note === "pluck") for (const p of pitches) pluck(bus.L, bus.R, at, p, g, pan, seed);
+      // a chord renders into its own bus so `pan` can place it (the instrument has no pan)
+      place(bus, at, len + 1.5, pan, undefined, (L, R) =>
+        padChord(L, R, 0, len, pitches, g, seed, Math.min(0.35, len / 3), 0.7, kind),
+      );
+    } else if (note === "keys")
+      place(bus, at, len + 1.5, pan, undefined, (L, R) =>
+        keysChord(L, R, 0, pitches, g, seed, len),
+      );
+    // a mallet or a pluck rings out on its own; `dur` cuts it short (with a short fade)
+    else if (note === "mallet")
+      place(bus, at, 3, 0, dur, (L, R) => {
+        for (const p of pitches) malletNote(L, R, 0, p, g, pan);
+      });
+    else if (note === "pluck")
+      place(bus, at, 3, 0, dur, (L, R) => {
+        for (const p of pitches) pluck(L, R, 0, p, g, pan, seed);
+      });
     else if (note === "bell") for (const p of pitches) bellNote(bus.L, bus.R, at, p, g, pan, len);
     else if (note === "rise") add(bus, pitchRise(seed, len, pitches), at, db, pan);
   }
+}
+
+/** Render `draw` into a stereo bus of `spanS` seconds, then add it to `bus` at
+ *  sample `at`: balanced by `pan`, cut at `cutS` seconds with a 20 ms fade. */
+function place(
+  bus: Bus,
+  at: number,
+  spanS: number,
+  pan: number,
+  cutS: number | undefined,
+  draw: (L: Float32Array, R: Float32Array) => void,
+): void {
+  const n = Math.round(spanS * SR);
+  const L = new Float32Array(n);
+  const R = new Float32Array(n);
+  draw(L, R);
+  if (cutS !== undefined) {
+    const end = Math.min(n, Math.round(cutS * SR));
+    const fade = Math.min(end, Math.round(0.02 * SR));
+    for (let i = 0; i < fade; i++) {
+      const k = 1 - i / fade;
+      L[end - fade + i]! *= k;
+      R[end - fade + i]! *= k;
+    }
+    L.fill(0, end);
+    R.fill(0, end);
+  }
+  const [gl, gr] = pan ? balance(pan) : [1, 1];
+  addInto(bus.L, L, at, gl);
+  addInto(bus.R, R, at, gr);
 }
 
 /** constant-power pan gains, unity at centre */

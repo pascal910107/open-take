@@ -84,3 +84,84 @@ test("master: false leaves every level as written", () => {
   assert.equal(raw.masterGainDb, 0);
   assert.equal(raw.after.integrated, raw.before.integrated);
 });
+
+test("a malformed score is reported, never thrown", () => {
+  assert.doesNotThrow(() => validateScore({ version: 1, durationS: 2, tracks: {} }));
+  assert.match(
+    validateScore({ version: 1, durationS: 2, tracks: {} }).join("\n"),
+    /tracks: a list/,
+  );
+  assert.match(
+    validateScore({
+      version: 1,
+      durationS: Number.POSITIVE_INFINITY,
+      tracks: [{ name: "a", events: [] }],
+    }).join("\n"),
+    /durationS/,
+  );
+  assert.match(
+    validateScore({ version: 1, durationS: 2, tracks: [{ name: "a", events: {} }] }).join("\n"),
+    /events: a list/,
+  );
+  assert.match(
+    validateScore({ version: 1, durationS: 2, tracks: [{ name: "a", events: [null] }] }).join("\n"),
+    /an event object/,
+  );
+});
+
+test("pan places a pad; dur cuts a mallet short", () => {
+  const energy = (x: Float32Array, from = 0, to = x.length) => {
+    let e = 0;
+    for (let i = from; i < to; i++) e += x[i]! * x[i]!;
+    return e;
+  };
+  const left = renderScore(
+    {
+      version: 1,
+      durationS: 2,
+      master: false,
+      tracks: [
+        { name: "p", events: [{ at: 0, note: "pad", pitch: ["D3", "A3"], dur: 1.5, pan: -1 }] },
+      ],
+    },
+    noFiles,
+  );
+  const [L, R] = left.pcm.channels as [Float32Array, Float32Array];
+  assert.ok(energy(L) > 20 * energy(R), "a pad panned hard left is in the left channel");
+  const cut = renderScore(
+    {
+      version: 1,
+      durationS: 2,
+      master: false,
+      tracks: [{ name: "m", events: [{ at: 0, note: "mallet", pitch: "A5", dur: 0.2 }] }],
+    },
+    noFiles,
+  );
+  const m = cut.pcm.channels[0]!;
+  assert.ok(energy(m, 0, 9600) > 0, "the mallet sounds");
+  assert.equal(energy(m, Math.round(0.25 * 48000)), 0, "and is silent after its 0.2 s");
+});
+
+test("numbers that would make NaN audio are refused before rendering", () => {
+  const bad = (extra: object, events: object[] = [{ at: 0, note: "bell", pitch: "A4" }]) =>
+    validateScore({ version: 1, durationS: 1, tracks: [{ name: "t", events }], ...extra }).join(
+      "\n",
+    );
+  assert.match(bad({}, [{ at: 0, note: "bell", pitch: Number.POSITIVE_INFINITY }]), /MIDI number/);
+  assert.match(bad({}, [{ at: 0, note: "pad", pitch: [] }]), /at least one note/);
+  assert.match(bad({ master: { lufs: "bad" } }), /master\.lufs/);
+  assert.match(bad({ master: { truePeakDb: 3 } }), /master\.truePeakDb/);
+  assert.throws(
+    () =>
+      renderScore(
+        {
+          version: 1,
+          durationS: 1,
+          master: { lufs: Number.NaN },
+          tracks: [{ name: "t", events: [] }],
+        },
+        noFiles,
+      ),
+    /master\.lufs/,
+  );
+});

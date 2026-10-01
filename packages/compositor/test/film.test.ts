@@ -10,6 +10,7 @@ import { after, before, test } from "node:test";
 import { promisify } from "node:util";
 import { resolveFfmpeg, resolveFfprobe } from "../src/ffmpeg";
 import { findClicks, motionFindings } from "../src/film/check";
+import { filmClockSource } from "../src/film/clock";
 import {
   balancedSlices,
   filmStills,
@@ -17,6 +18,8 @@ import {
   samplesFor,
   sampleTimes,
 } from "../src/film/render";
+import { launchHtmlBrowser } from "../src/html/cdp";
+import { serveDirectory } from "../src/html/server";
 import { findChrome } from "./fixtures/find-chrome";
 
 const exec = promisify(execFile);
@@ -310,6 +313,216 @@ window.__render = (t) => { document.body.style.background = 'rgb(' + Math.round(
     join(dir, "crash.mp4"),
   ]);
   assert.equal(Number(stdout.trim()), 120, "every frame is in the film once");
+});
+
+test("a page whose promises wait on timers still renders: film time starts when it is ready", {
+  skip,
+}, async () => {
+  const page = join(dir, "timers");
+  await exec("mkdir", ["-p", page]);
+  // ready waits 200 ms on a timer; __render waits 30 ms on a timer before it paints
+  await writeFile(
+    join(page, "index.html"),
+    `<!doctype html><html><head><style>body{margin:0;width:320px;height:180px;background:#000}</style></head><body>
+<script>
+window.__film = { duration: 1, width: 320, height: 180, ready: new Promise((r) => setTimeout(r, 200)) };
+window.__render = async (t) => {
+  await new Promise((r) => setTimeout(r, 30));
+  document.body.style.background = t < 0.5 ? 'rgb(255,0,0)' : 'rgb(0,0,255)';
+};
+</script></body></html>`,
+  );
+  const files = await filmStills({
+    page,
+    chromePath: chrome!,
+    at: [0.25, 0.75],
+    outDir: join(dir, "timer-stills"),
+    blur: false,
+  });
+  const a = await rgb(files[0]!, 320, 180);
+  const b = await rgb(files[1]!, 320, 180);
+  assert.ok(a[0]! > 200 && a[2]! < 50, `0.25 s is red (${a[0]},${a[1]},${a[2]})`);
+  assert.ok(b[2]! > 200 && b[0]! < 50, `0.75 s is blue (${b[0]},${b[1]},${b[2]})`);
+});
+
+test("a __render page draws each frame with the same random numbers, in any order", {
+  skip,
+}, async () => {
+  const page = join(dir, "random");
+  await exec("mkdir", ["-p", page]);
+  await writeFile(
+    join(page, "index.html"),
+    `<!doctype html><html><head><style>body{margin:0;width:320px;height:180px}</style></head><body>
+<script>
+window.__film = { duration: 2, width: 320, height: 180 };
+window.__render = (t) => { const g = Math.round(Math.random() * 255); document.body.style.background = 'rgb(' + g + ',' + g + ',' + g + ')'; };
+</script></body></html>`,
+  );
+  const one = await filmStills({
+    page,
+    chromePath: chrome!,
+    at: [0.5, 1.5],
+    outDir: join(dir, "random-a"),
+    blur: false,
+  });
+  // the other way round, with another moment drawn in between
+  const two = await filmStills({
+    page,
+    chromePath: chrome!,
+    at: [1.5, 0.9, 0.5],
+    outDir: join(dir, "random-b"),
+    blur: false,
+  });
+  const grey = async (f: string) => (await rgb(f, 320, 180))[0]!;
+  assert.equal(await grey(one[0]!), await grey(two.find((f) => f.endsWith("t000.500.png"))!));
+  assert.equal(await grey(one[1]!), await grey(two.find((f) => f.endsWith("t001.500.png"))!));
+});
+
+test("seeking backwards and in any order draws the same frame; CSS and SVG agree after a timed ready", {
+  skip,
+}, async () => {
+  const page = join(dir, "order");
+  await exec("mkdir", ["-p", page]);
+  // a __render page whose colour comes from Math.random, plus (in a second
+  // page) a CSS and an SVG animation started behind a 200 ms ready timer
+  await writeFile(
+    join(page, "random.html"),
+    `<!doctype html><html><head><style>body{margin:0;width:64px;height:64px}</style></head><body><script>
+window.__film = { duration: 2 };
+window.__render = (t) => { const g = Math.round(Math.random() * 255); document.body.style.background = 'rgb(' + g + ',' + g + ',' + g + ')'; };
+</script></body></html>`,
+  );
+  await writeFile(
+    join(page, "sync.html"),
+    `<!doctype html><html><head><style>body{margin:0;width:400px;height:100px;background:#000}
+#c{position:absolute;top:0;left:0;width:20px;height:40px;background:#f00;animation:m 1s linear forwards}
+@keyframes m{from{transform:translateX(0)}to{transform:translateX(300px)}}</style></head><body>
+<div id="c"></div>
+<svg width="400" height="100" style="position:absolute;top:0;left:0"><rect x="0" y="50" width="20" height="40" fill="#0f0"><animate attributeName="x" from="0" to="300" dur="1s" fill="freeze"/></rect></svg>
+<script>window.__film = { duration: 1, ready: new Promise((r) => setTimeout(r, 200)) };</script></body></html>`,
+  );
+  const server = await serveDirectory(page);
+  const open = (name: string, w: number, h: number) =>
+    launchHtmlBrowser({
+      chromePath: chrome!,
+      url: `${server.url}/${name}`,
+      width: w,
+      height: h,
+      initScript: filmClockSource({ seed: 7, epochMs: 0 }),
+    });
+  const pixel = async (b: Awaited<ReturnType<typeof open>>, t: number) => {
+    await b.evaluate(`window.__ot.seek(${t})`);
+    return b.evaluate<string>(`getComputedStyle(document.body).backgroundColor`);
+  };
+  const a = await open("random.html", 64, 64);
+  const b = await open("random.html", 64, 64);
+  const c = await open("sync.html", 400, 100);
+  try {
+    await a.evaluate("window.__ot.prepare()");
+    await b.evaluate("window.__ot.prepare()");
+    const late = await pixel(a, 1.5);
+    await pixel(a, 0.5);
+    assert.equal(await pixel(a, 1.5), late, "the same frame after seeking back and forth");
+    assert.equal(await pixel(b, 1.5), late, "and in another browser that never drew anything else");
+    await c.evaluate("window.__ot.prepare()");
+    await c.evaluate("window.__ot.seek(0.5)");
+    const xs = await c.evaluate<number[]>(
+      "[document.getElementById('c').getBoundingClientRect().left, document.querySelector('rect').getBoundingClientRect().left]",
+    );
+    assert.ok(
+      Math.abs(xs[0]! - 150) < 2 && Math.abs(xs[1]! - 150) < 2,
+      `CSS and SVG both at 150 px at 0.5 s: ${xs}`,
+    );
+  } finally {
+    await Promise.all([a.close(), b.close(), c.close()]);
+    await server.close();
+  }
+});
+
+test("inside a __render, timers run in due order and the page still reads the instant it draws", {
+  skip,
+}, async () => {
+  const page = join(dir, "nested");
+  await exec("mkdir", ["-p", page]);
+  // A waits 30 ms and then sets C to wait 30 more (due at 60); B waits 50:
+  // the order is A, B, C — and after all that waiting the clock still reads t
+  await writeFile(
+    join(page, "index.html"),
+    `<!doctype html><html><head></head><body><script>
+window.__film = { duration: 2 };
+window.__render = async (t) => {
+  const order = [];
+  await Promise.all([
+    new Promise((r) => setTimeout(() => { order.push('A'); setTimeout(() => { order.push('C'); r(); }, 30); }, 30)),
+    new Promise((r) => setTimeout(() => { order.push('B'); r(); }, 50)),
+  ]);
+  document.body.dataset.order = order.join('');
+  document.body.dataset.read = String(performance.now());
+};
+</script></body></html>`,
+  );
+  const server = await serveDirectory(page);
+  const b = await launchHtmlBrowser({
+    chromePath: chrome!,
+    url: `${server.url}/index.html`,
+    width: 64,
+    height: 64,
+    initScript: filmClockSource({ seed: 1, epochMs: 0 }),
+  });
+  try {
+    await b.evaluate("window.__ot.prepare()");
+    await b.evaluate("window.__ot.seek(1.25)");
+    const got = await b.evaluate<{ order: string; read: string }>(
+      "({ order: document.body.dataset.order, read: document.body.dataset.read })",
+    );
+    assert.equal(got.order, "ABC");
+    assert.equal(Number(got.read), 1250);
+  } finally {
+    await b.close();
+    await server.close();
+  }
+});
+
+test("one worker or three: the same film", { skip }, async () => {
+  const page = join(dir, "workers");
+  await exec("mkdir", ["-p", page]);
+  await writeFile(
+    join(page, "index.html"),
+    `<!doctype html><html><head><style>body{margin:0;width:160px;height:90px}</style></head><body><script>
+window.__film = { duration: 1, width: 160, height: 90 };
+window.__render = (t) => { const g = Math.round(Math.random() * 255); document.body.style.background = 'rgb(' + g + ',' + (255 - g) + ',90)'; };
+</script></body></html>`,
+  );
+  await renderFilm({
+    page,
+    out: join(dir, "w1.mp4"),
+    chromePath: chrome!,
+    workers: 1,
+    blur: false,
+  });
+  await renderFilm({
+    page,
+    out: join(dir, "w3.mp4"),
+    chromePath: chrome!,
+    workers: 3,
+    blur: false,
+  });
+  const ffmpeg = await resolveFfmpeg();
+  const { stderr } = await exec(ffmpeg, [
+    "-v",
+    "info",
+    "-i",
+    join(dir, "w1.mp4"),
+    "-i",
+    join(dir, "w3.mp4"),
+    "-lavfi",
+    "psnr",
+    "-f",
+    "null",
+    "-",
+  ]);
+  const min = Number(/min:([\d.inf]+)/.exec(stderr)?.[1]?.replace("inf", "99") ?? 0);
+  assert.ok(min > 35, `every frame matches across worker counts (min PSNR ${min} dB)`);
 });
 
 test("a file the page asks for that is not there fails the render by name", { skip }, async () => {
