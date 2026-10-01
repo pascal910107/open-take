@@ -268,19 +268,26 @@ test("when Chrome dies mid-render, its piece is rendered again on a fresh one", 
     `<!doctype html><html><head><style>body{margin:0;width:320px;height:180px;overflow:hidden;background:#123}</style></head><body>
 <script>
 window.__film = { duration: 4, width: 320, height: 180 };
-window.__render = (t) => { document.body.style.background = 'rgb(' + Math.round(t * 50) + ',40,80)'; };
+window.__render = (t) => {
+  // a few ms of work per frame, so the render outlasts the kill on a busy machine
+  let x = 0; for (let i = 0; i < 2e6; i++) x += Math.sqrt(i);
+  document.body.dataset.x = String(x);
+  document.body.style.background = 'rgb(' + Math.round(t * 50) + ',40,80)';
+};
 </script></body></html>`,
   );
-  // the render's Chrome: the browser process itself (it carries the debug port
-  // flag), looked up as soon as rendering starts so the kill itself is
-  // immediate — a slow lookup on a busy machine let the film finish first
+  // the render's Chrome: the browser process this test process started (it
+  // carries the debug port flag) — other test files render at the same time,
+  // with Chromes of their own — looked up as soon as rendering starts so the
+  // kill itself is immediate
   let pid: Promise<number | undefined> | undefined;
   const findChrome = async () => {
-    const { stdout } = await exec("ps", ["-axo", "pid=,command="], { maxBuffer: 1 << 24 });
-    const line = stdout
-      .split("\n")
-      .find((l) => l.includes("open-take-film-") && l.includes("--remote-debugging-port=0"));
-    return line ? Number(line.trim().split(/\s+/)[0]) : undefined;
+    const { stdout } = await exec("ps", ["-axo", "pid=,ppid=,command="], { maxBuffer: 1 << 24 });
+    for (const l of stdout.split("\n")) {
+      const [p, parent] = l.trim().split(/\s+/).map(Number);
+      if (parent === process.pid && l.includes("--remote-debugging-port=0")) return p;
+    }
+    return undefined;
   };
   let killed = false;
   const kill = () =>
