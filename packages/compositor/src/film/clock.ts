@@ -478,7 +478,10 @@ function installFilmClock(opts: FilmClockOptions): void {
     const playing = hadNothing && !!media.get(el)?.playing;
     media.delete(el);
     inserted.set(el, clock());
-    if (playing) Object.assign(mediaOf(el), { touched: true, playing: true, born: clock() });
+    // from where it got it — in a film that draws itself, from film time 0,
+    // as what plays by itself does there
+    if (playing)
+      Object.assign(mediaOf(el), { touched: true, playing: true, born: drawn() ? base : clock() });
   }
   const realLoad = HTMLMediaElement.prototype.load;
   HTMLMediaElement.prototype.load = function (this: HTMLMediaElement) {

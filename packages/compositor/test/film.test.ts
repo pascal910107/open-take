@@ -634,12 +634,13 @@ window.seen = () => [window.reads.join(" "), window.first, window.refused, ms(w)
   );
   // a film that draws itself gives a video a new source the first time it
   // draws 0.5 s or later, and sets it to how far past 0.5 s that is; and a
-  // new source to one that had its first in a <source>, which (playing by
-  // itself, in a film that draws itself) plays from film time 0 again
+  // new source to one that had its first in a <source>, and a first one to
+  // one that had none — both play by themselves, so in a film that draws
+  // itself they play from film time 0
   await writeFile(
     join(page, "drawn.html"),
     `<!doctype html><html><body><video id="v" src="clip.webm" autoplay muted></video>
-<video id="u" autoplay muted><source src="clip.webm"></video><script>
+<video id="u" autoplay muted><source src="clip.webm"></video><video id="e" autoplay muted></video><script>
 window.__film = { duration: 2 };
 const v = document.getElementById("v");
 const u = document.getElementById("u");
@@ -649,8 +650,10 @@ window.__render = (t) => {
     v.currentTime = t - 0.5;
   }
   if (t >= 0.5 && !u.src) u.src = "clip.webm?c";
+  if (t >= 0.5 && !e.src) e.src = "clip.webm?d";
 };
-window.seen = () => [v, u].map((e) => Math.round(e.currentTime * 1000)).join();
+const e = document.getElementById("e");
+window.seen = () => [v, u, e].map((x) => Math.round(x.currentTime * 1000)).join();
 </script></body></html>`,
   );
   const server = await serveDirectory(page);
@@ -680,8 +683,8 @@ window.seen = () => [v, u].map((e) => Math.round(e.currentTime * 1000)).join();
     const expected = "300 300 400,1,true,1600,600,0,600,0,0,300,600";
     assert.equal(await seen([0.6]), expected, "straight there");
     assert.equal(await seen([0.2, 0.35, 0.45, 0.6]), expected, "in steps");
-    assert.equal(await seen([1], "drawn.html"), "500,1000", "new sources: straight there");
-    assert.equal(await seen([0.75, 1], "drawn.html"), "500,1000", "and in steps");
+    assert.equal(await seen([1], "drawn.html"), "500,1000,1000", "new sources: straight there");
+    assert.equal(await seen([0.75, 1], "drawn.html"), "500,1000,1000", "and in steps");
   } finally {
     await server.close();
   }
