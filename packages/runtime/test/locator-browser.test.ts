@@ -23,6 +23,8 @@ label{display:flex;gap:8px;margin:10px}
 <button id="accept">Accept all</button>
 <label id="adult"><input type="checkbox" name="adult"> I confirm I am over 18 <small>(required by law)</small></label>
 <label id="plan"><input type="radio" name="plan" value="pro"> Pro plan</label>
+<label><input type="checkbox" name="news"> Notify me</label>
+<label><input type="checkbox" name="offers"> Notify me</label>
 <details id="alt"><summary>Use your phone instead</summary>
   <input id="phone" placeholder="0912 345 678">
 </details>
@@ -79,6 +81,9 @@ test("click by text: a label wrapping a checkbox or a radio, when no control car
     );
     assert.equal(probe.count, 1);
     assert.equal(probe.first.tag, "LABEL");
+    // and says when that name is on more than one of them
+    const twice = JSON.parse(await evaluate<string>(cdp, probeJs("text", "Notify me", "click")));
+    assert.equal(twice.exact, 2, "two labels carry the name");
   } finally {
     await browser?.close();
     server.close();

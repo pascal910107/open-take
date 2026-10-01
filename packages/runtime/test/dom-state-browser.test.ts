@@ -87,7 +87,7 @@ button{font:inherit;padding:8px 16px;border-radius:6px;border:1px solid #888;bac
 <noscript>no js</noscript>
 <main>
   <div class="row"><button id="b1">Save</button><button id="b2" aria-label="Delete row">🗑</button><a href="/docs" id="lnk">Docs</a></div>
-  <div class="row"><label for="txt">Name</label><input id="txt" value="attr"><input id="cb" type="checkbox"><select id="sel"><option>one</option><option>two</option></select></div>
+  <div class="row"><label for="txt">Name</label><input id="txt" value="attr"><input id="cb" type="checkbox"><select id="sel"><option>one</option><option>two</option></select><select id="multi" multiple><option>a</option><option>b</option><option>c</option></select></div>
   <div class="row"><canvas id="cv" width="80" height="60"></canvas>${opts.video ? '<video id="vid" src="/clip.webm" width="96" height="64" muted autoplay loop playsinline></video>' : ""}<div id="spin"></div></div>
   <div id="box"><div>scroll me</div></div>
   <p id="fade">faded in</p>
@@ -98,6 +98,7 @@ button{font:inherit;padding:8px 16px;border-radius:6px;border:1px solid #888;bac
   document.getElementById("txt").value = "typed";
   document.getElementById("cb").checked = true;
   document.getElementById("sel").selectedIndex = 1;
+  for (const i of [0, 2]) document.getElementById("multi").options[i].selected = true;
   const c = document.getElementById("cv").getContext("2d"); c.fillStyle = "#06d6a0"; c.fillRect(0, 0, 80, 60); c.fillStyle = "#000"; c.fillRect(20, 15, 40, 30);
   document.getElementById("box").scrollTop = 150;
   document.getElementById("txt").focus();
@@ -214,7 +215,7 @@ test("probe → snapshot → state.html → offline re-render matches the live p
       "checkbox recorded checked",
     );
     assert.ok(
-      p.inputs.some((i) => i.selectedIndex === 1),
+      p.inputs.some((i) => i.selected?.join() === "1"),
       "select recorded",
     );
     assert.equal(p.scrolled.length, 1);
@@ -301,6 +302,7 @@ test("probe → snapshot → state.html → offline re-render matches the live p
           value: document.getElementById('txt').value,
           checked: document.getElementById('cb').checked,
           sel: document.getElementById('sel').selectedIndex,
+          multi: Array.from(document.getElementById('multi').selectedOptions, (o) => o.textContent).join(),
           scrollTop: document.getElementById('box').scrollTop,
           tagged: document.querySelectorAll('[data-ot-id]').length,
           saveTag: document.getElementById('b1').getAttribute('data-ot-id'),
@@ -322,6 +324,7 @@ test("probe → snapshot → state.html → offline re-render matches the live p
     assert.equal(state.value, "typed");
     assert.equal(state.checked, true);
     assert.equal(state.sel, 1);
+    assert.equal(state.multi, "a,c", "every option a multiple select had chosen");
     assert.equal(state.scrollTop, 150, "scrolled container restored");
     assert.equal(state.saveTag, save.id);
     assert.equal(state.delTag, del.id);

@@ -60,9 +60,12 @@ const DOC = `<!DOCTYPE html><html><head><meta http-equiv="Content-Type" content=
 <link rel="stylesheet" crossorigin href="http://app.test/style.css" integrity="sha384-x"><meta http-equiv="refresh" content="5"><base href="http://app.test/sub/"></head>
 <body>
 <div id="root" style="background:url(/img.png)"><button onclick="go()" onmouseover="hi()">Go</button><img src="http://app.test/img.png" srcset="http://app.test/img.png 1x, http://app.test/missing.png 2x"><picture><source srcset="/nope.png 2x"><img src="http://app.test/img.png"></picture><script>alert(1)</script><span>after</span><iframe src="cid:frame-child@mhtml.blink"></iframe><div id="host"><template shadowmode="open"><b>s</b></template><i>light</i></div><img src="http://app.test/dup.png" crossorigin="anonymous"><a href="http://app.test/x">x</a></div>
-<style>.hero{background:url("/img.png")}.gone{background:url("http://app.test/gone.png")}</style>
+<svg><defs><clipPath id="clip"><rect width="9" height="9"/></clipPath><symbol id="icon"><circle r="4"/></symbol></defs><use href="#icon"></use><use href="http://app.test/icons.svg#check"></use></svg>
+<style>.hero{background:url("/img.png")}.gone{background:url("http://app.test/gone.png")}.clipped{clip-path:url(#clip)}.masked{mask:url(/icons.svg#check)}</style>
 <script type="application/json">{"a":1}</script>
 </body><link rel="stylesheet" type="text/css" href="cid:css-adopted@mhtml.blink" /></html>`;
+
+const SVG = `<svg xmlns="http://www.w3.org/2000/svg"><symbol id="check"><path d="M0 0h4v4z"/></symbol></svg>`;
 
 function archive(): string {
   return (
@@ -130,6 +133,14 @@ function archive(): string {
     ) +
     part(
       [
+        "Content-Type: image/svg+xml",
+        "Content-Transfer-Encoding: quoted-printable",
+        "Content-Location: http://app.test/icons.svg",
+      ],
+      qp(SVG),
+    ) +
+    part(
+      [
         "Content-Type: text/css",
         "Content-Transfer-Encoding: quoted-printable",
         "Content-Location: cid:css-adopted@mhtml.blink",
@@ -188,7 +199,7 @@ const probe: DomStateProbe = {
 
 test("parseMhtml: boundary, part headers, quoted-printable + base64 bodies", () => {
   const parts = parseMhtml(archive());
-  assert.equal(parts.length, 9);
+  assert.equal(parts.length, 10);
   assert.equal(parts[0]!.contentType, "text/html");
   assert.equal(parts[0]!.id, "frame-main@mhtml.blink");
   assert.equal(parts[0]!.location, "http://app.test/");
@@ -259,6 +270,13 @@ test("convertMhtml: scripts inert in place, on* gone, refs → ../assets/<sha1>.
     // a network reference the snapshot did not carry loads nothing, ever
     assert.ok(html.includes('.gone{background:url("about:blank")}'), "missing resource cut off");
     assert.ok(!html.includes("gone.png"));
+
+    // a place in the document stays as it is; a place in another file stays on its copy
+    const icons = `../assets/${sha1(Buffer.from(SVG))}.svg`;
+    assert.ok(html.includes('<use href="#icon">'), "a symbol in the document");
+    assert.ok(html.includes(`<use href="${icons}#check">`), `a symbol in a sprite file`);
+    assert.ok(html.includes(".clipped{clip-path:url(#clip)}"), "a clip path in the document");
+    assert.ok(html.includes(`.masked{mask:url(${icons}#check)}`), "a mask in a sprite file");
 
     // srcset keeps only candidates that travelled; a source with none loses the attribute
     assert.ok(

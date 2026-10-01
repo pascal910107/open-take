@@ -250,8 +250,10 @@ export function probeJs(kind: "selector" | "text", value: string, action: string
     `(function(){${desc}${NAME_JS}` +
     `var els=Array.prototype.slice.call(document.querySelectorAll('${set}'));` +
     `var m=pick(els,${v});` +
+    // when the pick is a label wrapping a checkbox, its peers are what share
+    // the name: two "Notify me" labels are as ambiguous as two buttons
     (action === "click"
-      ? `if(!m)m=pick(Array.prototype.slice.call(document.querySelectorAll('${CLICK_FALLBACK_CANDIDATES}')),${v});`
+      ? `if(!m){var fb=Array.prototype.slice.call(document.querySelectorAll('${CLICK_FALLBACK_CANDIDATES}'));m=pick(fb,${v});if(m)els=fb;}`
       : "") +
     `var exact=0;for(var i=0;i<els.length;i++){if(names(els[i]).indexOf(${v})!==-1)exact++;}` +
     `var how=m?(names(m).indexOf(${v})!==-1?'exact':'substring'):'none';` +

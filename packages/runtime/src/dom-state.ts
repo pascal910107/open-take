@@ -66,7 +66,8 @@ export type DomStateProbe = {
   elements: StateElement[];
   layers: string[];
   scrolled: { path: number[]; top: number; left: number }[];
-  inputs: { path: number[]; value?: string; checked?: boolean; selectedIndex?: number }[];
+  /** `selected`: a <select>'s chosen options, by index (one, or several when multiple) */
+  inputs: { path: number[]; value?: string; checked?: boolean; selected?: number[] }[];
   /** `box`: where it is on screen (CSS px); `blank`: its copy came out one colour */
   canvases: {
     path: number[];
@@ -236,7 +237,11 @@ const DOM_STATE_PROBE_JS = `(() => {
           if (ty === "checkbox" || ty === "radio") inputs.push({ path, checked: !!el.checked });
           else if (ty !== "file") inputs.push({ path, value: ty === "password" ? "x".repeat(el.value.length) : el.value });
         } else if (t === "textarea") inputs.push({ path, value: el.value });
-        else if (t === "select") inputs.push({ path, selectedIndex: el.selectedIndex });
+        else if (t === "select") {
+          const selected = [];
+          for (let i = 0; i < el.options.length; i++) if (el.options[i].selected) selected.push(i);
+          inputs.push({ path, selected });
+        }
         // pixels are copied only for what is on screen, at the size it is
         // shown (× the pixel ratio): encoding runs on the app's main thread,
         // and a hidden 4K <video> behind a canvas stage cost a 5.7 s freeze
@@ -856,7 +861,7 @@ function run(){
   var misses=0,i,j,el,waits=[];
   for(i=0;i<P.custom.length;i++){var c=P.custom[i];try{if(!customElements.get(c.name)){if(c.extends){var Base=doc.createElement(c.extends).constructor;customElements.define(c.name,class extends Base{},{extends:c.extends});}else customElements.define(c.name,class extends HTMLElement{});}}catch(e){}}
   for(i=0;i<P.elements.length;i++){var e=P.elements[i];el=resolve(e.path);if(el&&el.localName===e.tag)el.setAttribute("data-ot-id",e.id);else misses++;}
-  for(i=0;i<P.inputs.length;i++){var x=P.inputs[i];el=resolve(x.path);if(!el)continue;try{if("checked" in x)el.checked=x.checked;if("selectedIndex" in x)el.selectedIndex=x.selectedIndex;if("value" in x)el.value=x.value;}catch(e){}}
+  for(i=0;i<P.inputs.length;i++){var x=P.inputs[i];el=resolve(x.path);if(!el)continue;try{if("checked" in x)el.checked=x.checked;if(x.selected)for(var o=0;o<el.options.length;o++)el.options[o].selected=x.selected.indexOf(o)>=0;if("value" in x)el.value=x.value;}catch(e){}}
   for(i=0;i<P.canvases.length;i++){var cv=P.canvases[i];el=resolve(cv.path);if(!el||el.localName!=="canvas")continue;waits.push(paint(el,cv.dataUrl));}
   for(i=0;i<P.videos.length;i++){var vd=P.videos[i];el=resolve(vd.path);if(!el||el.localName!=="video")continue;try{el.removeAttribute("autoplay");el.removeAttribute("src");var ss=el.querySelectorAll("source");for(j=0;j<ss.length;j++)ss[j].remove();el.setAttribute("preload","none");el.setAttribute("poster",vd.dataUrl);el.load();}catch(e){}}
   for(i=0;i<P.animated.length;i++){var an=P.animated[i];el=resolve(an.path);if(!el)continue;for(var k in an.styles){try{el.style.setProperty(k,an.styles[k],"important");}catch(e){}}}
@@ -965,8 +970,15 @@ export function convertMhtml(
   };
 
   const resolveRef = (ref: string, base: string): string | null => {
+    // a place in the document itself (url(#clip), <use href="#icon">) stays
+    if (ref.startsWith("#")) return null;
     const part = lookup(ref, base);
-    if (part) return emit(part);
+    if (part) {
+      // and a place in another file (icons.svg#check) stays on its copy
+      const local = emit(part);
+      const place = /#.*$/.exec(ref)?.[0];
+      return local && place ? local + place : local;
+    }
     // a network reference the snapshot did not carry is cut off: a saved
     // state never reaches the network — the app's server is gone by the time
     // a film renders, and one that happens to be up must not change it. The
