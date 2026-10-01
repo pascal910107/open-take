@@ -439,33 +439,47 @@ function installFilmClock(opts: FilmClockOptions): void {
   }
 
   // --- media: a video plays on film time, seeked frame by frame ---------------
-  type Media = { seen: boolean; playing: boolean; born: number };
+  // A video the page plays — or that plays by itself (autoplay), from where it
+  // was put on the page — plays on film time: where it is follows from when
+  // it started. One the page pauses stays where it was; one the page sets to
+  // a time goes there. That place is what the page reads of the video, at
+  // once; the element is sought there before a frame is taken (see syncMedia).
+  type Media = {
+    /** taken over: muted, its own playback stopped (see syncMedia) */
+    seen: boolean;
+    /** the page has played, paused or set it */
+    touched: boolean;
+    playing: boolean;
+    /** playing: the time it was at 0 */
+    born: number;
+    /** paused: where it stays */
+    at: number;
+  };
   const media = new WeakMap<HTMLMediaElement, Media>();
   const mediaOf = (el: HTMLMediaElement): Media => {
     let m = media.get(el);
     if (!m) {
-      m = { seen: false, playing: false, born: clock() };
+      m = { seen: false, touched: false, playing: false, born: 0, at: Number.NaN };
       media.set(el, m);
     }
     return m;
   };
-  /** when a video that has not been seen yet starts playing (autoplay) */
+  /** a video that will play by itself, untouched by the page */
+  const autoplays = (el: HTMLMediaElement, m: Media) => !m.seen && !m.touched && el.autoplay;
+  /** when a video that plays by itself started: where it was put on the page */
   const autoBorn = (el: HTMLMediaElement) =>
     drawn() ? base : Math.max(base, inserted.get(el) ?? clock());
-  /** where a video that plays on film time is, at this page's time: from
-   *  where it started, looped or held at its end; null for one that does not
-   *  play. It is read from here, not from the element: what the page reads
-   *  of a video does not wait for the video to have been sought there */
+  /** where a video is on film time; null for one the page has left to itself */
   function position(el: HTMLMediaElement): number | null {
     const m = mediaOf(el);
-    let b = m.born;
-    if (!m.playing) {
-      if (m.seen || !el.autoplay) return null;
-      b = autoBorn(el);
-    }
-    let at = (clock() - b) / 1000;
     const d = el.duration;
-    if (Number.isFinite(d) && d > 0) at = el.loop ? at % d : Math.min(at, d - 0.001);
+    const known = Number.isFinite(d) && d > 0;
+    if (!m.playing && !autoplays(el, m)) {
+      if (!m.touched || !Number.isFinite(m.at)) return null;
+      return known ? Math.min(m.at, d) : m.at;
+    }
+    let at = (clock() - (m.playing ? m.born : autoBorn(el))) / 1000;
+    if (known) at = el.loop ? at % d : Math.min(at, d - 0.001);
     return Math.max(0, at);
   }
   const seekTo = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "currentTime")!;
@@ -475,22 +489,34 @@ function installFilmClock(opts: FilmClockOptions): void {
       return position(this) ?? seekTo.get!.call(this);
     },
     set(this: HTMLMediaElement, v: number) {
-      // a playing video set to a time plays on from there
-      const m = media.get(this);
-      if (m?.playing) m.born = clock() - Number(v) * 1000;
+      // the element's own checks first: a time it refuses changes nothing
       seekTo.set!.call(this, v);
+      const n = Number(v);
+      if (!Number.isFinite(n)) return;
+      const m = mediaOf(this);
+      // a playing video (or one about to play by itself) plays on from there
+      if (m.playing || autoplays(this, m)) {
+        m.born = clock() - n * 1000;
+        m.playing = true;
+      } else m.at = n;
+      m.touched = true;
     },
   });
   HTMLMediaElement.prototype.play = function (this: HTMLMediaElement) {
     const m = mediaOf(this);
     if (!m.playing) {
-      m.born = clock() - this.currentTime * 1000;
+      m.born = clock() - (position(this) ?? seekTo.get!.call(this)) * 1000;
       m.playing = true;
     }
+    m.touched = true;
     return Promise.resolve();
   };
   HTMLMediaElement.prototype.pause = function (this: HTMLMediaElement) {
-    mediaOf(this).playing = false;
+    const m = mediaOf(this);
+    const at = position(this);
+    if (at !== null) m.at = at;
+    m.playing = false;
+    m.touched = true;
     return realPause.call(this);
   };
   function seekVideo(el: HTMLVideoElement, at: number): Promise<void> {
@@ -516,12 +542,12 @@ function installFilmClock(opts: FilmClockOptions): void {
     for (const el of Array.from(document.querySelectorAll("video"))) {
       const m = mediaOf(el);
       if (!m.seen) {
-        m.seen = true;
-        el.muted = true;
-        if (el.autoplay && !m.playing) {
+        if (autoplays(el, m)) {
           m.born = autoBorn(el);
           m.playing = true;
         }
+        m.seen = true;
+        el.muted = true;
         el.autoplay = false;
         realPause.call(el);
       }

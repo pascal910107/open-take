@@ -562,6 +562,80 @@ setTimeout(() => { window.seen = ${video}.currentTime; }, 300);
   }
 });
 
+test("a video the page pauses, plays and sets is where the page left it, however the film is sought", {
+  skip,
+}, async () => {
+  const page = join(dir, "video-control");
+  await exec("mkdir", ["-p", page]);
+  const ffmpeg = await resolveFfmpeg();
+  await exec(ffmpeg, [
+    "-v",
+    "error",
+    "-f",
+    "lavfi",
+    "-i",
+    "testsrc=size=64x64:rate=30:duration=4",
+    "-c:v",
+    "libvpx",
+    "-y",
+    join(page, "clip.webm"),
+  ]);
+  await writeFile(
+    join(page, "player.html"),
+    `<!doctype html><html><body><video id="v" src="clip.webm" autoplay muted></video></body></html>`,
+  );
+  // a frame's video paused at 0.3 s and played again at 0.4 s; on the page
+  // itself, a video set to 1 s as it loads, and one played and then set to a
+  // time it refuses (its length, before it knows it)
+  await writeFile(
+    join(page, "index.html"),
+    `<!doctype html><html><body><iframe id="p" src="player.html"></iframe>
+<video id="w" src="clip.webm" autoplay muted></video><video id="x" muted></video><script>
+window.__film = { duration: 2 };
+const v = () => document.getElementById("p").contentDocument.getElementById("v");
+const w = document.getElementById("w");
+const x = document.getElementById("x");
+w.currentTime = 1;
+window.first = w.currentTime;
+x.play();
+try { x.currentTime = x.duration; } catch { window.refused = true; }
+x.src = "clip.webm";
+window.reads = [];
+const read = () => window.reads.push(Math.round(v().currentTime * 1000));
+setTimeout(() => { v().pause(); read(); }, 300);
+setTimeout(() => { read(); v().play(); }, 400);
+setTimeout(read, 500);
+window.seen = () => [window.reads.join(" "), window.first, window.refused,
+  Math.round(w.currentTime * 1000), Math.round(x.currentTime * 1000)].join();
+</script></body></html>`,
+  );
+  const server = await serveDirectory(page);
+  const seen = async (times: number[]) => {
+    const b = await launchHtmlBrowser({
+      chromePath: chrome!,
+      url: `${server.url}/index.html`,
+      width: 64,
+      height: 64,
+      initScript: filmClockSource({ seed: 3, epochMs: 0 }),
+      stillAnimations: true,
+    });
+    try {
+      await b.evaluate("window.__ot.prepare()");
+      for (const t of times) await b.evaluate(`window.__ot.seek(${t})`);
+      return await b.evaluate<string>("window.seen()");
+    } finally {
+      await b.close();
+    }
+  };
+  try {
+    const expected = "300 300 400,1,true,1600,600";
+    assert.equal(await seen([0.6]), expected, "straight there");
+    assert.equal(await seen([0.2, 0.35, 0.45, 0.6]), expected, "in steps");
+  } finally {
+    await server.close();
+  }
+});
+
 test("an animation frame a page asks of a frame runs at the page's time, before the frame shows", {
   skip,
 }, async () => {
