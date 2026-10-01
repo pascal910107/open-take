@@ -346,6 +346,20 @@ function installFilmClock(opts: FilmClockOptions): void {
     );
   }
 
+  /** while the page waits (its ready promise, an async __render), the frames
+   *  inside it run their due timers and animation frames too — a ready promise
+   *  may wait on a frame's requestAnimationFrame. With `jump` (before the film
+   *  starts) a frame also runs its next timer, as the page itself does. */
+  function tickFrames(jump: boolean): void {
+    for (const f of Array.from(document.querySelectorAll("iframe")))
+      try {
+        // biome-ignore lint/suspicious/noExplicitAny: the frame's own film clock
+        (f.contentWindow as any)?.__ot?.tick(jump);
+      } catch {
+        /* cross-origin: not ours to drive */
+      }
+  }
+
   /** a frame inside the film: go to the holding page's time */
   async function follow(tSec: number): Promise<void> {
     const t = base + tSec * 1000;
@@ -409,11 +423,13 @@ function installFilmClock(opts: FilmClockOptions): void {
         if (i > 3000) throw new Error("film clock: the page's promise did not settle within ~45 s");
         runTimers(now, hold);
         runFrames();
+        tickFrames(false);
         await new Promise((ok) => realSetTimeout(ok, i < 20 ? 0 : 15));
         if (settled || i < 3) continue;
         let due = Number.POSITIVE_INFINITY;
         for (const t of timers.values()) due = Math.min(due, t.due);
         if (due !== Number.POSITIVE_INFINITY && due - start <= MAX_JUMP_MS) runTimers(due, hold);
+        if (!hold) tickFrames(true);
       }
     } finally {
       holding = false;
@@ -615,6 +631,16 @@ function installFilmClock(opts: FilmClockOptions): void {
     seek,
     motion,
     follow,
+    tick: (jump: boolean) => {
+      runTimers(now, holding);
+      runFrames();
+      if (jump && !holding) {
+        let due = Number.POSITIVE_INFINITY;
+        for (const t of timers.values()) due = Math.min(due, t.due);
+        if (due - now <= MAX_JUMP_MS) runTimers(due);
+      }
+      tickFrames(jump);
+    },
     now: () => (now - base) / 1000,
     bornOf: (el: Element | null) => (bornOf(el) - base) / 1000,
   };

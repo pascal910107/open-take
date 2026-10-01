@@ -236,3 +236,48 @@ window.__render = (t) => {
   }
   assert.match(await readFile(r.index, "utf8"), /## Not measured/);
 });
+
+test("review: text the film's own window hides is not a collision", { skip }, async () => {
+  const page = join(dir, "clipped");
+  await mkdir(page, { recursive: true });
+  // the interface sits in a 300 px window (overflow hidden) scaled up as a camera
+  // move; the caption is outside the window, over interface text the window hides
+  await writeFile(
+    join(page, "ui.html"),
+    `<!doctype html><html><body style="margin:0;font:16px sans-serif">${Array.from({ length: 30 }, (_, i) => `<p style="margin:4px 8px">row ${i} of the real interface text</p>`).join("")}</body></html>`,
+  );
+  await writeFile(
+    join(page, "index.html"),
+    `<!doctype html><html><head><style>
+body{margin:0;width:640px;height:360px;background:#123}
+#win{position:absolute;left:340px;top:30px;width:280px;height:300px;overflow:hidden;border-radius:12px;background:#fff}
+#win iframe{width:640px;height:800px;border:0;transform-origin:0 0;transform:scale(1.4) translate(-120px,-40px)}
+#cap{position:absolute;left:20px;top:150px;color:#fff;font:700 28px sans-serif}
+</style></head><body><div id="win"><iframe src="ui.html"></iframe></div><div id="cap">Every gym, one place.</div>
+<script>window.__film = { duration: 0.5, width: 640, height: 360 }; window.__render = () => {};</script></body></html>`,
+  );
+  const film = join(dir, "clipped.mp4");
+  await renderFilm({ page, out: film, chromePath: chrome!, blur: false, workers: 1, audio: null });
+  const r = await filmReview({ film, page, chromePath: chrome!, out: join(dir, "clipped-pack") });
+  assert.deepEqual(r.layout, [], `nothing collides: ${JSON.stringify(r.layout)}`);
+});
+
+test("a ready promise that waits on a frame inside an iframe does not hang", { skip }, async () => {
+  const page = join(dir, "frame-ready");
+  await mkdir(page, { recursive: true });
+  await writeFile(join(page, "inner.html"), `<!doctype html><html><body style="margin:0;background:#0a0"></body></html>`);
+  await writeFile(
+    join(page, "index.html"),
+    `<!doctype html><html><head><style>body{margin:0;width:160px;height:90px}iframe{width:160px;height:90px;border:0}</style></head><body>
+<iframe id="f" src="inner.html"></iframe><script>
+const f = document.getElementById('f');
+window.__film = { duration: 0.5, width: 160, height: 90,
+  ready: new Promise((ok) => f.addEventListener('load', () => f.contentWindow.requestAnimationFrame(() => ok()))) };
+window.__render = () => {};
+</script></body></html>`,
+  );
+  const t0 = Date.now();
+  const files = await filmStills({ page, chromePath: chrome!, at: [0.2], outDir: join(dir, "frame-ready-stills"), blur: false });
+  assert.equal(files.length, 1);
+  assert.ok(Date.now() - t0 < 30_000, "well before the 45 s ready timeout");
+});

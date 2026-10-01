@@ -267,19 +267,26 @@ test("when Chrome dies mid-render, its piece is rendered again on a fresh one", 
     join(page, "index.html"),
     `<!doctype html><html><head><style>body{margin:0;width:320px;height:180px;overflow:hidden;background:#123}</style></head><body>
 <script>
-window.__film = { duration: 2, width: 320, height: 180 };
-window.__render = (t) => { document.body.style.background = 'rgb(' + Math.round(t * 100) + ',40,80)'; };
+window.__film = { duration: 4, width: 320, height: 180 };
+window.__render = (t) => { document.body.style.background = 'rgb(' + Math.round(t * 50) + ',40,80)'; };
 </script></body></html>`,
   );
-  let killed = false;
-  const kill = async () => {
-    // the render's Chrome: the browser process itself (it carries the debug port flag)
+  // the render's Chrome: the browser process itself (it carries the debug port
+  // flag), looked up as soon as rendering starts so the kill itself is
+  // immediate — a slow lookup on a busy machine let the film finish first
+  let pid: Promise<number | undefined> | undefined;
+  const findChrome = async () => {
     const { stdout } = await exec("ps", ["-axo", "pid=,command="], { maxBuffer: 1 << 24 });
     const line = stdout
       .split("\n")
       .find((l) => l.includes("open-take-film-") && l.includes("--remote-debugging-port=0"));
-    if (line) process.kill(Number(line.trim().split(/\s+/)[0]), "SIGKILL");
+    return line ? Number(line.trim().split(/\s+/)[0]) : undefined;
   };
+  let killed = false;
+  const kill = () =>
+    void pid?.then((p) => {
+      if (p) process.kill(p, "SIGKILL");
+    });
   const r = await renderFilm({
     page,
     out: join(dir, "crash.mp4"),
@@ -287,14 +294,16 @@ window.__render = (t) => { document.body.style.background = 'rgb(' + Math.round(
     workers: 1,
     blur: false,
     onProgress: (p) => {
-      if (p.phase === "render" && p.done >= 30 && !killed) {
+      if (p.phase !== "render") return;
+      pid ??= findChrome();
+      if (p.done >= 30 && !killed) {
         killed = true;
-        void kill();
+        kill();
       }
     },
   });
   assert.ok(killed);
-  assert.equal(r.frames, 120);
+  assert.equal(r.frames, 240);
   assert.ok(
     r.warnings.some((w) => /rendered again on a fresh one/.test(w)),
     `a warning names the re-rendered frames: ${r.warnings.join(" | ")}`,
@@ -312,7 +321,7 @@ window.__render = (t) => { document.body.style.background = 'rgb(' + Math.round(
     "csv=p=0",
     join(dir, "crash.mp4"),
   ]);
-  assert.equal(Number(stdout.trim()), 120, "every frame is in the film once");
+  assert.equal(Number(stdout.trim()), 240, "every frame is in the film once");
 });
 
 test("a page whose promises wait on timers still renders: film time starts when it is ready", {

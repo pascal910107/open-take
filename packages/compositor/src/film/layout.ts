@@ -65,6 +65,27 @@ function probeLayout(): unknown {
   };
   const texts: Text[] = [];
   const badges: Badge[] = [];
+  const intersect = (a: Box, b: Box): Box | null => {
+    const x0 = Math.max(a.x, b.x);
+    const y0 = Math.max(a.y, b.y);
+    const x1 = Math.min(a.x + a.w, b.x + b.w);
+    const y1 = Math.min(a.y + a.h, b.y + b.h);
+    return x1 > x0 && y1 > y0 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : null;
+  };
+  /** what of `base` the element's ancestors leave visible: every ancestor whose
+   *  overflow clips (a film's "window" around a scaled iframe, a masked line) */
+  const clips = new Map<Element, Box | null>();
+  const clipOf = (el: Element, view: Window, map: (b: DOMRect) => Box, base: Box): Box | null => {
+    const parent = el.parentElement;
+    if (!parent) return base;
+    if (clips.has(parent)) return clips.get(parent)!;
+    let clip = clipOf(parent, view, map, base);
+    const cs = view.getComputedStyle(parent);
+    if (clip && (cs.overflowX !== "visible" || cs.overflowY !== "visible"))
+      clip = intersect(clip, map(parent.getBoundingClientRect()));
+    clips.set(parent, clip);
+    return clip;
+  };
 
   const collect = (
     doc: Document,
@@ -92,17 +113,14 @@ function probeLayout(): unknown {
       )
         owner = owner.parentElement;
       range.selectNodeContents(n);
+      // what the frame, the iframe's box and any clipping ancestor cut off is not drawn
+      const visible = clipOf(n.parentElement!, view, map, clip);
+      if (!visible) continue;
       const boxes: Box[] = [];
       for (const r of Array.from(range.getClientRects())) {
         if (r.width < 2 || r.height < 2) continue;
-        const m = map(r);
-        // what the frame (or the iframe's own box) cuts off is not drawn
-        const x0 = Math.max(m.x, clip.x);
-        const y0 = Math.max(m.y, clip.y);
-        const x1 = Math.min(m.x + m.w, clip.x + clip.w);
-        const y1 = Math.min(m.y + m.h, clip.y + clip.h);
-        if (x1 - x0 < 2 || y1 - y0 < 2) continue;
-        boxes.push({ x: x0, y: y0, w: x1 - x0, h: y1 - y0 });
+        const v = intersect(map(r), visible);
+        if (v && v.w >= 2 && v.h >= 2) boxes.push(v);
       }
       if (!boxes.length) continue;
       const t = seen.get(owner);
@@ -124,9 +142,12 @@ function probeLayout(): unknown {
       if (!painted) continue;
       const r = el.getBoundingClientRect();
       if (r.width < 8 || r.height < 8) continue;
-      const m = map(r);
-      if (m.w * m.h > 0.04 * vw * vh) continue; // a panel or a page, not a badge
+      const full = map(r);
+      if (full.w * full.h > 0.04 * vw * vh) continue; // a panel or a page, not a badge
       if (baseOpacity * opacityOf(el, view) < MIN_OPACITY) continue;
+      const visible = clipOf(el, view, map, clip);
+      const m = visible && intersect(full, visible);
+      if (!m) continue;
       badges.push({ el, box: m, label: describe(el, prefix) });
     }
   };
@@ -161,13 +182,10 @@ function probeLayout(): unknown {
       w: r.width * sx,
       h: r.height * sy,
     });
-    const clip = {
-      x: Math.max(0, fb.left),
-      y: Math.max(0, fb.top),
-      w: Math.min(vw, fb.right) - Math.max(0, fb.left),
-      h: Math.min(vh, fb.bottom) - Math.max(0, fb.top),
-    };
-    if (clip.w > 0 && clip.h > 0) collect(doc, view, map, clip, o, `iframe › `);
+    const own = intersect({ x: fb.left, y: fb.top, w: fb.width, h: fb.height }, frame);
+    const clip =
+      own && clipOf(f, window, (r) => ({ x: r.left, y: r.top, w: r.width, h: r.height }), own);
+    if (clip) collect(doc, view, map, clip, o, `iframe › `);
   }
 
   const overlap = (a: Box, b: Box) => {
