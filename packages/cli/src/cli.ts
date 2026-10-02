@@ -447,9 +447,10 @@ Usage:
           timed contact sheet of any video; \`film check\` measures a finished
           film: format, hitches, cadence, cuts, black frames, loudness, clicks.
           --supersample 2 (render, still) draws each frame at twice the pixels
-          each way and averages it down: text in a slow zoom or drift glides
-          instead of stepping a pixel at a time (Chrome places glyphs on whole
-          pixels), for about 1.3–2× the render time; 3 smooths further.
+          each way and averages it down: text in a slow zoom or drift steps
+          less (Chrome places glyphs on whole pixels), for about 1.3–2× the
+          render time; 3 smooths further. A layer laid out at its largest and
+          only scaled down (\`skill film\`) smooths it more, at no cost.
 
   --out <path>   (make) where the postable master goes — taken literally, and
               its <name>.take/ working dir is created beside it. Default

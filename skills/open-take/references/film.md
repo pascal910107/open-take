@@ -55,11 +55,16 @@ soundtrack as AAC. `<audio>` elements on the page are not recorded — the
 soundtrack is `__film.audio` (or `--audio <file>`).
 
 Text that moves slowly — a slow push or drift across an interface — steps a
-pixel at a time, because Chrome places each glyph on a whole pixel. `--supersample
-2` (render and `film still`) draws every frame at twice the pixels each way
-and averages it down, which halves the steps; `3` cuts them to a third. It
-costs about 1.3–4× the render time (more on heavy pages), so use it for the
-master of a film that moves text slowly.
+pixel at a time, because Chrome places each glyph on a whole pixel. On its own
+layer it moves as a picture instead: give what moves `will-change: transform`.
+Chrome draws such a layer once, at the scale it has when it first appears, so
+make that its largest — its largest transform in its stylesheet, or its
+content laid out at the largest size — and only ever scale it down from there;
+a layer drawn small and then scaled up goes soft. A saved screen's `<iframe>`
+works the same way. Measured on a slow 1.0–1.2× zoom of text: the steps fell
+from 0.26 px to 0.06 px, and the largest frame stays as sharp as plain text.
+`--supersample 3` (render and `film still`) is the fallback for what cannot be
+laid out that way: 0.09 px, for about 1.75–4× the render time.
 
 ## Look at it
 
