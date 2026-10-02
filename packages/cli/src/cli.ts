@@ -449,8 +449,9 @@ Usage:
           --supersample 2 (render, still) draws each frame at twice the pixels
           each way and averages it down: text in a slow zoom or drift steps
           less (Chrome places glyphs on whole pixels), for about 1.3–2× the
-          render time; 3 smooths further. A layer laid out at its largest and
-          only scaled down (\`skill film\`) smooths it more, at no cost.
+          render time; 3 smooths further. A slow push on a screen is
+          steadiest as a picture of it shot at twice the pixels, rendered
+          with --supersample 3 (\`skill film\`).
 
   --out <path>   (make) where the postable master goes — taken literally, and
               its <name>.take/ working dir is created beside it. Default

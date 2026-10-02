@@ -55,16 +55,26 @@ soundtrack as AAC. `<audio>` elements on the page are not recorded — the
 soundtrack is `__film.audio` (or `--audio <file>`).
 
 Text that moves slowly — a slow push or drift across an interface — steps a
-pixel at a time, because Chrome places each glyph on a whole pixel. On its own
-layer it moves as a picture instead: give what moves `will-change: transform`.
-Chrome draws such a layer once, at the scale it has when it first appears, so
-make that its largest — its largest transform in its stylesheet, or its
-content laid out at the largest size — and only ever scale it down from there;
-a layer drawn small and then scaled up goes soft. A saved screen's `<iframe>`
-works the same way. Measured on a slow 1.0–1.2× zoom of text: the steps fell
-from 0.26 px to 0.06 px, and the largest frame stays as sharp as plain text.
-`--supersample 3` (render and `film still`) is the fallback for what cannot be
-laid out that way: 0.09 px, for about 1.75–4× the render time.
+pixel at a time, because Chrome places each glyph on a whole pixel. Push a
+picture of the screen, not the live screen: shoot it once at twice the
+pixels, show that picture at the screen's size, and render with
+`--supersample 3`. A page that shows a saved screen at twice the pixels:
+
+```html
+<iframe src="takes/x.take/states/s3/state.html" style="position:absolute;left:0;top:0;width:1920px;height:1080px;border:0;transform:scale(2);transform-origin:0 0"></iframe>
+<script>window.__film = { duration: 1, width: 3840, height: 2160 };</script>
+```
+
+`npx open-take film still shoot.html --at 0 --size 3840x2160 --out shots`
+shoots it. Measured on a saved screen pushed from 1× to 1.6× in 4 s (six
+lines of 13–18 px text, frame-to-frame jitter): 0.49 px as the live screen,
+0.19 px as the live screen with `--supersample 3`, 0.08 px as the picture
+with `--supersample 3` (0.10 with `--supersample 2`), which rendered in about
+the live screen's time without it. The picture's last frame is as sharp as
+the live screen's, a shade lighter. A layer drawn once at its largest and
+only scaled down (`will-change: transform`) steadies large type — 40 px bold
+pushed 1.0–1.2× went from 0.26 px to 0.06 px — but not interface text
+(0.48 px on the push above), and `--supersample` turns it off.
 
 ## Look at it
 
@@ -98,7 +108,8 @@ loudness, loudness range, true peak, silences, and clicks.
   and saves the interface itself at every settled moment:
   `takes/x.take/states/s3/state.html` is a self-contained copy of the page as
   it was (scripts inert). Put it in an `<iframe>` and it is the real UI, sharp
-  at any scale; same-origin, so your page can reach into
+  at any scale (to push slowly into it, push a picture of it — see the moving
+  text above); same-origin, so your page can reach into
   `iframe.contentDocument` to hide, restyle or animate single elements — what
   moves inside a frame, your page moves (a frame runs its own timers and
   animation frames only where it is put on the page).
