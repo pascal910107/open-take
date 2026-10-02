@@ -84,6 +84,22 @@ test("sample times spread over a 180° shutter centred on the frame, never befor
   assert.equal(samplesFor(1000), 16);
 });
 
+test("a shutter that cuts on one side is spread over the other side only", () => {
+  const open = 0.5 / 60;
+  const after = sampleTimes(1, 4, 60, 1);
+  assert.ok(
+    after.every((t) => t > 1 && t < 1 + open / 2),
+    "after the frame time, within half the shutter",
+  );
+  const before = sampleTimes(1, 4, 60, -1);
+  assert.ok(
+    before.every((t) => t < 1 && t > 1 - open / 2),
+    "before the frame time, within half the shutter",
+  );
+  assert.deepEqual(sampleTimes(1, 1, 60, 1), [1], "one sample is the frame time itself");
+  assert.deepEqual(sampleTimes(1, 4, 60, 0), sampleTimes(1, 4, 60), "side 0 is the whole shutter");
+});
+
 test("a full pipe whose ffmpeg has died fails the wait instead of hanging it", async () => {
   const { PassThrough } = await import("node:stream");
   // a stream that never drains, its process gone with an error
@@ -280,6 +296,57 @@ window.__render = (t) => {
     cut[i + 2]! > 150 && cut[i]! < 40,
     `the cut frame is the new scene, not a blend (${cut[i]},${cut[i + 1]},${cut[i + 2]})`,
   );
+});
+
+test("a small switch while something else moves is not doubled, and the motion keeps its blur", {
+  skip,
+}, async () => {
+  const page = join(dir, "small-cut");
+  await exec("mkdir", ["-p", page]);
+  // a white bar moves fast the whole time; at 0.25 s a small red card gives way
+  // to a green one, and a white block of text empties — each far smaller than a
+  // quarter of the picture, which is all a scene cut used to be
+  await writeFile(
+    join(page, "index.html"),
+    `<!doctype html><html><head><style>body{margin:0;width:320px;height:180px;overflow:hidden;background:#000}
+#bar{position:absolute;top:120px;left:0;width:20px;height:50px;background:#fff}
+.card{position:absolute;left:240px;top:20px;width:40px;height:30px}
+#txt{position:absolute;left:40px;top:20px;width:60px;height:50px;font:40px/50px monospace;color:#fff}</style></head><body>
+<div id="bar"></div><div class="card" id="red" style="background:#f00"></div><div class="card" id="green" style="background:#0c0"></div><div id="txt"></div>
+<script>
+window.__film = { duration: 0.5, width: 320, height: 180 };
+const $ = (id) => document.getElementById(id);
+window.__render = (t) => {
+  $('bar').style.transform = 'translateX(' + (t * 1200) + 'px)';
+  $('red').style.display = t < 0.25 ? 'block' : 'none';
+  $('green').style.display = t < 0.25 ? 'none' : 'block';
+  $('txt').textContent = t < 0.25 ? '\\u2588\\u2588' : '';
+};
+</script></body></html>`,
+  );
+  const out = join(dir, "small-cut.mp4");
+  await renderFilm({ page, out, chromePath: chrome!, workers: 1 });
+  const cut = await rgb(out, 320, 180, 0.25);
+  const at = (x: number, y: number) => {
+    const i = (y * 320 + x) * 3;
+    return [cut[i]!, cut[i + 1]!, cut[i + 2]!];
+  };
+  const [r, g] = at(260, 35);
+  assert.ok(
+    r < 60 && g > 150,
+    `the card on the cut frame is the green one, not a blend (${r},${g})`,
+  );
+  const [tr, tg, tb] = at(55, 45);
+  assert.ok(
+    tr < 40 && tg < 40 && tb < 40,
+    `the emptied text is gone on the cut frame, not half there (${tr},${tg},${tb})`,
+  );
+  let grey = 0;
+  for (let x = 0; x < 320; x++) {
+    const [v] = at(x, 145);
+    if (v! > 40 && v! < 215) grey++;
+  }
+  assert.ok(grey >= 2, `the moving bar is still blurred on the cut frame (${grey} grey px)`);
 });
 
 test("motion inside a same-origin frame is measured for blur too", { skip }, async () => {

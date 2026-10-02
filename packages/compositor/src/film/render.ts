@@ -139,11 +139,16 @@ export const samplesFor = (px: number): number =>
   Math.max(1, Math.min(MAX_SAMPLES, Math.ceil(px / SPACING_PX)));
 
 /** the sample instants (s) of one output frame: n points spread evenly over
- *  the shutter, centred on the frame time; never before the film starts */
-export function sampleTimes(t: number, n: number, fps: number): number[] {
+ *  the shutter, centred on the frame time — or over one side of it when the
+ *  picture cuts in the other (side -1: before the frame time, 1: after); never
+ *  before the film starts */
+export function sampleTimes(t: number, n: number, fps: number, side = 0): number[] {
   if (n <= 1) return [t];
   const open = SHUTTER_FRACTION / fps;
-  return Array.from({ length: n }, (_, k) => Math.max(0, t + open * ((k + 0.5) / n - 0.5)));
+  const [lo, hi] = side < 0 ? [-0.5, 0] : side > 0 ? [0, 0.5] : [-0.5, 0.5];
+  return Array.from({ length: n }, (_, k) =>
+    Math.max(0, t + open * (lo + (hi - lo) * ((k + 0.5) / n))),
+  );
 }
 
 /** frames [0, costs.length) cut into at most `workers` contiguous slices of
@@ -181,8 +186,9 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
     const frames = film.f1 - film.f0;
     const workers = Math.max(1, Math.min(opts.workers ?? defaultWorkers(), frames));
 
-    // --- probe: how many shutter samples each frame needs --------------------
+    // --- probe: how many shutter samples each frame needs, and where --------
     let samples = new Array<number>(frames).fill(1);
+    let sides = new Array<number>(frames).fill(0);
     let pool: HtmlBrowser[] = [first];
     if (film.blur) {
       // a clock film keeps its own state, so only a render film probes in parallel
@@ -192,7 +198,7 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
           await prepare(b);
           pool.push(b);
         }
-      samples = await probe(pool, film, opts.onProgress);
+      ({ samples, sides } = await probe(pool, film, opts.onProgress));
     }
 
     // --- render ------------------------------------------------------------------
@@ -250,7 +256,7 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
                     if (failed) throw failed;
                     page.checkFiles();
                     const t = (film.f0 + i) / film.fps;
-                    for (const ti of sampleTimes(t, samples[i]!, film.fps)) {
+                    for (const ti of sampleTimes(t, samples[i]!, film.fps, sides[i])) {
                       await seek(browser, ti, `frame ${film.f0 + i}`);
                       await sink.push(
                         await browser.screenshot({ format: "jpeg", quality: draft ? 85 : 100 }),
@@ -355,11 +361,16 @@ export async function filmStills(opts: FilmStillsOptions): Promise<string[]> {
       }
     };
     const counts: number[] = [];
+    const sides: number[] = [];
     for (const t of times) {
-      if (!film.blur) counts.push(1);
-      else {
+      if (!film.blur) {
+        counts.push(1);
+        sides.push(0);
+      } else {
         await from(Math.max(0, t - half));
-        counts.push(samplesFor(await motionAt(browser, t, half)));
+        const m = await motionAt(browser, t, half);
+        counts.push(samplesFor(m.px));
+        sides.push(m.side);
         reached = t + half;
       }
     }
@@ -371,7 +382,7 @@ export async function filmStills(opts: FilmStillsOptions): Promise<string[]> {
       const file = join(opts.outDir, `t${t.toFixed(3).padStart(7, "0")}.png`);
       const n = counts[i]!;
       const label = `the still at ${t}s`;
-      const at = sampleTimes(t, n, film.fps);
+      const at = sampleTimes(t, n, film.fps, sides[i]);
       await from(at[0]!);
       reached = at.at(-1)!;
       if (n === 1 && ss === 1) {
@@ -517,8 +528,12 @@ async function seek(b: HtmlBrowser, t: number, what: string): Promise<void> {
   }
 }
 
-async function motionAt(b: HtmlBrowser, t: number, half: number): Promise<number> {
-  return b.evaluate<number>(`window.__ot.motion(${t}, ${half})`);
+/** what the shutter around t sees: how far anything moves (px), and which
+ *  side of it to expose when the picture cuts in the other (see sampleTimes) */
+type Exposure = { px: number; side: number };
+
+async function motionAt(b: HtmlBrowser, t: number, half: number): Promise<Exposure> {
+  return b.evaluate<Exposure>(`window.__ot.motion(${t}, ${half})`);
 }
 
 function describe(
@@ -590,14 +605,16 @@ function defaultWorkers(): number {
   return Math.max(1, Math.min(2, Math.floor(cpus().length / 2)));
 }
 
-/** every frame's shutter samples, probed by the pool's browsers in turn */
+/** every frame's shutter samples and the side of the shutter they are spread
+ *  over, probed by the pool's browsers in turn */
 async function probe(
   pool: HtmlBrowser[],
   film: Film,
   onProgress?: (p: FilmProgress) => void,
-): Promise<number[]> {
+): Promise<{ samples: number[]; sides: number[] }> {
   const frames = film.f1 - film.f0;
-  const out = new Array<number>(frames).fill(1);
+  const samples = new Array<number>(frames).fill(1);
+  const sides = new Array<number>(frames).fill(0);
   const half = SHUTTER_FRACTION / film.fps / 2;
   let next = 0;
   let done = 0;
@@ -606,14 +623,16 @@ async function probe(
       for (;;) {
         const i = next++;
         if (i >= frames) return;
-        out[i] = samplesFor(await motionAt(b, (film.f0 + i) / film.fps, half));
+        const m = await motionAt(b, (film.f0 + i) / film.fps, half);
+        samples[i] = samplesFor(m.px);
+        sides[i] = m.side;
         done++;
         if (done % 30 === 0 || done === frames)
           onProgress?.({ phase: "probe", done, total: frames });
       }
     }),
   );
-  return out;
+  return { samples, sides };
 }
 
 // --- encoding -------------------------------------------------------------------------

@@ -14,7 +14,8 @@
 // The renderer drives the page through `window.__ot`:
 //   prepare()        → the page's ready promise, fonts, images; what it declared
 //   seek(t)          → the page shows film time t (seconds)
-//   motion(t, half)  → how far (px) anything visible moves across [t-half, t+half]
+//   motion(t, half)  → how far (px) anything visible moves across [t-half, t+half],
+//                      and which side of that shutter to expose (one that cuts is left out)
 //
 // The page may declare itself with `window.__film = { duration, width, height,
 // fps, audio, ready, motion }` (every field optional). `__duration` and `__ready`
@@ -899,13 +900,25 @@ function installFilmClock(opts: FilmClockOptions): void {
   }
   type Snapshot = {
     rects: Map<Element, DOMRect>;
+    /** what a still element shows — an image's source, a leaf's text: when it
+     *  changes, the picture cut there, however small the element */
+    shows: Map<Element, string>;
     thumbs: Map<HTMLCanvasElement, Uint8ClampedArray | null>;
     video: boolean;
   };
+  function showing(el: Element): string | null {
+    // by tag, not instanceof: a saved screen's elements belong to its frame's realm
+    if (el.tagName === "IMG") {
+      const img = el as HTMLImageElement;
+      return img.currentSrc || img.src;
+    }
+    return el.childElementCount === 0 ? (el.textContent ?? "") : null;
+  }
   function snapshot(): Snapshot {
     const vw = innerWidth;
     const vh = innerHeight;
     const rects = new Map<Element, DOMRect>();
+    const shows = new Map<Element, string>();
     const thumbs = new Map<HTMLCanvasElement, Uint8ClampedArray | null>();
     let video = false;
     for (const el of Array.from(document.querySelectorAll("body *"))) {
@@ -921,11 +934,13 @@ function installFilmClock(opts: FilmClockOptions): void {
         continue;
       if (!el.checkVisibility({ opacityProperty: true, visibilityProperty: true })) continue;
       rects.set(el, r);
+      const s = showing(el);
+      if (s !== null) shows.set(el, s);
       if (el instanceof HTMLCanvasElement) thumbs.set(el, thumb(el));
       else if (el instanceof HTMLVideoElement && media.get(el)?.playing) video = true;
-      else if (el instanceof HTMLIFrameElement) framed(el, r, rects, vw, vh);
+      else if (el instanceof HTMLIFrameElement) framed(el, r, rects, shows, vw, vh);
     }
-    return { rects, thumbs, video };
+    return { rects, shows, thumbs, video };
   }
 
   /** the elements inside a same-origin frame (a saved screen lifted into the
@@ -934,6 +949,7 @@ function installFilmClock(opts: FilmClockOptions): void {
     f: HTMLIFrameElement,
     box: DOMRect,
     rects: Map<Element, DOMRect>,
+    shows: Map<Element, string>,
     vw: number,
     vh: number,
   ): void {
@@ -960,6 +976,8 @@ function installFilmClock(opts: FilmClockOptions): void {
       if (m.left >= Math.min(vw, box.right) || m.top >= Math.min(vh, box.bottom)) continue;
       if (!el.checkVisibility({ opacityProperty: true, visibilityProperty: true })) continue;
       rects.set(el, m);
+      const s = showing(el);
+      if (s !== null) shows.set(el, s);
     }
   }
   type Change = {
@@ -967,21 +985,28 @@ function installFilmClock(opts: FilmClockOptions): void {
     px: number;
     /** visible area (px²) of elements that are in only one of them */
     churn: number;
+    /** elements inside the picture that appeared, vanished or changed what
+     *  they show: cuts, however small (one sliding in from an edge is motion) */
+    cuts: number;
   };
   function moved(a: Snapshot, b: Snapshot): Change {
     let px = 0;
     let churn = 0;
+    let cuts = 0;
     const vw = innerWidth;
     const vh = innerHeight;
     const area = (r: DOMRect) =>
       Math.max(0, Math.min(vw, r.right) - Math.max(0, r.left)) *
       Math.max(0, Math.min(vh, r.bottom) - Math.max(0, r.top));
+    const inside = (r: DOMRect) => r.left > 0 && r.top > 0 && r.right < vw && r.bottom < vh;
     for (const [el, ra] of a.rects) {
       const rb = b.rects.get(el);
       if (!rb) {
         churn += area(ra); // vanished: a cut or a fade, not motion
+        if (inside(ra)) cuts++;
         continue;
       }
+      if (a.shows.get(el) !== b.shows.get(el)) cuts++;
       const d = Math.max(
         Math.abs(ra.left - rb.left),
         Math.abs(ra.top - rb.top),
@@ -990,7 +1015,11 @@ function installFilmClock(opts: FilmClockOptions): void {
       );
       if (d > px) px = d;
     }
-    for (const [el, rb] of b.rects) if (!a.rects.has(el)) churn += area(rb);
+    for (const [el, rb] of b.rects)
+      if (!a.rects.has(el)) {
+        churn += area(rb);
+        if (inside(rb)) cuts++;
+      }
     for (const [el, ta] of a.thumbs) {
       if (!b.thumbs.has(el)) continue;
       const tb = b.thumbs.get(el);
@@ -1003,13 +1032,15 @@ function installFilmClock(opts: FilmClockOptions): void {
       if (changed) px = Math.max(px, OPAQUE_PX);
     }
     if (a.video || b.video) px = Math.max(px, OPAQUE_PX);
-    return { px, churn };
+    return { px, churn, cuts };
   }
-  async function motion(tSec: number, halfSec: number): Promise<number> {
+  /** how far anything moves while the shutter is open, and which part of the
+   *  shutter to expose: side 0 all of it, -1 its first half, 1 its second */
+  async function motion(tSec: number, halfSec: number): Promise<{ px: number; side: number }> {
     const hook = w.__film?.motion;
     if (typeof hook === "function") {
       const px = Number(await hook(tSec, halfSec));
-      return Number.isFinite(px) && px > 0 ? px : 0;
+      return { px: Number.isFinite(px) && px > 0 ? px : 0, side: 0 };
     }
     await seek(Math.max(0, tSec - halfSec));
     const a = snapshot();
@@ -1017,17 +1048,22 @@ function installFilmClock(opts: FilmClockOptions): void {
     const mid = snapshot();
     await seek(tSec + halfSec);
     const b = snapshot();
-    // A shutter never straddles a cut: when the change happens in one half of
-    // the shutter only — something jumps, or a large part of the picture
-    // appears or vanishes at once — the frame gets one sharp sample instead of
-    // a double exposure. Motion spreads over both halves.
+    // A shutter never straddles a cut: when something changes in one half of
+    // the shutter only — it jumps, a large part of the picture appears or
+    // vanishes at once, or anything inside the picture appears, vanishes or
+    // shows something else — the frame is exposed over the other half alone:
+    // no double exposure, and what moves through that half keeps its blur.
+    // Motion spreads over both halves.
     const first = moved(a, mid);
     const second = moved(mid, b);
     const screen = innerWidth * innerHeight;
     const onlyIn = (x: Change, y: Change) =>
-      (x.px > 1 && y.px < 0.1 * x.px) || (x.churn > 0.25 * screen && y.churn < 0.05 * screen);
-    if (onlyIn(first, second) || onlyIn(second, first)) return 0;
-    return moved(a, b).px;
+      (x.px > 1 && y.px < 0.1 * x.px) ||
+      (x.churn > 0.25 * screen && y.churn < 0.05 * screen) ||
+      (x.cuts > 0 && y.cuts === 0);
+    if (onlyIn(first, second)) return { px: second.px, side: 1 };
+    if (onlyIn(second, first)) return { px: first.px, side: -1 };
+    return { px: moved(a, b).px, side: 0 };
   }
 
   // --- ready -----------------------------------------------------------------
