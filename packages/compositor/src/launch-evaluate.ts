@@ -1,98 +1,9 @@
 import type {
   LaunchComposition,
-  LaunchMotionBlur,
   LaunchScene,
   LaunchUiMorphScene,
   LaunchUiState,
 } from "./launch-types";
-
-/** The film-standard 180° shutter (a reference launch film renders with it,
- *  confirmed by the ghost spacing in its frames), with up to 16 samples for
- *  the fastest frames: that film's fixed four leave distinct ghosts on a fast
- *  move at 1080p60; a still frame still renders once (motion-speed.ts). */
-export const DEFAULT_LAUNCH_MOTION_BLUR: LaunchMotionBlur = { samples: 16, shutter: 0.5 };
-
-export function launchMotionBlur(
-  output: LaunchComposition["output"],
-): LaunchMotionBlur | undefined {
-  if (output.motionBlur === false) return undefined;
-  return output.motionBlur ?? DEFAULT_LAUNCH_MOTION_BLUR;
-}
-
-/** The shutter a PREPARED composition renders with: prepare() resolves the
- *  default into `output.motionBlur`, so everything downstream of it (scene,
- *  project, render range, delivery encode) reads only an explicit value — a raw
- *  composition that never went through prepare() renders one sample a frame. */
-export function renderedMotionBlur(
-  output: LaunchComposition["output"],
-): LaunchMotionBlur | undefined {
-  return output.motionBlur || undefined;
-}
-
-/** Render frames per second of film while motion blur samples it (any
- *  constant works; the clock below maps render frames to scene time). */
-export const RENDER_OVERSAMPLE = 4;
-
-export type ShutterClock = {
-  renderFps: number;
-  renderFrames: number;
-  /** render frame `j`: the scene time it shows, and its output frame's time */
-  at(j: number): { atS: number; frameS: number };
-};
-
-/** The render clock of a prepared film. `schedule` holds the shutter samples
- *  of each output frame (motion-speed.ts): a still frame renders once, a fast
- *  one several times at offsets spread symmetrically around its instant —
- *  across `shutter` of the frame interval — so the blur trails AND leads the
- *  motion like a real shutter. `frameS` stays on the output frame for footage,
- *  which must never smear. An empty schedule is one render per output frame. */
-export function shutterClock(
-  schedule: readonly number[],
-  fps: number,
-  shutter: number,
-  outputFrames: number,
-): ShutterClock {
-  if (!schedule.length)
-    return {
-      renderFps: fps,
-      renderFrames: outputFrames,
-      at: (j) => ({ atS: j / fps, frameS: j / fps }),
-    };
-  const total = schedule.reduce((sum, s) => sum + s, 0);
-  const frameOf = new Int32Array(total),
-    sampleOf = new Int32Array(total);
-  let j = 0;
-  schedule.forEach((samples, n) => {
-    for (let k = 0; k < samples; k++, j++) {
-      frameOf[j] = n;
-      sampleOf[j] = k;
-    }
-  });
-  return {
-    renderFps: fps * RENDER_OVERSAMPLE,
-    renderFrames: total,
-    at(i) {
-      const n = frameOf[i]!,
-        k = sampleOf[i]!,
-        samples = schedule[n]!;
-      const shift = samples > 1 ? shutter * ((k + 0.5) / samples - 0.5) : 0;
-      return { atS: Math.max(0, (n + shift) / fps), frameS: n / fps };
-    },
-  };
-}
-
-/** A shutter sample never crosses a cut: it is held inside the scene that
- *  owns its output frame, so a hard cut stays a cut instead of a one-frame
- *  dissolve of the two scenes. */
-export function sceneSampleS(
-  windows: readonly { startS: number; endS: number }[],
-  atS: number,
-  frameS: number,
-): number {
-  const win = windows.find((w) => frameS >= w.startS && frameS < w.endS) ?? windows.at(-1);
-  if (!win) return atS;
-  return Math.min(Math.max(atS, win.startS), win.endS - 1e-6);
-}
 
 const clamp = (n: number, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, n));
 export const launchEase = (x: number): number => {

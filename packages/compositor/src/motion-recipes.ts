@@ -17,13 +17,6 @@ import type {
   MotionTextLayer,
 } from "./motion-types";
 import { estimateMotionTextLines } from "./motion-validate";
-import {
-  buildTakeRecipe,
-  TAKE_RECIPES,
-  type TakeLoader,
-  type TakeRecipe,
-  type TakeRecipeContext,
-} from "./take-recipes";
 
 export type MotionRecipeImage = { asset: string; crop?: MotionImageCrop };
 export type MotionRecipeStyle = "editorial" | "product" | "technical";
@@ -52,7 +45,7 @@ export type StepsMotionRecipe = RecipeBase & {
 };
 export type MotionRecipe = FocusMotionRecipe | CompareMotionRecipe | StepsMotionRecipe;
 export type MotionStoryBrief = Omit<LaunchComposition, "scenes"> & {
-  scenes: (LaunchScene | MotionRecipe | TakeRecipe)[];
+  scenes: (LaunchScene | MotionRecipe)[];
 };
 export type MotionStoryResult = { composition?: LaunchComposition; issues: LaunchIssue[] };
 type Box = { x: number; y: number; width: number; height: number };
@@ -369,12 +362,10 @@ function buildRecipe(
               : 0.55,
       finish = delay + entranceS;
     if (animated) latestEntrance = Math.max(latestEntrance, finish);
-    // arrivals land on `snap` (most of the travel early, a long settle); the
-    // fade stays on a plain ease-out so copy is legible as soon as it lands
-    const keyframes = (a: number, b: number, easing: "ease-out" | "snap" = "snap") => [
+    const keyframes = (a: number, b: number) => [
       { atS: 0, value: a },
       ...(delay > 0 ? [{ atS: delay, value: a }] : []),
-      { atS: finish, value: b, easing },
+      { atS: finish, value: b, easing: "ease-out" as const },
     ];
     return {
       id,
@@ -384,7 +375,7 @@ function buildRecipe(
         ? {}
         : {
             animations: [
-              { property: "opacity", keyframes: keyframes(0, 1, "ease-out") },
+              { property: "opacity", keyframes: keyframes(0, 1) },
               ...(style === "technical"
                 ? [{ property: "x" as const, keyframes: keyframes(-S * 0.018, 0) }]
                 : [
@@ -939,11 +930,6 @@ function buildRecipe(
         `too short for this copy and motion; allow at least ${derived.toFixed(3)}s, shorten the copy, or disable motion`,
       ),
     );
-  // The stage never rests: every group pushes in slowly (+2.5 %) through the
-  // reading hold, together, about the frame centre — a designed film keeps
-  // moving while the viewer reads.
-  if (recipe.motion !== "off")
-    for (const layer of layers) if (layer.type === "group") pushIn(layer, durationS, 1.025);
   return {
     id: recipe.id,
     type: "motion",
@@ -955,41 +941,12 @@ function buildRecipe(
   };
 }
 
-function pushIn(group: MotionGroupLayer, untilS: number, scale: number): void {
-  group.animations ??= [];
-  for (const property of ["scaleX", "scaleY"] as const) {
-    const track = group.animations.find((t) => t.property === property);
-    if (!track) {
-      group.animations.push({
-        property,
-        keyframes: [
-          { atS: 0, value: 1 },
-          { atS: untilS, value: scale, easing: "linear" },
-        ],
-      });
-      continue;
-    }
-    const last = track.keyframes.at(-1)!;
-    if (last.atS < untilS)
-      track.keyframes.push({
-        atS: untilS,
-        value: (last.value as number) * scale,
-        easing: "linear",
-      });
-  }
-}
-
 /** Expand guided recipes into ordinary editable layers. No asset I/O, capture or rendering. */
-/** `take` reads a recording a take recipe names (`proof`, `lift`), relative
- *  to the brief; without it those recipes are errors. */
-export function composeMotionStory(
-  value: unknown,
-  opts: { take?: TakeLoader } = {},
-): MotionStoryResult {
+export function composeMotionStory(value: unknown): MotionStoryResult {
   const issues: LaunchIssue[] = [];
   if (!record(value)) return { issues: [error("$", "must be a motion story JSON object")] };
   for (const key of Object.keys(value))
-    if (!["version", "output", "theme", "scenes", "audio", "story", "sound"].includes(key))
+    if (!["version", "output", "theme", "scenes", "audio", "story"].includes(key))
       issues.push(error(key, "unsupported motion story field"));
   issues.push(
     ...validateLaunchComposition({
@@ -1007,19 +964,11 @@ export function composeMotionStory(
   const output = value.output as LaunchComposition["output"],
     theme = value.theme as LaunchTheme;
   const generated = new Set<number>();
-  // scenes of one recording continue each other (its clock, its cursor)
-  const takes: TakeRecipeContext = {
-    design: { width: 1920, height: 1080 },
-    ...(opts.take ? { loader: opts.take } : {}),
-    tapes: new Map(),
-  };
   const scenes = (value.scenes as unknown[]).map((raw, i) => {
     if (!record(raw) || !Object.hasOwn(raw, "recipe")) return raw;
     generated.add(i);
-    const path = `scenes[${i}]`;
-    if ((TAKE_RECIPES as readonly unknown[]).includes(raw.recipe))
-      return buildTakeRecipe(raw, path, takes, issues)?.scenes ?? raw;
-    const recipe = parseRecipe(raw, path, issues);
+    const path = `scenes[${i}]`,
+      recipe = parseRecipe(raw, path, issues);
     if (!recipe) return raw;
     if (Math.min(output.width, output.height) < 320) {
       issues.push(
@@ -1037,11 +986,9 @@ export function composeMotionStory(
     version: value.version,
     output,
     theme,
-    // a take recipe may cut: it becomes several scenes, one per shot
-    scenes: scenes.flat(),
+    scenes,
     ...(value.audio !== undefined ? { audio: value.audio } : {}),
     ...(value.story !== undefined ? { story: value.story } : {}),
-    ...(value.sound !== undefined ? { sound: value.sound } : {}),
   };
   issues.push(...validateLaunchComposition(candidate));
   if (issues.some((x) => x.severity === "error")) return { issues };

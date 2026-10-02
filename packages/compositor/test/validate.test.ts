@@ -559,5 +559,8 @@ test("a dead opening warns like a dead tail — the load wait is for shooting, n
   // trimming to ~1.2s of establishing hold clears it
   c.startMs = 6000;
   issues = validateComposition(c);
-  assert.ok(!issues.some((i) => /dead opening/.test(i.message)), "a trimmed head is clean");
+  assert.ok(
+    !issues.some((i) => /dead opening/.test(i.message)),
+    "a trimmed head is clean",
+  );
 });

@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, realpathSync, statSync } from "node:fs";
 import {
   mkdir,
   mkdtemp,
@@ -16,40 +16,13 @@ import { tmpdir } from "node:os";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { renderVideo } from "@open-take/revideo-renderer";
-import {
-  arrange,
-  type CueSheet,
-  encodeWav,
-  type MusicSheet,
-  mixCues,
-  mixFilm,
-  type Pcm,
-  paletteLibrary,
-  renderMusic,
-  resolvePalette,
-  resolveStyle,
-  spot,
-} from "open-foley";
 import { resolveFfmpeg, resolveFfprobe } from "./ffmpeg";
-import { type FootageSource, launchEventSheet } from "./foley-events";
-import { htmlRenderable, htmlStagingDir, renderHtmlFilm } from "./html/launch";
-import {
-  launchAudioAtS,
-  launchDurationS,
-  launchMotionBlur,
-  renderedMotionBlur,
-  shutterClock,
-} from "./launch-evaluate";
-import { launchMusicAnchors } from "./launch-music";
+import { launchAudioAtS, launchDurationS } from "./launch-evaluate";
 import type { LaunchAudioTrack, LaunchComposition, LaunchIssue } from "./launch-types";
-import { formatLaunchIssues, usesStates, validateLaunchComposition } from "./launch-validate";
+import { formatLaunchIssues, validateLaunchComposition } from "./launch-validate";
 import { walkMotionLayers } from "./motion-evaluate";
-import { shutterSchedule } from "./motion-speed";
 import type { MotionImageLayer, MotionLayer, MotionScene, MotionVideoLayer } from "./motion-types";
 import { withRenderLock } from "./render-lock";
-import { accumulateShutter } from "./shutter";
-import { readStateIndex, type StateIndex } from "./state-index";
-import type { CaptureLog, TakeComposition } from "./types";
 
 const PKG_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -642,26 +615,11 @@ async function cleanup(dir: string): Promise<void> {
   else await rm(dir, { recursive: true, force: true });
 }
 
-/** The output a render draws: a draft is small and ≤30 fps; the renderer and
- *  the delivery encode read the resolved shutter (drafts skip it). */
-function renderOutput(comp: LaunchComposition, draft: boolean): LaunchComposition["output"] {
-  const draftScale = Math.min(1, 960 / Math.max(comp.output.width, comp.output.height));
-  const even = (value: number) => Math.max(2, Math.round(value / 2) * 2);
-  const size = draft
-    ? {
-        width: even(comp.output.width * draftScale),
-        height: even(comp.output.height * draftScale),
-        fps: Math.min(30, comp.output.fps),
-      }
-    : { width: comp.output.width, height: comp.output.height, fps: comp.output.fps };
-  return { ...size, motionBlur: draft ? false : (launchMotionBlur(comp.output) ?? false) };
-}
-
 async function prepare(
   comp: LaunchComposition,
   compositionPath: string,
   draft: boolean,
-): Promise<{ dir: string; rendered: LaunchComposition; schedule: number[] }> {
+): Promise<{ dir: string; rendered: LaunchComposition }> {
   const dir = await mkdtemp(join(tmpdir(), "open-take-launch-"));
   const base = dirname(resolve(compositionPath));
   try {
@@ -670,10 +628,17 @@ async function prepare(
     const nm = hostNodeModules();
     if (!nm) throw new Error("launch render: could not locate node_modules");
     await symlink(nm, join(dir, "node_modules"), "junction");
-    const rendered: LaunchComposition = structuredClone(comp);
-    rendered.output = renderOutput(comp, draft);
-    const output = rendered.output;
+    const draftScale = Math.min(1, 960 / Math.max(comp.output.width, comp.output.height));
     const even = (value: number) => Math.max(2, Math.round(value / 2) * 2);
+    const output = draft
+      ? {
+          width: even(comp.output.width * draftScale),
+          height: even(comp.output.height * draftScale),
+          fps: Math.min(30, comp.output.fps),
+        }
+      : comp.output;
+    const rendered: LaunchComposition = structuredClone(comp);
+    rendered.output = output;
     let n = 0;
     for (const scene of rendered.scenes)
       if (scene.type === "footage") {
@@ -700,12 +665,7 @@ async function prepare(
       join(dir, "src", "scene", ".launch-composition.json"),
       JSON.stringify(rendered, null, 2),
     );
-    // shutter samples per output frame: a still frame renders once, a fast one
-    // as often as a smooth smear needs ([] = no motion blur)
-    const blur = renderedMotionBlur(rendered.output);
-    const schedule = blur ? shutterSchedule(rendered, blur) : [];
-    await writeFile(join(dir, "src", "scene", ".launch-shutter.json"), JSON.stringify(schedule));
-    return { dir, rendered, schedule };
+    return { dir, rendered };
   } catch (error) {
     await cleanup(dir);
     throw error;
@@ -846,106 +806,6 @@ export async function deliverLaunchMedia(
   await run(ffmpeg, args);
 }
 
-/** The recording a footage / video asset came from: the layer's explicit
- *  `take` path, else a sibling by convention — the take layout (`demo.mp4` +
- *  `demo.take/composition.json` or `.take/capture.json`) or the older flat
- *  spelling (`demo.composition.json` / `demo.capture.json`). Its events are
- *  what let the sound design hear the clicks INSIDE the recording. */
-export function footageSourceFor(
-  base: string,
-  asset: string,
-  explicit?: string,
-): FootageSource | undefined {
-  const abs = resolve(base, asset);
-  const stem = abs.replace(/\.[^./]+$/, "");
-  const candidates = explicit
-    ? [resolve(base, explicit)]
-    : [
-        join(`${stem}.take`, "composition.json"),
-        join(`${stem}.take`, "capture.json"),
-        `${stem}.composition.json`,
-        `${stem}.capture.json`,
-      ];
-  for (const candidate of candidates) {
-    if (!existsSync(candidate)) continue;
-    try {
-      const parsed = JSON.parse(readFileSync(candidate, "utf8")) as Record<string, unknown>;
-      if (!parsed || !Array.isArray(parsed.events)) continue;
-      if (parsed.source) return { kind: "take", composition: parsed as unknown as TakeComposition };
-      if (parsed.viewport) {
-        const log = parsed as unknown as CaptureLog;
-        // its saved screens, when it has them: the launch camera reads what
-        // each action changed off them (take-recipes.ts directTake)
-        const states = new Map<string, StateIndex>();
-        for (const item of log.states?.items ?? []) {
-          const index = readStateIndex(join(dirname(candidate), log.states!.dir, item.id));
-          if (typeof index !== "string") states.set(item.id, index);
-        }
-        return { kind: "capture", log, ...(states.size ? { states } : {}) };
-      }
-    } catch {
-      // an unreadable sibling is not a recording; the asset is just footage
-    }
-  }
-  return undefined;
-}
-
-/** The film's soundtrack: foley spotted from its own timeline in the voices
- *  its palette picks, plus the generated score (unless the palette says
- *  `music: false` or the film brings its own music track), mastered as one
- *  stem. Returns the cue sheet and the music sheet too — the editable
- *  artifacts. Pure: no files written. */
-export function launchSoundtrack(
-  comp: LaunchComposition,
-  compositionPath: string,
-): { pcm: Pcm; cues: CueSheet; music?: MusicSheet; loudness: { lufs: number; truePeak: number } } {
-  const base = dirname(resolve(compositionPath));
-  const sound = comp.sound ?? { style: "cinematic" };
-  const palette = resolvePalette(sound.palette);
-  const events = launchEventSheet(comp, {
-    takeFor: (asset, explicit) => footageSourceFor(base, asset, explicit),
-  });
-  const ownMusic = (comp.audio ?? []).some((a) => a.kind === "music");
-  const withMusic = palette.music !== false && !ownMusic;
-  const spotted = spot(events, { style: sound.style, seed: sound.seed });
-  // with a score, the score owns the builds: no foley risers under it
-  const cues: CueSheet = withMusic
-    ? { ...spotted, cues: spotted.cues.filter((c) => c.role !== "riser") }
-    : spotted;
-  const durationS = launchDurationS(comp);
-  const foley = mixCues(cues, { library: paletteLibrary(palette), durationS });
-  let music: MusicSheet | undefined;
-  let musicPcm: Pcm | undefined;
-  let busy: number[] = [];
-  if (withMusic) {
-    const input = launchMusicAnchors(comp, events);
-    busy = input.busy;
-    music = arrange(input, { bpm: 120, seed: sound.seed ?? 1 });
-    musicPcm = renderMusic(music, undefined, palette.music || {}).pcm;
-  }
-  const mastered = mixFilm(musicPcm, foley, busy, durationS);
-  return {
-    pcm: mastered.pcm,
-    cues,
-    ...(music ? { music } : {}),
-    loudness: { lufs: mastered.after.integrated, truePeak: mastered.after.truePeak },
-  };
-}
-
-async function soundtrackFor(
-  comp: LaunchComposition,
-  compositionPath: string,
-  wavPath: string,
-): Promise<{ track: LaunchAudioTrack; cues: CueSheet; music?: MusicSheet }> {
-  const { pcm, cues, music } = launchSoundtrack(comp, compositionPath);
-  await writeFile(wavPath, encodeWav(pcm));
-  return {
-    track: { id: "open-foley", kind: "sfx", asset: wavPath, atS: 0 },
-    cues,
-    ...(music ? { music } : {}),
-  };
-}
-
 /** Stage beside the destination so failed encoding never replaces a good master. */
 export async function publishLaunchMedia(
   raw: string,
@@ -958,19 +818,7 @@ export async function publishLaunchMedia(
   );
   try {
     const staged = join(stageDir, "delivery.mp4");
-    let delivered = comp;
-    if (comp.sound) {
-      const { track, cues, music } = await soundtrackFor(
-        comp,
-        compositionPath,
-        join(stageDir, "soundtrack.wav"),
-      );
-      delivered = { ...comp, audio: [...(comp.audio ?? []), track] };
-      const beside = dirname(resolve(compositionPath));
-      await writeFile(join(beside, "foley.cues.json"), JSON.stringify(cues, null, 2));
-      if (music) await writeFile(join(beside, "music.sheet.json"), JSON.stringify(music, null, 2));
-    }
-    await deliverLaunchMedia(raw, staged, delivered, compositionPath);
+    await deliverLaunchMedia(raw, staged, comp, compositionPath);
     await rename(staged, target);
   } finally {
     await rm(stageDir, { recursive: true, force: true });
@@ -1014,43 +862,6 @@ export function assertLaunchOutputSafe(
   }
 }
 
-/** Films of motion scenes render in Chrome as DOM (html/): 3D, parallel. */
-async function renderHtml(
-  opts: RenderLaunchOpts,
-  out: string,
-  issues: LaunchIssue[],
-): Promise<RenderLaunchResult> {
-  const dir = await htmlStagingDir();
-  try {
-    const rendered: LaunchComposition = structuredClone(opts.composition);
-    rendered.output = renderOutput(opts.composition, !!opts.draft);
-    await mkdir(join(dir, "assets"), { recursive: true });
-    await prepareMotionImages(rendered, opts.compositionPath, join(dir, "assets"));
-    const { raw } = await renderHtmlFilm({
-      rendered,
-      compositionPath: opts.compositionPath,
-      chromePath: opts.chromePath,
-      dir,
-      onProgress: opts.onProgress,
-    });
-    await publishLaunchMedia(raw, out, rendered, opts.compositionPath);
-    return {
-      mp4Path: out,
-      durationS: launchDurationS(rendered),
-      warnings: issues.filter((x) => x.severity === "warn"),
-    };
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-}
-
-/** The last render frame's time on the render clock (launch-scene.tsx). */
-function lastRenderFrameS(comp: LaunchComposition, schedule: number[]): number {
-  const frames = Math.ceil(launchDurationS(comp) * comp.output.fps - 1e-9);
-  const clock = shutterClock(schedule, comp.output.fps, 0.5, frames);
-  return Math.max(0, (clock.renderFrames - 1) / clock.renderFps);
-}
-
 export async function renderLaunch(opts: RenderLaunchOpts): Promise<RenderLaunchResult> {
   return withRenderLock(() => renderExclusive(opts));
 }
@@ -1065,20 +876,10 @@ async function renderExclusive(opts: RenderLaunchOpts): Promise<RenderLaunchResu
   const out = resolve(opts.outPath);
   await mkdir(dirname(out), { recursive: true });
   assertLaunchOutputSafe(opts.composition, opts.compositionPath, out);
-  if (opts.composition.sound) resolveStyle(opts.composition.sound.style);
-  if (htmlRenderable(opts.composition)) return renderHtml(opts, out, issues);
-  if (opts.composition.scenes.some((s) => s.type === "motion" && usesStates(s.layers)))
-    throw new Error(
-      "launch render: state layers (saved screens) are drawn by the HTML renderer only — unset OPEN_TAKE_LAUNCH_RENDERER",
-    );
   // Revideo's exporter spawns ffmpeg/ffprobe itself and would default to the
   // binaries its own dependency bundles (an old 4.x); point it at ours.
   const ffmpeg = { ffmpegPath: await resolveFfmpeg(), ffprobePath: await resolveFfprobe() };
-  const { dir, rendered, schedule } = await prepare(
-    opts.composition,
-    opts.compositionPath,
-    !!opts.draft,
-  );
+  const { dir, rendered } = await prepare(opts.composition, opts.compositionPath, !!opts.draft);
   const deps = depsRoot();
   const prev = process.cwd();
   try {
@@ -1093,7 +894,14 @@ async function renderExclusive(opts: RenderLaunchOpts): Promise<RenderLaunchResu
         projectSettings: {
           // Revideo exports both range endpoints; cap the last frame explicitly
           // instead of including its extra scene-completion frames.
-          range: [0, lastRenderFrameS(rendered, schedule)],
+          range: [
+            0,
+            Math.max(
+              0,
+              (Math.ceil(launchDurationS(rendered) * rendered.output.fps - 1e-9) - 1) /
+                rendered.output.fps,
+            ),
+          ],
           exporter: { name: "@revideo/core/ffmpeg", options: { format: "proRes" } },
         },
         logProgress: opts.logProgress ?? false,
@@ -1111,14 +919,7 @@ async function renderExclusive(opts: RenderLaunchOpts): Promise<RenderLaunchResu
       },
     });
     process.chdir(prev);
-    let raw = resolve(dir, produced);
-    if (schedule.length) {
-      // average each output frame's shutter samples into one frame
-      const averaged = join(dir, "shutter.mov");
-      await accumulateShutter(raw, averaged, schedule, rendered.output);
-      raw = averaged;
-    }
-    await publishLaunchMedia(raw, out, rendered, opts.compositionPath);
+    await publishLaunchMedia(resolve(dir, produced), out, rendered, opts.compositionPath);
     return {
       mp4Path: out,
       durationS: launchDurationS(rendered),

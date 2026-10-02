@@ -9,7 +9,7 @@
 //
 // The refine loop is conversational: the user talks, the agent edits
 // composition.json and drives these verbs. See skills/open-take/SKILL.md.
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { stat as fsStat, readFile, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,11 +29,9 @@ import {
   composeLaunchFile,
   type Defect,
   type DefectReport,
-  describeSoundPalette,
   describeTake,
   emitGithubOutputs,
   emitStepSummary,
-  encodeWav,
   ensureChrome,
   filmSheet,
   filmStills,
@@ -42,7 +40,6 @@ import {
   formatNotes,
   formatTakeStates,
   healingWithheld,
-  INSTRUMENT_NOTES,
   initLaunchProject,
   inspectPage,
   lintPlan,
@@ -63,7 +60,6 @@ import {
   renderFrames,
   renderLaunchFile,
   renderReview,
-  renderScore,
   renderTeaserGif,
   requireTakeFiles,
   reRenderInPlace,
@@ -71,10 +67,6 @@ import {
   revealPath,
   runPostShootGates,
   SAY_IT_CARD,
-  SCORE_DRUMS,
-  SCORE_NOTES,
-  type ScoreSheet,
-  SOUND_STYLES,
   settleDefects,
   skippedDefects,
   stagePrev,
@@ -166,12 +158,10 @@ const FLAGS_BY_CMD: Record<string, string[]> = {
     "--profile",
     "--headed",
     "--verbose",
-    "--sound",
     "--states",
     "--no-render",
   ],
   render: [
-    "--sound",
     "--review",
     "--draft",
     "--open",
@@ -216,8 +206,7 @@ const FLAGS_BY_CMD: Record<string, string[]> = {
   ],
   init: ["--force"],
   skill: ["--force"],
-  launch: ["--video", "--out", "--draft", "--verbose", "--sound"],
-  sound: ["--out", "--json"],
+  launch: ["--video", "--out", "--draft", "--verbose"],
 };
 
 function rejectUnknownFlags(cmd: string): void {
@@ -233,31 +222,6 @@ function rejectUnknownFlags(cmd: string): void {
   }
 }
 
-/** `--sound <style>` — a preset name, or `off`. Validated here so a typo
- *  fails before a capture, not after a render. */
-function parseSound(v: string | undefined): string | undefined {
-  if (v == null || v === "off" || v === "none") return undefined;
-  if (!(v in SOUND_STYLES))
-    throw new Error(
-      `--sound ${v}: unknown style — one of ${Object.keys(SOUND_STYLES).join(", ")}, or off`,
-    );
-  return v;
-}
-
-/** Write `sound` into a composition file (take or launch) — or delete it for
- *  `off`. The composition is the source of truth; the flag is a way to edit it. */
-async function setCompositionSound(compositionPath: string, value: string): Promise<void> {
-  const style = parseSound(value);
-  const raw = JSON.parse(await readFile(compositionPath, "utf8")) as Record<string, unknown>;
-  if (style)
-    raw.sound = { ...(typeof raw.sound === "object" && raw.sound ? raw.sound : {}), style };
-  else delete raw.sound;
-  await writeFile(compositionPath, JSON.stringify(raw, null, 2));
-  process.stdout.write(
-    style ? `sound: ${style} (written to ${compositionPath})\n` : `sound: off\n`,
-  );
-}
-
 function parseViewport(s?: string): { width: number; height: number } | undefined {
   if (!s) return undefined;
   const [w, h] = s.toLowerCase().split("x").map(Number);
@@ -268,8 +232,8 @@ const USAGE = `open-take — agent-native demo recorder
 
 Usage:
   open-take inspect <url> [--viewport 1920x1080]
-  open-take make   --plan <plan.json> --out <out.mp4> [--fps 60] [--draft] [--no-open] [--sound <style>] [--states] [--no-render]
-  open-take render <take> [--review] [--draft] [--open] [--reveal] [--no-open] [--no-strict] [--sound <style>|off]
+  open-take make   --plan <plan.json> --out <out.mp4> [--fps 60] [--draft] [--no-open] [--states] [--no-render]
+  open-take render <take> [--review] [--draft] [--open] [--reveal] [--no-open] [--no-strict]
   open-take check  <take> [--no-strict]
   open-take beats  <take> [--card]
   open-take states <take> [--state <id>] [--json]
@@ -285,10 +249,8 @@ Usage:
   open-take launch init <directory> --video <existing.mp4>
   open-take launch compose <brief.json> --out <launch.json>
   open-take launch check <launch.json>
-  open-take launch render <launch.json> [--out <movie.mp4>] [--draft] [--sound <style>|off]
+  open-take launch render <launch.json> [--out <movie.mp4>] [--draft]
   open-take skill  [motion | film | install [--force]]
-  open-take sound render <score.json> [--out score.wav] [--json]
-  open-take sound instruments | palette
   open-take film render <page.html|dir> [--out film.mp4] [--audio <file>|none] [--draft] [--no-blur]
                    [--size 1920x1080] [--fps 60] [--duration <s>] [--from <s>] [--to <s>] [--root <dir>]
                    [--workers 2] [--supersample 2]
@@ -332,10 +294,6 @@ Usage:
           --draft renders a clean draft copy to draft.mp4 (30fps cap +
           motion blur off, no badges) — the cheap re-render for frame checks
           mid-refine; never overwrites the master. Does not auto-open.
-          --sound <style> scores the take from its own event log (open-foley:
-          cinematic | minimal | playful; off removes it) — written into the
-          composition, so every later render keeps it. Which sound each role
-          gets is sound.palette in the composition (see \`sound palette\`).
           (legacy flags --composition/--video/--out/--capture-log still work)
   check   judge an existing take without rendering anything: re-run the
           post-shoot gates against the delivered master (cursor audit · dead
@@ -480,10 +438,6 @@ Usage:
           guide to films written as web pages, \`skill motion\` the motion
           composition reference. \`skill install\` remains as a
           backwards-compatible alias for \`init\`.
-  sound   \`sound render <score.json>\` plays a score you wrote (every sound
-          with its time) to a mastered WAV; \`sound instruments\` lists the
-          drums and tuned instruments a score can play, \`sound palette\` the
-          vetted sounds per role (what each feels like, which is the default).
   film    a film you write yourself as a web page — open-take only performs
           it. \`film render\` plays the page on film time (window.__render(t),
           or its own CSS/WAAPI/rAF/GSAP/video animation, frame-exact) in
@@ -849,7 +803,6 @@ async function main() {
         throw new Error(
           "launch render: --video is not accepted; footage paths come from launch.json",
         );
-      if (has("--sound")) await setCompositionSound(target, flag("--sound")!);
       const result = await renderLaunchFile({
         compositionPath: target,
         outPath: flag("--out"),
@@ -1051,7 +1004,6 @@ async function main() {
     // repair loop defects that are already fixed (resolveTakePaths is a pure
     // string transform; the master need not exist)
     const takePre = await resolveTakePaths(out).catch(() => null);
-    const soundStyle = parseSound(flag("--sound"));
     const planIssues = lintPlan(parsedPlan);
     {
       const planErrors = planIssues.filter((i) => i.severity === "error");
@@ -1128,7 +1080,6 @@ async function main() {
         verbose: has("--verbose"),
         draft: has("--draft"),
         render: !has("--no-render"),
-        ...(soundStyle ? { planOpts: { sound: { style: soundStyle } } } : {}),
         // progressive reveal: the capture exists minutes before the polished
         // mp4 — show the raw footage the moment it lands so the wait is spent
         // watching, not staring at a spinner.
@@ -1419,9 +1370,6 @@ async function main() {
     const takeArg = positional[0];
     if (!takeArg) throw new Error("render: missing <take> (its .mp4, its .take/ dir, or a dir)");
     const take = await resolveTakePaths(takeArg);
-    // --sound edits the take's composition (the source of truth) and then
-    // renders whichever copy was asked for; every later render keeps it.
-    if (has("--sound")) await setCompositionSound(take.compositionPath, flag("--sound")!);
 
     if (has("--review")) {
       const { reviewPath, sheet, warnings } = await renderReview(take, { logProgress: true });
@@ -1905,69 +1853,6 @@ async function main() {
       return;
     }
     throw new Error(`film: unknown action ${action} — render, still, sheet or check`);
-  }
-
-  if (cmd === "sound") {
-    const action = positional[0];
-    const only = (...allowed: string[]) => {
-      for (const f of Object.keys(flags))
-        if (!allowed.includes(f))
-          throw new Error(
-            `sound ${action}: ${f} does not apply here${allowed.length ? ` — allowed: ${allowed.join(" ")}` : ""}`,
-          );
-    };
-    if (action === "palette") {
-      only();
-      process.stdout.write(`${describeSoundPalette()}\n`);
-      return;
-    }
-    if (action === "instruments") {
-      only();
-      const lines = [
-        "Instruments a score can play (a track event's `drum` or `note`):",
-        "",
-        "drums (one-shots):",
-        ...SCORE_DRUMS.map((d) => `  ${d.padEnd(15)} ${INSTRUMENT_NOTES[d]}`),
-        "",
-        'notes (pitch: "F#3", a MIDI number, or a list for a chord):',
-        ...SCORE_NOTES.map((d) => `  ${d.padEnd(15)} ${INSTRUMENT_NOTES[d]}`),
-        "",
-        "recordings and voices (a track event's `sound`): `open-take sound palette`",
-        "your own audio (a track event's `file`): any WAV, relative to the score",
-      ];
-      process.stdout.write(`${lines.join("\n")}\n`);
-      return;
-    }
-    if (action === "render") {
-      only("--out", "--json");
-      const sheetPath = positional[1];
-      if (!sheetPath || positional.length !== 2)
-        throw new Error("sound render: expected <score.json>");
-      const out = flag("--out") ?? sheetPath.replace(/\.json$/i, "") + ".wav";
-      const sheet = JSON.parse(await readFile(sheetPath, "utf8")) as ScoreSheet;
-      const result = renderScore(sheet, (p) => readFileSync(resolve(dirname(sheetPath), p)));
-      await writeFile(out, encodeWav(result.pcm));
-      if (has("--json")) {
-        process.stdout.write(
-          `${JSON.stringify({ out, before: result.before, after: result.after, masterGainDb: result.masterGainDb, tracks: result.tracks }, null, 2)}\n`,
-        );
-        return;
-      }
-      const f = (x: number) => (Number.isFinite(x) ? x.toFixed(1) : "silent");
-      process.stdout.write(
-        `rendered: ${out}\n` +
-          `mix: ${f(result.before.integrated)} → ${f(result.after.integrated)} LUFS, true peak ${f(result.after.truePeak)} dBTP, range ${f(result.after.range)} LU\n` +
-          result.tracks
-            .map(
-              (t) =>
-                `  ${t.name.padEnd(12)} peak ${f(t.peakDb)} dBFS · ${f(t.loudness.integrated)} LUFS · loudest 3 s ${f(t.loudness.shortTermMax)} LUFS`,
-            )
-            .join("\n") +
-          "\n",
-      );
-      return;
-    }
-    throw new Error("sound: expected `palette`, `instruments` or `render <score.json>`");
   }
 
   if (cmd === "--version" || cmd === "-v") {

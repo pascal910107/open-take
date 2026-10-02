@@ -304,7 +304,9 @@ test("startMs: range-checked; trimming into the first beat warns", () => {
   // range-check clean; the dead-opening advisory (its own test) may still
   // fire on this fixture's long pre-beat stretch and is not a range finding
   assert.ok(
-    validateComposition(ok).every((i) => i.path !== "startMs" || /dead opening/.test(i.message)),
+    validateComposition(ok).every(
+      (i) => i.path !== "startMs" || /dead opening/.test(i.message),
+    ),
     "a head trim before the first ramp is clean",
   );
   const neg = comp(squeezedEvents());

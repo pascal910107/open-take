@@ -112,11 +112,9 @@ judgment; when skipping, restate the brief so they can correct it.
   scene animation/transitions, and sound. This is a correction point, not another approval
   gate. Route Recording and Demo through `make`/`render`; route Launch through `film` (your own
   page, [film.md](references/film.md)) — the older `launch` JSON composition is for a quick cut
-  built around one finished recording. If
-  Recording or Demo includes **sound effects**, that is `--sound <style>` on `make`/`render`
-  (see SOUND below) — still a recording, still `make`. Only **music or narration** needs a
-  launch composition: capture with `make`, wrap that finished recording as the only `footage`
-  scene, and add only the requested `audio` track—no title, morph, or transition unless
+  built around one finished recording. If Recording or Demo explicitly includes sound, capture
+  with `make`, then wrap that finished recording as the only `footage` scene in a launch
+  composition and add only the requested audio—no title, morph, or transition unless
   separately chosen.
 - Ask audience/purpose as an additional question only when it is unknown and
   would materially change the story.
@@ -668,34 +666,7 @@ page changed).
 npx open-take make --plan plan.json --out demos/myapp.mp4 --draft    # the default loop
 npx open-take make --plan plan.json --out demos/myapp.mp4            # master up front
 npx open-take make --plan plan.json --out demos/myapp.mp4 --fps 30   # capture at 30
-npx open-take make --plan plan.json --out demos/myapp.mp4 --sound cinematic   # with foley
 ```
-
-### SOUND (open-foley) — only when the user chose it
-A take is silent unless the user asked for sound. `--sound <style>` (on `make`, `render`
-and `launch render`) scores the take **from its own event log**: a click per click, a
-keystroke per typed character, a whoosh riding each camera move, a riser under a long
-typing window, a transition breath on a navigation, and — in a launch film — a payoff stack
-on the story beat with `role: "payoff"`. Nothing listens to the video; placement is
-deterministic, so a re-render never changes the sound by itself. Styles: `cinematic`
-(the motion-design reference language), `minimal` (interface sounds only, no sub/riser),
-`playful` (pops). `--sound off` removes it. The flag writes `sound: { style }` into the
-composition, so every later copy (review, draft, A/B, master) carries it; the spotted cue
-sheet lands beside the composition as `foley.cues.json` — edit a cue's `gainDb` or delete
-it, then re-render. Judge sound the way you judge the picture: by listening to the master,
-not by reading the cue sheet; when the user has not heard a style yet, offer a quick A/B
-of two styles rather than describing them.
-
-**Choosing the sounds is yours; inventing them is not.** Each role (keystroke, click,
-arrival, move, the payoff stack) plays one of a small set of options a person has approved
-by ear — `npx open-take sound palette` lists them with what each one feels like and which is
-the default. Pick per film from what the product is (a calm writing tool and a trading
-terminal should not type the same way) and write the choices into the composition's
-`sound.palette`, e.g. `{ "key": "key.crisp", "music": { "style": "minimal" } }`; any role left
-out takes the default. Only listed entries validate. A launch film with sound also gets a
-generated score that follows the film — chapter changes land on downbeats, a payoff gets a
-build and a hit — with the same palette choosing its style and parts; `"music": false` keeps
-a film music-free, and a film that brings its own music track in `audio` never gets one.
 
 The `make` commands produce `<out>.mp4` (1920×1080 @ **60fps default**) — the one the user posts —
 and a working directory `<out>.take/` beside it holding everything else, starting
@@ -703,9 +674,9 @@ with the editable `<out>.take/composition.json`.
 
 **A launch or promo film is yours to write.** Build it as a web page — HTML, CSS, SVG,
 canvas, WebGL, any library — with the story, copy, typography, motion and sound you decide;
-open-take plays it frame-exactly into a 1080p60 master with measured motion blur, masters a
-score you write note by note (or takes your own WAV), hands you the real product's UI as
-material (`make --states`), and measures what you cannot see or hear (`film check`). Read
+open-take plays it frame-exactly into a 1080p60 master with measured motion blur and the
+soundtrack you make, hands you the real product's UI as material (`make --states`), and
+measures what you cannot see or hear (`film check`). Read
 [film.md](references/film.md) (or `npx open-take skill film`) before starting; nothing in it
 is a template.
 

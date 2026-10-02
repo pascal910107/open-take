@@ -4,7 +4,7 @@ A launch or promo film is yours to make: what it shows, what it says, how it
 moves and how it sounds. Write it the way you would build anything for the web
 — a page, with HTML, CSS, SVG, canvas, WebGL, any library — and let open-take
 do the parts that are plumbing: playing the page frame-exactly, motion blur,
-encoding, mixing and mastering sound, measuring what you cannot see or hear.
+encoding, measuring what you cannot see or hear.
 open-take adds nothing anyone sees or hears: the story, the motion and the
 music are the film's author's, and so is how good the film is. Nothing below
 is required; use what helps.
@@ -78,33 +78,11 @@ It judges nothing about taste.
 
 ## Sound
 
-Bring any WAV you made, or write a score and let open-take play it. A score
-is every sound with its time — nothing is added for you. Its shape (the
-names come from the two commands below; any program can write the file):
-
-```json
-{ "version": 1, "durationS": 42.5,
-  "tracks": [
-    { "name": "…", "gainDb": 0, "duck": { "under": "…", "depthDb": 4 },
-      "events": [ { "at": 3.2, "drum": "…" },
-                  { "at": 4.0, "note": "…", "pitch": "C4", "dur": 1.5 },
-                  { "at": 6.1, "sound": "…" },
-                  { "at": 9.0, "file": "voice.wav" } ] } ] }
-```
-
-```sh
-npx open-take sound instruments   # drums and tuned instruments (pitch "F#3", MIDI, or a chord)
-npx open-take sound palette       # vetted sounds (real keyboard and click recordings, synthesized whooshes and hits) and what each feels like
-npx open-take sound render score.json --out score.wav
-```
-
-An event is one of `drum`, `note` (+ `pitch`, `dur`), `sound` (a palette id)
-or `file` (your own WAV); `gainDb` is its peak level (default −12 dBFS), `pan`
-−1…1, `seed` varies a hit. The mix is mastered to −16 LUFS with a −1.5 dBTP
-ceiling (`"master": { "lufs": -14 }` to change it, `false` to leave levels as
-written). `sound render` prints each track's peak and loudness — the balance
-you would otherwise judge by ear. Sounds of real things (keys, clicks) should
-be recordings from the palette; synthesized imitations of them read as fake.
+The soundtrack is a WAV you make — `__film.audio`, or `--audio <file>`.
+Compose it however suits the film: a script that synthesizes and mixes it
+(it can follow the same timeline the page draws from), sounds you bring, or
+both. `film check` measures what is hard to judge by ear alone: integrated
+loudness, loudness range, true peak, silences, and clicks.
 
 ## Material from the real product
 

@@ -434,7 +434,7 @@ async function servePage(
 ) {
   const { root, pageFile, urlPath } = resolveFilmPage(opts.page, opts.root);
   const missing = new Set<string>();
-  const server = await serveDirectory(root, {}, (p) => {
+  const server = await serveDirectory(root, (p) => {
     if (!p.endsWith("/favicon.ico")) missing.add(decodeURIComponent(p));
   });
   const clock = filmClockSource({ seed: 0x5eed, epochMs: Date.now() });

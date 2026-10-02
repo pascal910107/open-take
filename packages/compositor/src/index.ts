@@ -8,16 +8,6 @@
 // composition is the editable source of truth.
 
 export {
-  DRUMS as SCORE_DRUMS,
-  describePalette as describeSoundPalette,
-  encodeWav,
-  INSTRUMENT_NOTES,
-  NOTES as SCORE_NOTES,
-  renderScore,
-  type ScoreSheet,
-  STYLES as SOUND_STYLES,
-} from "open-foley";
-export {
   type AuditCursorOpts,
   type AuditRow,
   auditCursor,
@@ -50,15 +40,6 @@ export {
 } from "./film/render";
 export { type FilmSheetOptions, filmSheet } from "./film/sheet";
 export {
-  captureEventSheet,
-  type FoleyEvent,
-  type FoleyEventSheet,
-  type FootageSource,
-  type LaunchEventSheetOpts,
-  launchEventSheet,
-  takeEventSheet,
-} from "./foley-events";
-export {
   evaluateUiMorph,
   launchAudioAtS,
   launchDurationS,
@@ -67,10 +48,7 @@ export {
   uiMorphDurationS,
   uiStateDurationS,
 } from "./launch-evaluate";
-export { type LaunchMusicInput, launchMusicAnchors } from "./launch-music";
 export {
-  footageSourceFor,
-  launchSoundtrack,
   type RenderLaunchOpts,
   type RenderLaunchResult,
   renderLaunch,
@@ -116,13 +94,6 @@ export {
   subtree,
 } from "./state-diff";
 export { readStateIndex, type StateElement, type StateIndex } from "./state-index";
-export type {
-  LiftRecipe,
-  ProofRecipe,
-  TakeLoader,
-  TakeMaterial,
-  TakeRecipe,
-} from "./take-recipes";
 export * from "./types";
 export {
   type CompositionIssue,

@@ -1,5 +1,5 @@
-// Static files for one directory, so the seek page and everything it loads —
-// fonts, images, clips, captured DOM states — are same-origin at
+// Static files for one directory, so a film's page and everything it loads —
+// fonts, images, clips, saved screens — are same-origin at
 // http://127.0.0.1:<port>/… A file:// page would refuse cross-origin fonts and
 // fetch() of a sibling file; over loopback every asset is a plain relative URL
 // and Chrome caches it for the life of that (throwaway) profile.
@@ -53,13 +53,9 @@ export type StaticServer = {
   close(): Promise<void>;
 };
 
-/** Serve `root` (a directory) on a loopback ephemeral port until `close()`.
- *  `mounts` serve other directories under a path prefix (`{"/states/0":
- *  dir}` → `/states/0/s3/state.html` is `dir/s3/state.html`) without copying
- *  them into the root. */
+/** Serve `root` (a directory) on a loopback ephemeral port until `close()`. */
 export async function serveDirectory(
   root: string,
-  mounts: Record<string, string> = {},
   /** told the path of every request answered 404 (a film's missing font or
    *  image would otherwise just render without it) */
   onMiss?: (urlPath: string) => void,
@@ -67,19 +63,10 @@ export async function serveDirectory(
   const base = resolve(root);
   const info = await stat(base).catch(() => null);
   if (!info?.isDirectory()) throw new Error(`serveDirectory: ${base} is not a directory`);
-  const mounted = Object.entries(mounts).map(([prefix, dir]) => {
-    if (!/^(\/[\w.-]+)+$/.test(prefix) || prefix.split("/").includes(".."))
-      throw new Error(`serveDirectory: bad mount prefix ${JSON.stringify(prefix)}`);
-    return { prefix: `${prefix}/`, base: resolve(dir) };
-  });
 
   const server = createServer((req, res) => {
     const url = req.url ?? "/";
-    const mount = mounted.find((m) => url.startsWith(m.prefix));
-    const from = mount
-      ? { base: mount.base, url: url.slice(mount.prefix.length - 1) }
-      : { base, url };
-    serveFile(from.base, from.url, req, res, () => onMiss?.(url.split("?")[0]!)).catch(() => {
+    serveFile(base, url, req, res, () => onMiss?.(url.split("?")[0]!)).catch(() => {
       if (!res.headersSent) res.writeHead(500);
       res.end();
     });

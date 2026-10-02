@@ -4,7 +4,6 @@
 // through viewport→video scaling), so the scene works in one coordinate
 // system.
 
-import type { SoundPalette } from "open-foley";
 export type Pt = { x: number; y: number };
 export type BBox = { x: number; y: number; w: number; h: number };
 
@@ -311,22 +310,6 @@ export type CompEvent = {
   files?: { name: string; size?: number }[];
   /** ghost-card rendering knobs (kind=dropFiles); absent ⇒ enabled defaults */
   ghostCard?: GhostCardConfig;
-  /** CAPTURE-DERIVED: fraction of the frame the action repainted, 0..1 —
-   *  carried from the log so a later pass (the sound design's `transition`)
-   *  can tell a navigation from a popover without re-reading the capture. */
-  changeCoverage?: number;
-};
-
-/** Sound design, by open-foley. Absent ⇒ silent (the default: audio is a
- *  choice, never a surprise). `style` is a preset name — cinematic / minimal /
- *  playful; `seed` varies the per-cue micro-variation. The cue sheet the
- *  render spotted is written beside the composition as foley.cues.json. */
-export type SoundConfig = {
-  style: string;
-  seed?: number;
-  /** which vetted sound each role gets (open-foley palette); absent ⇒ the
-   *  default palette. Takes use its foley roles; music is for launch films. */
-  palette?: SoundPalette;
 };
 
 export type FramingConfig = {
@@ -578,8 +561,6 @@ export type TakeComposition = {
   captions?: Caption[];
   /** optional opening title card over the establishing hold (see TitleCard) */
   titleCard?: TitleCard;
-  /** optional sound design (see SoundConfig); absent ⇒ silent */
-  sound?: SoundConfig;
   /** render-time review decoration (badges/watermark/label); never persisted
    *  (render strips exactly this field — `captions` above deliberately IS
    *  persisted; it is content, not review scaffolding) */

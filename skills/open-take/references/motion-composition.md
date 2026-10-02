@@ -86,46 +86,6 @@ These are heuristics for free layouts,
 not proof of artistic quality or correct storytelling. Inspect the rendered
 frames. Keep a simple recording when extra design does not help.
 
-### Recipes from a recording
-
-When the product was recorded with `make --states`, two recipes take the take
-itself as material. You name WHAT to show — actions of the take and an
-element of a saved screen — and the program owns the rest. The camera is the
-take's own director: it follows the hand (pushing in on each action, easing
-out for page-wide changes), and when an action changes something elsewhere on
-the page — a field whose result appears across the screen — it shows the hand
-through the action, then looks at the result (the saved screens tell it what
-changed where). The recording starts a beat before the hand moves and never
-before the page settled; an idle stretch between two actions is cut only where
-the cut lands on a new framing, never inside one. The cursor, click ripples,
-switching between recording and saved screen where they match, how big a
-lifted element grows and where it goes, reading-time holds and the curves are
-the program's too. Scenes of one take continue each other: the recording's
-clock and the cursor carry over.
-
-| Recipe | Fields | What it shows |
-| --- | --- | --- |
-| `proof` | `take`, `from`, optional `to` | The recorded actions `from` → `to` through the take's camera (the hand, then what it changed), until the last result has been seen |
-| `lift` | `take`, `after`, `element`, optional `change` | The screen `after` left behind; `element` lifts out of it, big and sharp, the page dimmed behind; with `change`, a later action's change to it happens in place; then it goes home and the recording carries on |
-
-`take` is the `<name>.take` folder, relative to the brief. Actions are `a1`,
-`a2`, … as `open-take states <take>` numbers them (it also lists what each
-action changed, the saved screen it left behind, and its elements); an
-element is an id of the state that action left behind (`e32`). Read the
-listing, then choose: prove the actions that carry the story with `proof`, and
-`lift` the one element whose content IS the point — a value that changed, a
-card the viewer must read. A lift is a close look, not a transition; one or two
-in a film, where the content earns it. A state that failed its fidelity check
-cannot be lifted (show that moment with `proof`).
-
-```json
-{ "scenes": [
-  { "recipe": "proof", "id": "add", "take": "shop.take", "from": "a1", "to": "a2" },
-  { "recipe": "lift", "id": "total", "take": "shop.take", "after": "a2", "element": "e41", "change": "a3" },
-  { "recipe": "proof", "id": "pay", "take": "shop.take", "from": "a4" }
-] }
-```
-
 Use free layers below when the purpose calls for a different visual structure.
 The protected recipes are starting points, not the entire animation system.
 
@@ -178,32 +138,16 @@ and scales default to 1. IDs must be unique throughout a scene.
 | `group` | `children` | `width`, `height`, `clip` (clipping requires both sizes), `radius` (only with `clip: true`) |
 | `rect` | `width`, `height` | `fill`, `stroke`, `strokeWidth`, `radius`, `shadow` |
 | `ellipse` | `width`, `height` | `fill`, `stroke`, `strokeWidth` |
-| `text` | `text`, `width`, `height`, `fontSize` | `fontFamily`, `fontWeight`, `fill`, `align`, `lineHeight`, `reveal`, `units` |
+| `text` | `text`, `width`, `height`, `fontSize` | `fontFamily`, `fontWeight`, `fill`, `align`, `lineHeight`, `reveal` |
 | `image` | `asset`, `width`, `height` | `fit`, `radius`, `crop`, `shadow` |
 | `video` | `asset`, `width`, `height`, `durationS` | `fit`, `radius`, `trimStartS`, `startS`, `shadow` |
-| `state` | `state`, `width`, `height` | `fit`, `radius`, `crop`, `only`, `hide`, `shadow` |
-| `cursor` | — | open-take's arrow, its tip at the layer's origin (24 × 39 at scale 1) |
 | `line` | `points` (array of `[x,y]`) | `stroke`, `strokeWidth`, `end` |
-| `wipe` | `atS` | `durationS`, `holdS`, `revealS`, `direction` (`right`/`left`), `color` |
 
 Text wraps in a bounded box. `align` is `left`, `center` (default), or `right`;
 `lineHeight` is in design pixels. `reveal` runs 0–1 over grapheme clusters (so an
 emoji or combining character is not cut into code units). Leave enough height
 for all lines and inspect the rendered font; estimated validation cannot know
 every installed font. Defaults inherit theme `ink`, `surface`, and `accent`.
-
-`units` makes copy move word by word (or grapheme by grapheme) with **named
-moves** — the program owns the distances, curves, masks and blur; you choose the
-move and when: `"units": {"by": "word", "moves": [{"move": "rise", "atS": 0.4},
-{"move": "fall", "atS": 5.2}]}`. Arrivals: `rise` (each word rises into place
-through a mask at its line — the default for a headline), `pop` (settles from
-slightly large with a blurred first frame — a word that lands on a beat),
-`fade`. Exits: `fall` (each word drops away, tipping and blurring — lets a line
-leave with the same energy it arrived with), `fade-out`. At most one arrival,
-then at most one exit; optional `staggerS`/`durationS` override the measured
-defaults. CJK copy is segmented into words too. Do not combine `units` with a
-`reveal` track (typing), and give the box no clip of its own when a unit leaves
-it (a `fall` leaves the box).
 
 Image assets are local PNG, JPEG or WebP; paths resolve relative to the JSON.
 `fit: "contain"` preserves all of the source; `"cover"` crops to the layer box.
@@ -222,35 +166,7 @@ stay inside one moving or expanding panel. Keep related beats inside one scene
 when the same element should continue across them. A normal `footage` scene is
 still available for a standalone clip.
 
-**Saved screens.** A take recorded with `make --states` also keeps the
-interface itself at every settled moment: `<take>.take/states/s<N>/` holds
-`state.html` (the page, re-renderable offline), `index.json` (what was on
-screen: each visible element's `id`, `role`, `name`, `text` and `box` —
-`[x, y, width, height]` in page CSS px — plus `layers`, the page's major regions
-back to front, `step`, the action it follows, and `fidelity`) and `live.png`
-(the recording at that moment). A `state` layer shows one as live DOM, laid out
-at its captured viewport: text and vectors stay sharp at any zoom, where a
-recording softens past its capture resolution, and every element is
-addressable. `only: ["e42"]` keeps just those elements — the rest of the page,
-its background included, turns transparent — so a button, a card or a panel
-can leave its page; `hide` removes elements without moving anything around
-them; `crop` selects a region in page CSS px before fitting, like an image
-crop. Find ids by role, name and text in index.json, and take crops from their
-boxes. To sit an element exactly over its place in a full-page layer P (contain
-scale `s = min(P.width / viewport.w, P.height / viewport.h)`), give it
-`crop` = its box, `width`/`height` = the box × s, and centre it at
-`P.x + (x + w/2 − viewport.w/2) × s`, `P.y + (y + h/2 − viewport.h/2) × s`.
-A saved screen is a still: the recording carries what happens (typing,
-clicking, scrolling), the state what is there — for a hold, a close look, a
-region lifted out, a layout taken apart. When a state did not re-render like
-the recording (`fidelity.ok` false) the checker warns: compare it with
-live.png, or show the recording instead. A moment the page was still moving
-at (a video playing, a long animation) is not saved at all — `open-take
-states` names it MOVING — because there is no still of it to show, and
-reading one would stall the app mid-recording; show it with the recording. Saved screens need a film made only
-of motion scenes (the HTML renderer, below).
-
-Rectangles, images, videos and states accept a static `shadow` object with `color`,
+Rectangles, images and videos accept a static `shadow` object with `color`,
 `blur` (0–256), and optional `offsetX`/`offsetY` (−512 to 512, default zero), all
 in design pixels. Shadow follows the layer's transform; shadow-specific tracks
 are not supported. Use it sparingly to distinguish lifted content from its surface.
@@ -261,64 +177,8 @@ Each track has a `property` and `keyframes: [{atS, value, easing?}]`. One track 
 property; the first time must be 0; later times strictly increase within the
 scene duration. A delayed entrance uses repeated values before the change.
 Values hold after the last keyframe. Easing belongs to the **destination**
-keyframe: `linear` (default), `ease-in`, `ease-out`, `ease-in-out`, `step`, or a
-named curve. `step` holds the previous value until the destination timestamp.
-
-The named curves carry a meaning (measured frame by frame off a reference launch
-film): **`snap`** — something arriving (most of the travel early, then a long
-settle); **`swift`** — an object moving; **`glide`** — a camera or a hand moving
-(symmetric, never overshoots); **`spring`** — something landing (a small
-overshoot, settled by the keyframe); **`back`** — a small pop past the target
-(handles, checkboxes). Leave with `ease-in`: exits accelerate away rather than
-decelerate. Pick the curve by what the motion *is*, not per film.
-
-A few habits separate a designed film from a slideshow; `launch check` points
-at them as advice, never errors. The camera rarely rests — over a reading hold
-let the framing creep (a linear push of a few percent) rather than freeze. Vary
-camera moves; the same move repeated reads as a template. Let copy leave with a
-move, not a fade. Start the next move before the last one has fully settled,
-and move the camera a few frames before the action it frames.
-
-**Depth.** Any layer takes `rotateX`, `rotateY` (degrees) and `z` (design px,
-negative = away), animatable like the other transforms, seen through the
-scene's `perspective` (design px, default 2800 — the measured reference). A
-recorded window that waits tilted beside the copy and swings to face the viewer
-as the camera pushes in is the typical use; keep tilts modest (10–30°). Layers
-still stack in paint order — a tilted plane is drawn over what came before it.
-3D needs a film made only of motion scenes (it renders through the HTML
-renderer, below); the checker says so otherwise.
-
-**Chapter changes.** Most changes need no effect at all: cut onto the next
-action, or let a camera move carried by the product's own interface take the
-viewer there. A `wipe` layer is a plain cover — a straight edge sweeps across
-in `color`, holds, then clears; switch what is underneath while it is covered
-(between `atS + durationS` and `atS + durationS + holdS`). Keep it for a real
-turn in the story, and put it last so it paints over everything.
-
-**Beats that land.** A scene's `hits: [{"atS": 30.15, "strength": 0.6, "flash":
-0.5}]` shakes the whole frame briefly and optionally flashes it white — for the
-payoff, the reveal, the logo landing. A hit on everything is a hit on nothing.
-
-**Design from this product, not a template.** Every tool here — depth,
-wipes, hits, word moves — is optional and earns its place only by what it
-shows. Don't add an effect because it is available, don't reuse one film's
-set pieces in the next, and don't imitate another film's look: two launch
-films should not feel like the same template with different screenshots. The
-distinctive moments come from the product's own material — its interface, its
-recorded actions, its words — framed for this story. What the program keeps
-constant is the craft you should not have to think about: curves, motion blur,
-a camera that never quite rests, readable holds, sound in sync.
-
-**Renderer.** A film made only of motion scenes renders through the HTML
-renderer (Chrome drawing the layers as DOM, several pages in parallel); films
-with other scene types use the 2D renderer. Both read the same JSON and the
-same curves; depth and saved screens need the HTML renderer.
-
-Final renders apply a film-style motion blur automatically (a 180° shutter;
-drafts skip it): a still frame renders once, a fast move is sampled finely
-enough to smear instead of strobe. `output.motionBlur: false` turns it off;
-`{"samples": 2–16, "shutter": 0–1}` caps the samples per frame and sets the
-shutter. Recorded footage itself is never smeared.
+keyframe: `linear` (default), `ease-in`, `ease-out`, `ease-in-out`, or `step`.
+`step` holds the previous value until the destination timestamp.
 
 Animate shared transforms or kind-specific fields: size, rect/image/video or
 clipped-group `radius`, paint `fill`/`stroke`, `strokeWidth`, text

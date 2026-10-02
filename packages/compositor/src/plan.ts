@@ -22,7 +22,6 @@ import {
   DEFAULT_MOTION_BLUR,
   type FramingConfig,
   type Pt,
-  type SoundConfig,
   type TakeComposition,
   type ZoomDecision,
 } from "./types";
@@ -36,8 +35,6 @@ export type PlanOpts = {
    *  `camera.enabled = false` for the manual escape hatch (only explicit
    *  event `zoom: "always"/"never"` produce zoom then). */
   camera?: Partial<CameraConfig>;
-  /** sound design (open-foley) for the take; absent ⇒ silent */
-  sound?: SoundConfig;
 };
 
 export function planComposition(log: CaptureLog, opts: PlanOpts = {}): TakeComposition {
@@ -132,7 +129,6 @@ export function planComposition(log: CaptureLog, opts: PlanOpts = {}): TakeCompo
       ...(kind === "dropFiles"
         ? { files: (c as { files: { name: string; size?: number }[] }).files }
         : {}),
-      ...(c.changeCoverage != null ? { changeCoverage: c.changeCoverage } : {}),
     };
     return { beat, ev };
   });
@@ -209,7 +205,6 @@ export function planComposition(log: CaptureLog, opts: PlanOpts = {}): TakeCompo
     events,
     durationMs,
     ...(captions.length ? { captions } : {}),
-    ...(opts.sound ? { sound: opts.sound } : {}),
   };
 }
 

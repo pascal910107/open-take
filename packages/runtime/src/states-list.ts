@@ -1,13 +1,13 @@
 // `open-take states <take>` — what a recording's saved states contain and
 // what each recorded action changed, for a model that is about to write a
-// launch film from it. Reads the take's capture.json (the actions, and which
+// film from it. Reads the take's capture.json (the actions, and which
 // saved state followed each) and states/<id>/index.json (what was on screen,
 // element by element — see compositor/src/state-index.ts) and describes the
 // difference between neighbouring states at the level a viewer notices: a
 // card that appeared, a number that changed, a box that moved.
 //
-// Two contracts the launch recipes lean on: actions are numbered a1..aN in
-// capture order, and element ids are PER STATE (the same button can be e52
+// Two contracts a film leans on when it names what it shows: actions are
+// numbered a1..aN in capture order, and element ids are PER STATE (the same button can be e52
 // in s1 and e83 in s3), so an element is always named with its state —
 // s3:e32. The diff itself comes from the compositor's state-diff helpers;
 // this file only decides what is worth a line.
@@ -1205,7 +1205,7 @@ function formatOutline(o: StateOutline): string {
   const out: string[] = [
     `${stateHeading(s, s.id === "s0")} · ${s.elements ?? 0} elements` +
       `${s.title ? ` · ${quote(s.title, 60)}` : ""}${s.url ? ` ${s.url}` : ""}`,
-    `regions back → front · card = a group a film can lift out (≥2 labels, 0.3–20% of the page) · name elements as ${s.id}:e<N>`,
+    `regions back → front · card = a group a film might show on its own (≥2 labels, 0.3–20% of the page) · name elements as ${s.id}:e<N>`,
     "",
   ];
   for (const r of o.regions) {
