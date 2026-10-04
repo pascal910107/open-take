@@ -46,7 +46,7 @@
 // take in <out>/.shoot/ with the error in its shots.json.
 
 import { existsSync } from "node:fs";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rename, rm, rmdir, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
@@ -517,32 +517,61 @@ export async function runShoot(opts: ShootOpts): Promise<{ log: ShootLog; path: 
     await browser?.close();
   }
 
-  // the script finished: this shoot replaces the last one, but only once all
-  // of it is in place — the last one is moved aside first, and put back if
-  // anything of the new one cannot go where it belongs
+  // the script finished: this shoot replaces the last one
   const log: ShootLog = { viewport, scale, stills };
   await writeFile(join(stage, "shots.json"), `${JSON.stringify(log, null, 2)}\n`);
-  const aside = join(out, ".shoot-previous");
-  await rm(aside, { recursive: true, force: true });
+  await replaceShoot(
+    out,
+    stage,
+    stills.map((st) => st.file),
+  );
+  return { log, path: join(out, "shots.json") };
+}
+
+/** Put the shoot staged in `stage` (its stills, `names`, and its shots.json)
+ *  in place of the last one in `out`, but only once all of it is in place —
+ *  the last one is moved aside first, and put back if anything of the new one
+ *  cannot go where it belongs. Nothing of the last one is deleted unless the
+ *  new one is whole in place: what cannot be put back stays aside, in a
+ *  directory of this run's own, and the error says where. `move` is rename;
+ *  a test makes it fail. */
+export async function replaceShoot(
+  out: string,
+  stage: string,
+  names: readonly string[],
+  move: (from: string, to: string) => Promise<void> = rename,
+): Promise<void> {
+  const aside = await mkdtemp(join(out, ".shoot-previous-"));
   const previous: string[] = [];
   const placed: string[] = [];
   try {
-    await moveAside(out, aside, previous);
-    for (const name of [...stills.map((st) => st.file), "shots.json"]) {
-      await rename(join(stage, name), join(out, name));
+    await moveAside(out, aside, previous, move);
+    for (const name of [...names, "shots.json"]) {
+      await move(join(stage, name), join(out, name));
       placed.push(name);
     }
   } catch (e) {
-    for (const name of placed) await rename(join(out, name), join(stage, name)).catch(() => {});
-    for (const name of previous) await rename(join(aside, name), join(out, name)).catch(() => {});
-    await rm(aside, { recursive: true, force: true }).catch(() => {});
+    const why = e instanceof Error ? e.message : String(e);
+    // the new files go back to the stage; one that cannot is left where it
+    // is, and the last shoot's file of the same name is not put over it
+    const left: string[] = [];
+    for (const name of placed.reverse())
+      await move(join(out, name), join(stage, name)).catch(() => left.push(name));
+    const stuck: string[] = [];
+    for (const name of previous)
+      if (left.includes(name)) stuck.push(name);
+      else await move(join(aside, name), join(out, name)).catch(() => stuck.push(name));
+    if (!stuck.length) await rmdir(aside).catch(() => {});
     throw new Error(
-      `shoot: the new shoot could not replace the last one (${e instanceof Error ? e.message : String(e)}) — the last one is back in place, the new one is in ${stage}`,
+      `shoot: the new shoot could not replace the last one (${why}) — ${
+        stuck.length
+          ? `the last one could not all be put back: ${stuck.join(", ")} ${stuck.length === 1 ? "is" : "are"} in ${aside}`
+          : "the last one is back in place"
+      }, the new one is in ${stage}${left.length ? ` (but for ${left.join(", ")}, left in ${out})` : ""}`,
     );
   }
   await rm(aside, { recursive: true, force: true });
   await rm(stage, { recursive: true, force: true });
-  return { log, path: join(out, "shots.json") };
 }
 
 async function loadScript(
@@ -581,20 +610,24 @@ function scriptFailure(e: unknown, file?: string): string {
  *  log into `aside`, adding each to `moved` as it goes, so that what was moved
  *  can be put back even if the rest cannot. Anything else in the directory is
  *  the author's and stays where it is. */
-async function moveAside(out: string, aside: string, moved: string[]): Promise<void> {
+async function moveAside(
+  out: string,
+  aside: string,
+  moved: string[],
+  move: (from: string, to: string) => Promise<void>,
+): Promise<void> {
   let old: ShootLog;
   try {
     old = JSON.parse(await readFile(join(out, "shots.json"), "utf8")) as ShootLog;
   } catch {
     return;
   }
-  await mkdir(aside, { recursive: true });
   const names = (Array.isArray(old.stills) ? old.stills : [])
     .map((st) => st?.file)
     .filter((f): f is string => typeof f === "string" && /^\d{3,}-[^/\\]+\.png$/.test(f));
   for (const name of [...names, "shots.json"]) {
     if (!existsSync(join(out, name))) continue;
-    await rename(join(out, name), join(aside, name));
+    await move(join(out, name), join(aside, name));
     moved.push(name);
   }
 }

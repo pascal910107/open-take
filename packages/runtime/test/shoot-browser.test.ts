@@ -9,14 +9,14 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { promisify } from "node:util";
 import { resolveChrome } from "../src/cdp";
-import { runShoot, type ShootLog, type ShootOpts } from "../src/shoot";
+import { replaceShoot, runShoot, type ShootLog, type ShootOpts } from "../src/shoot";
 
 const exec = promisify(execFile);
 
@@ -469,10 +469,68 @@ test("shoot: a last shoot that cannot all be moved aside is put back whole", {
     );
     for (const st of kept.stills)
       assert.ok(existsSync(join(out, st.file)), `${st.file} is back in place`);
-    assert.ok(!existsSync(join(out, ".shoot-previous")), "nothing is left aside");
+    assert.ok(
+      !(await readdir(out)).some((n) => n.startsWith(".shoot-previous")),
+      "nothing is left aside",
+    );
   } finally {
     server.close();
     if (locked) await exec("chflags", ["nouchg", locked]).catch(() => {});
+    await rm(out, { recursive: true, force: true });
+  }
+});
+
+test("shoot: a last shoot that cannot be put back stays aside, and the error says where", async () => {
+  const out = await mkdtemp(join(tmpdir(), "open-take-shoot-"));
+  try {
+    const stage = join(out, ".shoot");
+    await mkdir(stage);
+    const log = (names: string[]) =>
+      `${JSON.stringify({ viewport: { w: 800, h: 600 }, scale: 2, stills: names.map((file) => ({ file })) })}\n`;
+    // the last shoot
+    await writeFile(join(out, "000-a.png"), "old a");
+    await writeFile(join(out, "shots.json"), log(["000-a.png"]));
+    // the new one: a still of the same name, and one that cannot be placed
+    await writeFile(join(stage, "000-a.png"), "new a");
+    await writeFile(join(stage, "001-b.png"), "new b");
+    await writeFile(join(stage, "shots.json"), log(["000-a.png", "001-b.png"]));
+    await mkdir(join(out, "001-b.png"));
+    await writeFile(join(out, "001-b.png", "theirs.txt"), "not ours");
+    // and the old still cannot be put back
+    const move = async (from: string, to: string) => {
+      if (from.includes(".shoot-previous") && from.endsWith("000-a.png"))
+        throw new Error("EIO: i/o error");
+      await rename(from, to);
+    };
+    const err = await replaceShoot(out, stage, ["000-a.png", "001-b.png"], move).then(
+      () => null,
+      (e: Error) => e,
+    );
+    assert.ok(err, "it fails");
+    const aside = (await readdir(out)).find((n) => n.startsWith(".shoot-previous"));
+    assert.ok(aside, `the last shoot's still is kept aside: ${await readdir(out)}`);
+    assert.equal(readFileSync(join(out, aside, "000-a.png"), "utf8"), "old a");
+    assert.match(err.message, new RegExp(`${aside}.*000-a\\.png|000-a\\.png.*${aside}`));
+    assert.doesNotMatch(err.message, /back in place/);
+    assert.equal(
+      readFileSync(join(out, "shots.json"), "utf8"),
+      log(["000-a.png"]),
+      "its log is back",
+    );
+    assert.equal(readFileSync(join(stage, "000-a.png"), "utf8"), "new a", "the new one is staged");
+    assert.ok(existsSync(join(out, "001-b.png", "theirs.txt")), "what was there is untouched");
+    // a later shoot does not clear what an earlier one left aside
+    await rm(join(out, "001-b.png"), { recursive: true });
+    await writeFile(join(stage, "001-b.png"), "new b");
+    await replaceShoot(out, stage, ["000-a.png", "001-b.png"]);
+    assert.equal(readFileSync(join(out, aside, "000-a.png"), "utf8"), "old a");
+    assert.equal(readFileSync(join(out, "000-a.png"), "utf8"), "new a");
+    assert.equal(
+      (await readdir(out)).filter((n) => n.startsWith(".shoot-previous")).length,
+      1,
+      "only the one that could not be put back is left aside",
+    );
+  } finally {
     await rm(out, { recursive: true, force: true });
   }
 });
