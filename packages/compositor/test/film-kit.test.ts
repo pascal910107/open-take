@@ -274,6 +274,36 @@ test("the still cache bounds what is still loading, not just what it holds", asy
   assert.ok(opened < 100, `not every still was fetched (${opened})`);
 });
 
+test("a small still cache never cancels the still it was asked for", async () => {
+  for (const keep of [1, 2, 3]) {
+    const cancelled: number[] = [];
+    const cache = stillCache({
+      keep,
+      ahead: 3,
+      count: 10,
+      open: (i: number) => {
+        let done = (_: number) => {};
+        let fail = (_: Error) => {};
+        const ready = new Promise<number>((ok, no) => {
+          done = ok;
+          fail = no;
+        });
+        setTimeout(() => done(i), 5);
+        return {
+          ready,
+          cancel: () => {
+            cancelled.push(i);
+            fail(new Error(`still ${i} cancelled`));
+          },
+        };
+      },
+    });
+    for (const i of [0, 4, 5])
+      assert.equal(await cache.take(i), i, `keep ${keep}: still ${i} (cancelled ${cancelled})`);
+    assert.ok(cache.size <= keep, `keep ${keep}: held ${cache.size}`);
+  }
+});
+
 test("many tiny cursor moves add up to where they lead", () => {
   const cur = cursor({ content: { width: 1920, height: 1080 }, start: { x: 100, y: 100 } });
   for (let i = 1; i <= 100; i++) cur.move({ x: 100 + i * 0.4, y: 100 }, i / 60, { dur: 1 / 60 });

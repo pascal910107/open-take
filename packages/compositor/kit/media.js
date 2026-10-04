@@ -189,11 +189,13 @@ export function stillCache({ keep, ahead, count, open }) {
     return n;
   };
   return {
-    /** still i, and a few after it fetched while fewer than `ahead` are loading */
+    /** still i, and a few after it fetched while fewer than `ahead` are
+     *  loading — never more than the cache holds besides still i, so what is
+     *  fetched ahead cannot push out the still that was asked for */
     /** @param {number} i */
     take(i) {
       const p = get(i);
-      for (let k = 1; k <= ahead && i + k < count; k++) {
+      for (let k = 1; k <= Math.min(ahead, keep - 1) && i + k < count; k++) {
         if (held.has(i + k)) continue;
         if (loading() > ahead) break; // the one wanted counts as loading too
         get(i + k);
