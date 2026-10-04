@@ -264,7 +264,8 @@ Usage:
                    [--size 1920x1080] [--supersample 2]
   open-take film picture <state.html|dir> [--scale 2] [--out picture.png]
   open-take film sheet  <film.mp4> [--out sheet.png] [--every <s> | --at <s>,<s>…]
-  open-take film check  <film.mp4> [--size 1920x1080] [--fps 60] [--json]
+  open-take film check  <film.mp4> [--size 1920x1080] [--fps 60] [--page <page.html|dir> [--root <dir>]]
+                   [--json]
 
   A take is TWO things on disk: the postable master at exactly your --out path
   (<out>.mp4), and a working directory beside it (<out>.take/) holding
@@ -486,7 +487,15 @@ Usage:
           and the page's soundtrack (window.__film = { duration, audio }).
           \`film still\` writes PNG stills at given times; \`film sheet\` a
           timed contact sheet of any video; \`film check\` measures a finished
-          film: format, hitches, cadence, cuts, black frames, loudness, clicks.
+          film: format, hitches, cadence, cuts, flashes (a few frames unlike
+          the frames on both sides), shots that start on near-blank frames,
+          black frames, loudness, clicks. With --page (the film's page) it
+          also reads the page over the film's time: text over text, text into
+          a small painted element, text cut by the frame's edge, and the
+          smallest text on screen (information, not a verdict). Each finding
+          has a time; one the page marks as intended (window.__film.marks =
+          [{ at, until?, what? }], kept in the film by \`film render\`) is
+          listed as marked, not as a defect.
           --supersample 2 (render, still) draws each frame at twice the pixels
           each way and averages it down: text in a slow zoom or drift steps
           less (Chrome places glyphs on whole pixels), for about 1.3–2× the
@@ -1933,12 +1942,17 @@ async function main() {
       return;
     }
     if (action === "check") {
-      only("--size", "--fps", "--json");
-      const c = await checkFilm(target, {
-        width: size?.width,
-        height: size?.height,
-        fps: num("--fps"),
-      });
+      only("--size", "--fps", "--json", "--page", "--root", "--verbose");
+      const page = flag("--page");
+      if (has("--root") && !page)
+        throw new Error("film check: --root is where --page is served from; give --page too");
+      const c = await checkFilm(
+        target,
+        { width: size?.width, height: size?.height, fps: num("--fps") },
+        page
+          ? { page, root: flag("--root"), chromePath: await ensureChrome(), onConsole }
+          : undefined,
+      );
       process.stdout.write(
         has("--json") ? `${JSON.stringify(c, null, 2)}\n` : `${formatFilmCheck(c)}\n`,
       );

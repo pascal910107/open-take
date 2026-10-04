@@ -18,8 +18,10 @@
 //                      and which side of that shutter to expose (one that cuts is left out)
 //
 // The page may declare itself with `window.__film = { duration, width, height,
-// fps, audio, ready, motion }` (every field optional). `__duration` and `__ready`
-// are read too.
+// fps, audio, ready, motion, marks }` (every field optional). `__duration` and
+// `__ready` are read too. `marks` — [{ at, until?, what? }] — are the moments
+// the author means to look the way they do (a white flash on the beat): `film
+// check` lists what it finds there as marked, not as a defect.
 //
 // This function is serialized into the page (Function#toString): it must not
 // reference anything outside its own body.
@@ -42,7 +44,37 @@ export type FilmPageInfo = {
   audio: string | null;
   /** the page has <audio> elements — they are not recorded */
   audioElements: number;
+  /** window.__film.marks as the page has them (see filmMarks) */
+  marks: unknown;
 };
+
+/** A moment the author means to look the way it does, in seconds of film
+ *  time: `film check` lists what it finds there as marked, not as a defect. */
+export type FilmMark = { at: number; until: number; what: string | null };
+
+/** window.__film.marks, checked: a list of { at, until?, what? } in seconds;
+ *  a mark without `until` is the moment `at`. */
+export function filmMarks(raw: unknown): FilmMark[] {
+  if (raw == null) return [];
+  const usage = "[{ at: <seconds>, until?: <seconds>, what?: <text> }]";
+  if (!Array.isArray(raw)) throw new Error(`film: window.__film.marks is a list — ${usage}`);
+  return raw.map((m, i) => {
+    const { at, until, what } = (m ?? {}) as Record<string, unknown>;
+    if (typeof at !== "number" || !Number.isFinite(at) || at < 0)
+      throw new Error(
+        `film: window.__film.marks[${i}].at is the mark's time in seconds — ${usage}`,
+      );
+    if (until != null && (typeof until !== "number" || !Number.isFinite(until) || until < at))
+      throw new Error(
+        `film: window.__film.marks[${i}].until is a time in seconds from at (${at}) on — ${usage}`,
+      );
+    return {
+      at,
+      until: (until as number | null | undefined) ?? at,
+      what: what == null ? null : String(what),
+    };
+  });
+}
 
 export function filmClockSource(opts: FilmClockOptions): string {
   // a transpiler that keeps function names (tsx/esbuild) calls a module-level
@@ -1085,6 +1117,13 @@ function installFilmClock(opts: FilmClockOptions): void {
       fps: num(film.fps),
       audio: typeof film.audio === "string" ? film.audio : null,
       audioElements: document.querySelectorAll("audio").length,
+      // plain values only, to cross into the renderer; checked there (filmMarks)
+      marks: Array.isArray(film.marks)
+        ? // biome-ignore lint/suspicious/noExplicitAny: the page's own marks, untyped
+          film.marks.map((m: any) => ({ at: m?.at, until: m?.until, what: m?.what }))
+        : film.marks == null
+          ? null
+          : String(film.marks),
     };
   }
 

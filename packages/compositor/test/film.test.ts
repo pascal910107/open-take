@@ -10,8 +10,8 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { promisify } from "node:util";
 import { resolveFfmpeg, resolveFfprobe } from "../src/ffmpeg";
-import { findClicks, motionFindings } from "../src/film/check";
-import { filmClockSource } from "../src/film/clock";
+import { checkFilm, findClicks, motionFindings, readPicture } from "../src/film/check";
+import { filmClockSource, filmMarks } from "../src/film/clock";
 import {
   balancedSlices,
   drainOrFail,
@@ -1677,4 +1677,322 @@ test("a click is a jump inside a smooth waveform, not the onset of a noisy sound
     noise[n] = 0.4 * (s / 2 ** 31 - 1);
   }
   assert.deepEqual(findClicks(noise, sr), []);
+});
+
+// --- flashes and blank frames, read from synthetic frames (grey, 64×36) -------
+
+const GW = 64;
+const GH = 36;
+/** a grey frame, each pixel f(x, y) */
+function grey(f: (x: number, y: number) => number): Uint8Array {
+  const a = new Uint8Array(GW * GH);
+  for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) a[y * GW + x] = f(x, y);
+  return a;
+}
+/** a scene: a soft gradient and a light box — a picture, not one colour */
+const scene = (shade: number, boxX: number) =>
+  grey((x, y) => (x >= boxX && x < boxX + 10 && y >= 12 && y < 24 ? 230 : shade + (x >> 2)));
+const flat = (v: number) => grey(() => v);
+const mix = (a: Uint8Array, b: Uint8Array, k: number) =>
+  a.map((v, i) => Math.round(v + (b[i]! - v) * k));
+/** feed frames to a picture reader; n copies of each */
+function feed(fps: number, ...shots: [Uint8Array, number?][]) {
+  const r = readPicture(GW, GH, fps);
+  for (const [f, n = 1] of shots) for (let i = 0; i < n; i++) r.push(f);
+  return r.done();
+}
+const at = (frame: number, fps: number) => Math.round((frame / fps) * 1000) / 1000;
+
+test("a flash is up to 1/15 s of frames unlike the frames on both sides — a cut, a fade, motion, a pan and a ticking number are not", () => {
+  const a = scene(40, 8);
+  const b = scene(90, 40);
+  const c = scene(20, 20);
+  const shots: [Uint8Array, number?][] = [
+    [a, 10],
+    // three frames of something else: bright, a dark band across — then back
+    [grey((_, y) => (y > 14 && y < 20 ? 0 : 220)), 3],
+    [a, 10],
+    [b, 10], // a clean cut
+    ...Array.from({ length: 20 }, (_, k): [Uint8Array] => [mix(b, c, (k + 1) / 20)]), // a fade
+    // a box moving across
+    ...Array.from({ length: 20 }, (_, k): [Uint8Array] => [scene(20, 2 * k)]),
+    // a pan: stripes over the whole picture, moving 3 px a frame
+    ...Array.from({ length: 20 }, (_, k): [Uint8Array] => [
+      grey((x) => ((x + 3 * k) & 8 ? 200 : 30)),
+    ]),
+    [c, 10],
+    // a number ticking over: a tenth of the picture changes for one frame
+    [grey((x, y) => (x >= 20 && x < 40 && y >= 12 && y < 24 ? 250 : c[y * GW + x]!)), 1],
+    [c, 10],
+  ];
+  const p = feed(60, ...shots);
+  assert.deepEqual(p.flashes, [{ at: at(10, 60), frames: 3 }]);
+  assert.deepEqual(p.blanks, []);
+  // the same picture at 30 fps: three frames are 1/10 s — a shot, not a flash;
+  // two frames still flash
+  const slow = feed(30, [a, 10], [shots[1]![0], 3], [a, 10], [shots[1]![0], 2], [a, 10]);
+  assert.deepEqual(slow.flashes, [{ at: at(23, 30), frames: 2 }]);
+});
+
+test("the frame differences are exact: identical frames differ by nothing", () => {
+  const p = feed(60, [scene(40, 8), 4], [scene(40, 12), 1], [scene(40, 12), 3]);
+  assert.equal(p.diffs.length, 7, "one difference between each pair of frames");
+  assert.deepEqual(
+    p.diffs.map((d) => d > 0),
+    [false, false, false, true, false, false, false],
+  );
+});
+
+test("a cut that lands on near-blank frames before the shot's content is found — not a fade through black, a held black or the end", () => {
+  const a = scene(40, 8);
+  const b = scene(90, 40);
+  const p = feed(
+    60,
+    [flat(20), 1], // the film opens on one blank frame
+    [a, 10],
+    [flat(98), 2], // a cut to the next shot's background, two frames before its content
+    [b, 10],
+    // a fade through black and back: no cut into it
+    ...Array.from({ length: 15 }, (_, k): [Uint8Array] => [mix(b, flat(0), (k + 1) / 15)]),
+    [flat(0), 3],
+    ...Array.from({ length: 15 }, (_, k): [Uint8Array] => [mix(flat(0), a, (k + 1) / 15)]),
+    [a, 10],
+    [flat(0), 30], // a cut to black held half a second: a beat, not a flicker
+    [b, 10],
+    [flat(0), 5], // the end
+  );
+  assert.deepEqual(p.blanks, [
+    { at: 0, frames: 1 },
+    { at: at(11, 60), frames: 2 },
+  ]);
+  assert.deepEqual(p.flashes, []);
+  // white frames unlike the shots on both sides of them are a flash, said once
+  const white = feed(60, [a, 10], [flat(250), 2], [b, 10]);
+  assert.deepEqual(white.flashes, [{ at: at(10, 60), frames: 2 }]);
+  assert.deepEqual(white.blanks, []);
+});
+
+test("marks are checked: a time in seconds, an optional end from it on, optional words", () => {
+  assert.deepEqual(filmMarks(null), []);
+  assert.deepEqual(filmMarks([{ at: 1.5 }, { at: 2, until: 2.5, what: "white flash" }]), [
+    { at: 1.5, until: 1.5, what: null },
+    { at: 2, until: 2.5, what: "white flash" },
+  ]);
+  assert.throws(() => filmMarks([{ at: "1.5" }]), /marks\[0\]\.at/);
+  assert.throws(() => filmMarks([{ at: 1 }, { at: 2, until: 1 }]), /marks\[1\]\.until/);
+  assert.throws(() => filmMarks("[object Object]"), /is a list/);
+});
+
+// --- the check on rendered films ---------------------------------------------
+
+/** small scenes on a 320×180 page, 3 s: what the check must find (a flash at
+ *  0.5 s, a blank start of a shot at 2.5 s) and what it must pass (a cut at
+ *  1 s, a fade from 1.5 s, motion from 2 s) */
+const SCENES = `<style>body{margin:0;width:320px;height:180px;overflow:hidden}
+#bg,#veil{position:absolute;inset:0}#veil{background:#a2c}
+#box,#vbox,#d{position:absolute;top:60px;width:60px;height:60px}#vbox{background:#fff}#d{background:#333;left:130px}
+#band{position:absolute;left:0;right:0;top:80px;height:24px;background:#000}</style>
+<div id="bg"></div><div id="box"></div><div id="band"></div><div id="veil"><div id="vbox"></div></div><div id="d"></div>
+<script>
+const $ = (id) => document.getElementById(id);
+const show = (id, on) => { $(id).style.display = on ? 'block' : 'none'; };
+window.__render = (t) => {
+  const flash = t >= 0.5 && t < 0.545; // frames 30–32
+  const blank = t >= 2.5 && t < 2.53; // frames 150–151
+  let bg = '#234', box = '#fff', x = 40, veil = 0;
+  if (t >= 1 && t < 2.5) { bg = '#2a6'; box = '#fd3'; x = 200; veil = Math.min(1, Math.max(0, (t - 1.5) / 0.5)); }
+  if (flash) bg = '#e33';
+  if (t >= 2.5) bg = '#ddd';
+  $('bg').style.background = bg;
+  $('box').style.background = box;
+  $('box').style.left = x + 'px';
+  show('box', !flash && t < 2.5);
+  show('band', flash);
+  $('veil').style.opacity = String(veil);
+  show('veil', veil > 0 && t < 2.5);
+  $('vbox').style.left = (20 + Math.max(0, t - 2) * 480) + 'px';
+  show('d', t >= 2.53);
+};
+</script>`;
+
+test("a rendered film: the check finds a 3-frame flash and a blank start of a shot, and passes a cut, a fade and motion", {
+  skip,
+}, async () => {
+  const page = join(dir, "flashes");
+  await exec("mkdir", ["-p", page]);
+  await writeFile(
+    join(page, "index.html"),
+    `<!doctype html><html><head><script>window.__film = { duration: 3, width: 320, height: 180 };</script></head><body>${SCENES}</body></html>`,
+  );
+  const out = join(dir, "flashes.mp4");
+  await renderFilm({ page, out, chromePath: chrome!, workers: 2, audio: null });
+  const c = await checkFilm(out);
+  assert.deepEqual(c.flashes, [{ at: 0.5, frames: 3 }]);
+  assert.deepEqual(c.blanks, [{ at: 2.5, frames: 2 }]);
+  assert.ok(c.cuts.includes(1), `the cut at 1 s is a cut: ${c.cuts}`);
+  const warns = c.issues.filter((i) => i.severity === "warn").map((i) => i.message);
+  assert.ok(
+    warns.some((m) => /flash/.test(m) && /0\.5s/.test(m)),
+    `the flash is a timed finding: ${warns.join(" | ")}`,
+  );
+  assert.ok(
+    warns.some((m) => /blank/.test(m) && /2\.5s/.test(m)),
+    `so is the blank start of the shot: ${warns.join(" | ")}`,
+  );
+  assert.ok(
+    !c.issues.some((i) => i.severity === "error"),
+    "neither is an error: a flash may be meant",
+  );
+  assert.deepEqual(c.marks, []);
+  assert.equal(c.layout, null, "the page's layout is read only when the page is given");
+});
+
+test("a flash the page marks as intended is listed as marked — also in a film rendered from the middle", {
+  skip,
+}, async () => {
+  const page = join(dir, "marked");
+  await exec("mkdir", ["-p", page]);
+  await writeFile(
+    join(page, "index.html"),
+    `<!doctype html><html><head><script>window.__film = { duration: 3, width: 320, height: 180,
+  marks: [{ at: 0.5, until: 0.55, what: "a flash on the beat" }] };</script></head><body>${SCENES}</body></html>`,
+  );
+  // page time 0.25–1.25: the flash is 0.25 s into this film
+  const out = join(dir, "marked.mp4");
+  await renderFilm({
+    page,
+    out,
+    chromePath: chrome!,
+    from: 0.25,
+    to: 1.25,
+    blur: false,
+    audio: null,
+  });
+  const c = await checkFilm(out);
+  assert.deepEqual(c.flashes, [{ at: 0.25, frames: 3 }], "still measured");
+  assert.deepEqual(c.marks, [{ at: 0.25, until: 0.3, what: "a flash on the beat" }]);
+  assert.ok(
+    !c.issues.some((i) => i.severity !== "info" && /flash/.test(i.message)),
+    `not a defect: ${c.issues.map((i) => i.message).join(" | ")}`,
+  );
+  assert.ok(
+    c.issues.some(
+      (i) =>
+        i.severity === "info" && /marked/.test(i.message) && /a flash on the beat/.test(i.message),
+    ),
+    `listed as marked: ${c.issues.map((i) => i.message).join(" | ")}`,
+  );
+  // a mistyped mark fails the render before a frame is drawn, by name
+  await writeFile(
+    join(page, "bad.html"),
+    `<!doctype html><html><body><script>window.__film = { duration: 1, marks: [{ at: "0.5" }] };</script></body></html>`,
+  );
+  await assert.rejects(
+    renderFilm({
+      page: join(page, "bad.html"),
+      out: join(dir, "bad.mp4"),
+      chromePath: chrome!,
+      audio: null,
+    }),
+    /marks\[0\]\.at/,
+  );
+});
+
+test("with the page, the check reads text over text and text cut by the frame's edge, with times, and the smallest text", {
+  skip,
+}, async () => {
+  const page = join(dir, "layout");
+  await exec("mkdir", ["-p", page]);
+  await writeFile(
+    join(page, "ui.html"),
+    `<!doctype html><html><body style="margin:0;font:16px sans-serif"><nav style="padding:20px 24px">Home · Pricing · Docs · Sign in</nav><p style="padding:0 24px">The real interface, with its own text.</p></body></html>`,
+  );
+  await writeFile(
+    join(page, "rows.html"),
+    `<!doctype html><html><body style="margin:0;font:16px sans-serif">${Array.from({ length: 30 }, (_, i) => `<p style="margin:4px 8px">row ${i} of the real interface text</p>`).join("")}</body></html>`,
+  );
+  // a caption over the interface's own text while it shows (0.25–0.75 s); a
+  // title running off the right edge from 1 s, marked as intended; a caption
+  // beside a window whose interface text the window hides; a ticker whose
+  // line runs past the edge but is cut by its own box first; a big number with
+  // its label tucked under it (their line boxes overlap, their glyphs do not);
+  // small print drawn at half size. Built as film pages often are: the page
+  // hides its overflow and the stage is placed absolutely, so the body has no
+  // height
+  await writeFile(
+    join(page, "index.html"),
+    `<!doctype html><html><head><style>
+html,body{margin:0;overflow:hidden;background:#fff}
+#stage{position:absolute;left:0;top:0;width:640px;height:360px;overflow:hidden;font:700 28px sans-serif}
+#ui{position:absolute;left:0;top:0;width:640px;height:120px;border:0}
+#cap{position:absolute;left:24px;top:12px;font-size:30px;color:#111;white-space:nowrap}
+#edge{position:absolute;left:520px;top:130px;white-space:nowrap}
+#win{position:absolute;left:340px;top:170px;width:280px;height:180px;overflow:hidden;background:#fff}
+#win iframe{width:640px;height:800px;border:0;transform-origin:0 0;transform:scale(1.4) translate(-120px,-40px)}
+#note{position:absolute;left:20px;top:260px;color:#123}
+#ticker{position:absolute;left:20px;top:130px;width:180px;overflow:hidden;white-space:nowrap;font:400 20px sans-serif}
+#num{position:absolute;left:230px;top:150px;font:700 64px/1 sans-serif}
+#yrs{position:absolute;left:230px;top:208px;font:700 14px sans-serif}
+#small{position:absolute;left:20px;top:330px;transform-origin:0 0;transform:scale(0.5);font:16px sans-serif}
+</style></head><body><div id="stage">
+<iframe id="ui" src="ui.html"></iframe><div id="cap">Find your next gym.</div><div id="edge">Runs off the edge</div>
+<div id="win"><iframe src="rows.html"></iframe></div><div id="note">Every gym.</div>
+<div id="ticker">A ticker that runs on well past the edge of the frame, inside its own box</div>
+<div id="num">32</div><div id="yrs">YEARS</div>
+<div id="small">small print</div></div>
+<script>
+window.__film = { duration: 2, width: 640, height: 360,
+  marks: [{ at: 1, until: 2, what: "the title runs off on purpose" }] };
+window.__render = (t) => {
+  document.getElementById('cap').style.opacity = t >= 0.25 && t < 0.75 ? '1' : '0';
+  document.getElementById('edge').style.visibility = t >= 1 ? 'visible' : 'hidden';
+};
+</script></body></html>`,
+  );
+  // a draft is drawn at half size: the check lays the page out at its own size
+  const out = join(dir, "layout.mp4");
+  await renderFilm({ page, out, chromePath: chrome!, draft: true, audio: null });
+  const c = await checkFilm(out, {}, { page, chromePath: chrome! });
+  const layout = c.layout!;
+  const over = layout.find((l) => l.kind === "text-over-text" && l.a.includes("#cap"));
+  assert.ok(
+    over?.b?.includes("iframe"),
+    `the caption over the interface's text: ${JSON.stringify(layout)}`,
+  );
+  assert.deepEqual([over!.from, over!.to], [0.25, 0.5], "while it shows, sampled every 0.25 s");
+  const edge = layout.find((l) => l.kind === "text-off-frame");
+  assert.ok(edge?.a.includes("#edge"), `the title cut by the edge: ${JSON.stringify(layout)}`);
+  assert.deepEqual([edge!.from, edge!.to], [1, 1.75], "from when it shows to the last sample");
+  assert.ok(
+    !layout.some((l) => l.a.includes("#note") || l.b?.includes("#note")),
+    `text the film's own window hides is not a collision: ${JSON.stringify(layout)}`,
+  );
+  assert.ok(
+    !layout.some((l) => l.a.includes("#ticker") || l.b?.includes("#ticker")),
+    `text its own box cuts is not cut by the frame: ${JSON.stringify(layout)}`,
+  );
+  assert.ok(
+    !layout.some((l) => l.a.includes("#num") || l.b?.includes("#num")),
+    `a label under a number's glyphs is not over them: ${JSON.stringify(layout)}`,
+  );
+  assert.deepEqual(
+    [c.smallestText?.px, /small print/.test(c.smallestText?.text ?? "")],
+    [8, true],
+    `the smallest text as drawn: ${JSON.stringify(c.smallestText)}`,
+  );
+  const warns = c.issues.filter((i) => i.severity === "warn").map((i) => i.message);
+  assert.ok(
+    warns.some((m) => m.includes("#cap")),
+    `a warning: ${warns.join(" | ")}`,
+  );
+  assert.ok(
+    !warns.some((m) => m.includes("#edge")),
+    `the edge is marked as intended: ${warns.join(" | ")}`,
+  );
+  assert.ok(
+    c.issues.some(
+      (i) => i.severity === "info" && /marked/.test(i.message) && i.message.includes("#edge"),
+    ),
+    c.issues.map((i) => i.message).join(" | "),
+  );
 });

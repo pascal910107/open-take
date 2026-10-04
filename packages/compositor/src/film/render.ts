@@ -25,7 +25,7 @@ import { resolveFfmpeg, runTool } from "../ffmpeg";
 import { type HtmlBrowser, launchHtmlBrowser } from "../html/cdp";
 import { serveDirectory } from "../html/server";
 import { jpegDimensions, matroskaCluster, matroskaHead } from "../mjpeg-matroska";
-import { type FilmPageInfo, filmClockSource } from "./clock";
+import { type FilmMark, type FilmPageInfo, filmClockSource, filmMarks } from "./clock";
 
 /** the shutter is open for this fraction of the frame interval (180°) */
 const SHUTTER_FRACTION = 0.5;
@@ -105,8 +105,19 @@ type Film = {
   f1: number;
   audio: string | null;
   blur: boolean;
+  marks: FilmMark[];
   warnings: string[];
 };
+
+/** The MP4 metadata key a rendered film carries for `film check`. In the file
+ *  itself rather than beside it, so it goes wherever the film is copied and a
+ *  render that drops a mark cannot leave a stale one behind. */
+export const FILM_TAG = "open_take_film";
+
+/** What the film carries under FILM_TAG: where on the page's timeline its
+ *  first frame is (a render --from), the size the page was laid out at, and
+ *  the page's marks, in page time. */
+export type FilmRecord = { from: number; width: number; height: number; marks: FilmMark[] };
 
 const inside = (file: string, dir: string) => {
   const r = relative(dir, file);
@@ -114,7 +125,7 @@ const inside = (file: string, dir: string) => {
 };
 
 /** the page file, the directory served, and the page's path in it */
-function resolveFilmPage(
+export function resolveFilmPage(
   page: string,
   root?: string,
 ): { root: string; pageFile: string; urlPath: string } {
@@ -586,6 +597,9 @@ function describe(
     f1,
     audio,
     blur: opts.blur ?? !at.draft,
+    // checked here, before a frame is drawn: a mark the author meant to make
+    // and mistyped would otherwise only surface as a defect after the render
+    marks: filmMarks(info.marks),
     warnings,
   };
 }
@@ -696,7 +710,15 @@ async function deliver(
   args.push("-map", "0:v", "-c:v", "copy");
   if (film.audio)
     args.push("-map", "1:a", "-af", "apad", "-c:a", "aac", "-b:a", "256k", "-ar", "48000");
-  args.push("-t", durationS.toFixed(6), "-movflags", "+faststart", resolve(out));
+  const record: FilmRecord = {
+    from: film.f0 / film.fps,
+    width: film.width,
+    height: film.height,
+    marks: film.marks,
+  };
+  args.push("-metadata", `${FILM_TAG}=${JSON.stringify(record)}`);
+  // a key of our own is written only with use_metadata_tags
+  args.push("-t", durationS.toFixed(6), "-movflags", "+faststart+use_metadata_tags", resolve(out));
   await runTool(ffmpeg, args);
 }
 

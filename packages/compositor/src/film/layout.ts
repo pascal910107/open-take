@@ -1,0 +1,510 @@
+// What a film page's layout gets wrong at a given moment, read from the page
+// itself — the defects an author who cannot watch the film misses:
+//
+//   text-over-text   two pieces of text drawn on top of each other (a caption
+//                    over the real interface's own text, inside an <iframe> too)
+//   text-over-badge  text running into a small painted element that is not
+//                    its own box (a number growing into a "vs" disc)
+//   text-off-frame   text cut by the edge of the frame
+//
+// Only what is clearly visible counts: both pieces at an effective opacity of
+// at least 0.6 (a cross-fade's two scenes are not a collision), where their
+// glyphs reach (not their fonts' full line boxes), as far as the boxes that
+// hold them let them show. The size each piece of text is drawn at is read
+// too — its font size times how much it is scaled on screen — as
+// information: what is too small to read is not decided here. Nothing here
+// judges taste; contrast and crowding are not checked, and text drawn into a
+// canvas or a video is pixels, not text.
+//
+// `readPageLayout` plays the film's page on its clock and samples it over the
+// film's time; a finding counts once it holds for two samples in a row (an
+// entrance sliding past an edge for a moment does not).
+//
+// The probe is serialized into the page (Function#toString): it must not
+// reference anything outside its own body.
+
+import { type HtmlBrowser, launchHtmlBrowser } from "../html/cdp";
+import { serveDirectory } from "../html/server";
+import { type FilmPageInfo, filmClockSource } from "./clock";
+import { resolveFilmPage } from "./render";
+
+export type LayoutFinding = {
+  kind: "text-over-text" | "text-over-badge" | "text-off-frame";
+  /** the two parties, described (the second is absent for text-off-frame) */
+  a: string;
+  b?: string;
+  /** where, in frame CSS px: x, y, w, h */
+  box: [number, number, number, number];
+};
+
+/** a finding that held, and from when to when (seconds, the film's own time) */
+export type LayoutSpan = LayoutFinding & { from: number; to: number };
+
+/** a piece of text as drawn: its description and its size in frame px */
+type DrawnText = { text: string; px: number };
+
+export function layoutProbeSource(): string {
+  return `(() => { const __name = (f) => f; return (${probeLayout.toString()})(); })()`;
+}
+
+function probeLayout(): { findings: LayoutFinding[]; texts: DrawnText[] } {
+  const vw = innerWidth;
+  const vh = innerHeight;
+  type Box = { x: number; y: number; w: number; h: number };
+  type Text = { el: Element; boxes: Box[]; label: string; root: Document; px: number };
+  type Badge = { el: Element; box: Box; label: string };
+  const MIN_OPACITY = 0.6;
+
+  /** how much an element is scaled on screen — by its ancestors' transforms,
+   *  a camera's zoom: the box it is drawn in over the box it is laid out in */
+  const scaleOf = (el: Element): number => {
+    const drawn = el.getBoundingClientRect().height;
+    const laid = (el as HTMLElement).offsetHeight;
+    if (typeof laid === "number") return laid > 0 ? drawn / laid : 1;
+    try {
+      // SVG text: its box in its own units
+      const own = (el as SVGGraphicsElement).getBBox?.().height;
+      return own && own > 0 ? drawn / own : 1;
+    } catch {
+      return 1;
+    }
+  };
+
+  // effective opacity: none when the element itself is not visible — its own
+  // computed visibility, which a descendant can set back to visible under a
+  // hidden ancestor (a part a lifted screen shows), or a display:none
+  // ancestor — else its opacity times every ancestor's (memoized per probe)
+  const alphas = new Map<Element, number>();
+  const alphaOf = (el: Element | null, view: Window): number => {
+    if (!el) return 1;
+    const hit = alphas.get(el);
+    if (hit !== undefined) return hit;
+    const cs = view.getComputedStyle(el);
+    const own = cs.display === "none" ? 0 : Number(cs.opacity) || 0;
+    const o = own === 0 ? 0 : own * alphaOf(el.parentElement, view);
+    alphas.set(el, o);
+    return o;
+  };
+  const opacityOf = (el: Element | null, view: Window): number => {
+    if (!el) return 1;
+    const v = view.getComputedStyle(el).visibility;
+    return v === "hidden" || v === "collapse" ? 0 : alphaOf(el, view);
+  };
+  /** the alpha of a computed colour: rgba(…, a) or 1 */
+  const alpha = (c: string): number => {
+    const m = /rgba?\(([^)]*)\)/.exec(c);
+    if (!m) return c === "transparent" ? 0 : 1;
+    const parts = m[1]!.split(/[,/\s]+/).filter(Boolean);
+    return parts.length >= 4 ? Number.parseFloat(parts[3]!) : 1;
+  };
+  const describe = (el: Element, prefix: string): string => {
+    const id = el.id ? `#${el.id}` : "";
+    const cls =
+      typeof el.className === "string" && el.className.trim()
+        ? `.${el.className.trim().split(/\s+/).slice(0, 2).join(".")}`
+        : "";
+    const text = (el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 28);
+    return `${prefix}${el.localName}${id}${cls}${text ? ` "${text}"` : ""}`;
+  };
+  const texts: Text[] = [];
+  const badges: Badge[] = [];
+  const intersect = (a: Box, b: Box): Box | null => {
+    const x0 = Math.max(a.x, b.x);
+    const y0 = Math.max(a.y, b.y);
+    const x1 = Math.min(a.x + a.w, b.x + b.w);
+    const y1 = Math.min(a.y + a.h, b.y + b.h);
+    return x1 > x0 && y1 > y0 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : null;
+  };
+  /** whether an element is where positioned descendants are placed from: a
+   *  positioned one (for `absolute`), or one with a transform, a filter or
+   *  containment (for `fixed` too) */
+  const holds = (cs: CSSStyleDeclaration, fixed: boolean): boolean =>
+    (!fixed && cs.position !== "static") ||
+    cs.transform !== "none" ||
+    cs.perspective !== "none" ||
+    cs.filter !== "none" ||
+    (!!cs.backdropFilter && cs.backdropFilter !== "none") ||
+    /paint|layout|strict|content/.test(cs.contain) ||
+    /transform|perspective|filter/.test(cs.willChange);
+  /** the element whose overflow can clip `el`: its parent, or for an
+   *  absolutely or fixed positioned one the ancestor it is placed from — those
+   *  in between do not clip it; null when that is the frame itself */
+  const containerOf = (el: Element, view: Window): Element | null => {
+    const pos = view.getComputedStyle(el).position;
+    if (pos !== "absolute" && pos !== "fixed") return el.parentElement;
+    for (let a = el.parentElement; a; a = a.parentElement)
+      if (holds(view.getComputedStyle(a), pos === "fixed")) return a;
+    return null;
+  };
+  /** an element's overflow clips what it holds — except the root's, and the
+   *  body's while the root's is visible: those belong to the frame */
+  const clipping = (el: Element, view: Window): boolean => {
+    const doc = el.ownerDocument;
+    if (el === doc.documentElement) return false;
+    const visible = (cs: CSSStyleDeclaration) =>
+      cs.overflowX === "visible" && cs.overflowY === "visible";
+    if (el === doc.body && visible(view.getComputedStyle(doc.documentElement))) return false;
+    const cs = view.getComputedStyle(el);
+    return cs.display !== "contents" && !visible(cs);
+  };
+  /** what of `base` shows of what `holder` holds: its own box when its
+   *  overflow clips, within what its own holder lets show (a film's "window"
+   *  around a scaled iframe, a masked line) — memoized per holder */
+  const clips = new Map<Element, Box | null>();
+  const shownIn = (
+    holder: Element | null,
+    view: Window,
+    map: (b: DOMRect) => Box,
+    base: Box,
+  ): Box | null => {
+    if (!holder) return base;
+    if (clips.has(holder)) return clips.get(holder)!;
+    let clip = shownIn(containerOf(holder, view), view, map, base);
+    if (clip && clipping(holder, view)) clip = intersect(clip, map(holder.getBoundingClientRect()));
+    clips.set(holder, clip);
+    return clip;
+  };
+  /** what of `base` shows of an element: what its holder lets show */
+  const clipOf = (el: Element, view: Window, map: (b: DOMRect) => Box, base: Box) =>
+    shownIn(containerOf(el, view), view, map, base);
+
+  const collect = (
+    doc: Document,
+    view: Window,
+    map: (b: DOMRect) => Box,
+    clip: Box,
+    baseOpacity: number,
+    prefix: string,
+    /** how much the document itself is scaled on screen (an iframe's) */
+    scale: number,
+  ) => {
+    const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+    const range = doc.createRange();
+    const seen = new Map<Element, Text>();
+    // the document's own fonts, to measure its text's glyphs with
+    const pen = doc.createElement("canvas").getContext("2d");
+    /** how much of a line of text's box, top and bottom, its glyphs leave
+     *  empty: the box is the font's full height, the ink only what these
+     *  characters reach — a label tucked under a big number shares its line
+     *  box, not its glyphs */
+    const inkOf = (cs: CSSStyleDeclaration, text: string) => {
+      const whole = { top: 0, bottom: 0 };
+      if (!pen) return whole;
+      pen.font = "10px serif";
+      pen.font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+      if (pen.font === "10px serif") return whole; // a font canvas cannot read
+      const m = pen.measureText(text);
+      const box = m.fontBoundingBoxAscent + m.fontBoundingBoxDescent;
+      if (!(box > 0)) return whole;
+      const top = Math.max(0, (m.fontBoundingBoxAscent - m.actualBoundingBoxAscent) / box);
+      const bottom = Math.max(0, (m.fontBoundingBoxDescent - m.actualBoundingBoxDescent) / box);
+      return top + bottom < 0.95 ? { top, bottom } : whole;
+    };
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      if (!n.nodeValue?.trim()) continue;
+      const el = n.parentElement;
+      if (!el || ["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE"].includes(el.tagName)) continue;
+      if (baseOpacity * opacityOf(el, view) < MIN_OPACITY) continue;
+      // the block the text belongs to: a caption split into per-character
+      // spans for its entrance is one piece of text, not one per character
+      let owner: Element = el;
+      while (
+        owner.parentElement &&
+        owner.parentElement !== doc.body &&
+        /^(inline|inline-block|inline-flex|contents)$/.test(view.getComputedStyle(owner).display)
+      )
+        owner = owner.parentElement;
+      range.selectNodeContents(n);
+      // what the frame, the iframe's box and any clipping box that holds the
+      // text — its own element first — cut off is not drawn
+      const visible = shownIn(el, view, map, clip);
+      if (!visible) continue;
+      const ink = inkOf(view.getComputedStyle(el), n.nodeValue);
+      const boxes: Box[] = [];
+      for (const r of Array.from(range.getClientRects())) {
+        if (r.width < 2 || r.height < 2) continue;
+        const glyphs = new DOMRect(
+          r.left,
+          r.top + ink.top * r.height,
+          r.width,
+          r.height * (1 - ink.top - ink.bottom),
+        );
+        const v = intersect(map(glyphs), visible);
+        if (v && v.w >= 2 && v.h >= 2) boxes.push(v);
+      }
+      if (!boxes.length) continue;
+      // the size it is drawn at: its own font size, as scaled on screen
+      const px = (Number.parseFloat(view.getComputedStyle(el).fontSize) || 0) * scaleOf(el) * scale;
+      const t = seen.get(owner);
+      if (t) {
+        t.boxes.push(...boxes);
+        t.px = Math.min(t.px, px);
+      } else {
+        const entry = { el: owner, boxes, label: describe(owner, prefix), root: doc, px };
+        seen.set(owner, entry);
+        texts.push(entry);
+      }
+    }
+    // small painted elements: badges, chips, discs, buttons
+    for (const el of Array.from(doc.body.querySelectorAll("*"))) {
+      const cs = view.getComputedStyle(el);
+      const painted =
+        alpha(cs.backgroundColor) >= 0.5 ||
+        (Number.parseFloat(cs.borderTopWidth) > 0 &&
+          cs.borderTopStyle !== "none" &&
+          alpha(cs.borderTopColor) >= 0.5);
+      if (!painted) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width < 8 || r.height < 8) continue;
+      const full = map(r);
+      if (full.w * full.h > 0.04 * vw * vh) continue; // a panel or a page, not a badge
+      if (baseOpacity * opacityOf(el, view) < MIN_OPACITY) continue;
+      const visible = clipOf(el, view, map, clip);
+      const m = visible && intersect(full, visible);
+      if (!m) continue;
+      badges.push({ el, box: m, label: describe(el, prefix) });
+    }
+  };
+
+  const frame: Box = { x: 0, y: 0, w: vw, h: vh };
+  collect(
+    document,
+    window,
+    (r) => ({ x: r.left, y: r.top, w: r.width, h: r.height }),
+    frame,
+    1,
+    "",
+    1,
+  );
+  // same-origin iframes, mapped into the frame through their own box and scale
+  for (const f of Array.from(document.querySelectorAll("iframe"))) {
+    let doc: Document | null = null;
+    try {
+      doc = f.contentDocument;
+    } catch {
+      continue;
+    }
+    const view = f.contentWindow;
+    if (!doc?.body || !view) continue;
+    const o = opacityOf(f, window);
+    if (o < MIN_OPACITY) continue;
+    const fb = f.getBoundingClientRect();
+    const sx = fb.width / (f.clientWidth || fb.width);
+    const sy = fb.height / (f.clientHeight || fb.height);
+    const map = (r: DOMRect) => ({
+      x: fb.left + r.left * sx,
+      y: fb.top + r.top * sy,
+      w: r.width * sx,
+      h: r.height * sy,
+    });
+    // its own box, within what the boxes holding it let show (measured from
+    // the frame, as everything on this page is: the clips are shared)
+    const own = { x: fb.left, y: fb.top, w: fb.width, h: fb.height };
+    const shown = clipOf(
+      f,
+      window,
+      (r) => ({ x: r.left, y: r.top, w: r.width, h: r.height }),
+      frame,
+    );
+    const clip = shown && intersect(own, shown);
+    if (clip) collect(doc, view, map, clip, o, `iframe › `, sy);
+  }
+
+  const overlap = (a: Box, b: Box) => {
+    const x0 = Math.max(a.x, b.x);
+    const y0 = Math.max(a.y, b.y);
+    const x1 = Math.min(a.x + a.w, b.x + b.w);
+    const y1 = Math.min(a.y + a.h, b.y + b.h);
+    return x1 > x0 && y1 > y0 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : null;
+  };
+  const related = (a: Element, b: Element) => a === b || a.contains(b) || b.contains(a);
+  const findings: LayoutFinding[] = [];
+  const round = (b: Box): [number, number, number, number] => [
+    Math.round(b.x),
+    Math.round(b.y),
+    Math.round(b.w),
+    Math.round(b.h),
+  ];
+
+  // text over text: a real overlap of glyph boxes, not a touch
+  for (let i = 0; i < texts.length; i++)
+    for (let j = i + 1; j < texts.length; j++) {
+      const A = texts[i]!;
+      const B = texts[j]!;
+      if (A.root === B.root && related(A.el, B.el)) continue;
+      // inside one embedded page the overlap is the product's own design
+      if (A.root === B.root && A.root !== document) continue;
+      let hit: Box | null = null;
+      for (const a of A.boxes)
+        for (const b of B.boxes) {
+          const o = overlap(a, b);
+          if (o && o.w * o.h >= Math.max(40, 0.2 * Math.min(a.w * a.h, b.w * b.h))) hit = o;
+        }
+      if (hit) findings.push({ kind: "text-over-text", a: A.label, b: B.label, box: round(hit) });
+    }
+  // text into a badge that is not its own box
+  for (const T of texts)
+    for (const G of badges) {
+      if (T.root === G.el.ownerDocument && related(T.el, G.el)) continue;
+      if (T.root === G.el.ownerDocument && T.root !== document) continue;
+      for (const a of T.boxes) {
+        const o = overlap(a, G.box);
+        if (o && o.w * o.h >= Math.max(40, 0.15 * Math.min(a.w * a.h, G.box.w * G.box.h))) {
+          findings.push({ kind: "text-over-badge", a: T.label, b: G.label, box: round(o) });
+          break;
+        }
+      }
+    }
+  // the film's own text cut by the frame's edge — where what shows of it
+  // reaches that edge: a box inside the frame that clips it first is design
+  for (const T of texts) {
+    if (T.root !== document) continue;
+    const r = T.el.getBoundingClientRect();
+    const range = document.createRange();
+    range.selectNodeContents(T.el);
+    const full = range.getBoundingClientRect();
+    const box = full.width > 0 ? full : r;
+    const reaches = (edge: (b: Box) => boolean) => T.boxes.some(edge);
+    if (
+      (box.left < -1 && reaches((b) => b.x <= 1)) ||
+      (box.top < -1 && reaches((b) => b.y <= 1)) ||
+      (box.right > vw + 1 && reaches((b) => b.x + b.w >= vw - 1)) ||
+      (box.bottom > vh + 1 && reaches((b) => b.y + b.h >= vh - 1))
+    ) {
+      const vis = overlap({ x: box.left, y: box.top, w: box.width, h: box.height }, frame);
+      if (vis) findings.push({ kind: "text-off-frame", a: T.label, box: round(vis) });
+    }
+  }
+  return {
+    findings,
+    texts: texts.map((t) => ({ text: t.label, px: Math.round(t.px * 10) / 10 })),
+  };
+}
+
+export type PageReading = {
+  /** what held for two samples in a row */
+  spans: LayoutSpan[];
+  /** the smallest text drawn — at about the same size for two samples in a
+   *  row, so text growing in from nothing does not count — and when */
+  smallest: { px: number; at: number; text: string } | null;
+  /** the page's own window.__film.marks, as prepare() returned them */
+  marks: unknown;
+  /** the size the page was laid out at (CSS px: the master's frame) */
+  width: number;
+  height: number;
+};
+
+/** Play the film's page on the film clock and read its layout every `every`
+ *  seconds of [from, from + duration) — the stretch of the page the film
+ *  shows. Times come back in the film's own time (its first frame is 0). */
+export async function readPageLayout(opts: {
+  page: string;
+  root?: string;
+  chromePath: string;
+  from: number;
+  duration: number;
+  every: number;
+  /** the size the film was rendered at; default the page's own, else `fallback` */
+  width?: number;
+  height?: number;
+  fallback: { width: number; height: number };
+  onConsole?: (level: string, text: string) => void;
+}): Promise<PageReading> {
+  const { root, urlPath } = resolveFilmPage(opts.page, opts.root);
+  const server = await serveDirectory(root);
+  // as `film render` opens it: the same clock, animations still until it sets them
+  const open = (width: number, height: number) =>
+    launchHtmlBrowser({
+      chromePath: opts.chromePath,
+      url: `${server.url}${urlPath}`,
+      width,
+      height,
+      initScript: filmClockSource({ seed: 0x5eed, epochMs: Date.now() }),
+      stillAnimations: true,
+      onConsole: opts.onConsole,
+      timeoutMs: 120_000,
+      profilePrefix: "open-take-check-",
+    });
+  const prepare = async (b: HtmlBrowser) => {
+    if (!(await b.evaluate<boolean>(`typeof window.__ot === "object"`)))
+      throw new Error("film check: the film clock did not install in the page");
+    return b.evaluate<FilmPageInfo>("window.__ot.prepare()", { timeoutMs: 120_000 });
+  };
+  try {
+    let width = opts.width ?? opts.fallback.width;
+    let height = opts.height ?? opts.fallback.height;
+    let browser = await open(width, height);
+    try {
+      let info = await prepare(browser);
+      // a page that declares its size, when the film does not say, is laid
+      // out again at it — as `film render` does
+      if (
+        opts.width === undefined &&
+        info.width &&
+        info.height &&
+        (info.width !== width || info.height !== height)
+      ) {
+        await browser.close();
+        width = info.width;
+        height = info.height;
+        browser = await open(width, height);
+        info = await prepare(browser);
+      }
+      // findings seen at the last sample, and since when
+      const running = new Map<string, LayoutSpan & { count: number }>();
+      const spans: LayoutSpan[] = [];
+      const end = (key: string) => {
+        const s = running.get(key)!;
+        running.delete(key);
+        if (s.count >= 2)
+          spans.push({ kind: s.kind, a: s.a, b: s.b, box: s.box, from: s.from, to: s.to });
+      };
+      let smallest: PageReading["smallest"] = null;
+      // each piece of text's size at the sample before, and when that was
+      let before = new Map<string, number>();
+      let beforeAt = 0;
+      for (let k = 0; ; k++) {
+        const at = Math.round(k * opts.every * 1000) / 1000;
+        if (at >= opts.duration - 1e-9) break;
+        await browser.evaluate(`window.__ot.seek(${opts.from + at})`);
+        const { findings, texts } = await browser.evaluate<ReturnType<typeof probeLayout>>(
+          layoutProbeSource(),
+        );
+        const now = new Set<string>();
+        for (const f of findings) {
+          const key = `${f.kind}|${f.a}|${f.b ?? ""}`;
+          now.add(key);
+          const s = running.get(key);
+          if (s) {
+            s.to = at;
+            s.count++;
+          } else running.set(key, { ...f, from: at, to: at, count: 1 });
+        }
+        for (const key of [...running.keys()]) if (!now.has(key)) end(key);
+        // a size counts once a piece of text keeps it, within a tenth, from
+        // one sample to the next
+        const sizes = new Map<string, number>();
+        for (const t of texts) sizes.set(t.text, Math.min(t.px, sizes.get(t.text) ?? t.px));
+        for (const [text, px] of sizes) {
+          const was = before.get(text);
+          if (was === undefined || Math.abs(px - was) > 0.1 * Math.max(px, was)) continue;
+          if (!smallest || was < smallest.px) smallest = { px: was, at: beforeAt, text };
+        }
+        before = sizes;
+        beforeAt = at;
+      }
+      for (const key of [...running.keys()]) end(key);
+      return {
+        spans: spans.sort((a, b) => a.from - b.from),
+        smallest,
+        marks: info.marks,
+        width,
+        height,
+      };
+    } finally {
+      await browser.close();
+    }
+  } finally {
+    await server.close();
+  }
+}
