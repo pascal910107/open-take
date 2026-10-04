@@ -1872,6 +1872,7 @@ test("a mark covers its own moment, not the whole of a defect that runs through 
     marks: [],
     page: null,
     layout: null,
+    unreadText: null,
     smallestText: null,
     issues: [],
     ...over,
@@ -1908,6 +1909,14 @@ test("a mark covers its own moment, not the whole of a defect that runs through 
     said({ black: [{ start: 5, end: 8 }], marks: [mark(5, 6), mark(7, 8)] }).includes(
       "warn: black frames 5–8s inside the film",
     ),
+  );
+  // exactly 0.1 s away counts, however the sums round
+  assert.deepEqual(said({ stalls: [0.7], marks: [mark(0.8)] }), [
+    "info: marked as intended: a frame repeats inside motion at 0.7s",
+  ]);
+  assert.deepEqual(
+    said({ black: [{ start: 0.5, end: 1 }], marks: [mark(0.5, 0.6), mark(0.8, 1)] }),
+    ["info: marked as intended: black frames 0.5–1s"],
   );
 });
 
@@ -2007,6 +2016,85 @@ test("text inside a bordered or padded iframe is read where it is drawn, at the 
   const scaled = await read("scaled.html");
   assert.equal(scaled.smallest?.px, 24, JSON.stringify(scaled.smallest));
   assert.deepEqual(scaled.spans, []);
+});
+
+test("text drawn turned or skewed is named, not measured by the box around it", {
+  skip,
+}, async () => {
+  const page = join(dir, "turned");
+  await exec("mkdir", ["-p", page]);
+  await writeFile(
+    join(page, "inner.html"),
+    `<!doctype html><html><body style="margin:0;background:#fff"><p style="margin:0;font:16px/20px monospace">INNER TEXT HERE</p></body></html>`,
+  );
+  // a tall frame turned on its side (the box around it is wide and short: its
+  // 16 px text would read as 8 px); a caption at a slant; a turn undone inside
+  // another (drawn upright); an upright caption
+  await writeFile(
+    join(page, "index.html"),
+    `<!doctype html><html><head><style>html,body{margin:0;overflow:hidden;background:#fff}</style></head><body>
+<iframe src="inner.html" style="position:absolute;left:400px;top:20px;width:100px;height:200px;border:0;transform-origin:0 0;transform:rotate(90deg)"></iframe>
+<div id="slant" style="position:absolute;left:20px;top:200px;font:20px sans-serif;white-space:nowrap;transform:rotate(-8deg)">A caption at a slant</div>
+<div id="undone" style="position:absolute;left:300px;top:260px;transform:rotate(30deg)"><span style="display:block;white-space:nowrap;transform:rotate(-30deg);font:22px sans-serif">Turned back</span></div>
+<div id="flat" style="position:absolute;left:20px;top:300px;font:18px sans-serif">An upright caption</div>
+<div id="sticker" style="position:absolute;left:300px;top:320px;font:20px sans-serif;rotate:-3deg">A sticker</div>
+<script>window.__film = { duration: 1, width: 640, height: 360 };</script></body></html>`,
+  );
+  const read = await readPageLayout({
+    page: join(page, "index.html"),
+    chromePath: chrome!,
+    from: 0,
+    duration: 1,
+    every: 0.25,
+    fallback: { width: 640, height: 360 },
+  });
+  const unread = read.unread ?? [];
+  assert.ok(
+    unread.some((u) => u.includes("INNER TEXT")) &&
+      unread.some((u) => u.includes("#slant")) &&
+      unread.some((u) => u.includes("#sticker")),
+    `the turned frame's text, the slanted caption and the sticker turned by \`rotate\` are named: ${JSON.stringify(unread)}`,
+  );
+  assert.ok(
+    !unread.some((u) => u.includes("Turned back") || u.includes("#flat")),
+    `upright text is read: ${JSON.stringify(unread)}`,
+  );
+  assert.deepEqual(
+    [read.smallest?.px, read.smallest?.text.includes("upright")],
+    [18, true],
+    JSON.stringify(read.smallest),
+  );
+  // and the check says so
+  const c = judgeFilm(
+    {
+      file: "film.mp4",
+      durationS: 1,
+      video: null,
+      audio: null,
+      stalls: [],
+      cadence: [],
+      cuts: [],
+      flashes: [],
+      blanks: [],
+      black: [],
+      silences: [],
+      clicks: [],
+      marks: [],
+      page: null,
+      layout: [],
+      unreadText: unread,
+      smallestText: null,
+      issues: [],
+    },
+    {},
+  );
+  assert.ok(
+    c.some(
+      (i) =>
+        i.severity === "info" && /turned or skewed/.test(i.message) && i.message.includes("#slant"),
+    ),
+    c.map((i) => i.message).join(" | "),
+  );
 });
 
 test("with the page, the check reads text over text and text cut by the frame's edge, with times, and the smallest text", {

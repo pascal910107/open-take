@@ -69,6 +69,8 @@ export type FilmCheck = {
   page: { file: string; width: number; height: number; every: number } | null;
   /** text that collides or leaves the frame, from when to when; null without the page */
   layout: LayoutSpan[] | null;
+  /** text drawn turned or skewed: named, not read; null without the page */
+  unreadText: string[] | null;
   /** the smallest text drawn — information, not a verdict; null without the page */
   smallestText: { px: number; at: number; text: string } | null;
   issues: FilmCheckIssue[];
@@ -138,6 +140,7 @@ export async function checkFilm(
     marks: [],
     page: null,
     layout: null,
+    unreadText: null,
     smallestText: null,
     issues: [],
   };
@@ -218,6 +221,7 @@ export async function checkFilm(
     });
     result.page = { file: page.page, width: read.width, height: read.height, every };
     result.layout = read.spans;
+    result.unreadText = read.unread;
     result.smallestText = read.smallest;
     // the page as it is now says what is meant: a mark added since the
     // render counts without rendering again
@@ -570,6 +574,8 @@ export function findClicks(x: Float32Array, rate: number): number[] {
 /** a mark covers its moment, or its stretch, and this much either side: the
  *  check reads times to the frame, an author writes them by hand */
 const MARK_SLACK = 0.1;
+/** times are read to the millisecond: closer than this is the same time */
+const SAME_TIME = 1e-6;
 
 const LAYOUT_SAYS: Record<LayoutSpan["kind"], string> = {
   "text-over-text": "text over text",
@@ -588,15 +594,17 @@ export function judgeFilm(c: FilmCheck, expect: FilmCheckExpect): FilmCheckIssue
     xs.filter((x) => {
       const [from, to] = span(x);
       const touching = c.marks
-        .filter((m) => from <= m.until + MARK_SLACK && to >= m.at - MARK_SLACK)
+        .filter(
+          (m) => from <= m.until + MARK_SLACK + SAME_TIME && to >= m.at - MARK_SLACK - SAME_TIME,
+        )
         .sort((a, b) => a.at - b.at);
       if (!touching.length) return true;
       let reach = from;
       for (const m of touching) {
-        if (m.at - MARK_SLACK > reach) break;
+        if (m.at - MARK_SLACK > reach + SAME_TIME) break;
         reach = Math.max(reach, m.until + MARK_SLACK);
       }
-      const whole = reach >= to;
+      const whole = reach + SAME_TIME >= to;
       const whats = touching.flatMap((m) => (m.what ? [`"${m.what}"`] : []));
       const named = touching.map((m) =>
         m.what ? `"${m.what}"` : `${m.at === m.until ? m.at : `${m.at}–${m.until}`}s`,
@@ -684,6 +692,12 @@ export function judgeFilm(c: FilmCheck, expect: FilmCheckExpect): FilmCheckIssue
     (g) => g.message,
   );
   for (const g of layout) issues.push({ severity: "warn", message: g.message });
+  const unread = c.unreadText ?? [];
+  if (unread.length)
+    issues.push({
+      severity: "info",
+      message: `text drawn turned or skewed is not read for collisions or size — look at it yourself: ${unread.slice(0, 6).join(", ")}${unread.length > 6 ? ` and ${unread.length - 6} more` : ""}`,
+    });
   if (!c.audio) {
     issues.push({ severity: "warn", message: "no audio stream — the film is silent" });
   } else {

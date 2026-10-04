@@ -47,7 +47,7 @@ export function layoutProbeSource(): string {
   return `(() => { const __name = (f) => f; return (${probeLayout.toString()})(); })()`;
 }
 
-function probeLayout(): { findings: LayoutFinding[]; texts: DrawnText[] } {
+function probeLayout(): { findings: LayoutFinding[]; texts: DrawnText[]; unread: string[] } {
   const vw = innerWidth;
   const vh = innerHeight;
   type Box = { x: number; y: number; w: number; h: number };
@@ -97,6 +97,53 @@ function probeLayout(): { findings: LayoutFinding[]; texts: DrawnText[] } {
     const parts = m[1]!.split(/[,/\s]+/).filter(Boolean);
     return parts.length >= 4 ? Number.parseFloat(parts[3]!) : 1;
   };
+  /** what an element's own and its ancestors' transforms (an iframe's
+   *  included) do to it on screen, without what moves it: a, b, c, d of a 2D
+   *  matrix. Memoized per probe. */
+  type Lin = [number, number, number, number];
+  const UPRIGHT: Lin = [1, 0, 0, 1];
+  const lins = new Map<Element, Lin>();
+  const linOf = (el: Element, view: Window, base: Lin): Lin => {
+    const hit = lins.get(el);
+    if (hit) return hit;
+    const u = el.parentElement ? linOf(el.parentElement, view, base) : base;
+    const cs = view.getComputedStyle(el);
+    // `rotate` and `scale` apply before `transform`, which does not show them
+    let m = new DOMMatrix();
+    if (cs.rotate && cs.rotate !== "none") {
+      const v = cs.rotate.trim().split(/\s+/); // "30deg", "x 30deg", "1 1 0 30deg"
+      const deg = Number.parseFloat(v[v.length - 1] ?? "0");
+      const axis =
+        v.length === 4
+          ? v.slice(0, 3).map(Number)
+          : v[0] === "x"
+            ? [1, 0, 0]
+            : v[0] === "y"
+              ? [0, 1, 0]
+              : [0, 0, 1];
+      m = m.rotateAxisAngle(axis[0], axis[1], axis[2], deg);
+    }
+    if (cs.scale && cs.scale !== "none") {
+      const v = cs.scale.trim().split(/\s+/).map(Number.parseFloat);
+      m = m.scale(v[0], v[1] ?? v[0], v[2] ?? 1);
+    }
+    if (cs.transform && cs.transform !== "none") m = m.multiply(new DOMMatrix(cs.transform));
+    const l: Lin = m.isIdentity
+      ? u
+      : [
+          u[0] * m.a + u[2] * m.b,
+          u[1] * m.a + u[3] * m.b,
+          u[0] * m.c + u[2] * m.d,
+          u[1] * m.c + u[3] * m.d,
+        ];
+    lins.set(el, l);
+    return l;
+  };
+  /** turned or skewed on screen: its boxes would be the upright boxes around
+   *  it, and its size a guess — such text is named, not read */
+  const askew = (l: Lin) =>
+    Math.abs(l[1]) + Math.abs(l[2]) > 0.01 * (Math.abs(l[0]) + Math.abs(l[3]));
+  const unread = new Set<string>();
   const describe = (el: Element, prefix: string): string => {
     const id = el.id ? `#${el.id}` : "";
     const cls =
@@ -177,6 +224,8 @@ function probeLayout(): { findings: LayoutFinding[]; texts: DrawnText[] } {
     prefix: string,
     /** how much the document itself is scaled on screen (an iframe's) */
     scale: number,
+    /** what the frame holding the document turns or skews (an iframe's) */
+    base: Lin,
   ) => {
     const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
     const range = doc.createRange();
@@ -219,6 +268,10 @@ function probeLayout(): { findings: LayoutFinding[]; texts: DrawnText[] } {
       // text — its own element first — cut off is not drawn
       const visible = shownIn(el, view, map, clip);
       if (!visible) continue;
+      if (askew(linOf(el, view, base))) {
+        unread.add(describe(owner, prefix));
+        continue;
+      }
       const ink = inkOf(view.getComputedStyle(el), n.nodeValue);
       const boxes: Box[] = [];
       for (const r of Array.from(range.getClientRects())) {
@@ -247,6 +300,7 @@ function probeLayout(): { findings: LayoutFinding[]; texts: DrawnText[] } {
     }
     // small painted elements: badges, chips, discs, buttons
     for (const el of Array.from(doc.body.querySelectorAll("*"))) {
+      if (askew(linOf(el, view, base))) continue; // its box would be the one around it
       const cs = view.getComputedStyle(el);
       const painted =
         alpha(cs.backgroundColor) >= 0.5 ||
@@ -275,6 +329,7 @@ function probeLayout(): { findings: LayoutFinding[]; texts: DrawnText[] } {
     1,
     "",
     1,
+    UPRIGHT,
   );
   // same-origin iframes, mapped into the frame through their own box and scale
   for (const f of Array.from(document.querySelectorAll("iframe"))) {
@@ -319,7 +374,7 @@ function probeLayout(): { findings: LayoutFinding[]; texts: DrawnText[] } {
       frame,
     );
     const clip = shown && intersect(own, shown);
-    if (clip) collect(doc, view, map, clip, o, `iframe › `, sy);
+    if (clip) collect(doc, view, map, clip, o, `iframe › `, sy, linOf(f, window, UPRIGHT));
   }
 
   const overlap = (a: Box, b: Box) => {
@@ -390,6 +445,7 @@ function probeLayout(): { findings: LayoutFinding[]; texts: DrawnText[] } {
   return {
     findings,
     texts: texts.map((t) => ({ text: t.label, px: Math.round(t.px * 10) / 10 })),
+    unread: [...unread],
   };
 }
 
@@ -399,6 +455,8 @@ export type PageReading = {
   /** the smallest text drawn — at about the same size for two samples in a
    *  row, so text growing in from nothing does not count — and when */
   smallest: { px: number; at: number; text: string } | null;
+  /** text drawn turned or skewed, which is named rather than read */
+  unread: string[];
   /** the page's own window.__film.marks, as prepare() returned them */
   marks: unknown;
   /** the size the page was laid out at (CSS px: the master's frame) */
@@ -472,6 +530,7 @@ export async function readPageLayout(opts: {
           spans.push({ kind: s.kind, a: s.a, b: s.b, box: s.box, from: s.from, to: s.to });
       };
       let smallest: PageReading["smallest"] = null;
+      const unread = new Set<string>();
       // each piece of text's size at the sample before, and when that was
       let before = new Map<string, number>();
       let beforeAt = 0;
@@ -479,9 +538,9 @@ export async function readPageLayout(opts: {
         const at = Math.round(k * opts.every * 1000) / 1000;
         if (at >= opts.duration - 1e-9) break;
         await browser.evaluate(`window.__ot.seek(${opts.from + at})`);
-        const { findings, texts } = await browser.evaluate<ReturnType<typeof probeLayout>>(
-          layoutProbeSource(),
-        );
+        const read = await browser.evaluate<ReturnType<typeof probeLayout>>(layoutProbeSource());
+        const { findings, texts } = read;
+        for (const u of read.unread) unread.add(u);
         const now = new Set<string>();
         for (const f of findings) {
           const key = `${f.kind}|${f.a}|${f.b ?? ""}`;
@@ -509,6 +568,7 @@ export async function readPageLayout(opts: {
       return {
         spans: spans.sort((a, b) => a.from - b.from),
         smallest,
+        unread: [...unread],
         marks: info.marks,
         width,
         height,
