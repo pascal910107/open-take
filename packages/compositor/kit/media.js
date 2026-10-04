@@ -11,7 +11,8 @@
 //                   (shots.json): which still shows at t, decoded before the
 //                   frame is drawn, a bounded number held at once (a long drag
 //                   can be 900 stills), and every box and cursor position the
-//                   shoot recorded, so nothing is copied by hand.
+//                   shoot recorded — in the still's own px — so nothing is
+//                   copied by hand.
 //
 // A box is always in one place's own CSS px. Where a screen sits inside a
 // bigger layer, box(…, { in: layer }) adds its offset — and refuses when
@@ -137,6 +138,7 @@ export function screen(frame) {
  * @property {string} [name]
  * @property {number} t
  * @property {{ x: number, y: number }} [cursor]
+ * @property {{ x: number, y: number }} [scroll]
  * @property {Record<string, Box>} [boxes]
  */
 
@@ -213,19 +215,27 @@ export async function stills(logUrl, img, { keep = 12, ahead = 3 } = {}) {
         shown = i;
       }
     },
-    /** a box the shoot recorded at still i, by the selector it was tracked with */
+    /** a box the shoot recorded at still i, by the selector it was tracked
+     *  with — in the still's own CSS px (the shoot logs page px; the still
+     *  shows the page from its scroll) */
     /** @param {number} i @param {string} selector */
     box(i, selector) {
-      const b = still(i).boxes?.[selector];
+      const s = still(i);
+      const b = s.boxes?.[selector];
       if (!b) throw new Error(`stills: still ${i} recorded no box for ${selector}`);
-      return b;
+      return {
+        x: b.x - (s.scroll?.x ?? 0),
+        y: b.y - (s.scroll?.y ?? 0),
+        width: b.width,
+        height: b.height,
+      };
     },
-    /** where the shoot's cursor was at still i */
+    /** where the shoot's cursor was at still i, in the still's own CSS px */
     /** @param {number} i */
     cursor(i) {
-      const c = still(i).cursor;
-      if (!c) throw new Error(`stills: still ${i} recorded no cursor`);
-      return c;
+      const s = still(i);
+      if (!s.cursor) throw new Error(`stills: still ${i} recorded no cursor`);
+      return { x: s.cursor.x - (s.scroll?.x ?? 0), y: s.cursor.y - (s.scroll?.y ?? 0) };
     },
   };
 }

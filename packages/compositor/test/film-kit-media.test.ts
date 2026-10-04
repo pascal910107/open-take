@@ -247,22 +247,27 @@ test("shot stills play by film time, decoded before the frame, a bounded few hel
       stills: colours.map((_, i) => ({
         file: `00${i}.png`,
         t: i * 0.1,
-        cursor: { x: 10 * i, y: 5 },
-        boxes: { "#a": { x: i, y: 2, width: 3, height: 4 } },
+        cursor: { x: 10 * i, y: 105 },
+        scroll: { x: 0, y: 100 },
+        boxes: { "#a": { x: i, y: 102, width: 3, height: 4 } },
       })),
     }),
   );
   await writeFile(
     join(film, "index.html"),
     `<!doctype html><html><head><style>html,body{margin:0;width:320px;height:180px;overflow:hidden;background:#000}
-img{position:absolute;left:0;top:0;width:320px;height:180px}</style></head><body><img id="still" alt="">
+img{position:absolute;left:0;top:0;width:320px;height:180px}
+#wrong{display:none;position:absolute;left:0;top:0;width:320px;height:180px;background:#f0f}</style></head><body><img id="still" alt=""><div id="wrong"></div>
 <script type="module">
 import { stills } from "./kit/media.js";
 const ready = stills("shots/shots.json", document.getElementById("still"), { keep: 1, ahead: 0 });
 window.__film = { duration: 3, width: 320, height: 180, ready };
 window.__render = async (t) => {
   const st = await ready;
-  if (st.box(2, "#a").x !== 2 || st.cursor(1).x !== 10) document.body.style.background = "#f0f";
+  // the log's page px, less each still's scroll: the still's own px
+  const b = st.box(2, "#a"), c = st.cursor(1);
+  if (b.x !== 2 || b.y !== 2 || c.x !== 10 || c.y !== 5 || st.count !== 3)
+    document.getElementById("wrong").style.display = "block";
   await st.show(st.at(t, { rate: 1 }));
 };
 </script></body></html>`,
