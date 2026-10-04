@@ -152,6 +152,20 @@ export {
   toDraft,
 } from "./review";
 export {
+  runShoot,
+  type Shoot,
+  type ShootAction,
+  type ShootActOpts,
+  type ShootBox,
+  type ShootLog,
+  type ShootOpenOpts,
+  type ShootOpts,
+  type ShootScript,
+  type ShootSettle,
+  type ShootStill,
+  type ShootTarget,
+} from "./shoot";
+export {
   describeTake,
   type FormatOpts,
   formatTakeStates,

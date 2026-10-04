@@ -130,7 +130,7 @@ export const NAME_JS =
 // changeCoverage 0 and every dependent beat skipped. So: a miss from the
 // singular API alone is not occlusion — only when the layered list agrees the
 // centre belongs to someone else does the in-page fallback fire.
-const HITTABLE_JS =
+export const HITTABLE_JS =
   `function hittable(m,r){var cx=Math.round(r.x+r.width/2),cy=Math.round(r.y+r.height/2);` +
   `if(!(r.width>0&&r.height>0&&document.elementFromPoint))return null;` +
   `var hit=document.elementFromPoint(cx,cy);` +
@@ -145,7 +145,7 @@ const HITTABLE_JS =
 // laid out but neither painted nor hit-testable until the <summary> is
 // clicked. A field with no size is not shown yet at all; one whose centre
 // lands on its own container is hidden by it; otherwise something covers it.
-const UNREACHABLE_JS =
+export const UNREACHABLE_JS =
   `function unreachable(m){` +
   `var z=m.getBoundingClientRect();if(!z.width||!z.height)return 'it has no size — not shown yet (display:none?)';` +
   `function d(e){var s=e.tagName.toLowerCase();if(e.id)s+='#'+e.id;` +

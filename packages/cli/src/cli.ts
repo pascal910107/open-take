@@ -68,6 +68,7 @@ import {
   resolveTakePaths,
   revealPath,
   runPostShootGates,
+  runShoot,
   SAY_IT_CARD,
   settleDefects,
   skippedDefects,
@@ -209,6 +210,7 @@ const FLAGS_BY_CMD: Record<string, string[]> = {
   init: ["--force"],
   skill: ["--force"],
   launch: ["--video", "--out", "--draft", "--verbose"],
+  shoot: ["--out", "--scale", "--size", "--profile", "--headed"],
 };
 
 function rejectUnknownFlags(cmd: string): void {
@@ -253,6 +255,7 @@ Usage:
   open-take launch check <launch.json>
   open-take launch render <launch.json> [--out <movie.mp4>] [--draft]
   open-take skill  [motion | film | install [--force]]
+  open-take shoot  <script.mjs> [--out shots] [--scale 2] [--size 1920x1080]
   open-take film init   <dir> [--force]
   open-take film render <page.html|dir> [--out film.mp4] [--audio <file>|none] [--draft] [--no-blur]
                    [--size 1920x1080] [--fps 60] [--duration <s>] [--from <s>] [--to <s>] [--root <dir>]
@@ -442,6 +445,36 @@ Usage:
           guide to films written as web pages, \`skill motion\` the motion
           composition reference. \`skill install\` remains as a
           backwards-compatible alias for \`init\`.
+  shoot   shoot a film's material with a script you write: an .mjs whose
+          default export is \`async (s) => { … }\`, run in open-take's Chrome
+          at --size (default 1920x1080) and --scale (default 2: every still is
+          twice the viewport each way). s.open(url) loads the page and waits
+          until it shows something, has its input handlers (has hydrated) and
+          is quiet. s.still(name) saves <out>/NNN-<name>.png. s.click, s.type,
+          s.drag, s.move and s.press act with a real mouse and keyboard, wait
+          for the page to settle and take a still (settle: false, still: false
+          skip either); s.type(…, { each: true }) takes one per keystroke,
+          s.drag(…, { dx, dy } | { to }, { every: N }) one every N px with the
+          button held. A target is a CSS selector, text=<name> or { x, y } in
+          viewport px. s.track(targets) records their boxes in every later
+          still; s.evaluate runs code in the page; s.wait takes ms, a target
+          or a check. Native exits: s.cdp (a raw CDP session on the page),
+          s.wsEndpoint (puppeteer.connect or Playwright's connectOverCDP reach
+          the same browser), s.inject(js) (runs before the page's own scripts
+          on every navigation — call it before s.open). Mouse events sent
+          through s.cdp move the logged cursor; after moving the mouse any
+          other way, set s.cursor = { x, y }.
+          Writes <out>/shots.json (default --out shots): the viewport, the
+          scale, and per still its file, name, t (s), cursor, scroll and the
+          box of every tracked or acted-on target, all in page CSS px — the
+          film page imports it instead of copying coordinates. A call returns
+          its still's entry; fields you add to it (a number read off the
+          page) are saved with it. Between stills the app's own clock keeps
+          running (a still takes ~0.1 s), so its animations play fast in a
+          film that shows one still per frame; shoot a passage that needs
+          real speed with \`make\`. A script that throws exits 1 with its
+          message and line; the last good shoot stays, and what the failed
+          one took is in <out>/.shoot/.
   film    a film you write yourself as a web page — open-take only performs
           it. \`film init\` copies the film kit into a folder (kit/: a camera
           with the take camera's motion, a cursor, one timeline for picture
@@ -502,11 +535,11 @@ Usage:
               folder each get their own name (\`--out myapp.mp4\`). Under
               OPEN_TAKE_CI the refusal softens to a warning — preview deploys
               give the same app a fresh origin every PR.
-  --profile <name>   (make/inspect) drive an authenticated session: reuse the
-              persistent profile created by \`open-take auth <name>\`.
-  --headed    (make/inspect) drive a visible Chrome window instead of headless —
-              the escape hatch for sites that gate on a real window. The
-              screencast records the page either way.
+  --profile <name>   (make/inspect/shoot) drive an authenticated session: reuse
+              the persistent profile created by \`open-take auth <name>\`.
+  --headed    (make/inspect/shoot) drive a visible Chrome window instead of
+              headless — the escape hatch for sites that gate on a real
+              window. The screencast records the page either way.
   --verbose   show per-event diagnostics (frame-diff lines, renderer console
               passthrough). Hidden by default so real warnings stay visible.
 `;
@@ -1721,6 +1754,36 @@ async function main() {
         );
       process.stdout.write(text);
     }
+    return;
+  }
+
+  if (cmd === "shoot") {
+    const script = positional[0];
+    if (!script || positional.length !== 1)
+      throw new Error(`shoot: expected one <script.mjs> — e.g. ${INVOKE} shoot shoot.mjs`);
+    // every argument is checked before Chrome is resolved (a first run downloads it)
+    if (!existsSync(script)) throw new Error(`shoot: no script at ${resolve(script)}`);
+    const size = parseViewport(flag("--size"));
+    if (has("--size") && !size) throw new Error("shoot: --size is WIDTHxHEIGHT, e.g. 1920x1080");
+    const scaleFlag = flag("--scale");
+    const scale = scaleFlag == null ? undefined : Number(scaleFlag);
+    if (scale != null && !(scale > 0 && scale <= 4))
+      throw new Error(`shoot: --scale takes a number above 0, at most 4 (got ${scaleFlag})`);
+    const profile = flag("--profile");
+    const { log, path } = await runShoot({
+      script,
+      outDir: flag("--out") ?? "shots",
+      width: size?.width,
+      height: size?.height,
+      scale,
+      ...(profile ? { userDataDir: profileDir(profile) } : {}),
+      ...(has("--headed") ? { headless: false } : {}),
+    });
+    const px = (n: number) => Math.round(n * log.scale);
+    process.stdout.write(
+      `shots: ${path} — ${log.stills.length} still${log.stills.length === 1 ? "" : "s"}, ` +
+        `${px(log.viewport.w)}×${px(log.viewport.h)} each\n`,
+    );
     return;
   }
 

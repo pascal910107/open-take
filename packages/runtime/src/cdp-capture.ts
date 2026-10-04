@@ -129,7 +129,8 @@ async function evalString(cdp: CDP, js: string): Promise<string | null> {
 // starts AND after every mid-take `navigate` — the second document is exactly
 // as cold as the first, and a FOUT mid-shot is just as visible as one at the
 // head. A page with no webfonts resolves immediately.
-async function awaitFonts(cdp: CDP): Promise<void> {
+export async function awaitFonts(cdp: CDP): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   await Promise.race([
     cdp
       .send("Runtime.evaluate", {
@@ -138,8 +139,11 @@ async function awaitFonts(cdp: CDP): Promise<void> {
         returnByValue: true,
       })
       .catch(() => {}),
-    sleep(3000),
+    new Promise((r) => {
+      timer = setTimeout(r, 3000);
+    }),
   ]);
+  clearTimeout(timer); // see navigate(): a live timer holds the process open
 }
 
 const center = (b: Box): Pt => ({ x: Math.round(b.x + b.w / 2), y: Math.round(b.y + b.h / 2) });
@@ -261,7 +265,7 @@ async function dispatchKey(
 
 // Press a chord: hold modifiers, tap the key, release in reverse — the order a
 // real keyboard produces, so apps tracking modifier state respond correctly.
-async function pressChord(cdp: CDP, keys: string): Promise<void> {
+export async function pressChord(cdp: CDP, keys: string): Promise<void> {
   const { mods, info } = parseChord(keys);
   const active = [1, 2, 4, 8].filter((m) => mods & m);
   for (const m of active) await dispatchKey(cdp, "keyDown", MOD_KEY[m]!, mods);
@@ -1304,7 +1308,7 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
  *  ci` sets it to the app's own origin), any navigation outside the list is a
  *  skipped step, never a request. Unset (the interactive default), everything
  *  is allowed — a human is watching. */
-function originAllowed(url: string): boolean {
+export function originAllowed(url: string): boolean {
   const raw = process.env.OPEN_TAKE_ALLOWED_ORIGINS;
   if (!raw) return true;
   try {
@@ -1334,12 +1338,16 @@ function credentialFieldProbeJs(): string {
  *  error page, which fires load events like any document and would otherwise
  *  get filmed as if it were the app. HTTP error PAGES (404/500) carry no
  *  errorText: the app answered, and what it said is what an honest take shows. */
-async function navigate(cdp: CDP, url: string): Promise<string | undefined> {
+export async function navigate(cdp: CDP, url: string): Promise<string | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   const loaded = new Promise<void>((res) => {
     cdp.on("Page.loadEventFired", () => res());
-    setTimeout(res, 8000); // don't hang on a never-firing load
+    timer = setTimeout(res, 8000); // don't hang on a never-firing load
   });
   const nav = await cdp.send<{ errorText?: string }>("Page.navigate", { url });
   await loaded;
+  // a pending timer keeps the process alive: a short `shoot` would sit out
+  // the rest of the 8 s before it could exit
+  clearTimeout(timer);
   return nav.errorText || undefined;
 }
