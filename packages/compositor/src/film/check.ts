@@ -696,7 +696,7 @@ export function judgeFilm(c: FilmCheck, expect: FilmCheckExpect): FilmCheckIssue
   if (unread.length)
     issues.push({
       severity: "info",
-      message: `text drawn turned, skewed or mirrored is not read for collisions or size — look at it yourself: ${unread.slice(0, 6).join(", ")}${unread.length > 6 ? ` and ${unread.length - 6} more` : ""}`,
+      message: `text drawn turned, skewed, mirrored or in a frame tilted in perspective is not read for collisions or size — look at it yourself: ${unread.slice(0, 6).join(", ")}${unread.length > 6 ? ` and ${unread.length - 6} more` : ""}`,
     });
   if (!c.audio) {
     issues.push({ severity: "warn", message: "no audio stream — the film is silent" });

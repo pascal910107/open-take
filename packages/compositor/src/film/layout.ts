@@ -163,24 +163,65 @@ function probeLayout(): { findings: LayoutFinding[]; texts: DrawnText[]; unread:
     u[0] * m.c + u[2] * m.d,
     u[1] * m.c + u[3] * m.d,
   ];
+  /** whether what an element holds stays in its 3D space: `preserve-3d`,
+   *  unless a grouping property flattens it all the same (a clip, a fade, a
+   *  filter, a blend, a mask, isolation, paint containment) */
+  const keeps3D = (cs: CSSStyleDeclaration): boolean =>
+    cs.transformStyle === "preserve-3d" &&
+    /^(visible|clip)$/.test(cs.overflowX) &&
+    /^(visible|clip)$/.test(cs.overflowY) &&
+    !(Number(cs.opacity) < 1) &&
+    cs.filter === "none" &&
+    (!cs.backdropFilter || cs.backdropFilter === "none") &&
+    cs.clipPath === "none" &&
+    (!cs.clip || cs.clip === "auto") &&
+    cs.isolation !== "isolate" &&
+    (!cs.maskImage || cs.maskImage === "none") &&
+    cs.mixBlendMode === "normal" &&
+    !/paint|strict|content/.test(cs.contain);
+  /** what a parent's `perspective` does to what it holds (about its origin:
+   *  which plane is tilted, not where, is what matters here) */
+  const perspectiveOf = (cs: CSSStyleDeclaration): DOMMatrix | null => {
+    const d = Number.parseFloat(cs.perspective);
+    return cs.perspective !== "none" && d > 0
+      ? new DOMMatrix([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, -1 / d, 0, 0, 0, 1])
+      : null;
+  };
+  /** a plane tilted under perspective: no single 2D matrix maps it */
+  const projective = (m: DOMMatrix) => Math.abs(m.m14) + Math.abs(m.m24) > 1e-9;
   /** per element: its 2D part on screen; the 3D context it belongs to (the
-   *  whole matrix from that context's root down) and the 2D part above it */
-  type Turn = { lin: Lin; ctx: DOMMatrix; above: Lin };
+   *  whole matrix from that context's root down) and the 2D part above it;
+   *  whether it, or what holds it, is tilted under perspective */
+  type Turn = { lin: Lin; ctx: DOMMatrix; above: Lin; projected: boolean };
   const turns = new Map<Element, Turn>();
   const turnOf = (el: Element, view: Window, base: Lin): Turn => {
     const hit = turns.get(el);
     if (hit) return hit;
-    const own = ownOf(el, view.getComputedStyle(el));
     const p = el.parentElement;
+    const pcs = p ? view.getComputedStyle(p) : null;
+    const own = ownOf(el, view.getComputedStyle(el));
+    const persp = own && pcs ? perspectiveOf(pcs) : null;
+    const local = persp && own ? persp.multiply(own) : own;
     let t: Turn;
-    if (p && view.getComputedStyle(p).transformStyle === "preserve-3d") {
+    if (p && pcs && keeps3D(pcs)) {
       const pt = turnOf(p, view, base);
-      const ctx = own ? pt.ctx.multiply(own) : pt.ctx;
-      t = { lin: times(pt.above, ctx), ctx, above: pt.above };
+      const ctx = local ? pt.ctx.multiply(local) : pt.ctx;
+      t = {
+        lin: times(pt.above, ctx),
+        ctx,
+        above: pt.above,
+        projected: pt.projected || projective(ctx),
+      };
     } else {
-      const above = p ? turnOf(p, view, base).lin : base;
-      const ctx = own ?? new DOMMatrix();
-      t = { lin: own ? times(above, own) : above, ctx, above };
+      const pt = p ? turnOf(p, view, base) : null;
+      const above = pt ? pt.lin : base;
+      const ctx = local ?? new DOMMatrix();
+      t = {
+        lin: local ? times(above, local) : above,
+        ctx,
+        above,
+        projected: !!pt?.projected || projective(ctx),
+      };
     }
     turns.set(el, t);
     return t;
@@ -275,6 +316,10 @@ function probeLayout(): { findings: LayoutFinding[]; texts: DrawnText[]; unread:
     scale: number,
     /** what the frame holding the document turns or skews (an iframe's) */
     base: Lin,
+    /** whether the frame's box maps what it holds: not when the frame is
+     *  turned, mirrored or tilted under perspective — then all its text is
+     *  named */
+    mapped: boolean,
   ) => {
     const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
     const range = doc.createRange();
@@ -332,7 +377,7 @@ function probeLayout(): { findings: LayoutFinding[]; texts: DrawnText[]; unread:
       }
       if (!boxes.length) continue;
       // drawn at all, but turned: named, not read
-      if (askew(linOf(el, view, base))) {
+      if (!mapped || askew(linOf(el, view, base))) {
         unread.add(describe(owner, prefix));
         continue;
       }
@@ -350,7 +395,7 @@ function probeLayout(): { findings: LayoutFinding[]; texts: DrawnText[]; unread:
     }
     // small painted elements: badges, chips, discs, buttons
     for (const el of Array.from(doc.body.querySelectorAll("*"))) {
-      if (askew(linOf(el, view, base))) continue; // its box would be the one around it
+      if (!mapped || askew(linOf(el, view, base))) continue; // its box would be the one around it
       const cs = view.getComputedStyle(el);
       const painted =
         alpha(cs.backgroundColor) >= 0.5 ||
@@ -380,6 +425,7 @@ function probeLayout(): { findings: LayoutFinding[]; texts: DrawnText[]; unread:
     "",
     1,
     UPRIGHT,
+    true,
   );
   // same-origin iframes, mapped into the frame through their own box and scale
   for (const f of Array.from(document.querySelectorAll("iframe"))) {
@@ -424,7 +470,19 @@ function probeLayout(): { findings: LayoutFinding[]; texts: DrawnText[]; unread:
       frame,
     );
     const clip = shown && intersect(own, shown);
-    if (clip) collect(doc, view, map, clip, o, `iframe › `, sy, linOf(f, window, UPRIGHT));
+    const turn = turnOf(f, window, UPRIGHT);
+    if (clip)
+      collect(
+        doc,
+        view,
+        map,
+        clip,
+        o,
+        `iframe › `,
+        sy,
+        turn.lin,
+        !askew(turn.lin) && !turn.projected,
+      );
   }
 
   const overlap = (a: Box, b: Box) => {

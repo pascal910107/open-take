@@ -130,8 +130,9 @@ clip cut on a transition frame), a shot that starts on blank frames. With
 `--page film/index.html` it also plays the page and reports text over text,
 text running into a painted element and text cut by the frame's edge, each
 with its times, and the smallest text on screen; text drawn turned, skewed
-or mirrored is named for you to look at, not measured. A flash or a blank that
-is meant is marked in the page and reported as such:
+or mirrored, or inside a frame tilted in perspective, is named for you to look
+at, not measured. A flash or a blank that is meant is marked in the page and
+reported as such:
 
 ```js
 window.__film = { duration: 42.5, marks: [{ at: 21.4, until: 21.5, what: "white flash" }] };

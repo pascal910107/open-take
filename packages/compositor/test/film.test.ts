@@ -2031,12 +2031,24 @@ test("text drawn turned, skewed or mirrored is named, not measured by the box ar
     join(page, "inner2.html"),
     `<!doctype html><html><body style="margin:0;background:#fff"><p style="margin:0;font:16px/20px monospace">UPSIDE DOWN</p></body></html>`,
   );
+  for (const [file, text, style] of [
+    ["inner3.html", "TILTED SCREEN", ""],
+    ["inner4.html", "FLIPPED TWICE", "rotate:180deg"],
+    ["inner5.html", "UNDER PERSPECTIVE", ""],
+  ])
+    await writeFile(
+      join(page, file!),
+      `<!doctype html><html><body style="margin:0;background:#fff"><p style="margin:0;font:16px/20px monospace;width:max-content;${style}">${text}</p></body></html>`,
+    );
   // a tall frame turned on its side (the box around it is wide and short: its
   // 16 px text would read as 8 px); a caption at a slant; a turn undone inside
   // another (drawn upright); an upright caption; a sticker turned by `rotate`;
   // turns that do not apply (a box-less wrapper, a plain inline span); a frame
   // turned upside down; a turn about y holding one about x in 3D (a skew); a
-  // stretched SVG turned, holding HTML turned back (a skew)
+  // stretched SVG turned, holding HTML turned back (a skew); the same 3D turns
+  // where the parent's clipping flattens them (upright); a frame tilted under
+  // perspective, its own or its parent's; a frame upside down holding text
+  // upside down (upright inside, but not on screen as the frame's box says)
   await writeFile(
     join(page, "index.html"),
     `<!doctype html><html><head><style>html,body{margin:0;overflow:hidden;background:#fff}</style></head><body>
@@ -2050,6 +2062,10 @@ test("text drawn turned, skewed or mirrored is named, not measured by the box ar
 <iframe src="inner2.html" style="position:absolute;left:300px;top:110px;width:200px;height:40px;border:0;rotate:180deg"></iframe>
 <div style="position:absolute;left:20px;top:110px;transform-style:preserve-3d;rotate:y 45deg"><div id="deep" style="rotate:x 45deg;font:24px sans-serif;white-space:nowrap">Deep in 3D</div></div>
 <svg style="position:absolute;left:420px;top:200px;rotate:30deg" width="200" height="100" viewBox="0 0 100 100" preserveAspectRatio="none"><foreignObject x="0" y="0" width="100" height="100"><div xmlns="http://www.w3.org/1999/xhtml" id="stretched" style="rotate:-30deg;font:14px sans-serif">Stretched</div></foreignObject></svg>
+<div style="position:absolute;left:20px;top:150px;transform-style:preserve-3d;overflow:hidden;rotate:y 45deg"><div id="flattened" style="rotate:x 45deg;font:32px sans-serif;white-space:nowrap">Flattened by its clip</div></div>
+<iframe src="inner3.html" style="position:absolute;left:200px;top:180px;width:200px;height:40px;border:0;transform-origin:0 0;transform:perspective(800px) rotateY(20deg)"></iframe>
+<iframe src="inner4.html" style="position:absolute;left:200px;top:230px;width:200px;height:40px;border:0;rotate:180deg"></iframe>
+<div style="position:absolute;left:200px;top:280px;perspective:800px"><iframe src="inner5.html" style="width:200px;height:40px;border:0;rotate:y 25deg"></iframe></div>
 <script>window.__film = { duration: 1, width: 640, height: 360 };</script></body></html>`,
   );
   const read = await readPageLayout({
@@ -2074,7 +2090,13 @@ test("text drawn turned, skewed or mirrored is named, not measured by the box ar
     `upside down, skewed in 3D, skewed by a stretched SVG — all named: ${JSON.stringify(unread)}`,
   );
   assert.ok(
-    !unread.some((u) => /Turned back|#flat|#boxless|inline word/.test(u)),
+    ["TILTED SCREEN", "FLIPPED TWICE", "UNDER PERSPECTIVE"].every((t) =>
+      unread.some((u) => u.includes(t)),
+    ),
+    `frames under perspective or upside down: all their text named: ${JSON.stringify(unread)}`,
+  );
+  assert.ok(
+    !unread.some((u) => /Turned back|#flat|#boxless|inline word|#flattened/.test(u)),
     `upright text is read: ${JSON.stringify(unread)}`,
   );
   assert.deepEqual(
@@ -2110,7 +2132,7 @@ test("text drawn turned, skewed or mirrored is named, not measured by the box ar
     c.some(
       (i) =>
         i.severity === "info" &&
-        /turned, skewed or mirrored/.test(i.message) &&
+        /turned, skewed, mirrored or in a frame tilted in perspective/.test(i.message) &&
         i.message.includes("#slant"),
     ),
     c.map((i) => i.message).join(" | "),
