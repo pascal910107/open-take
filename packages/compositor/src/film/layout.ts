@@ -288,18 +288,30 @@ function probeLayout(): { findings: LayoutFinding[]; texts: DrawnText[] } {
     if (!doc?.body || !view) continue;
     const o = opacityOf(f, window);
     if (o < MIN_OPACITY) continue;
+    // its page shows in its content box (inside its border and padding), as
+    // scaled as the frame's own box is on screen
     const fb = f.getBoundingClientRect();
-    const sx = fb.width / (f.clientWidth || fb.width);
-    const sy = fb.height / (f.clientHeight || fb.height);
+    const sx = f.offsetWidth ? fb.width / f.offsetWidth : 1;
+    const sy = f.offsetHeight ? fb.height / f.offsetHeight : 1;
+    const fcs = getComputedStyle(f);
+    const pad = (side: "Left" | "Right" | "Top" | "Bottom") =>
+      Number.parseFloat(fcs[`padding${side}`]) || 0;
+    const left = fb.left + (f.clientLeft + pad("Left")) * sx;
+    const top = fb.top + (f.clientTop + pad("Top")) * sy;
     const map = (r: DOMRect) => ({
-      x: fb.left + r.left * sx,
-      y: fb.top + r.top * sy,
+      x: left + r.left * sx,
+      y: top + r.top * sy,
       w: r.width * sx,
       h: r.height * sy,
     });
-    // its own box, within what the boxes holding it let show (measured from
+    // that box, within what the boxes holding it let show (measured from
     // the frame, as everything on this page is: the clips are shared)
-    const own = { x: fb.left, y: fb.top, w: fb.width, h: fb.height };
+    const own = {
+      x: left,
+      y: top,
+      w: Math.max(0, f.clientWidth - pad("Left") - pad("Right")) * sx,
+      h: Math.max(0, f.clientHeight - pad("Top") - pad("Bottom")) * sy,
+    };
     const shown = clipOf(
       f,
       window,

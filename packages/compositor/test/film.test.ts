@@ -10,8 +10,16 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { promisify } from "node:util";
 import { resolveFfmpeg, resolveFfprobe } from "../src/ffmpeg";
-import { checkFilm, findClicks, motionFindings, readPicture } from "../src/film/check";
+import {
+  checkFilm,
+  type FilmCheck,
+  findClicks,
+  judgeFilm,
+  motionFindings,
+  readPicture,
+} from "../src/film/check";
 import { filmClockSource, filmMarks } from "../src/film/clock";
+import { readPageLayout } from "../src/film/layout";
 import {
   balancedSlices,
   drainOrFail,
@@ -1847,6 +1855,62 @@ test("a rendered film: the check finds a 3-frame flash and a blank start of a sh
   assert.equal(c.layout, null, "the page's layout is read only when the page is given");
 });
 
+test("a mark covers its own moment, not the whole of a defect that runs through it", () => {
+  const film = (over: Partial<FilmCheck>): FilmCheck => ({
+    file: "film.mp4",
+    durationS: 10,
+    video: null,
+    audio: null,
+    stalls: [],
+    cadence: [],
+    cuts: [],
+    flashes: [],
+    blanks: [],
+    black: [],
+    silences: [],
+    clicks: [],
+    marks: [],
+    page: null,
+    layout: null,
+    smallestText: null,
+    issues: [],
+    ...over,
+  });
+  const mark = (at: number, until = at, what: string | null = null) => ({ at, until, what });
+  const said = (c: Partial<FilmCheck>) =>
+    judgeFilm(film(c), {})
+      .filter((i) => /black|stall|repeats/.test(i.message))
+      .map((i) => `${i.severity}: ${i.message}`);
+  // unintended black from 5 to 8 s, with one meant black frame marked at 6 s
+  const partly = said({ black: [{ start: 5, end: 8 }], marks: [mark(6, 6, "a beat of black")] });
+  assert.ok(
+    partly.includes("warn: black frames 5–8s inside the film"),
+    `still a defect: ${partly.join(" | ")}`,
+  );
+  assert.ok(
+    partly.some((m) => m.startsWith("info:") && /only part/.test(m) && /a beat of black/.test(m)),
+    `and the mark is named as covering only part of it: ${partly.join(" | ")}`,
+  );
+  assert.ok(!partly.some((m) => /marked as intended/.test(m)), partly.join(" | "));
+  // what the mark does cover (to the frame, give or take) is meant
+  assert.deepEqual(said({ black: [{ start: 5.95, end: 6.05 }], marks: [mark(6)] }), [
+    "info: marked as intended: black frames 5.95–6.05s",
+  ]);
+  assert.deepEqual(said({ stalls: [6.05], marks: [mark(6)] }), [
+    "info: marked as intended: a frame repeats inside motion at 6.05s",
+  ]);
+  // marks that meet cover it together; marks with a gap between them do not
+  assert.deepEqual(
+    said({ black: [{ start: 5, end: 8 }], marks: [mark(5, 6.5, "fade"), mark(6.5, 8, "hold")] }),
+    ['info: marked as intended ("fade", "hold"): black frames 5–8s'],
+  );
+  assert.ok(
+    said({ black: [{ start: 5, end: 8 }], marks: [mark(5, 6), mark(7, 8)] }).includes(
+      "warn: black frames 5–8s inside the film",
+    ),
+  );
+});
+
 test("a flash the page marks as intended is listed as marked — also in a film rendered from the middle", {
   skip,
 }, async () => {
@@ -1896,6 +1960,53 @@ test("a flash the page marks as intended is listed as marked — also in a film 
     }),
     /marks\[0\]\.at/,
   );
+});
+
+test("text inside a bordered or padded iframe is read where it is drawn, at the size it is drawn", {
+  skip,
+}, async () => {
+  const page = join(dir, "framed");
+  await exec("mkdir", ["-p", page]);
+  await writeFile(
+    join(page, "inner.html"),
+    `<!doctype html><html><body style="margin:0;background:#fff"><p style="margin:0;font:16px/20px monospace">INNER TEXT HERE</p></body></html>`,
+  );
+  const film = (body: string) =>
+    `<!doctype html><html><head><style>html,body{margin:0;overflow:hidden;background:#fff}</style></head><body>${body}
+<script>window.__film = { duration: 1, width: 640, height: 360 };</script></body></html>`;
+  // a 20 px border: the interface starts 20 px in, at its own scale; the
+  // caption sits on the border above it, clear of its text
+  await writeFile(
+    join(page, "border.html"),
+    film(`<iframe src="inner.html" style="position:absolute;left:100px;top:100px;width:400px;height:100px;border:20px solid #333;padding:0"></iframe>
+<div id="cap" style="position:absolute;left:100px;top:92px;font:24px/24px monospace;white-space:nowrap">CAPTION</div>`),
+  );
+  // a border and padding, the whole frame scaled 1.5×: 16 px text is drawn at 24 px
+  await writeFile(
+    join(page, "scaled.html"),
+    film(
+      `<iframe src="inner.html" style="position:absolute;left:0;top:0;width:300px;height:100px;border:10px solid #333;padding:8px;transform-origin:0 0;transform:scale(1.5)"></iframe>`,
+    ),
+  );
+  const read = (file: string) =>
+    readPageLayout({
+      page: join(page, file),
+      chromePath: chrome!,
+      from: 0,
+      duration: 1,
+      every: 0.25,
+      fallback: { width: 640, height: 360 },
+    });
+  const border = await read("border.html");
+  assert.deepEqual(
+    [border.smallest?.px, border.smallest?.text.includes("INNER")],
+    [16, true],
+    `16 px text in a frame with a border reads 16 px: ${JSON.stringify(border.smallest)}`,
+  );
+  assert.deepEqual(border.spans, [], "the caption on the border is not over the interface's text");
+  const scaled = await read("scaled.html");
+  assert.equal(scaled.smallest?.px, 24, JSON.stringify(scaled.smallest));
+  assert.deepEqual(scaled.spans, []);
 });
 
 test("with the page, the check reads text over text and text cut by the frame's edge, with times, and the smallest text", {

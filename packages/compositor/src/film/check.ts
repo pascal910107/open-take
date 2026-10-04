@@ -226,7 +226,7 @@ export async function checkFilm(
   result.marks = marks
     .map((m) => ({ at: ms(m.at - from), until: ms(m.until - from), what: m.what }))
     .filter((m) => m.until >= -MARK_SLACK && m.at <= durationS + MARK_SLACK);
-  result.issues = judge(result, expect);
+  result.issues = judgeFilm(result, expect);
   return result;
 }
 
@@ -577,22 +577,37 @@ const LAYOUT_SAYS: Record<LayoutSpan["kind"], string> = {
   "text-off-frame": "text cut by the frame's edge",
 };
 
-function judge(c: FilmCheck, expect: FilmCheckExpect): FilmCheckIssue[] {
+export function judgeFilm(c: FilmCheck, expect: FilmCheckExpect): FilmCheckIssue[] {
   const issues: FilmCheckIssue[] = [];
   const v = c.video;
   const fps = v?.fps || 60;
-  const markOf = (from: number, to: number) =>
-    c.marks.find((m) => from <= m.until + MARK_SLACK && to >= m.at - MARK_SLACK);
-  /** the findings no mark covers; the others are listed as marked as intended */
+  /** the findings the marks do not cover from end to end; the others are
+   *  listed as marked as intended, and a mark that covers a finding only in
+   *  part is named beside it */
   const unmarked = <T>(xs: readonly T[], span: (x: T) => [number, number], say: (x: T) => string) =>
     xs.filter((x) => {
-      const m = markOf(...span(x));
-      if (m)
-        issues.push({
-          severity: "info",
-          message: `marked as intended${m.what ? ` ("${m.what}")` : ""}: ${say(x)}`,
-        });
-      return !m;
+      const [from, to] = span(x);
+      const touching = c.marks
+        .filter((m) => from <= m.until + MARK_SLACK && to >= m.at - MARK_SLACK)
+        .sort((a, b) => a.at - b.at);
+      if (!touching.length) return true;
+      let reach = from;
+      for (const m of touching) {
+        if (m.at - MARK_SLACK > reach) break;
+        reach = Math.max(reach, m.until + MARK_SLACK);
+      }
+      const whole = reach >= to;
+      const whats = touching.flatMap((m) => (m.what ? [`"${m.what}"`] : []));
+      const named = touching.map((m) =>
+        m.what ? `"${m.what}"` : `${m.at === m.until ? m.at : `${m.at}–${m.until}`}s`,
+      );
+      issues.push({
+        severity: "info",
+        message: whole
+          ? `marked as intended${whats.length ? ` (${whats.join(", ")})` : ""}: ${say(x)}`
+          : `a mark covers only part of it (${named.join(", ")}): ${say(x)}`,
+      });
+      return !whole;
     });
   const frames = (n: number) => `${n} frame${n === 1 ? "" : "s"}`;
   const runOf = (r: { at: number; frames: number }): [number, number] => [
