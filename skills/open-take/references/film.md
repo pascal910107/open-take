@@ -5,9 +5,47 @@ moves and how it sounds. Write it the way you would build anything for the web
 — a page, with HTML, CSS, SVG, canvas, WebGL, any library — and let open-take
 do the parts that are plumbing: playing the page frame-exactly, motion blur,
 encoding, measuring what you cannot see or hear.
-open-take adds nothing anyone sees or hears: the story, the motion and the
-music are the film's author's, and so is how good the film is. Nothing below
-is required; use what helps.
+open-take adds no look of its own: the story, the type, the colours, the
+motion and the music are the film's author's, and so is how good the film is.
+
+## Start
+
+```sh
+npx open-take film init film/     # kit/ and a page to start from
+```
+
+`kit/` holds what every film needs underneath and twelve films without it
+each wrote again — and often got wrong:
+
+- `camera.js` — say when to see what (`cam.frame(box, { arrive: 12 })`); the
+  path is open-take's take camera, tuned by eye on recordings: the view itself
+  moves, so what is framed heads for its place in a straight line; it is kept
+  inside the content once, when asked, never mid-move. Seven of those films
+  moved the centre and the zoom separately and clamped the centre every
+  frame: the camera stopped short, then swung back. Defaults are measured (in
+  0.73 s, out 1.34 s, what is framed fills 60 %); every move can set its own
+  `dur` and `ease`, and a cut is `cam.cut(box, t)`.
+- `cursor.js` — say where it clicks, types or drags and when; it travels at
+  the take cursor's pace (0.35 content widths a second, 0.30–0.85 s a leg,
+  landing on the action), timed by what the viewer sees when zoomed in. What
+  it looks like is yours.
+- `time.js` — named moments and an optional pulse in one module that the
+  page and the score both import.
+- `media.js` — a saved screen's parts measured where they are now
+  (`screen(iframe).box("#search")`), and shot stills played by film time,
+  their boxes and cursor read from the shoot's log.
+- `audio.mjs` — for the score's Node script: buffers and a mix, an envelope
+  that releases from the level it reached (one that releases from the
+  sustain level clicks), filters that stop and name their track when they
+  blow up, a reverb, a sidechain, seeded numbers, a WAV writer; `normalize`
+  lands the mix on −16 LUFS with its true peak under −1 dBTP, measured as
+  BS.1770 measures it (films that guessed from peaks shipped at −12.2 and
+  −17.8); `diagnose` checks each stem for NaN, clipping, clicks and DC. The
+  music itself is yours: no melodies, instruments or samples.
+
+It is the film's code from then on: read it, change it, drop it for any
+scene. The renderer only ever reads `__film` and `__render`. One flat layer
+per camera; for 3D, read `cam.at(t)` and project it yourself.
 
 ## The page
 
@@ -58,15 +96,13 @@ Text that moves slowly — a slow push or drift across an interface — steps a
 pixel at a time, because Chrome places each glyph on a whole pixel. Push a
 picture of the screen, not the live screen: shoot it once at twice the
 pixels, show that picture at the screen's size, and render with
-`--supersample 3`. A page that shows a saved screen at twice the pixels:
+`--supersample 3`:
 
-```html
-<iframe src="takes/x.take/states/s3/state.html" style="position:absolute;left:0;top:0;width:1920px;height:1080px;border:0;transform:scale(2);transform-origin:0 0"></iframe>
-<script>window.__film = { duration: 1, width: 3840, height: 2160 };</script>
+```sh
+npx open-take film picture takes/x.take/states/s3   # → states/s3/picture@2x.png
 ```
 
-`npx open-take film still shoot.html --at 0 --size 3840x2160 --out shots`
-shoots it. Measured on a saved screen pushed from 1× to 1.6× in 4 s (six
+Measured on a saved screen pushed from 1× to 1.6× in 4 s (six
 lines of 13–18 px text, frame-to-frame jitter): 0.49 px as the live screen,
 0.19 px as the live screen with `--supersample 3`, 0.08 px as the picture
 with `--supersample 3` (0.10 with `--supersample 2`), which rendered in about
@@ -88,8 +124,20 @@ npx open-take film check film.mp4 --size 1920x1080 --fps 60              # forma
 
 `film check` reports measured defects with times — a frame that repeats inside
 motion, motion updating at a lower rate than the film, black frames inside the
-film, true peak above −1 dBFS, clicks (single-sample jumps in the waveform).
-It judges nothing about taste.
+film, true peak above −1 dBFS, clicks (single-sample jumps in the waveform) —
+and what it finds worth a look: a flash (a few frames unlike both sides — a
+clip cut on a transition frame), a shot that starts on blank frames. With
+`--page film/index.html` it also plays the page and reports text over text,
+text running into a painted element and text cut by the frame's edge, each
+with its times, and the smallest text on screen. A flash or a blank that is
+meant is marked in the page and reported as such:
+
+```js
+window.__film = { duration: 42.5, marks: [{ at: 21.4, until: 21.5, what: "white flash" }] };
+```
+
+A mark covers what lies inside it, give or take 0.1 s; whatever runs past it
+is still reported. It judges nothing about taste.
 
 ## Sound
 
@@ -103,6 +151,17 @@ loudness, loudness range, true peak, silences, and clicks.
 
 - The product's own assets: its fonts, colours, logo and illustrations are in
   its repository — use them rather than lookalikes.
+- `npx open-take shoot shoot.mjs --out shots` runs your own capture script in
+  open-take's browser and keeps the log: `s.open(url)` (loaded, hydrated,
+  settled), `s.still(name)`, `s.click` / `s.type(…, { each: true })` /
+  `s.drag(…, { every: 4 })` (real input, then a 2× still), `s.track(selector)`.
+  `shots/shots.json` holds every still with the cursor, the scroll and the box
+  of everything tracked or acted on — read it, never copy coordinates by hand.
+  For what the helpers do not cover, `s.cdp` is the page's CDP session,
+  `s.wsEndpoint` lets Puppeteer or Playwright connect to the same browser, and
+  `s.inject(js)` runs before the page's own scripts. Stills are taken between
+  inputs while the product's own clock keeps running: its animations play
+  faster across them — record the real thing (`make`) where speed matters.
 - `npx open-take make --plan plan.json --out takes/x.mp4 --states --no-render`
   records the real app (no polished master — a film only needs the material)
   and saves the interface itself at every settled moment:
