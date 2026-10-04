@@ -1,7 +1,7 @@
 {
   "name": "@open-take/compositor",
   "version": "0.5.3",
-  "description": "Polish compositor (D3) — event log + captured frames -> polished mp4 + editable revideo composition.",
+  "description": "Polish compositor (D3) \u2014 event log + captured frames -> polished mp4 + editable revideo composition.",
   "license": "MIT",
   "funding": "https://ko-fi.com/pascal18663",
   "type": "module",
@@ -12,6 +12,7 @@
   },
   "files": [
     "dist",
+    "kit",
     "src/**/*.ts",
     "src/**/*.tsx",
     "src/scene/tsconfig.json"

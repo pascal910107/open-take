@@ -33,6 +33,7 @@ import {
   emitGithubOutputs,
   emitStepSummary,
   ensureChrome,
+  filmPicture,
   filmSheet,
   filmStills,
   formatFilmCheck,
@@ -40,6 +41,7 @@ import {
   formatNotes,
   formatTakeStates,
   healingWithheld,
+  initFilm,
   initLaunchProject,
   inspectPage,
   lintPlan,
@@ -251,11 +253,13 @@ Usage:
   open-take launch check <launch.json>
   open-take launch render <launch.json> [--out <movie.mp4>] [--draft]
   open-take skill  [motion | film | install [--force]]
+  open-take film init   <dir> [--force]
   open-take film render <page.html|dir> [--out film.mp4] [--audio <file>|none] [--draft] [--no-blur]
                    [--size 1920x1080] [--fps 60] [--duration <s>] [--from <s>] [--to <s>] [--root <dir>]
                    [--workers 2] [--supersample 2]
   open-take film still  <page.html|dir> --at <s>[,<s>…] [--out <dir>] [--no-blur] [--root <dir>]
                    [--size 1920x1080] [--supersample 2]
+  open-take film picture <state.html|dir> [--scale 2] [--out picture.png]
   open-take film sheet  <film.mp4> [--out sheet.png] [--every <s> | --at <s>,<s>…]
   open-take film check  <film.mp4> [--size 1920x1080] [--fps 60] [--json]
 
@@ -439,7 +443,11 @@ Usage:
           composition reference. \`skill install\` remains as a
           backwards-compatible alias for \`init\`.
   film    a film you write yourself as a web page — open-take only performs
-          it. \`film render\` plays the page on film time (window.__render(t),
+          it. \`film init\` copies the film kit into a folder (kit/: a camera
+          with the take camera's motion, a cursor, one timeline for picture
+          and sound, saved screens and shot stills as material, the sound's
+          plumbing) and a page to start from; the kit is the film's own code
+          from then on. \`film render\` plays the page on film time (window.__render(t),
           or its own CSS/WAAPI/rAF/GSAP/video animation, frame-exact) in
           headless Chrome and writes an H.264 master with measured motion blur
           and the page's soundtrack (window.__film = { duration, audio }).
@@ -451,7 +459,8 @@ Usage:
           less (Chrome places glyphs on whole pixels), for about 1.3–2× the
           render time; 3 smooths further. A slow push on a screen is
           steadiest as a picture of it shot at twice the pixels, rendered
-          with --supersample 3 (\`skill film\`).
+          with --supersample 3 (\`skill film\`): \`film picture\` draws a saved
+          screen that way.
 
   --out <path>   (make) where the postable master goes — taken literally, and
               its <name>.take/ working dir is created beside it. Default
@@ -1720,7 +1729,7 @@ async function main() {
     const target = positional[1];
     if (!action || !target || positional.length !== 2)
       throw new Error(
-        "film: expected render <page>, still <page> --at <s>, sheet <film.mp4> or check <film.mp4>",
+        "film: expected init <dir>, render <page>, still <page> --at <s>, picture <state.html>, sheet <film.mp4> or check <film.mp4>",
       );
     const only = (...allowed: string[]) => {
       for (const f of Object.keys(flags))
@@ -1808,6 +1817,25 @@ async function main() {
         `rendered: ${result.out}\n${result.width}×${result.height} ${result.fps} fps, ${result.durationS.toFixed(2)}s — ` +
           `${result.frames} frames, ${result.samples} samples (${result.mode} mode), ${(result.wallMs / 1000).toFixed(1)}s\n`,
       );
+      return;
+    }
+    if (action === "init") {
+      only("--force");
+      const r = await initFilm({ dir: target, force: has("--force") });
+      for (const f of r.written) process.stdout.write(`wrote ${f}\n`);
+      for (const f of r.kept)
+        process.stdout.write(`kept ${f} — yours differs from the kit's (--force replaces it)\n`);
+      return;
+    }
+    if (action === "picture") {
+      only("--scale", "--out");
+      const r = await filmPicture({
+        state: target,
+        chromePath: await ensureChrome(),
+        scale: num("--scale"),
+        out: flag("--out"),
+      });
+      process.stdout.write(`picture: ${r.out} (${r.width}×${r.height})\n`);
       return;
     }
     if (action === "still") {

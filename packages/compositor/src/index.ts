@@ -30,6 +30,8 @@ export {
   type FilmCheckIssue,
   formatFilmCheck,
 } from "./film/check";
+export { type FilmInitResult, filmKitDir, initFilm } from "./film/kit";
+export { type FilmPictureOptions, filmPicture } from "./film/picture";
 export {
   type FilmProgress,
   type FilmRenderOptions,
