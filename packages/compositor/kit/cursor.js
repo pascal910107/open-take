@@ -140,7 +140,9 @@ export function cursor({
     let free = 0; // when the last action ended: a move never departs before it
     for (const a of order) {
       const dist = Math.hypot(a.to.x - cur.x, a.to.y - cur.y);
-      if (dist > 0.5) {
+      // every move gets its leg, however small: skipping one would leave the
+      // cursor behind where the next one is measured from
+      if (dist > 0) {
         const dur = a.dur ?? travel(dist, a.at);
         const prev = legs.length ? /** @type {Leg} */ (legs[legs.length - 1]).t1 : 0;
         const t0 = Math.min(a.at, Math.max(a.at - dur, prev, free, 0));

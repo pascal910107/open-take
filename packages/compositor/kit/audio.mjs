@@ -686,22 +686,31 @@ export function normalize(
     return integrated(blockPowers(out, sampleRate));
   };
   // the gain that lands on the target: the limiter takes back a little of
-  // whatever it is given, so search (secant steps in dB)
+  // whatever it is given, so search (secant steps in dB). It never goes past
+  // MORE dB over the plain gain: by then the limiter is taking back nearly all
+  // of it (a few short peaks over quiet), and pushing on only wrecks the sound
+  const MORE = 24;
+  const most = lufs - before + MORE;
   /** @param {number} limit */
   const land = (limit) => {
     let d0 = lufs - before;
     let l0 = render(d0, limit);
     if (Math.abs(l0 - lufs) < 0.01) return d0;
-    let d1 = d0 + (lufs - l0);
+    let d1 = Math.min(d0 + (lufs - l0), most);
     let l1 = render(d1, limit);
     for (let k = 0; k < 12 && Math.abs(l1 - lufs) >= 0.01; k++) {
       const slope = (l1 - l0) / (d1 - d0);
-      const d2 = d1 + (lufs - l1) / (slope > 0.05 ? slope : 1);
+      if (!(slope > 0.05) || d1 >= most) break; // more gain no longer makes it louder
+      const d2 = Math.min(d1 + (lufs - l1) / slope, most);
       d0 = d1;
       l0 = l1;
       d1 = d2;
       l1 = render(d1, limit);
     }
+    if (Math.abs(l1 - lufs) > 0.5)
+      throw new Error(
+        `normalize: the mix cannot reach ${lufs < 0 ? "−" : ""}${Math.abs(lufs)} LUFS with its true peak under ${truePeak} dBTP — it gets to ${l1.toFixed(1)} LUFS with ${MORE} dB of limiting (its loud moments are too few and too short); bring up its quieter parts, or aim lower`,
+      );
     return d1;
   };
   // aim a hair under the ceiling; if the gain's own movement still lets an

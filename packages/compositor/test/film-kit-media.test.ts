@@ -184,6 +184,20 @@ window.__render = () => {
     join(film, "plain.html"),
     page(`<iframe id="shot" src="../states/s1/state.html"></iframe>`),
   );
+  // a 10 px border, and a scrolled box around the frame: the document starts
+  // inside the border, and the scroll moves it
+  await writeFile(
+    join(film, "bordered.html"),
+    page(
+      `<iframe id="shot" src="../states/s1/state.html" style="border:10px solid #333"></iframe>`,
+    ),
+  );
+  await writeFile(
+    join(film, "scrolled.html"),
+    page(
+      `<div id="box" style="position:absolute;left:0;top:0;width:400px;height:240px;overflow:hidden"><div style="position:relative;height:600px"><iframe id="shot" src="../states/s1/state.html" style="top:70px"></iframe></div></div><script>document.getElementById("box").scrollTop = 50;</script>`,
+    ),
+  );
   await writeFile(
     join(film, "scaled.html"),
     page(
@@ -202,6 +216,20 @@ window.__render = () => {
     isRed(px(await rgb(plain!, 400, 240), 400, 30 + 220, 20 + 115)),
     "the frame's offset in the layer is added",
   );
+  for (const [name, x, y, what] of [
+    ["bordered", 30 + 10 + 220, 20 + 10 + 115, "the frame's border is counted"],
+    ["scrolled", 30 + 220, 70 - 50 + 115, "a scroll in between is counted"],
+  ] as const) {
+    const [still] = await filmStills({
+      page: join(film, `${name}.html`),
+      root: dir,
+      chromePath: chrome!,
+      at: [0.5],
+      outDir: join(dir, `inside-${name}`),
+      blur: false,
+    });
+    assert.ok(isRed(px(await rgb(still!, 400, 240), 400, x, y)), what);
+  }
   const [scaled] = await filmStills({
     page: join(film, "scaled.html"),
     root: dir,

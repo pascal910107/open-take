@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { camera, settleDecay as kitDecay, linear } from "../kit/camera.js";
 import { cursor } from "../kit/cursor.js";
+import { stillCache } from "../kit/media.js";
 import { timeline } from "../kit/time.js";
 import { type CamRect, type KF, settleDecay, settleRectAt } from "../src/math";
 
@@ -241,4 +242,41 @@ test("one timeline for picture and sound: names, beats, progress", () => {
   );
   assert.throws(() => tl.t("nope"), /no moment named/);
   assert.throws(() => timeline({}).beat(1), /no bpm/);
+});
+
+test("the still cache bounds what is still loading, not just what it holds", async () => {
+  // shown stills decode at once; the ones fetched ahead never finish — the
+  // case that used to leave a decode in flight for every still shown
+  let cancelled = 0;
+  let opened = 0;
+  const cache = stillCache({
+    keep: 12,
+    ahead: 3,
+    count: 100,
+    open: (i: number) => {
+      opened++;
+      return {
+        ready: i % 2 === 0 ? Promise.resolve(i) : new Promise<number>(() => {}),
+        cancel: () => {
+          cancelled++;
+        },
+      };
+    },
+  });
+  let most = 0;
+  for (let i = 0; i < 100; i += 2) {
+    assert.equal(await cache.take(i), i);
+    most = Math.max(most, cache.loading());
+    assert.ok(cache.size <= 12, `held ${cache.size}`);
+  }
+  assert.ok(most <= 4, `at most the wanted still and 3 ahead loading at once (saw ${most})`);
+  assert.ok(cancelled > 0, "stills pushed out while loading were cancelled");
+  assert.ok(opened < 100, `not every still was fetched (${opened})`);
+});
+
+test("many tiny cursor moves add up to where they lead", () => {
+  const cur = cursor({ content: { width: 1920, height: 1080 }, start: { x: 100, y: 100 } });
+  for (let i = 1; i <= 100; i++) cur.move({ x: 100 + i * 0.4, y: 100 }, i / 60, { dur: 1 / 60 });
+  near(cur.at(2).x, 140, 1e-9, "the last of a hundred 0.4 px steps");
+  near(cur.at(50 / 60).x, 120, 1e-9, "halfway along");
 });

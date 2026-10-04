@@ -28,9 +28,10 @@
 /** @typedef {{ x: number, y: number, width: number, height: number }} Box */
 
 /**
- * Where `el` sits inside `layer`, in the layer's CSS px: the offsets up to it.
- * Anything transformed on the way (the element included) would make those
- * offsets wrong, so it is refused rather than answered.
+ * Where the document inside the frame `el` begins, in `layer`'s CSS px: the
+ * offsets up to it, the borders they are taken inside of, less what scrolls in
+ * between, plus the frame's own border and padding. Anything transformed on
+ * the way (the frame included) would make that wrong, so it is refused.
  * @param {string} what
  * @param {Element} el
  * @param {Element} layer
@@ -43,8 +44,16 @@ function offsetWithin(what, el, layer) {
       throw new Error(
         `${what}: it, or something between it and the layer, is transformed — the kit cannot measure through that; place it untransformed in the layer, or map it yourself`,
       );
-  let x = 0;
-  let y = 0;
+  if (!(el instanceof HTMLElement)) throw new Error(`${what}: only HTML elements can be measured`);
+  // its document starts inside its border and padding
+  const own = getComputedStyle(el);
+  let x = el.clientLeft + Number.parseFloat(own.paddingLeft);
+  let y = el.clientTop + Number.parseFloat(own.paddingTop);
+  // what scrolls in between moves it
+  for (let n = el.parentElement; n && n !== layer; n = n.parentElement) {
+    x -= n.scrollLeft;
+    y -= n.scrollTop;
+  }
   /** @type {Element | null} */
   let n = el;
   while (n && n !== layer) {
@@ -56,6 +65,11 @@ function offsetWithin(what, el, layer) {
       throw new Error(
         `${what}: the layer is not positioned — give it position: relative (or absolute) so what is inside it can be measured in it`,
       );
+    // an offset is taken from inside its parent's border
+    if (n && n !== layer) {
+      x += n.clientLeft;
+      y += n.clientTop;
+    }
   }
   if (n !== layer)
     throw new Error(
@@ -133,6 +147,67 @@ export function screen(frame) {
 }
 
 /**
+ * Decoded stills, bounded twice: at most `keep` held, and at most `ahead`
+ * fetched ahead while still loading. One pushed out while it loads is
+ * cancelled, so a render that seeks about cannot pile up decodes. stills()
+ * is what a film uses; this is the part that can be tested without a browser.
+ * @template T
+ * @param {{ keep: number, ahead: number, count: number, open: (i: number) => { ready: Promise<T>, cancel: () => void } }} o
+ */
+export function stillCache({ keep, ahead, count, open }) {
+  /** @type {Map<number, { ready: Promise<T>, cancel: () => void, done: boolean }>} */
+  const held = new Map();
+  /** @param {number} i */
+  const get = (i) => {
+    const had = held.get(i);
+    if (had) {
+      held.delete(i); // the most recently wanted go last, the oldest first
+      held.set(i, had);
+      return had.ready;
+    }
+    const o = open(i);
+    /** @type {{ ready: Promise<T>, cancel: () => void, done: boolean }} */
+    const entry = { ready: o.ready, cancel: o.cancel, done: false };
+    entry.ready = o.ready.then((v) => {
+      entry.done = true;
+      return v;
+    });
+    entry.ready.catch(() => {}); // a cancelled fetch ahead is nobody's error
+    held.set(i, entry);
+    while (held.size > Math.max(1, keep)) {
+      const first = held.keys().next().value;
+      if (first === undefined) break;
+      const old = held.get(first);
+      held.delete(first);
+      if (old && !old.done) old.cancel();
+    }
+    return entry.ready;
+  };
+  const loading = () => {
+    let n = 0;
+    for (const e of held.values()) if (!e.done) n++;
+    return n;
+  };
+  return {
+    /** still i, and a few after it fetched while fewer than `ahead` are loading */
+    /** @param {number} i */
+    take(i) {
+      const p = get(i);
+      for (let k = 1; k <= ahead && i + k < count; k++) {
+        if (held.has(i + k)) continue;
+        if (loading() > ahead) break; // the one wanted counts as loading too
+        get(i + k);
+      }
+      return p;
+    },
+    loading,
+    get size() {
+      return held.size;
+    },
+  };
+}
+
+/**
  * @typedef {object} Still
  * @property {string} file
  * @property {string} [name]
@@ -154,8 +229,6 @@ export async function stills(logUrl, img, { keep = 12, ahead = 3 } = {}) {
   /** @type {{ viewport: { w: number, h: number }, scale?: number, stills: Still[] }} */
   const log = await res.json();
   const base = new URL(logUrl, location.href);
-  /** @type {Map<number, Promise<HTMLImageElement>>} */
-  const held = new Map();
   let shown = -1;
 
   /** @param {number} i */
@@ -164,29 +237,27 @@ export async function stills(logUrl, img, { keep = 12, ahead = 3 } = {}) {
     if (!s) throw new Error(`stills: there is no still ${i} (the shoot has ${log.stills.length})`);
     return s;
   };
-  /** @param {number} i */
-  const load = (i) => {
-    let p = held.get(i);
-    if (!p) {
+  const cache = stillCache({
+    keep,
+    ahead,
+    count: log.stills.length,
+    open: (i) => {
       const im = new Image();
       const src = new URL(still(i).file, base).href;
       im.src = src;
-      p = im.decode().then(
-        () => im,
-        () => {
-          throw new Error(`stills: ${src} could not be decoded`);
+      return {
+        ready: im.decode().then(
+          () => im,
+          () => {
+            throw new Error(`stills: ${src} could not be decoded`);
+          },
+        ),
+        cancel: () => {
+          im.src = ""; // stops the fetch and the decode
         },
-      );
-      held.set(i, p);
-      // the oldest go first: memory stays bounded however long the shoot
-      while (held.size > keep) {
-        const first = held.keys().next().value;
-        if (first === undefined) break;
-        held.delete(first);
-      }
-    }
-    return p;
-  };
+      };
+    },
+  });
 
   return {
     log,
@@ -207,8 +278,7 @@ export async function stills(logUrl, img, { keep = 12, ahead = 3 } = {}) {
     /** show still i (decoded first), fetching a few ahead */
     /** @param {number} i */
     async show(i) {
-      const im = await load(i);
-      for (let k = 1; k <= ahead && i + k < log.stills.length; k++) load(i + k).catch(() => {});
+      const im = await cache.take(i);
       if (shown !== i) {
         img.src = im.src;
         await img.decode();

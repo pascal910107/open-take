@@ -790,3 +790,10 @@ test("rng: mulberry32, the same numbers every run", () => {
   }
   near(sum / 100000, 0.5, 0.01, "centred on a half");
 });
+
+test("normalize says so when the target cannot be reached, rather than run away", () => {
+  // one full-scale sample in a second of silence: nothing to raise but a spike
+  const x = new Float32Array(48000);
+  x[24000] = 1;
+  assert.throws(() => normalize([x], 48000), /cannot reach −16 LUFS/);
+});
