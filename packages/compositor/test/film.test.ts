@@ -2018,7 +2018,7 @@ test("text inside a bordered or padded iframe is read where it is drawn, at the 
   assert.deepEqual(scaled.spans, []);
 });
 
-test("text drawn turned or skewed is named, not measured by the box around it", {
+test("text drawn turned, skewed or mirrored is named, not measured by the box around it", {
   skip,
 }, async () => {
   const page = join(dir, "turned");
@@ -2027,9 +2027,16 @@ test("text drawn turned or skewed is named, not measured by the box around it", 
     join(page, "inner.html"),
     `<!doctype html><html><body style="margin:0;background:#fff"><p style="margin:0;font:16px/20px monospace">INNER TEXT HERE</p></body></html>`,
   );
+  await writeFile(
+    join(page, "inner2.html"),
+    `<!doctype html><html><body style="margin:0;background:#fff"><p style="margin:0;font:16px/20px monospace">UPSIDE DOWN</p></body></html>`,
+  );
   // a tall frame turned on its side (the box around it is wide and short: its
   // 16 px text would read as 8 px); a caption at a slant; a turn undone inside
-  // another (drawn upright); an upright caption
+  // another (drawn upright); an upright caption; a sticker turned by `rotate`;
+  // turns that do not apply (a box-less wrapper, a plain inline span); a frame
+  // turned upside down; a turn about y holding one about x in 3D (a skew); a
+  // stretched SVG turned, holding HTML turned back (a skew)
   await writeFile(
     join(page, "index.html"),
     `<!doctype html><html><head><style>html,body{margin:0;overflow:hidden;background:#fff}</style></head><body>
@@ -2038,6 +2045,11 @@ test("text drawn turned or skewed is named, not measured by the box around it", 
 <div id="undone" style="position:absolute;left:300px;top:260px;transform:rotate(30deg)"><span style="display:block;white-space:nowrap;transform:rotate(-30deg);font:22px sans-serif">Turned back</span></div>
 <div id="flat" style="position:absolute;left:20px;top:300px;font:18px sans-serif">An upright caption</div>
 <div id="sticker" style="position:absolute;left:300px;top:320px;font:20px sans-serif;rotate:-3deg">A sticker</div>
+<div style="display:contents;rotate:30deg"><div id="boxless" style="position:absolute;left:20px;top:20px;font:24px sans-serif">Inside a wrapper</div></div>
+<p style="position:absolute;left:20px;top:60px;margin:0;font:24px sans-serif">An <span style="transform:rotate(20deg)">inline word</span> here</p>
+<iframe src="inner2.html" style="position:absolute;left:300px;top:110px;width:200px;height:40px;border:0;rotate:180deg"></iframe>
+<div style="position:absolute;left:20px;top:110px;transform-style:preserve-3d;rotate:y 45deg"><div id="deep" style="rotate:x 45deg;font:24px sans-serif;white-space:nowrap">Deep in 3D</div></div>
+<svg style="position:absolute;left:420px;top:200px;rotate:30deg" width="200" height="100" viewBox="0 0 100 100" preserveAspectRatio="none"><foreignObject x="0" y="0" width="100" height="100"><div xmlns="http://www.w3.org/1999/xhtml" id="stretched" style="rotate:-30deg;font:14px sans-serif">Stretched</div></foreignObject></svg>
 <script>window.__film = { duration: 1, width: 640, height: 360 };</script></body></html>`,
   );
   const read = await readPageLayout({
@@ -2056,7 +2068,13 @@ test("text drawn turned or skewed is named, not measured by the box around it", 
     `the turned frame's text, the slanted caption and the sticker turned by \`rotate\` are named: ${JSON.stringify(unread)}`,
   );
   assert.ok(
-    !unread.some((u) => u.includes("Turned back") || u.includes("#flat")),
+    unread.some((u) => u.includes("UPSIDE DOWN")) &&
+      unread.some((u) => u.includes("#deep")) &&
+      unread.some((u) => u.includes("#stretched")),
+    `upside down, skewed in 3D, skewed by a stretched SVG — all named: ${JSON.stringify(unread)}`,
+  );
+  assert.ok(
+    !unread.some((u) => /Turned back|#flat|#boxless|inline word/.test(u)),
     `upright text is read: ${JSON.stringify(unread)}`,
   );
   assert.deepEqual(
@@ -2091,7 +2109,9 @@ test("text drawn turned or skewed is named, not measured by the box around it", 
   assert.ok(
     c.some(
       (i) =>
-        i.severity === "info" && /turned or skewed/.test(i.message) && i.message.includes("#slant"),
+        i.severity === "info" &&
+        /turned, skewed or mirrored/.test(i.message) &&
+        i.message.includes("#slant"),
     ),
     c.map((i) => i.message).join(" | "),
   );

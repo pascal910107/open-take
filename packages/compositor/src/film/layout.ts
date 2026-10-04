@@ -99,16 +99,33 @@ function probeLayout(): { findings: LayoutFinding[]; texts: DrawnText[]; unread:
   };
   /** what an element's own and its ancestors' transforms (an iframe's
    *  included) do to it on screen, without what moves it: a, b, c, d of a 2D
-   *  matrix. Memoized per probe. */
+   *  matrix. Within a 3D context (`transform-style: preserve-3d`) the whole
+   *  matrices multiply before the plane is taken; perspective is left out.
+   *  Memoized per probe. */
   type Lin = [number, number, number, number];
   const UPRIGHT: Lin = [1, 0, 0, 1];
-  const lins = new Map<Element, Lin>();
-  const linOf = (el: Element, view: Window, base: Lin): Lin => {
-    const hit = lins.get(el);
-    if (hit) return hit;
-    const u = el.parentElement ? linOf(el.parentElement, view, base) : base;
-    const cs = view.getComputedStyle(el);
-    // `rotate` and `scale` apply before `transform`, which does not show them
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  /** what transforms apply to when `display` is inline: replaced elements */
+  const REPLACED = new Set([
+    "img",
+    "video",
+    "canvas",
+    "iframe",
+    "embed",
+    "object",
+    "input",
+    "select",
+    "textarea",
+    "svg",
+  ]);
+  /** an element's own transform — `rotate` and `scale` first, then
+   *  `transform`, which does not show them; an SVG's stretched viewBox too —
+   *  or null where there is none, or none applies (a box-less or plain
+   *  inline element) */
+  const ownOf = (el: Element, cs: CSSStyleDeclaration): DOMMatrix | null => {
+    if (cs.display === "contents" || cs.display === "none") return null;
+    if (cs.display === "inline" && el.namespaceURI !== SVG_NS && !REPLACED.has(el.localName))
+      return null;
     let m = new DOMMatrix();
     if (cs.rotate && cs.rotate !== "none") {
       const v = cs.rotate.trim().split(/\s+/); // "30deg", "x 30deg", "1 1 0 30deg"
@@ -128,20 +145,52 @@ function probeLayout(): { findings: LayoutFinding[]; texts: DrawnText[]; unread:
       m = m.scale(v[0], v[1] ?? v[0], v[2] ?? 1);
     }
     if (cs.transform && cs.transform !== "none") m = m.multiply(new DOMMatrix(cs.transform));
-    const l: Lin = m.isIdentity
-      ? u
-      : [
-          u[0] * m.a + u[2] * m.b,
-          u[1] * m.a + u[3] * m.b,
-          u[0] * m.c + u[2] * m.d,
-          u[1] * m.c + u[3] * m.d,
-        ];
-    lins.set(el, l);
-    return l;
+    if (el.namespaceURI === SVG_NS && el.localName === "svg") {
+      const svg = el as SVGSVGElement;
+      const vb = svg.viewBox?.baseVal;
+      // SVG_PRESERVEASPECTRATIO_NONE: the viewBox stretched to the box
+      if (vb && vb.width > 0 && vb.height > 0 && svg.preserveAspectRatio?.baseVal.align === 1) {
+        const w = svg.clientWidth || svg.width.baseVal.value;
+        const h = svg.clientHeight || svg.height.baseVal.value;
+        if (w > 0 && h > 0) m = m.scale(w / vb.width, h / vb.height);
+      }
+    }
+    return m.isIdentity ? null : m;
   };
-  /** turned or skewed on screen: its boxes would be the upright boxes around
-   *  it, and its size a guess — such text is named, not read */
+  const times = (u: Lin, m: DOMMatrix): Lin => [
+    u[0] * m.a + u[2] * m.b,
+    u[1] * m.a + u[3] * m.b,
+    u[0] * m.c + u[2] * m.d,
+    u[1] * m.c + u[3] * m.d,
+  ];
+  /** per element: its 2D part on screen; the 3D context it belongs to (the
+   *  whole matrix from that context's root down) and the 2D part above it */
+  type Turn = { lin: Lin; ctx: DOMMatrix; above: Lin };
+  const turns = new Map<Element, Turn>();
+  const turnOf = (el: Element, view: Window, base: Lin): Turn => {
+    const hit = turns.get(el);
+    if (hit) return hit;
+    const own = ownOf(el, view.getComputedStyle(el));
+    const p = el.parentElement;
+    let t: Turn;
+    if (p && view.getComputedStyle(p).transformStyle === "preserve-3d") {
+      const pt = turnOf(p, view, base);
+      const ctx = own ? pt.ctx.multiply(own) : pt.ctx;
+      t = { lin: times(pt.above, ctx), ctx, above: pt.above };
+    } else {
+      const above = p ? turnOf(p, view, base).lin : base;
+      const ctx = own ?? new DOMMatrix();
+      t = { lin: own ? times(above, own) : above, ctx, above };
+    }
+    turns.set(el, t);
+    return t;
+  };
+  const linOf = (el: Element, view: Window, base: Lin): Lin => turnOf(el, view, base).lin;
+  /** turned, skewed or mirrored on screen: its boxes would be the upright
+   *  boxes around it, and its size a guess — such text is named, not read */
   const askew = (l: Lin) =>
+    l[0] < 0 ||
+    l[3] < 0 ||
     Math.abs(l[1]) + Math.abs(l[2]) > 0.01 * (Math.abs(l[0]) + Math.abs(l[3]));
   const unread = new Set<string>();
   const describe = (el: Element, prefix: string): string => {
@@ -268,10 +317,6 @@ function probeLayout(): { findings: LayoutFinding[]; texts: DrawnText[]; unread:
       // text — its own element first — cut off is not drawn
       const visible = shownIn(el, view, map, clip);
       if (!visible) continue;
-      if (askew(linOf(el, view, base))) {
-        unread.add(describe(owner, prefix));
-        continue;
-      }
       const ink = inkOf(view.getComputedStyle(el), n.nodeValue);
       const boxes: Box[] = [];
       for (const r of Array.from(range.getClientRects())) {
@@ -286,6 +331,11 @@ function probeLayout(): { findings: LayoutFinding[]; texts: DrawnText[]; unread:
         if (v && v.w >= 2 && v.h >= 2) boxes.push(v);
       }
       if (!boxes.length) continue;
+      // drawn at all, but turned: named, not read
+      if (askew(linOf(el, view, base))) {
+        unread.add(describe(owner, prefix));
+        continue;
+      }
       // the size it is drawn at: its own font size, as scaled on screen
       const px = (Number.parseFloat(view.getComputedStyle(el).fontSize) || 0) * scaleOf(el) * scale;
       const t = seen.get(owner);
@@ -455,7 +505,7 @@ export type PageReading = {
   /** the smallest text drawn — at about the same size for two samples in a
    *  row, so text growing in from nothing does not count — and when */
   smallest: { px: number; at: number; text: string } | null;
-  /** text drawn turned or skewed, which is named rather than read */
+  /** text drawn turned, skewed or mirrored, which is named rather than read */
   unread: string[];
   /** the page's own window.__film.marks, as prepare() returned them */
   marks: unknown;

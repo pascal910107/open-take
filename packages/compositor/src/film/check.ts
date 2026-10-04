@@ -69,7 +69,7 @@ export type FilmCheck = {
   page: { file: string; width: number; height: number; every: number } | null;
   /** text that collides or leaves the frame, from when to when; null without the page */
   layout: LayoutSpan[] | null;
-  /** text drawn turned or skewed: named, not read; null without the page */
+  /** text drawn turned, skewed or mirrored: named, not read; null without the page */
   unreadText: string[] | null;
   /** the smallest text drawn — information, not a verdict; null without the page */
   smallestText: { px: number; at: number; text: string } | null;
@@ -696,7 +696,7 @@ export function judgeFilm(c: FilmCheck, expect: FilmCheckExpect): FilmCheckIssue
   if (unread.length)
     issues.push({
       severity: "info",
-      message: `text drawn turned or skewed is not read for collisions or size — look at it yourself: ${unread.slice(0, 6).join(", ")}${unread.length > 6 ? ` and ${unread.length - 6} more` : ""}`,
+      message: `text drawn turned, skewed or mirrored is not read for collisions or size — look at it yourself: ${unread.slice(0, 6).join(", ")}${unread.length > 6 ? ` and ${unread.length - 6} more` : ""}`,
     });
   if (!c.audio) {
     issues.push({ severity: "warn", message: "no audio stream — the film is silent" });
