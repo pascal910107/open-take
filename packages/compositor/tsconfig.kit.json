@@ -8,5 +8,5 @@
     "declarationMap": false,
     "sourceMap": false
   },
-  "include": ["kit/**/*.js"]
+  "include": ["kit/**/*.js", "kit/**/*.mjs"]
 }
