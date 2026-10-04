@@ -200,8 +200,10 @@ function probeLayout(): { findings: LayoutFinding[]; texts: DrawnText[]; unread:
     const p = el.parentElement;
     const pcs = p ? view.getComputedStyle(p) : null;
     const own = ownOf(el, view.getComputedStyle(el));
-    const persp = own && pcs ? perspectiveOf(pcs) : null;
-    const local = persp && own ? persp.multiply(own) : own;
+    // a parent's perspective reaches whatever it holds in its 3D space, an
+    // untransformed wrapper included
+    const persp = pcs ? perspectiveOf(pcs) : null;
+    const local = persp ? (own ? persp.multiply(own) : persp) : own;
     let t: Turn;
     if (p && pcs && keeps3D(pcs)) {
       const pt = turnOf(p, view, base);
@@ -358,6 +360,21 @@ function probeLayout(): { findings: LayoutFinding[]; texts: DrawnText[]; unread:
       )
         owner = owner.parentElement;
       range.selectNodeContents(n);
+      if (!mapped) {
+        // the frame's box cannot place it: named when drawn in the frame's
+        // own view at all
+        const inView = Array.from(range.getClientRects()).some(
+          (r) =>
+            r.width >= 2 &&
+            r.height >= 2 &&
+            r.right > 0 &&
+            r.bottom > 0 &&
+            r.left < view.innerWidth &&
+            r.top < view.innerHeight,
+        );
+        if (inView) unread.add(describe(owner, prefix));
+        continue;
+      }
       // what the frame, the iframe's box and any clipping box that holds the
       // text — its own element first — cut off is not drawn
       const visible = shownIn(el, view, map, clip);
@@ -377,7 +394,7 @@ function probeLayout(): { findings: LayoutFinding[]; texts: DrawnText[]; unread:
       }
       if (!boxes.length) continue;
       // drawn at all, but turned: named, not read
-      if (!mapped || askew(linOf(el, view, base))) {
+      if (askew(linOf(el, view, base))) {
         unread.add(describe(owner, prefix));
         continue;
       }
@@ -469,20 +486,14 @@ function probeLayout(): { findings: LayoutFinding[]; texts: DrawnText[]; unread:
       (r) => ({ x: r.left, y: r.top, w: r.width, h: r.height }),
       frame,
     );
-    const clip = shown && intersect(own, shown);
+    // a frame turned, mirrored or tilted in perspective: its box cannot map
+    // what it holds, and whether it shows at all is read from the box around it
     const turn = turnOf(f, window, UPRIGHT);
-    if (clip)
-      collect(
-        doc,
-        view,
-        map,
-        clip,
-        o,
-        `iframe › `,
-        sy,
-        turn.lin,
-        !askew(turn.lin) && !turn.projected,
-      );
+    const mapped = !askew(turn.lin) && !turn.projected;
+    const clip =
+      shown &&
+      intersect(mapped ? own : { x: fb.left, y: fb.top, w: fb.width, h: fb.height }, shown);
+    if (clip) collect(doc, view, map, clip, o, `iframe › `, sy, turn.lin, mapped);
   }
 
   const overlap = (a: Box, b: Box) => {

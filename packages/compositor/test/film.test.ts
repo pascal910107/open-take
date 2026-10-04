@@ -2035,6 +2035,8 @@ test("text drawn turned, skewed or mirrored is named, not measured by the box ar
     ["inner3.html", "TILTED SCREEN", ""],
     ["inner4.html", "FLIPPED TWICE", "rotate:180deg"],
     ["inner5.html", "UNDER PERSPECTIVE", ""],
+    ["inner6.html", "THROUGH A WRAPPER", ""],
+    ["inner7.html", "AT THE FOOT", "position:absolute;left:0;top:78px"],
   ])
     await writeFile(
       join(page, file!),
@@ -2047,8 +2049,11 @@ test("text drawn turned, skewed or mirrored is named, not measured by the box ar
   // turned upside down; a turn about y holding one about x in 3D (a skew); a
   // stretched SVG turned, holding HTML turned back (a skew); the same 3D turns
   // where the parent's clipping flattens them (upright); a frame tilted under
-  // perspective, its own or its parent's; a frame upside down holding text
-  // upside down (upright inside, but not on screen as the frame's box says)
+  // perspective, its own or its parent's, or its grandparent's through an
+  // untransformed 3D wrapper; a frame upside down holding text upside down
+  // (upright inside, but not on screen as the frame's box says); a frame
+  // turned on its side in a window that shows only the part where its last
+  // line is drawn
   await writeFile(
     join(page, "index.html"),
     `<!doctype html><html><head><style>html,body{margin:0;overflow:hidden;background:#fff}</style></head><body>
@@ -2066,6 +2071,8 @@ test("text drawn turned, skewed or mirrored is named, not measured by the box ar
 <iframe src="inner3.html" style="position:absolute;left:200px;top:180px;width:200px;height:40px;border:0;transform-origin:0 0;transform:perspective(800px) rotateY(20deg)"></iframe>
 <iframe src="inner4.html" style="position:absolute;left:200px;top:230px;width:200px;height:40px;border:0;rotate:180deg"></iframe>
 <div style="position:absolute;left:200px;top:280px;perspective:800px"><iframe src="inner5.html" style="width:200px;height:40px;border:0;rotate:y 25deg"></iframe></div>
+<div style="position:absolute;left:420px;top:20px;perspective:800px;perspective-origin:0 0"><div style="transform-style:preserve-3d"><iframe src="inner6.html" style="width:200px;height:40px;border:0;transform-origin:0 0;rotate:y 20deg"></iframe></div></div>
+<div style="position:absolute;left:520px;top:290px;width:100px;height:60px;overflow:hidden"><iframe src="inner7.html" style="width:200px;height:100px;border:0;transform-origin:0 0;rotate:90deg;translate:100px 0"></iframe></div>
 <script>window.__film = { duration: 1, width: 640, height: 360 };</script></body></html>`,
   );
   const read = await readPageLayout({
@@ -2090,9 +2097,13 @@ test("text drawn turned, skewed or mirrored is named, not measured by the box ar
     `upside down, skewed in 3D, skewed by a stretched SVG — all named: ${JSON.stringify(unread)}`,
   );
   assert.ok(
-    ["TILTED SCREEN", "FLIPPED TWICE", "UNDER PERSPECTIVE"].every((t) =>
-      unread.some((u) => u.includes(t)),
-    ),
+    [
+      "TILTED SCREEN",
+      "FLIPPED TWICE",
+      "UNDER PERSPECTIVE",
+      "THROUGH A WRAPPER",
+      "AT THE FOOT",
+    ].every((t) => unread.some((u) => u.includes(t))),
     `frames under perspective or upside down: all their text named: ${JSON.stringify(unread)}`,
   );
   assert.ok(
