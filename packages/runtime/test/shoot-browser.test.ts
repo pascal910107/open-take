@@ -7,14 +7,18 @@
 // scripts) must reach the same browser. Skips without Chrome for Testing.
 
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { promisify } from "node:util";
 import { resolveChrome } from "../src/cdp";
 import { runShoot, type ShootLog, type ShootOpts } from "../src/shoot";
+
+const exec = promisify(execFile);
 
 const chrome = process.env.OPEN_TAKE_E2E_CHROME ?? resolveChrome();
 const skip = chrome ? false : "no Chrome for Testing";
@@ -56,6 +60,11 @@ const LATE = `<!doctype html><html><body><main><h1 id="title">Late</h1><a href="
 </body></html>`;
 const NEXT = `<!doctype html><html><body><h1>Next page</h1></body></html>`;
 const BLANK = `<!doctype html><html><body><div id="root"></div><script>/* the app never mounts */</script></body></html>`;
+// a button disabled by its fieldset (its own .disabled stays false), enabled later
+const FIELDSET = `<!doctype html><html><body><fieldset id="fs" disabled><button id="b2">Go</button></fieldset><p id="n">0</p>
+<script>setTimeout(() => { document.getElementById("fs").disabled = false; }, 1500);
+document.getElementById("b2").addEventListener("click", () => { const n = document.getElementById("n"); n.textContent = String(+n.textContent + 1); });</script>
+</body></html>`;
 
 async function serve(): Promise<{ server: Server; url: string }> {
   const pages: Record<string, string> = {
@@ -63,6 +72,7 @@ async function serve(): Promise<{ server: Server; url: string }> {
     "/late": LATE,
     "/next": NEXT,
     "/blank": BLANK,
+    "/fieldset": FIELDSET,
   };
   const server = createServer((req, res) => {
     const html = pages[req.url ?? "/"];
@@ -370,6 +380,120 @@ test("shoot: s.open waits for a page that hydrates late, follows a link, refuses
       }),
       /did not answer/,
     );
+  } finally {
+    server.close();
+    await rm(out, { recursive: true, force: true });
+  }
+});
+
+test("shoot: a new shoot that cannot be put in place leaves the last good one as it was", {
+  skip,
+  timeout: 60000,
+}, async () => {
+  const { server, url } = await serve();
+  const out = await mkdtemp(join(tmpdir(), "open-take-shoot-"));
+  try {
+    await runShoot({
+      ...base(out),
+      script: async (s) => {
+        await s.open(url);
+        await s.still("keep");
+      },
+    });
+    // something of the user's sits where the new still must go
+    await mkdir(join(out, "000-new.png"));
+    await writeFile(join(out, "000-new.png", "theirs.txt"), "not ours");
+    await assert.rejects(
+      runShoot({
+        ...base(out),
+        script: async (s) => {
+          await s.open(url);
+          await s.still("new");
+        },
+      }),
+      /could not replace the last one/,
+    );
+    const kept = JSON.parse(readFileSync(join(out, "shots.json"), "utf8")) as ShootLog;
+    assert.deepEqual(
+      kept.stills.map((s) => s.name),
+      ["keep"],
+      "the last good log is back",
+    );
+    assert.ok(existsSync(join(out, kept.stills[0]!.file)), "and its still");
+    assert.ok(existsSync(join(out, "000-new.png", "theirs.txt")), "what was there is untouched");
+    const staged = JSON.parse(readFileSync(join(out, ".shoot", "shots.json"), "utf8")) as ShootLog;
+    assert.deepEqual(
+      staged.stills.map((s) => s.name),
+      ["new"],
+      "the new shoot is kept aside, whole",
+    );
+  } finally {
+    server.close();
+    await rm(out, { recursive: true, force: true });
+  }
+});
+
+test("shoot: a last shoot that cannot all be moved aside is put back whole", {
+  skip: skip || (process.platform !== "darwin" && "an immutable file is set with chflags"),
+  timeout: 60000,
+}, async () => {
+  const { server, url } = await serve();
+  const out = await mkdtemp(join(tmpdir(), "open-take-shoot-"));
+  let locked = "";
+  try {
+    const last = await runShoot({
+      ...base(out),
+      script: async (s) => {
+        await s.open(url);
+        await s.still("a");
+        await s.still("b");
+      },
+    });
+    // its second still cannot be moved: the first is aside by then
+    locked = join(out, last.log.stills[1]!.file);
+    await exec("chflags", ["uchg", locked]);
+    await assert.rejects(
+      runShoot({
+        ...base(out),
+        script: async (s) => {
+          await s.open(url);
+          await s.still("new");
+        },
+      }),
+      /could not replace the last one/,
+    );
+    const kept = JSON.parse(readFileSync(join(out, "shots.json"), "utf8")) as ShootLog;
+    assert.deepEqual(
+      kept.stills.map((s) => s.name),
+      ["a", "b"],
+    );
+    for (const st of kept.stills)
+      assert.ok(existsSync(join(out, st.file)), `${st.file} is back in place`);
+    assert.ok(!existsSync(join(out, ".shoot-previous")), "nothing is left aside");
+  } finally {
+    server.close();
+    if (locked) await exec("chflags", ["nouchg", locked]).catch(() => {});
+    await rm(out, { recursive: true, force: true });
+  }
+});
+
+test("shoot: a button its fieldset disables is waited for, not clicked dead", {
+  skip,
+  timeout: 60000,
+}, async () => {
+  const { server, url } = await serve();
+  const out = await mkdtemp(join(tmpdir(), "open-take-shoot-"));
+  try {
+    let clicks = "";
+    await runShoot({
+      ...base(out),
+      script: async (s) => {
+        await s.open(`${url}fieldset`, { settle: false });
+        await s.click("#b2", { settle: false, still: false });
+        clicks = String(await s.evaluate("document.getElementById('n').textContent"));
+      },
+    });
+    assert.equal(clicks, "1", "the click landed once the fieldset was enabled");
   } finally {
     server.close();
     await rm(out, { recursive: true, force: true });

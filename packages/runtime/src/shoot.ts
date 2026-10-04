@@ -384,7 +384,7 @@ function findJs(target: string, kind: Kind, scroll: boolean): string {
         `m.scrollIntoView({block:'center',inline:'center',behavior:'instant'});r=m.getBoundingClientRect();}`
       : "") +
     `var p=hittable(m,r);` +
-    `return JSON.stringify({x:r.x,y:r.y,w:r.width,h:r.height,tag:m.tagName,disabled:m.disabled===true,` +
+    `return JSON.stringify({x:r.x,y:r.y,w:r.width,h:r.height,tag:m.tagName,disabled:m.matches(':disabled'),` +
     `hit:!!p,why:p?undefined:unreachable(m)});})()`
   );
 }
@@ -407,7 +407,7 @@ function focusJs(target: string | null): string {
   return (
     `(function(){${LOCATE_JS}var f=${find},m=f&&f.el;` +
     `var a=document.activeElement;while(a&&a.shadowRoot&&a.shadowRoot.activeElement)a=a.shadowRoot.activeElement;` +
-    `var ed=!!a&&a!==document.body&&(a.isContentEditable||(typeof a.value==='string'&&!a.readOnly&&!a.disabled));` +
+    `var ed=!!a&&a!==document.body&&(a.isContentEditable||(typeof a.value==='string'&&!a.readOnly&&!a.matches(':disabled')));` +
     `function inside(n){while(n){if(n===m)return true;var rn=n.getRootNode?n.getRootNode():null;n=n.parentElement||(rn&&rn.host?rn.host:null);}return false;}` +
     `var own=!!m&&!!a&&(inside(a)||(a.isContentEditable&&a.contains(m)));` +
     `return JSON.stringify({editable:ed,own:own});})()`
@@ -517,14 +517,32 @@ export async function runShoot(opts: ShootOpts): Promise<{ log: ShootLog; path: 
     await browser?.close();
   }
 
-  // the script finished: this shoot replaces the last one
-  await retire(out);
-  for (const st of stills) await rename(join(stage, st.file), join(out, st.file));
+  // the script finished: this shoot replaces the last one, but only once all
+  // of it is in place — the last one is moved aside first, and put back if
+  // anything of the new one cannot go where it belongs
   const log: ShootLog = { viewport, scale, stills };
-  const path = join(out, "shots.json");
-  await writeFile(path, `${JSON.stringify(log, null, 2)}\n`);
+  await writeFile(join(stage, "shots.json"), `${JSON.stringify(log, null, 2)}\n`);
+  const aside = join(out, ".shoot-previous");
+  await rm(aside, { recursive: true, force: true });
+  const previous: string[] = [];
+  const placed: string[] = [];
+  try {
+    await moveAside(out, aside, previous);
+    for (const name of [...stills.map((st) => st.file), "shots.json"]) {
+      await rename(join(stage, name), join(out, name));
+      placed.push(name);
+    }
+  } catch (e) {
+    for (const name of placed) await rename(join(out, name), join(stage, name)).catch(() => {});
+    for (const name of previous) await rename(join(aside, name), join(out, name)).catch(() => {});
+    await rm(aside, { recursive: true, force: true }).catch(() => {});
+    throw new Error(
+      `shoot: the new shoot could not replace the last one (${e instanceof Error ? e.message : String(e)}) — the last one is back in place, the new one is in ${stage}`,
+    );
+  }
+  await rm(aside, { recursive: true, force: true });
   await rm(stage, { recursive: true, force: true });
-  return { log, path };
+  return { log, path: join(out, "shots.json") };
 }
 
 async function loadScript(
@@ -559,19 +577,26 @@ function scriptFailure(e: unknown, file?: string): string {
     : err.message;
 }
 
-/** Remove the previous shoot's stills (exactly the files its log names) and
- *  its log. Anything else in the directory is the author's. */
-async function retire(out: string): Promise<void> {
+/** Move the previous shoot's stills (exactly the files its log names) and its
+ *  log into `aside`, adding each to `moved` as it goes, so that what was moved
+ *  can be put back even if the rest cannot. Anything else in the directory is
+ *  the author's and stays where it is. */
+async function moveAside(out: string, aside: string, moved: string[]): Promise<void> {
   let old: ShootLog;
   try {
     old = JSON.parse(await readFile(join(out, "shots.json"), "utf8")) as ShootLog;
   } catch {
     return;
   }
-  for (const st of Array.isArray(old.stills) ? old.stills : [])
-    if (typeof st?.file === "string" && /^\d{3,}-[^/\\]+\.png$/.test(st.file))
-      await rm(join(out, st.file), { force: true });
-  await rm(join(out, "shots.json"), { force: true });
+  await mkdir(aside, { recursive: true });
+  const names = (Array.isArray(old.stills) ? old.stills : [])
+    .map((st) => st?.file)
+    .filter((f): f is string => typeof f === "string" && /^\d{3,}-[^/\\]+\.png$/.test(f));
+  for (const name of [...names, "shots.json"]) {
+    if (!existsSync(join(out, name))) continue;
+    await rename(join(out, name), join(aside, name));
+    moved.push(name);
+  }
 }
 
 // --- s ----------------------------------------------------------------------------
