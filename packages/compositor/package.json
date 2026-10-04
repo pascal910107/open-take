@@ -18,7 +18,7 @@
   ],
   "scripts": {
     "build": "tsdown",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.kit.json",
     "test": "node --test --import tsx/esm test/*.test.ts",
     "test:render-smoke": "node --test --test-force-exit --import tsx/esm e2e/render-smoke.test.ts",
     "clean": "rm -rf dist"

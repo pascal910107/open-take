@@ -109,7 +109,7 @@ export function gradientEndpoints(
   };
 }
 
-type KF<T> = [number, T];
+export type KF<T> = [number, T];
 
 export function keyvalN(
   t: number,
@@ -497,7 +497,7 @@ export function buildStageKeyframes(comp: TakeComposition): StageKeyframes {
  *  plus a slow settle pole; at frac 0.04 the tail τ ≈ duration/3.6 (730ms →
  *  ~205ms, 1340ms → ~375ms — the frame-tracked reference tails; a different
  *  frac shifts ω0 and with it τ). */
-function settleDecay(frac: number): (u: number) => number {
+export function settleDecay(frac: number): (u: number) => number {
   const zeta = 1.2;
   const s = Math.sqrt(zeta * zeta - 1);
   const l1 = zeta + s;
@@ -522,7 +522,7 @@ function settleDecay(frac: number): (u: number) => number {
  *  build-time-clamped rects, and the valid-rect set is convex (linear
  *  half-plane bounds in cx,cy,w), so in-between rects stay valid exactly as
  *  in the lerped path. */
-function settleRectAt(kfs: KF<CamRect>[], decay: (u: number) => number, t: number): CamRect {
+export function settleRectAt(kfs: KF<CamRect>[], decay: (u: number) => number, t: number): CamRect {
   let from = kfs[0]![1];
   for (let i = 0; i < kfs.length - 1; i++) {
     const [t0, r0] = kfs[i]!;
