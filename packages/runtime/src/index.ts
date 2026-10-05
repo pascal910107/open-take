@@ -47,6 +47,8 @@ export {
   formatFilmCheck,
   formatIssues,
   initFilm,
+  muxFilm,
+  patchFilm,
   renderFilm,
   type TakeComposition,
   validateComposition,

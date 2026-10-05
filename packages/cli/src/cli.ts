@@ -47,10 +47,12 @@ import {
   lintPlan,
   loadCaptureLogSibling,
   makeTake,
+  muxFilm,
   openPath,
   outlineState,
   type PostShootPass,
   PrecheckRefusal,
+  patchFilm,
   profileDir,
   readNotes,
   renderAbReel,
@@ -259,7 +261,8 @@ Usage:
   open-take film init   <dir> [--force]
   open-take film render <page.html|dir> [--out film.mp4] [--audio <file>|none] [--draft] [--no-blur]
                    [--size 1920x1080] [--fps 60] [--duration <s>] [--from <s>] [--to <s>] [--root <dir>]
-                   [--workers 2] [--supersample 2]
+                   [--workers 2] [--supersample 2] [--into <film.mp4>]
+  open-take film mux    <film.mp4> --audio <file>|none [--out <film.mp4>]
   open-take film still  <page.html|dir> --at <s>[,<s>…] [--out <dir>] [--no-blur] [--root <dir>]
                    [--size 1920x1080] [--supersample 2]
   open-take film picture <state.html|dir> [--scale 2] [--out picture.png]
@@ -484,7 +487,12 @@ Usage:
           from then on. \`film render\` plays the page on film time (window.__render(t),
           or its own CSS/WAAPI/rAF/GSAP/video animation, frame-exact) in
           headless Chrome and writes an H.264 master with measured motion blur
-          and the page's soundtrack (window.__film = { duration, audio }).
+          and the page's soundtrack (window.__film = { duration, audio }). A
+          <video> on the page is shown from its decoded frames: steady under a
+          slow push, and quick to render. --from/--to with --into <film.mp4>
+          renders only those seconds and puts them into that master, in place
+          of its own; \`film mux\` puts a new soundtrack under a film without
+          rendering it again.
           \`film still\` writes PNG stills at given times; \`film sheet\` a
           timed contact sheet of any video; \`film check\` measures a finished
           film: format, hitches, cadence, cuts, flashes (a few frames unlike
@@ -1801,7 +1809,7 @@ async function main() {
     const target = positional[1];
     if (!action || !target || positional.length !== 2)
       throw new Error(
-        "film: expected init <dir>, render <page>, still <page> --at <s>, picture <state.html>, sheet <film.mp4> or check <film.mp4>",
+        "film: expected init <dir>, render <page>, still <page> --at <s>, picture <state.html>, sheet <film.mp4>, check <film.mp4> or mux <film.mp4> --audio <file>",
       );
     const only = (...allowed: string[]) => {
       for (const f of Object.keys(flags))
@@ -1850,13 +1858,16 @@ async function main() {
         "--to",
         "--workers",
         "--supersample",
+        "--into",
         "--verbose",
       );
       const audio = flag("--audio");
+      const into = flag("--into");
       let said = "";
-      const result = await renderFilm({
+      const result = await (into ? patchFilm : renderFilm)({
+        into: into ?? "",
         page: target,
-        out: flag("--out") ?? "film.mp4",
+        out: flag("--out") ?? into ?? "film.mp4",
         chromePath: await ensureChrome(),
         root: flag("--root"),
         width: size?.width,
@@ -1889,6 +1900,19 @@ async function main() {
         `rendered: ${result.out}\n${result.width}×${result.height} ${result.fps} fps, ${result.durationS.toFixed(2)}s — ` +
           `${result.frames} frames, ${result.samples} samples (${result.mode} mode), ${(result.wallMs / 1000).toFixed(1)}s\n`,
       );
+      return;
+    }
+    if (action === "mux") {
+      only("--audio", "--out");
+      const audio = flag("--audio");
+      if (!audio)
+        throw new Error("film mux: --audio <file> (or none) is the sound to put under the film");
+      const r = await muxFilm({
+        film: target,
+        audio: audio === "none" ? null : audio,
+        out: flag("--out") ?? target,
+      });
+      process.stdout.write(`muxed: ${r.out} — ${r.durationS.toFixed(2)}s, the picture as it was\n`);
       return;
     }
     if (action === "init") {

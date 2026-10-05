@@ -38,6 +38,8 @@ export {
   type FilmRenderResult,
   type FilmStillsOptions,
   filmStills,
+  muxFilm,
+  patchFilm,
   renderFilm,
 } from "./film/render";
 export { type FilmSheetOptions, filmSheet } from "./film/sheet";

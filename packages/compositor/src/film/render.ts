@@ -18,10 +18,10 @@
 
 import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
 import { cpus, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { resolveFfmpeg, runTool } from "../ffmpeg";
+import { resolveFfmpeg, resolveFfprobe, runTool } from "../ffmpeg";
 import { type HtmlBrowser, launchHtmlBrowser } from "../html/cdp";
 import { serveDirectory } from "../html/server";
 import { jpegDimensions, matroskaCluster, matroskaHead } from "../mjpeg-matroska";
@@ -93,6 +93,9 @@ export type FilmRenderResult = {
   /** screenshots taken (a blurred frame takes several) */
   samples: number;
   durationS: number;
+  /** the first frame rendered, and the whole film's length in frames */
+  startFrame: number;
+  filmFrames: number;
   wallMs: number;
   warnings: string[];
 };
@@ -104,6 +107,8 @@ type Film = {
   scale: number;
   f0: number;
   f1: number;
+  /** the whole film's length in frames, whatever range is rendered */
+  total: number;
   audio: string | null;
   blur: boolean;
   marks: FilmMark[];
@@ -323,6 +328,8 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
       frames,
       samples: samples.reduce((x, y) => x + y, 0),
       durationS: frames / film.fps,
+      startFrame: film.f0,
+      filmFrames: film.total,
       wallMs: Date.now() - t0,
       warnings: film.warnings,
     };
@@ -347,6 +354,213 @@ export type FilmStillsOptions = {
   supersample?: number;
   onConsole?: (level: string, text: string) => void;
 };
+
+/** Render only [from, to) of the film, at master quality, into `into` — a
+ *  master of the whole film — in place of its own frames: a change to a few
+ *  seconds costs those seconds, not the film. The master's sound is kept (to
+ *  change it, muxFilm). Refused when `into` is not a whole master of this
+ *  film: another size, frame rate or length, or a range of its own. */
+export async function patchFilm(
+  opts: FilmRenderOptions & { into: string },
+): Promise<FilmRenderResult> {
+  const t0 = Date.now();
+  if (opts.from === undefined && opts.to === undefined)
+    throw new Error("film: --into takes --from and/or --to: the seconds to render again");
+  if (opts.draft) throw new Error("film: --into puts master frames into a master — not a --draft");
+  const into = resolve(opts.into);
+  if (!existsSync(into))
+    throw new Error(`film: there is no master at ${into} to put the range into`);
+  const ffmpeg = await resolveFfmpeg();
+  const master = await probeFilm(into);
+  const tmp = await mkdtemp(join(tmpdir(), "open-take-patch-"));
+  try {
+    const range = join(tmp, "range.mp4");
+    const r = await renderFilm({ ...opts, out: range, audio: null });
+    const it = `${master.width}×${master.height} ${master.fps} fps, ${master.frames} frames${master.from ? `, from ${master.from}s` : ""}`;
+    const film = `${r.width}×${r.height} ${r.fps} fps, ${r.filmFrames} frames`;
+    if (
+      master.width !== r.width ||
+      master.height !== r.height ||
+      Math.abs(master.fps - r.fps) > 0.001 ||
+      master.frames !== r.filmFrames ||
+      master.from
+    )
+      throw new Error(
+        `film: ${opts.into} is not a whole master of this film (it is ${it}; the film is ${film}) — render it whole`,
+      );
+    const a = r.startFrame;
+    const b = r.startFrame + r.frames;
+    const parts: string[] = [];
+    let graph = "";
+    if (a > 0) {
+      graph += `[0:v]trim=end_frame=${a},setpts=PTS-STARTPTS[before];`;
+      parts.push("[before]");
+    }
+    graph += "[1:v]setpts=PTS-STARTPTS[range];";
+    parts.push("[range]");
+    if (b < master.frames) {
+      graph += `[0:v]trim=start_frame=${b},setpts=PTS-STARTPTS[after];`;
+      parts.push("[after]");
+    }
+    graph += `${parts.join("")}concat=n=${parts.length}:v=1:a=0,format=yuv420p[v]`;
+    const record = { ...(await probeFilm(range)).record, from: 0 };
+    const out = join(tmp, "patched.mp4");
+    // the same encoding as a master (see encodeArgs)
+    await runTool(ffmpeg, [
+      "-v",
+      "error",
+      "-y",
+      "-i",
+      into,
+      "-i",
+      range,
+      "-filter_complex",
+      graph,
+      "-map",
+      "[v]",
+      "-map",
+      "0:a?",
+      "-c:a",
+      "copy",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "medium",
+      "-crf",
+      "14",
+      "-x264-params",
+      `keyint=${Math.round(r.fps) * 2}:min-keyint=1:aq-mode=3`,
+      "-colorspace",
+      "bt709",
+      "-color_primaries",
+      "bt709",
+      "-color_trc",
+      "bt709",
+      "-color_range",
+      "tv",
+      "-metadata",
+      `${FILM_TAG}=${JSON.stringify(record)}`,
+      "-movflags",
+      "+faststart+use_metadata_tags",
+      out,
+    ]);
+    await mkdir(dirname(resolve(opts.out)), { recursive: true });
+    await moveFile(out, resolve(opts.out));
+    return {
+      ...r,
+      out: resolve(opts.out),
+      frames: master.frames,
+      durationS: master.frames / r.fps,
+      startFrame: 0,
+      wallMs: Date.now() - t0,
+      warnings: r.warnings.filter((w) => !w.startsWith("no soundtrack")),
+    };
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+}
+
+/** Put a soundtrack under a rendered film without rendering it again: the
+ *  picture is copied as it is, the sound encoded as a render encodes it.
+ *  `audio` null leaves the film silent. */
+export async function muxFilm(opts: {
+  film: string;
+  audio: string | null;
+  out: string;
+}): Promise<{ out: string; durationS: number }> {
+  const film = resolve(opts.film);
+  if (!existsSync(film)) throw new Error(`film: there is no film at ${film}`);
+  if (opts.audio && !existsSync(resolve(opts.audio)))
+    throw new Error(`film: the soundtrack ${resolve(opts.audio)} does not exist`);
+  const ffmpeg = await resolveFfmpeg();
+  const info = await probeFilm(film);
+  const durationS = info.frames / info.fps;
+  const tmp = await mkdtemp(join(tmpdir(), "open-take-mux-"));
+  try {
+    const out = join(tmp, "muxed.mp4");
+    const args = ["-v", "error", "-y", "-i", film];
+    // a film rendered from the middle starts its sound there too
+    if (opts.audio) args.push("-ss", String(info.from), "-i", resolve(opts.audio));
+    args.push("-map", "0:v", "-c:v", "copy");
+    if (opts.audio)
+      args.push("-map", "1:a", "-af", "apad", "-c:a", "aac", "-b:a", "256k", "-ar", "48000");
+    args.push(
+      "-map_metadata",
+      "0",
+      "-t",
+      durationS.toFixed(6),
+      "-movflags",
+      "+faststart+use_metadata_tags",
+      out,
+    );
+    await runTool(ffmpeg, args);
+    await mkdir(dirname(resolve(opts.out)), { recursive: true });
+    await moveFile(out, resolve(opts.out));
+    return { out: resolve(opts.out), durationS };
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+}
+
+/** move a finished file into place — copied when it is on another disk */
+async function moveFile(from: string, to: string): Promise<void> {
+  try {
+    await rename(from, to);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "EXDEV") throw e;
+    await copyFile(from, to);
+    await rm(from, { force: true });
+  }
+}
+
+/** a rendered film's picture: size, rate, length in frames, and the record
+ *  `film render` keeps in it (where it starts on the page's timeline) */
+async function probeFilm(file: string): Promise<{
+  width: number;
+  height: number;
+  fps: number;
+  frames: number;
+  from: number;
+  record: Partial<FilmRecord>;
+}> {
+  const ffprobe = await resolveFfprobe();
+  const p = JSON.parse(
+    await runTool(ffprobe, [
+      "-v",
+      "error",
+      "-select_streams",
+      "v:0",
+      "-show_entries",
+      "stream=width,height,avg_frame_rate,nb_frames,duration:format_tags",
+      "-of",
+      "json",
+      file,
+    ]),
+  ) as {
+    streams?: {
+      width?: number;
+      height?: number;
+      avg_frame_rate?: string;
+      nb_frames?: string;
+      duration?: string;
+    }[];
+    format?: { tags?: Record<string, string> };
+  };
+  const v = p.streams?.[0];
+  if (!v?.width || !v.height) throw new Error(`film: ${file} has no picture`);
+  const [n, d] = String(v.avg_frame_rate ?? "0/1")
+    .split("/")
+    .map(Number);
+  const fps = d ? n! / d : 0;
+  const frames = Number(v.nb_frames) || Math.round(Number(v.duration ?? 0) * fps);
+  let record: Partial<FilmRecord> = {};
+  try {
+    record = JSON.parse(p.format?.tags?.[FILM_TAG] ?? "{}") as Partial<FilmRecord>;
+  } catch {
+    // a film from elsewhere carries none
+  }
+  return { width: v.width, height: v.height, fps, frames, from: Number(record.from) || 0, record };
+}
 
 /** PNG stills of the film at the given times — `t012.500.png` … — as the
  *  master would show them. */
@@ -630,6 +844,7 @@ function describe(
     scale: at.scale,
     f0,
     f1,
+    total: Math.round((durationS ?? 0) * fps),
     audio,
     blur: opts.blur ?? !at.draft,
     // checked here, before a frame is drawn: a mark the author meant to make
