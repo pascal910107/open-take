@@ -83,6 +83,20 @@ npx open-take film render film/index.html --draft --out draft.mp4 # half size, 3
 npx open-take film render film/index.html --from 12 --to 16 --out part.mp4
 ```
 
+Render the master once, when the film is done; look at drafts and stills
+while you work on it. A change to a few seconds goes into the master you
+have, in place of its own frames — the rest is not drawn again; a change to
+the sound alone is not a render at all:
+
+```sh
+npx open-take film render film/index.html --from 12 --to 16 --into film.mp4
+npx open-take film mux film.mp4 --audio score.wav
+```
+
+A `<video>` on the page is shown from its decoded frames: steady under a slow
+push and quick to render, as it is — and one you draw into a canvas gets the
+same frames.
+
 The directory served is the working directory when the page is inside it
 (`--root <dir>` otherwise); a file the page asks for that is not there fails
 the render by name. Motion blur is measured, not guessed: every frame's
