@@ -57,6 +57,9 @@ export type LaunchHtmlBrowserOpts = {
    *  clock) sets them: one shorter than the page's load would otherwise play
    *  out in real time before the film begins, and be gone */
   stillAnimations?: boolean;
+  /** functions the page can call by name (Runtime.addBinding), in every
+   *  document it opens: each gets the string the page passed */
+  bindings?: Record<string, (payload: string) => void>;
 };
 
 // Chrome writes the port of a `--remote-debugging-port=0` launch to
@@ -247,6 +250,14 @@ export async function launchHtmlBrowser(opts: LaunchHtmlBrowserOpts): Promise<Ht
         (p) =>
           onConsole(p.type, p.args.map((a) => String(a.value ?? a.description ?? "")).join(" ")),
       );
+    }
+    const bindings = opts.bindings ?? {};
+    if (Object.keys(bindings).length) {
+      s.on<{ name: string; payload: string }>("Runtime.bindingCalled", (p) =>
+        bindings[p.name]?.(p.payload),
+      );
+      for (const name of Object.keys(bindings))
+        await s.send("Runtime.addBinding", { name }, timeoutMs);
     }
     if (opts.initScript)
       await s.send("Page.addScriptToEvaluateOnNewDocument", { source: opts.initScript }, timeoutMs);

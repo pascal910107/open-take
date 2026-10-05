@@ -26,6 +26,7 @@ import { type HtmlBrowser, launchHtmlBrowser } from "../html/cdp";
 import { serveDirectory } from "../html/server";
 import { jpegDimensions, matroskaCluster, matroskaHead } from "../mjpeg-matroska";
 import { type FilmMark, type FilmPageInfo, filmClockSource, filmMarks } from "./clock";
+import { frameStore, type VideoFrames } from "./frames";
 
 /** the shutter is open for this fraction of the frame interval (180°) */
 const SHUTTER_FRACTION = 0.5;
@@ -306,6 +307,10 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
     });
     await page.closeAll();
     page.checkFiles();
+    for (const v of page.unframed())
+      film.warnings.push(
+        `a video was shown by seeking it, not as its frames: ${v} — under a slow push it can shimmer, and it renders slower`,
+      );
     await deliver(ffmpeg, chunks, film, opts.out, tmp);
     const { width: w, height: h } = outSize(film);
     return {
@@ -460,8 +465,31 @@ async function servePage(
     if (!p.endsWith("/favicon.ico")) missing.add(decodeURIComponent(p));
   });
   const clock = filmClockSource({ seed: 0x5eed, epochMs: Date.now() });
+  // the videos the page plays, as decoded frames (see frames.ts)
+  const frames = frameStore({ root, server });
+  const unframed = new Set<string>();
   const browsers = new Set<HtmlBrowser>();
   const open = async (width: number, height: number) => {
+    let page: HtmlBrowser | null = null;
+    const asked: string[] = [];
+    const answer = (payload: string) => {
+      if (!page) return void asked.push(payload);
+      const b = page;
+      let src = "";
+      try {
+        src = String((JSON.parse(payload) as { src?: unknown }).src ?? "");
+      } catch {
+        return;
+      }
+      const reply = (f: VideoFrames | null) =>
+        b
+          .evaluate(`window.__ot.framesReady(${JSON.stringify(src)}, ${JSON.stringify(f)})`)
+          .catch(() => {});
+      frames.frames(src).then(reply, (e: Error) => {
+        unframed.add(`${decodeURIComponent(new URL(src, server.url).pathname)} (${e.message})`);
+        return reply(null);
+      });
+    };
     const b = await launchHtmlBrowser({
       chromePath: opts.chromePath,
       url: `${server.url}${urlPath}`,
@@ -473,7 +501,10 @@ async function servePage(
       onConsole: opts.onConsole,
       timeoutMs: 120_000,
       profilePrefix: "open-take-film-",
+      bindings: { __otFrames: answer },
     });
+    page = b;
+    for (const p of asked.splice(0)) answer(p);
     browsers.add(b);
     return b;
   };
@@ -514,9 +545,13 @@ async function servePage(
     async closeAll() {
       for (const b of [...browsers]) await close(b);
     },
+    /** videos shown by seeking the element, because their frames could not
+     *  be decoded — each with the reason */
+    unframed: () => [...unframed],
     async shut() {
       await Promise.all([...browsers].map((b) => b.close()));
       await server.close();
+      await frames.clean();
     },
   };
 }

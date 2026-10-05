@@ -49,6 +49,9 @@ const MIME: Record<string, string> = {
 export type StaticServer = {
   /** `http://127.0.0.1:<port>` — no trailing slash */
   url: string;
+  /** serve `dir` under the URL path `prefix` (`/a/b/`): what the server
+   *  itself made for the page, kept out of the served folder */
+  mount(prefix: string, dir: string): void;
   /** stop listening and drop every open connection */
   close(): Promise<void>;
 };
@@ -64,9 +67,17 @@ export async function serveDirectory(
   const info = await stat(base).catch(() => null);
   if (!info?.isDirectory()) throw new Error(`serveDirectory: ${base} is not a directory`);
 
+  const mounts = new Map<string, string>();
   const server = createServer((req, res) => {
-    const url = req.url ?? "/";
-    serveFile(base, url, req, res, () => onMiss?.(url.split("?")[0]!)).catch(() => {
+    let url = req.url ?? "/";
+    let from = base;
+    for (const [prefix, dir] of mounts)
+      if (url.startsWith(prefix)) {
+        from = dir;
+        url = `/${url.slice(prefix.length)}`;
+        break;
+      }
+    serveFile(from, url, req, res, () => onMiss?.((req.url ?? "/").split("?")[0]!)).catch(() => {
       if (!res.headersSent) res.writeHead(500);
       res.end();
     });
@@ -81,6 +92,13 @@ export async function serveDirectory(
   const { port } = server.address() as AddressInfo;
   return {
     url: `http://127.0.0.1:${port}`,
+    mount(prefix, dir) {
+      if (!prefix.startsWith("/") || !prefix.endsWith("/"))
+        throw new Error(
+          `serveDirectory: a mount is a path that starts and ends with "/", not ${prefix}`,
+        );
+      mounts.set(prefix, resolve(dir));
+    },
     close: () =>
       new Promise<void>((ok) => {
         // close() alone waits for keep-alive connections to end on their own;

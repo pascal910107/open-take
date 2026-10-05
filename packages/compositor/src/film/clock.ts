@@ -575,8 +575,15 @@ function installFilmClock(opts: FilmClockOptions): void {
       return position(this) ?? seekTo.get!.call(this);
     },
     set(this: HTMLMediaElement, v: number) {
+      // a video shown as its frames is not sought: its frame at the new time
+      // is shown, and the page told, as a real seek would (see showFrame)
+      const virtual =
+        this instanceof HTMLVideoElement &&
+        asFrame.has(this) &&
+        !readers.has(this) &&
+        Number.isFinite(Number(v));
       // the element's own checks first: a time it refuses changes nothing
-      seekTo.set!.call(this, v);
+      if (!virtual) seekTo.set!.call(this, v);
       let n = Number(v);
       if (!Number.isFinite(n)) return;
       // as the element does: a time before 0 is 0, one past its end its end
@@ -589,6 +596,20 @@ function installFilmClock(opts: FilmClockOptions): void {
         m.playing = true;
       } else m.at = n;
       m.touched = true;
+      if (virtual) {
+        // as a real seek does: seeking, then seeked once the frame is there —
+        // in a later task, so a listener added right after the set still hears it
+        const el = this as HTMLVideoElement;
+        realSetTimeout(() => {
+          el.dispatchEvent(new Event("seeking"));
+          void showFrame(el, position(el) ?? n).then((shown) => {
+            // read in the meantime: a real seek, which tells the page itself
+            if (!shown) return void seekTo.set!.call(el, n);
+            el.dispatchEvent(new Event("timeupdate"));
+            el.dispatchEvent(new Event("seeked"));
+          });
+        }, 0);
+      }
     },
   });
   HTMLMediaElement.prototype.play = function (this: HTMLMediaElement) {
@@ -608,6 +629,153 @@ function installFilmClock(opts: FilmClockOptions): void {
     m.touched = true;
     return realPause.call(this);
   };
+  // --- a video shown as its frames --------------------------------------------
+  // A film-timed <video> is shown as its decoded frame at the film's time —
+  // the frame's image as the element's CSS `content`, so the page's own size,
+  // fit, corners and transforms all hold — and is not sought: a video element
+  // composited under a slow push shimmers, and seeking it for every frame and
+  // every motion probe is most of a recorded film's render. The frames come
+  // from the renderer (the __otFrames binding, answered by framesReady). With
+  // no renderer to ask (a layout reading), for a source it cannot decode, or
+  // for a video whose pixels the page reads itself (a canvas, WebGL, a frame
+  // callback, a stream), the element is sought as before.
+  type Frames = { base: string; times: number[]; ext: string } | null;
+  const framesFor = new Map<string, Promise<Frames>>();
+  const framesWaiting = new Map<string, (f: Frames) => void>();
+  const readers = new WeakSet<HTMLMediaElement>();
+  const asFrame = new WeakMap<HTMLMediaElement, string>();
+  /** the page reads this video's pixels: it is sought from now on */
+  const reads = (v: unknown) => {
+    if (!(v instanceof HTMLMediaElement) || readers.has(v)) return;
+    readers.add(v);
+    frameImage.delete(v);
+    if (asFrame.has(v)) {
+      v.style.removeProperty("content");
+      asFrame.delete(v);
+    }
+  };
+  /** a video shown as its frames, as the image of the frame it shows */
+  const frameImage = new WeakMap<HTMLMediaElement, HTMLImageElement>();
+  // where the page reads a video's pixels: a video shown as its frames is
+  // handed over as the image of its frame (the same pixels, the same size);
+  // one not shown so yet is read as it is, sought as before
+  const passFrames = (owner: Record<string, unknown> | undefined, name: string) => {
+    const real = owner?.[name];
+    if (!owner || typeof real !== "function") return;
+    owner[name] = function (this: unknown, ...a: unknown[]) {
+      for (let i = 0; i < a.length; i++) {
+        const x = a[i];
+        const im = x instanceof HTMLMediaElement && !readers.has(x) && frameImage.get(x);
+        if (im) a[i] = im;
+      }
+      return (real as (...a: unknown[]) => unknown).apply(this, a);
+    };
+  };
+  // what needs the element's own decoding: a frame callback, a stream, a VideoFrame
+  const needsDecoding = (owner: Record<string, unknown> | undefined, name: string) => {
+    const real = owner?.[name];
+    if (!owner || typeof real !== "function") return;
+    owner[name] = function (this: unknown, ...a: unknown[]) {
+      reads(this);
+      return (real as (...a: unknown[]) => unknown).apply(this, a);
+    };
+  };
+  for (const ctx of [w.CanvasRenderingContext2D, w.OffscreenCanvasRenderingContext2D])
+    passFrames(ctx?.prototype, "drawImage");
+  for (const gl of [w.WebGLRenderingContext, w.WebGL2RenderingContext])
+    for (const f of ["texImage2D", "texSubImage2D", "texImage3D", "texSubImage3D"])
+      passFrames(gl?.prototype, f);
+  passFrames(w, "createImageBitmap");
+  needsDecoding(w.HTMLVideoElement?.prototype, "requestVideoFrameCallback");
+  needsDecoding(w.HTMLMediaElement?.prototype, "captureStream");
+  if (typeof w.VideoFrame === "function")
+    w.VideoFrame = new Proxy(w.VideoFrame, {
+      construct(target, args, nt) {
+        reads(args[0]);
+        return Reflect.construct(target, args, nt);
+      },
+    });
+  /** the frames of the video at `src`, asked of the renderer once */
+  const framesOf = (src: string): Promise<Frames> => {
+    let p = framesFor.get(src);
+    if (!p) {
+      p = new Promise<Frames>((ok) => {
+        framesWaiting.set(src, ok);
+        // an answer that never comes leaves the video to be sought
+        realSetTimeout(() => framesReady(src, null), 180_000);
+      });
+      framesFor.set(src, p);
+      try {
+        w.__otFrames(JSON.stringify({ src }));
+      } catch {
+        framesReady(src, null);
+      }
+    }
+    return p;
+  };
+  /** the renderer's answer, passed on to the frames inside the film */
+  function framesReady(src: string, f: Frames): void {
+    const ok = framesWaiting.get(src);
+    framesWaiting.delete(src);
+    ok?.(f);
+    for (const el of Array.from(document.querySelectorAll("iframe"))) {
+      try {
+        // biome-ignore lint/suspicious/noExplicitAny: another document's globals
+        (el.contentWindow as any)?.__ot?.framesReady?.(src, f);
+      } catch {
+        // another origin: it has no frames of ours to wait for
+      }
+    }
+  }
+  /** the frame showing at `t` seconds: the last that starts by then */
+  const frameAt = (times: number[], t: number): number => {
+    let lo = 0;
+    let hi = times.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (times[mid]! <= t + 1e-4) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo;
+  };
+  // decoded frames, a few held: the ones shown and the next ones fetched ahead
+  const decoded = new Map<string, Promise<HTMLImageElement>>();
+  const decodeFrame = (url: string): Promise<HTMLImageElement> => {
+    let p = decoded.get(url);
+    if (p) decoded.delete(url);
+    else {
+      const im = new Image();
+      im.src = url;
+      p = im.decode().then(
+        () => im,
+        () => im,
+      );
+    }
+    decoded.set(url, p);
+    while (decoded.size > 8) decoded.delete(decoded.keys().next().value!);
+    return p;
+  };
+  const frameUrl = (f: NonNullable<Frames>, i: number) =>
+    `${f.base}${String(i).padStart(6, "0")}.${f.ext}`;
+  /** show the video at `at` seconds as its frame; false when it cannot be */
+  async function showFrame(el: HTMLVideoElement, at: number): Promise<boolean> {
+    if (typeof w.__otFrames !== "function" || readers.has(el)) return false;
+    const src = el.currentSrc || el.src;
+    if (!src?.startsWith(`${location.origin}/`)) return false;
+    const f = await framesOf(src);
+    if (!f?.times.length || readers.has(el)) return false;
+    const i = frameAt(f.times, at);
+    const url = frameUrl(f, i);
+    const im = await decodeFrame(url);
+    for (let k = 1; k <= 2 && i + k < f.times.length; k++) void decodeFrame(frameUrl(f, i + k));
+    if (readers.has(el)) return false;
+    if (asFrame.get(el) !== url) {
+      el.style.setProperty("content", `url("${url}")`, "important");
+      asFrame.set(el, url);
+    }
+    frameImage.set(el, im);
+    return true;
+  }
   function seekVideo(el: HTMLVideoElement, at: number): Promise<void> {
     return new Promise((ok) => {
       let finished = false;
@@ -643,8 +811,17 @@ function installFilmClock(opts: FilmClockOptions): void {
       }
       const at = position(el);
       if (at === null) continue;
-      if (Math.abs(seekTo.get!.call(el) - at) > 0.0005 || el.readyState < 2)
-        waits.push(seekVideo(el, at));
+      waits.push(
+        showFrame(el, at).then((shown) => {
+          if (shown) return;
+          if (asFrame.has(el)) {
+            el.style.removeProperty("content");
+            asFrame.delete(el);
+          }
+          if (Math.abs(seekTo.get!.call(el) - at) > 0.0005 || el.readyState < 2)
+            return seekVideo(el, at);
+        }),
+      );
     }
     await Promise.all(waits);
   }
@@ -1131,6 +1308,7 @@ function installFilmClock(opts: FilmClockOptions): void {
     prepare,
     seek,
     motion,
+    framesReady,
     // --- for the frames inside the film (times in ms on the top page's clock) ---
     follow,
     stamp,
