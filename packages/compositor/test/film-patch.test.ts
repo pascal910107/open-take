@@ -118,6 +118,20 @@ test("a few seconds rendered again go into the master in place of their own; the
   near(await frameRgb(master, 59), [0, 0, 255], "the film's last frame");
   const record = JSON.parse(p.format.tags?.open_take_film ?? "{}") as { from?: number };
   assert.equal(record.from, 0, "still a whole film for `film check`");
+  // and still a master another range goes into
+  await patchFilm({
+    page,
+    out: master,
+    into: master,
+    from: 1,
+    to: 1.5,
+    chromePath: chrome!,
+    blur: false,
+  });
+  assert.equal(
+    (await probe(master)).streams.find((s) => s.codec_type === "video")?.nb_frames,
+    "60",
+  );
   // a master that is not this film's whole length is refused, by name
   const short = join(dir, "short.mp4");
   await renderFilm({ page, out: short, to: 1, chromePath: chrome!, blur: false, audio: null });
@@ -182,4 +196,78 @@ test("a new soundtrack goes under a film without rendering it again; none leaves
   const silent = join(dir, "silent-again.mp4");
   await muxFilm({ film: out, audio: null, out: silent });
   assert.equal((await probe(silent)).streams.filter((s) => s.codec_type === "audio").length, 0);
+});
+
+test("a master whose frames are not evenly spaced, or that `film render` did not make, is refused", {
+  skip,
+}, async () => {
+  const page = join(dir, "uneven");
+  await colourPage(page, "rgb(0,255,0)");
+  const ffmpeg = await resolveFfmpeg();
+  const record = JSON.stringify({ from: 0, width: 64, height: 64, marks: [] });
+  // 60 frames in 2 s, 30 a second on average — the first 30 over 1.5 s, the
+  // rest over 0.5 s — and carrying the record `film render` writes
+  const uneven = join(dir, "uneven.mp4");
+  await exec(ffmpeg, [
+    "-v",
+    "error",
+    "-f",
+    "lavfi",
+    "-i",
+    // each frame 1/60 s long, so the last one ends the film at 2 s exactly
+    "color=c=gray:s=64x64:r=60:d=1",
+    "-vf",
+    "settb=1/3000,setpts='if(lt(N,30),N*150,4500+(N-30)*50)'",
+    "-fps_mode",
+    "passthrough",
+    "-enc_time_base",
+    "1:3000",
+    "-video_track_timescale",
+    "3000",
+    "-bf",
+    "0",
+    "-c:v",
+    "libx264",
+    "-pix_fmt",
+    "yuv420p",
+    "-metadata",
+    `open_take_film=${record}`,
+    "-movflags",
+    "+use_metadata_tags",
+    "-y",
+    uneven,
+  ]);
+  // evenly spaced, the film's size, rate and length — but made elsewhere
+  const elsewhere = join(dir, "elsewhere.mp4");
+  await exec(ffmpeg, [
+    "-v",
+    "error",
+    "-f",
+    "lavfi",
+    "-i",
+    "color=c=gray:s=64x64:r=30:d=2",
+    "-c:v",
+    "libx264",
+    "-pix_fmt",
+    "yuv420p",
+    "-y",
+    elsewhere,
+  ]);
+  for (const [into, why] of [
+    [uneven, /not evenly spaced/],
+    [elsewhere, /`film render` did not make it/],
+  ] as const)
+    await assert.rejects(
+      patchFilm({
+        page,
+        out: join(dir, "patched.mp4"),
+        into,
+        from: 0.5,
+        to: 1,
+        chromePath: chrome!,
+        blur: false,
+      }),
+      (e: Error) => /not a whole master of this film/.test(e.message) && why.test(e.message),
+      into,
+    );
 });

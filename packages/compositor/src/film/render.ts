@@ -359,7 +359,8 @@ export type FilmStillsOptions = {
  *  master of the whole film — in place of its own frames: a change to a few
  *  seconds costs those seconds, not the film. The master's sound is kept (to
  *  change it, muxFilm). Refused when `into` is not a whole master of this
- *  film: another size, frame rate or length, or a range of its own. */
+ *  film: one `film render` did not make, one whose frames are not evenly
+ *  spaced, another size, frame rate or length, or a range of its own. */
 export async function patchFilm(
   opts: FilmRenderOptions & { into: string },
 ): Promise<FilmRenderResult> {
@@ -372,6 +373,17 @@ export async function patchFilm(
     throw new Error(`film: there is no master at ${into} to put the range into`);
   const ffmpeg = await resolveFfmpeg();
   const master = await probeFilm(into);
+  // its frames are swapped by number: frame n must be the one at n/fps, as in
+  // a master `film render` made — not in a file whose average rate only matches
+  const unlike = !master.made
+    ? "`film render` did not make it"
+    : !(await evenlySpaced(into))
+      ? "its frames are not evenly spaced"
+      : null;
+  if (unlike)
+    throw new Error(
+      `film: ${opts.into} is not a whole master of this film (${unlike}) — render it whole`,
+    );
   const tmp = await mkdtemp(join(tmpdir(), "open-take-patch-"));
   try {
     const range = join(tmp, "range.mp4");
@@ -514,7 +526,8 @@ async function moveFile(from: string, to: string): Promise<void> {
 }
 
 /** a rendered film's picture: size, rate, length in frames, and the record
- *  `film render` keeps in it (where it starts on the page's timeline) */
+ *  `film render` keeps in it (where it starts on the page's timeline) —
+ *  `made` when there is one */
 async function probeFilm(file: string): Promise<{
   width: number;
   height: number;
@@ -522,6 +535,7 @@ async function probeFilm(file: string): Promise<{
   frames: number;
   from: number;
   record: Partial<FilmRecord>;
+  made: boolean;
 }> {
   const ffprobe = await resolveFfprobe();
   const p = JSON.parse(
@@ -559,7 +573,40 @@ async function probeFilm(file: string): Promise<{
   } catch {
     // a film from elsewhere carries none
   }
-  return { width: v.width, height: v.height, fps, frames, from: Number(record.from) || 0, record };
+  return {
+    width: v.width,
+    height: v.height,
+    fps,
+    frames,
+    from: Number(record.from) || 0,
+    record,
+    made: typeof record.from === "number",
+  };
+}
+
+/** every frame of the film's picture one frame's length after the one before
+ *  — as `film render` encodes it; a file of varying rate is not, whatever
+ *  its average */
+async function evenlySpaced(file: string): Promise<boolean> {
+  const pts = (
+    await runTool(await resolveFfprobe(), [
+      "-v",
+      "error",
+      "-select_streams",
+      "v:0",
+      "-show_entries",
+      "packet=pts",
+      "-of",
+      "csv=p=0",
+      file,
+    ])
+  )
+    .split("\n")
+    .map((l) => Number.parseInt(l, 10))
+    .filter((t) => Number.isFinite(t))
+    .sort((a, b) => a - b);
+  const step = (pts[1] ?? 1) - (pts[0] ?? 0);
+  return step > 0 && pts.every((t, i) => t - pts[0]! === i * step);
 }
 
 /** PNG stills of the film at the given times — `t012.500.png` … — as the
