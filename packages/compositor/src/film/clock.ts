@@ -503,13 +503,20 @@ function installFilmClock(opts: FilmClockOptions): void {
   /** a video that will play by itself, untouched by the page */
   const autoplays = (el: HTMLMediaElement, m: Media) =>
     !m.seen && !m.touched && (el.autoplay || autoplay.has(el));
+  /** how many times a video was loaded: what was asked of it before it was
+   *  loaded again (a seek, a frame to show) is not done to what it loads */
+  const loads = new WeakMap<HTMLMediaElement, number>();
   /** a video loaded again (load(), a new source) starts over where it is
    *  loaded: at 0, playing by itself from there if it does. One that had
    *  nothing to play keeps playing if the page had played it, as the element
-   *  does; one that had something stops */
+   *  does; one that had something stops. The frame it showed goes with what
+   *  it had: it shows what it loads */
   function startOver(el: HTMLMediaElement, hadNothing: boolean): void {
     const playing = hadNothing && !!media.get(el)?.playing;
     media.delete(el);
+    loads.set(el, (loads.get(el) ?? 0) + 1);
+    seeks.delete(el);
+    unframe(el);
     inserted.set(el, clock());
     // from where it got it — in a film that draws itself, from film time 0,
     // as what plays by itself does there
@@ -568,6 +575,17 @@ function installFilmClock(opts: FilmClockOptions): void {
     if (known) at = el.loop ? at % d : Math.min(at, d - 0.001);
     return Math.max(0, at);
   }
+  // a video sought to its frame (below) reads as seeking until that frame is
+  // there, as one sought itself does until it has decoded it: how many such
+  // seeks each video has under way
+  const seeks = new WeakMap<HTMLMediaElement, number>();
+  const realSeeking = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "seeking")!;
+  Object.defineProperty(HTMLMediaElement.prototype, "seeking", {
+    ...realSeeking,
+    get(this: HTMLMediaElement) {
+      return seeks.has(this) || realSeeking.get!.call(this);
+    },
+  });
   const seekTo = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "currentTime")!;
   Object.defineProperty(HTMLMediaElement.prototype, "currentTime", {
     ...seekTo,
@@ -597,12 +615,21 @@ function installFilmClock(opts: FilmClockOptions): void {
       } else m.at = n;
       m.touched = true;
       if (virtual) {
-        // as a real seek does: seeking, then seeked once the frame is there —
-        // in a later task, so a listener added right after the set still hears it
+        // as a real seek does: seeking at once, then seeked once the frame is
+        // there — the events in a later task, so a listener added right after
+        // the set still hears them. One loaded again in the meantime is not
+        // sought: loading ends a seek
         const el = this as HTMLVideoElement;
+        const load = loads.get(el);
+        seeks.set(el, (seeks.get(el) ?? 0) + 1);
         realSetTimeout(() => {
+          if (loads.get(el) !== load) return;
           el.dispatchEvent(new Event("seeking"));
           void showFrame(el, position(el) ?? n).then((shown) => {
+            if (loads.get(el) !== load) return;
+            const left = (seeks.get(el) ?? 1) - 1;
+            if (left > 0) seeks.set(el, left);
+            else seeks.delete(el);
             // read in the meantime: a real seek, which tells the page itself
             if (!shown) return void seekTo.set!.call(el, n);
             el.dispatchEvent(new Event("timeupdate"));
@@ -635,43 +662,87 @@ function installFilmClock(opts: FilmClockOptions): void {
   // fit, corners and transforms all hold — and is not sought: a video element
   // composited under a slow push shimmers, and seeking it for every frame and
   // every motion probe is most of a recorded film's render. The frames come
-  // from the renderer (the __otFrames binding, answered by framesReady). With
-  // no renderer to ask (a layout reading), for a source it cannot decode, or
-  // for a video whose pixels the page reads itself (a canvas, WebGL, a frame
-  // callback, a stream), the element is sought as before.
-  type Frames = { base: string; times: number[]; ext: string } | null;
+  // from the renderer (the __otFrames binding, answered by framesReady); a
+  // canvas, WebGL or a VideoFrame the page makes of the video gets the frame
+  // too. With no renderer to ask (a layout reading), for a source it does not
+  // decode (or not in time), or for a video the page reads frame by frame
+  // itself (a frame callback, a stream), the element is sought as before.
+  type Frames = { base: string; times: number[]; ext: string; bright?: boolean } | null;
   const framesFor = new Map<string, Promise<Frames>>();
   const framesWaiting = new Map<string, (f: Frames) => void>();
   const readers = new WeakSet<HTMLMediaElement>();
   const asFrame = new WeakMap<HTMLMediaElement, string>();
-  /** the page reads this video's pixels: it is sought from now on */
-  const reads = (v: unknown) => {
-    if (!(v instanceof HTMLMediaElement) || readers.has(v)) return;
-    readers.add(v);
-    frameImage.delete(v);
+  /** What a video shown as its frames shows: the frame's image, when that
+   *  frame starts, and whether the image is brighter than the video decodes
+   *  (frames.ts). Kept on the element under a key every page and frame
+   *  shares, so the page around a frame reads the frame's videos too. */
+  type Shown = { im: HTMLImageElement; at: number; bright: boolean; plain?: HTMLCanvasElement };
+  const SHOWN = Symbol.for("open-take frame shown");
+  const shownOf = (x: unknown): Shown | null =>
+    x !== null && typeof x === "object"
+      ? ((x as Record<symbol, Shown | undefined>)[SHOWN] ?? null)
+      : null;
+  /** show the video itself again */
+  function unframe(v: HTMLMediaElement): void {
     if (asFrame.has(v)) {
       v.style.removeProperty("content");
       asFrame.delete(v);
     }
+    delete (v as unknown as Record<symbol, unknown>)[SHOWN];
+  }
+  /** the page reads this video's pixels: it is sought from now on */
+  const reads = (v: unknown) => {
+    if (!(v instanceof HTMLMediaElement) || readers.has(v)) return;
+    readers.add(v);
+    unframe(v);
   };
-  /** a video shown as its frames, as the image of the frame it shows */
-  const frameImage = new WeakMap<HTMLMediaElement, HTMLImageElement>();
-  // where the page reads a video's pixels: a video shown as its frames is
-  // handed over as the image of its frame (the same pixels, the same size);
-  // one not shown so yet is read as it is, sought as before
+  // Chrome on macOS shows video through Apple's gamma, but hands a canvas
+  // the pixels as they decode: a frame written as shown (frames.ts) goes to
+  // a canvas with that undone
+  let undo: Uint8Array | null = null;
+  function pixelsOf(f: Shown): HTMLImageElement | HTMLCanvasElement {
+    if (!f.bright || !f.im.naturalWidth) return f.im;
+    if (f.plain) return f.plain;
+    if (!undo) {
+      undo = new Uint8Array(256);
+      for (let v = 0; v < 256; v++) {
+        const c = v / 255;
+        const light = c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+        undo[v] = Math.round(255 * light ** (1 / 1.961));
+      }
+    }
+    const c = document.createElement("canvas");
+    c.width = f.im.naturalWidth;
+    c.height = f.im.naturalHeight;
+    const g = c.getContext("2d", { willReadFrequently: true })!;
+    g.drawImage(f.im, 0, 0);
+    const d = g.getImageData(0, 0, c.width, c.height);
+    const p = d.data;
+    for (let i = 0; i < p.length; i += 4) {
+      p[i] = undo[p[i]!]!;
+      p[i + 1] = undo[p[i + 1]!]!;
+      p[i + 2] = undo[p[i + 2]!]!;
+    }
+    g.putImageData(d, 0, 0);
+    f.plain = c;
+    return c;
+  }
+  // where the page reads a video's pixels: a video shown as its frames — here
+  // or in a frame inside the page — is handed over as its frame (the same
+  // pixels, the same size); one not shown so yet is read as it is, sought as
+  // before
   const passFrames = (owner: Record<string, unknown> | undefined, name: string) => {
     const real = owner?.[name];
     if (!owner || typeof real !== "function") return;
     owner[name] = function (this: unknown, ...a: unknown[]) {
       for (let i = 0; i < a.length; i++) {
-        const x = a[i];
-        const im = x instanceof HTMLMediaElement && !readers.has(x) && frameImage.get(x);
-        if (im) a[i] = im;
+        const f = shownOf(a[i]);
+        if (f) a[i] = pixelsOf(f);
       }
       return (real as (...a: unknown[]) => unknown).apply(this, a);
     };
   };
-  // what needs the element's own decoding: a frame callback, a stream, a VideoFrame
+  // what needs the element's own decoding: a frame callback, a stream
   const needsDecoding = (owner: Record<string, unknown> | undefined, name: string) => {
     const real = owner?.[name];
     if (!owner || typeof real !== "function") return;
@@ -688,22 +759,40 @@ function installFilmClock(opts: FilmClockOptions): void {
   passFrames(w, "createImageBitmap");
   needsDecoding(w.HTMLVideoElement?.prototype, "requestVideoFrameCallback");
   needsDecoding(w.HTMLMediaElement?.prototype, "captureStream");
+  // a VideoFrame of a video shown as its frames holds the frame it shows, at
+  // that frame's time unless the page gives one
   if (typeof w.VideoFrame === "function")
     w.VideoFrame = new Proxy(w.VideoFrame, {
       construct(target, args, nt) {
-        reads(args[0]);
+        const f = shownOf(args[0]);
+        if (f) {
+          const init = (args[1] ?? {}) as { timestamp?: number };
+          args = [pixelsOf(f), { ...init, timestamp: init.timestamp ?? Math.round(f.at * 1e6) }];
+        }
         return Reflect.construct(target, args, nt);
       },
     });
+  // A call from the renderer gives up at 120 s, and a page waits for frames
+  // inside one: in all, one call waits for frames at most FRAMES_WAIT_MS (a
+  // frame inside the page counts with the page), and a video whose frames
+  // have not come by then is sought, that once. One whose answer never comes
+  // is sought from then on.
+  const FRAMES_WAIT_MS = 75_000;
+  let framesUntil = 0;
+  /** the real time by which the frames of this call must be there */
+  const framesBy = (): number =>
+    holder?.framesBy?.() ?? (framesUntil || RealDate.now() + FRAMES_WAIT_MS);
+  /** the renderer's answers that have come */
+  const answered = new Map<string, Frames>();
   /** the frames of the video at `src`, asked of the renderer once */
   const framesOf = (src: string): Promise<Frames> => {
     let p = framesFor.get(src);
     if (!p) {
       p = new Promise<Frames>((ok) => {
         framesWaiting.set(src, ok);
-        // an answer that never comes leaves the video to be sought
-        realSetTimeout(() => framesReady(src, null), 180_000);
+        realSetTimeout(() => framesReady(src, null), FRAMES_WAIT_MS);
       });
+      void p.then((f) => answered.set(src, f));
       framesFor.set(src, p);
       try {
         w.__otFrames(JSON.stringify({ src }));
@@ -713,6 +802,14 @@ function installFilmClock(opts: FilmClockOptions): void {
     }
     return p;
   };
+  /** the frames of the video at `src`; null when they do not come in time */
+  const framesNow = (src: string): Frames | Promise<Frames> =>
+    answered.has(src)
+      ? (answered.get(src) ?? null)
+      : Promise.race([
+          framesOf(src),
+          new Promise<Frames>((ok) => realSetTimeout(() => ok(null), framesBy() - RealDate.now())),
+        ]);
   /** the renderer's answer, passed on to the frames inside the film */
   function framesReady(src: string, f: Frames): void {
     const ok = framesWaiting.get(src);
@@ -727,13 +824,15 @@ function installFilmClock(opts: FilmClockOptions): void {
       }
     }
   }
-  /** the frame showing at `t` seconds: the last that starts by then */
+  /** the frame showing at `t` seconds: the last that starts by then — give
+   *  or take the film's own rounding, and no more: a 29.97 fps video's second
+   *  frame starts 33 µs after a 30 fps film's */
   const frameAt = (times: number[], t: number): number => {
     let lo = 0;
     let hi = times.length - 1;
     while (lo < hi) {
       const mid = (lo + hi + 1) >> 1;
-      if (times[mid]! <= t + 1e-4) lo = mid;
+      if (times[mid]! <= t + 1e-9) lo = mid;
       else hi = mid - 1;
     }
     return lo;
@@ -757,23 +856,29 @@ function installFilmClock(opts: FilmClockOptions): void {
   };
   const frameUrl = (f: NonNullable<Frames>, i: number) =>
     `${f.base}${String(i).padStart(6, "0")}.${f.ext}`;
-  /** show the video at `at` seconds as its frame; false when it cannot be */
+  /** show the video at `at` seconds as its frame; false when it cannot be,
+   *  or when it is read or loaded again while its frame comes */
   async function showFrame(el: HTMLVideoElement, at: number): Promise<boolean> {
     if (typeof w.__otFrames !== "function" || readers.has(el)) return false;
     const src = el.currentSrc || el.src;
     if (!src?.startsWith(`${location.origin}/`)) return false;
-    const f = await framesOf(src);
-    if (!f?.times.length || readers.has(el)) return false;
+    const load = loads.get(el);
+    const gone = () => readers.has(el) || loads.get(el) !== load;
+    const f = await framesNow(src);
+    if (!f?.times.length || gone()) return false;
     const i = frameAt(f.times, at);
     const url = frameUrl(f, i);
     const im = await decodeFrame(url);
     for (let k = 1; k <= 2 && i + k < f.times.length; k++) void decodeFrame(frameUrl(f, i + k));
-    if (readers.has(el)) return false;
+    if (gone()) return false;
     if (asFrame.get(el) !== url) {
       el.style.setProperty("content", `url("${url}")`, "important");
       asFrame.set(el, url);
     }
-    frameImage.set(el, im);
+    if (shownOf(el)?.im !== im) {
+      const shown: Shown = { im, at: f.times[i]!, bright: !!f.bright };
+      Object.defineProperty(el, SHOWN, { value: shown, configurable: true, writable: true });
+    }
     return true;
   }
   function seekVideo(el: HTMLVideoElement, at: number): Promise<void> {
@@ -811,13 +916,12 @@ function installFilmClock(opts: FilmClockOptions): void {
       }
       const at = position(el);
       if (at === null) continue;
+      const load = loads.get(el);
       waits.push(
         showFrame(el, at).then((shown) => {
-          if (shown) return;
-          if (asFrame.has(el)) {
-            el.style.removeProperty("content");
-            asFrame.delete(el);
-          }
+          // loaded again meanwhile: `at` was where the old one was
+          if (shown || loads.get(el) !== load) return;
+          unframe(el);
           if (Math.abs(seekTo.get!.call(el) - at) > 0.0005 || el.readyState < 2)
             return seekVideo(el, at);
         }),
@@ -1067,10 +1171,12 @@ function installFilmClock(opts: FilmClockOptions): void {
     if (mode === "render") {
       now = t;
       // the frames the page draws into have shown before it does (their first
-      // frame would otherwise come after what it writes), and are at t; a
-      // frame it puts on the page while drawing loads, and the instant is
-      // drawn again — into that one too — until no new one shows up
+      // frame would otherwise come after what it writes), and are at t — the
+      // videos in them too, for a page that draws one; a frame it puts on the
+      // page while drawing loads, and the instant is drawn again — into that
+      // one too — until no new one shows up
       await showFrames();
+      await followFrames();
       syncAnimations();
       for (let pass = 0; ; pass++) {
         if (pass === MAX_DRAWS)
@@ -1304,12 +1410,20 @@ function installFilmClock(opts: FilmClockOptions): void {
     };
   }
 
+  /** a call from the renderer: the frames it waits for count from now */
+  const called =
+    <A extends unknown[], R>(fn: (...a: A) => R) =>
+    (...a: A): R => {
+      framesUntil = RealDate.now() + FRAMES_WAIT_MS;
+      return fn(...a);
+    };
   w.__ot = {
-    prepare,
-    seek,
-    motion,
+    prepare: called(prepare),
+    seek: called(seek),
+    motion: called(motion),
     framesReady,
     // --- for the frames inside the film (times in ms on the top page's clock) ---
+    framesBy,
     follow,
     stamp,
     showFrames,

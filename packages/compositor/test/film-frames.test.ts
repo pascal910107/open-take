@@ -29,21 +29,33 @@ after(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-/** 2 s at 10 fps, frame N a flat colour: red N×12, green 255−N×12, blue 128 */
-async function numberedClip(file: string): Promise<void> {
+/** frame N a flat colour — red N×12, green 255−N×12, blue 128 — tagged so
+ *  that Chrome shows its colours as they are (BT.601 full range, the sRGB
+ *  curve): 2 s at 10 fps by default; `startAt` puts its picture that late,
+ *  with sound from 0 */
+async function numberedClip(
+  file: string,
+  o: { rate?: string; seconds?: number; startAt?: number } = {},
+): Promise<void> {
+  const rate = o.rate ?? "10";
+  const late = o.startAt ? [`setpts=PTS+${o.startAt}/TB`] : [];
   await exec(await resolveFfmpeg(), [
     "-v",
     "error",
     "-f",
     "lavfi",
     "-i",
-    "color=c=black:s=64x64:r=10:d=2,format=rgb24,geq=r='N*12':g='255-N*12':b='128'",
+    `color=c=black:s=64x64:r=${rate}:d=${o.seconds ?? 2},format=rgb24,geq=r='N*12':g='255-N*12':b='128'`,
+    ...(o.startAt ? ["-f", "lavfi", "-i", "sine=frequency=440:duration=3"] : []),
+    "-vf",
+    ["scale=out_color_matrix=bt601:out_range=pc", "format=yuvj420p", ...late].join(","),
     "-c:v",
     "libx264",
     "-g",
     "30",
-    "-pix_fmt",
-    "yuv420p",
+    "-bsf:v",
+    "h264_metadata=colour_primaries=1:transfer_characteristics=13:matrix_coefficients=5:video_full_range_flag=1",
+    ...(o.startAt ? ["-c:a", "aac"] : []),
     "-y",
     file,
   ]);
@@ -62,11 +74,55 @@ async function pixel(file: string, w: number, h: number, x: number, y: number) {
   const i = (y * w + x) * 3;
   return [b[i]!, b[i + 1]!, b[i + 2]!];
 }
-const near = (a: number[], b: number[], what: string) =>
+const near = (a: number[], b: number[], what: string, within = 12) =>
   assert.ok(
-    a.every((v, i) => Math.abs(v - b[i]!) <= 12),
+    a.every((v, i) => Math.abs(v - b[i]!) <= within),
     `${what}: ${a.join(",")} vs ${b.join(",")}`,
   );
+
+/** what Chrome itself shows of the page at t — its video elements sought, as
+ *  every render did before frames — at each (x, y) */
+async function shownByChrome(
+  page: string,
+  file: string,
+  w: number,
+  h: number,
+  t: number,
+  at: [number, number][],
+): Promise<number[][]> {
+  const server = await serveDirectory(page);
+  const b = await launchHtmlBrowser({
+    chromePath: chrome!,
+    url: `${server.url}/${file}`,
+    width: w,
+    height: h,
+    initScript: filmClockSource({ seed: 1, epochMs: 0 }),
+    stillAnimations: true,
+  });
+  try {
+    await b.evaluate("window.__ot.prepare()");
+    await b.evaluate(`window.__ot.seek(${t})`);
+    const png = join(page, `chrome-${t}.png`);
+    await writeFile(png, await b.screenshot({ format: "png" }));
+    return await Promise.all(at.map(([x, y]) => pixel(png, w, h, x, y)));
+  } finally {
+    await b.close();
+    await server.close();
+  }
+}
+
+/** a film page: a video of `clip` filling w×h, set to film time by the page */
+const videoPage = (clip: string, w: number, h: number) =>
+  `<!doctype html><html><body style="margin:0;background:#000">
+<video id="v" src="${clip}" muted style="position:absolute;left:0;top:0;width:${w}px;height:${h}px"></video>
+<script>
+window.__film = { duration: 2, width: ${w}, height: ${h} };
+const v = document.getElementById("v");
+window.__render = async (t) => {
+  if (v.readyState < 2) await new Promise((r) => v.addEventListener("loadeddata", r, { once: true }));
+  await new Promise((r) => { v.addEventListener("seeked", r, { once: true }); v.currentTime = t; });
+};
+</script></body></html>`;
 
 test("a video's frames come out in presentation order, each with its own time, a varying rate included", async () => {
   const out = join(dir, "vfr");
@@ -227,4 +283,338 @@ window.at = () => ["r", "v"].map((id) => Math.round(document.getElementById(id).
     await store.clean();
     await server.close();
   }
+});
+
+/** a clip of one flat colour, tagged as numberedClip's */
+async function flatClip(file: string, colour: string): Promise<void> {
+  await exec(await resolveFfmpeg(), [
+    "-v",
+    "error",
+    "-f",
+    "lavfi",
+    "-i",
+    `color=c=${colour}:s=64x64:r=10:d=2`,
+    "-vf",
+    "scale=out_color_matrix=bt601:out_range=pc,format=yuvj420p",
+    "-c:v",
+    "libx264",
+    "-bsf:v",
+    "h264_metadata=colour_primaries=1:transfer_characteristics=13:matrix_coefficients=5:video_full_range_flag=1",
+    "-y",
+    file,
+  ]);
+}
+
+test("a video too long, too large or too slow to decode as frames is refused within its limits", async () => {
+  const out = join(dir, "budget");
+  for (const d of ["frames", "bytes", "time"]) await exec("mkdir", ["-p", join(out, d)]);
+  await numberedClip(join(out, "clip.mp4"));
+  const clip = join(out, "clip.mp4");
+  await assert.rejects(decodeFrames(clip, join(out, "frames"), { maxFrames: 5 }), /20 frames/);
+  await assert.rejects(decodeFrames(clip, join(out, "bytes"), { maxBytes: 2000 }), /disk/);
+  await assert.rejects(decodeFrames(clip, join(out, "time"), { maxMs: 1 }), /seconds/);
+});
+
+test("a video's frames keep the colours Chrome gives it, on the page and in a canvas — grey and red tagged BT.709, and a recording's orange", {
+  skip,
+}, async () => {
+  const page = join(dir, "colours");
+  await exec("mkdir", ["-p", page]);
+  const ffmpeg = await resolveFfmpeg();
+  const clips: [string, string, string, string][] = [
+    // name, colour, how it is encoded, the stream's colour fields
+    [
+      "grey709",
+      "0x808080",
+      "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p",
+      "colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1",
+    ],
+    [
+      "red709",
+      "red",
+      "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p",
+      "colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1",
+    ],
+    // as ffmpeg makes a video of JPEG screenshots: BT.601 full range, nothing else said
+    [
+      "orange",
+      "0xC86432",
+      "scale=out_color_matrix=bt601:out_range=pc,format=yuvj420p,setparams=colorspace=bt470bg:color_primaries=unknown:color_trc=unknown:range=pc",
+      "",
+    ],
+  ];
+  for (const [name, colour, encode, fields] of clips) {
+    await exec(ffmpeg, [
+      "-v",
+      "error",
+      "-f",
+      "lavfi",
+      "-i",
+      // a recording's size: Chrome guesses what the tags leave out by size
+      `color=c=${colour}:s=1280x720:r=10:d=2`,
+      "-vf",
+      encode,
+      "-c:v",
+      "libx264",
+      ...(fields ? ["-bsf:v", `h264_metadata=${fields}`] : []),
+      "-y",
+      join(page, `${name}.mp4`),
+    ]);
+    // the video, and a canvas the page draws it into
+    await writeFile(
+      join(page, `${name}.html`),
+      `<!doctype html><html><body style="margin:0;width:128px;height:64px;background:#000">
+<video id="v" src="${name}.mp4" muted style="position:absolute;left:0;top:0;width:64px;height:64px"></video>
+<canvas id="c" width="64" height="64" style="position:absolute;left:64px;top:0"></canvas>
+<script>
+window.__film = { duration: 2, width: 128, height: 64 };
+const v = document.getElementById("v"), c = document.getElementById("c").getContext("2d");
+window.__render = async (t) => {
+  if (v.readyState < 2) await new Promise((r) => v.addEventListener("loadeddata", r, { once: true }));
+  await new Promise((r) => { v.addEventListener("seeked", r, { once: true }); v.currentTime = t; });
+  c.drawImage(v, 0, 0, 64, 64);
+};
+</script></body></html>`,
+    );
+    // at 0.5 s the video is shown as its frames (the first instant drawn shows it so)
+    const [, still] = await filmStills({
+      page: join(page, `${name}.html`),
+      outDir: join(page, `stills-${name}`),
+      at: [0.25, 0.5],
+      chromePath: chrome!,
+      blur: false,
+    });
+    const [video, canvas] = await shownByChrome(page, `${name}.html`, 128, 64, 0.5, [
+      [32, 32],
+      [96, 32],
+    ]);
+    near(await pixel(still!, 128, 64, 32, 32), video!, `${name}: as frames, against Chrome`, 4);
+    near(
+      await pixel(still!, 128, 64, 96, 32),
+      canvas!,
+      `${name}: drawn into a canvas, against Chrome`,
+      4,
+    );
+  }
+});
+
+test("a video the page sets reads as seeking until its frame is there", { skip }, async () => {
+  const page = join(dir, "seeking");
+  await exec("mkdir", ["-p", page]);
+  await numberedClip(join(page, "clip.mp4"));
+  await writeFile(
+    join(page, "index.html"),
+    `<!doctype html><html><body style="margin:0;width:128px;height:64px;background:#000">
+<video id="a" src="clip.mp4" muted style="position:absolute;left:0;top:0;width:64px;height:64px"></video>
+<canvas id="c" width="64" height="64" style="position:absolute;left:64px;top:0"></canvas>
+<script>
+window.__film = { duration: 2, width: 128, height: 64 };
+const a = document.getElementById("a"), c = document.getElementById("c").getContext("2d");
+window.__render = async (t) => {
+  if (a.readyState < 2) await new Promise((r) => a.addEventListener("loadeddata", r, { once: true }));
+  a.currentTime = t;
+  if (a.seeking) await new Promise((r) => a.addEventListener("seeked", r, { once: true }));
+  c.drawImage(a, 0, 0, 64, 64);
+};
+</script></body></html>`,
+  );
+  const times = [0.25, 0.95, 1.55];
+  const files = await filmStills({
+    page,
+    outDir: join(page, "stills"),
+    at: times,
+    chromePath: chrome!,
+    blur: false,
+  });
+  for (const [k, t] of times.entries())
+    near(
+      await pixel(files[k]!, 128, 64, 96, 32),
+      colourOf(Math.floor(t * 10 + 1e-6)),
+      `drawn once it says it is there, at ${t}s`,
+    );
+});
+
+test("a video whose picture starts late shows each frame from its own time, as Chrome does", {
+  skip,
+}, async () => {
+  const page = join(dir, "late");
+  await exec("mkdir", ["-p", page]);
+  // its picture from 0.5 s, its sound from 0
+  await numberedClip(join(page, "clip.mp4"), { startAt: 0.5 });
+  await writeFile(join(page, "index.html"), videoPage("clip.mp4", 64, 64));
+  const times = [0.25, 0.65, 1.05];
+  const files = await filmStills({
+    page,
+    outDir: join(page, "stills"),
+    at: times,
+    chromePath: chrome!,
+    blur: false,
+  });
+  // before its first frame, the first frame; then frame n from 0.5 + n/10
+  for (const [k, t] of times.entries())
+    near(
+      await pixel(files[k]!, 64, 64, 32, 32),
+      colourOf(Math.max(0, Math.floor((t - 0.5) * 10 + 1e-6))),
+      `at ${t}s`,
+    );
+});
+
+test("a paused video given a new source shows the new source, not its last frame", {
+  skip,
+}, async () => {
+  const page = join(dir, "resource");
+  await exec("mkdir", ["-p", page]);
+  await flatClip(join(page, "red.mp4"), "red");
+  await flatClip(join(page, "blue.mp4"), "blue");
+  await writeFile(
+    join(page, "index.html"),
+    `<!doctype html><html><body style="margin:0;background:#000">
+<video id="a" src="red.mp4" muted style="position:absolute;left:0;top:0;width:64px;height:64px"></video>
+<script>
+window.__film = { duration: 2, width: 64, height: 64 };
+const a = document.getElementById("a");
+let blue = false;
+window.__render = async (t) => {
+  const loaded = () => new Promise((r) => a.addEventListener("loadeddata", r, { once: true }));
+  if (a.readyState < 2) await loaded();
+  if (t < 0.5) {
+    await new Promise((r) => { a.addEventListener("seeked", r, { once: true }); a.currentTime = t; });
+  } else if (!blue) {
+    blue = true;
+    a.src = "blue.mp4";
+    a.load();
+    await loaded();
+  }
+};
+</script></body></html>`,
+  );
+  const files = await filmStills({
+    page,
+    outDir: join(page, "stills"),
+    at: [0.25, 1],
+    chromePath: chrome!,
+    blur: false,
+  });
+  near(await pixel(files[0]!, 64, 64, 32, 32), [255, 0, 0], "before: red");
+  near(await pixel(files[1]!, 64, 64, 32, 32), [0, 0, 255], "after its new source: blue");
+});
+
+test("a VideoFrame made of a video shown as its frames holds the frame the video shows", {
+  skip,
+}, async () => {
+  const page = join(dir, "videoframe");
+  await exec("mkdir", ["-p", page]);
+  await numberedClip(join(page, "clip.mp4"));
+  await writeFile(
+    join(page, "index.html"),
+    `<!doctype html><html><body style="margin:0;width:128px;height:64px;background:#000">
+<video id="a" src="clip.mp4" muted style="position:absolute;left:0;top:0;width:64px;height:64px"></video>
+<canvas id="c" width="64" height="64" style="position:absolute;left:64px;top:0"></canvas>
+<script>
+window.__film = { duration: 2, width: 128, height: 64 };
+const a = document.getElementById("a"), c = document.getElementById("c").getContext("2d");
+window.__render = async (t) => {
+  if (a.readyState < 2) await new Promise((r) => a.addEventListener("loadeddata", r, { once: true }));
+  await new Promise((r) => { a.addEventListener("seeked", r, { once: true }); a.currentTime = t; });
+  // only once it is shown as its frames (the first instant drawn shows it so)
+  if (t < 0.5) return;
+  const f = new VideoFrame(a, { timestamp: Math.round(t * 1e6) });
+  c.drawImage(f, 0, 0, 64, 64);
+  f.close();
+};
+</script></body></html>`,
+  );
+  const times = [0.25, 0.95, 1.55];
+  const files = await filmStills({
+    page,
+    outDir: join(page, "stills"),
+    at: times,
+    chromePath: chrome!,
+    blur: false,
+  });
+  for (const [k, t] of times.entries()) {
+    const n = Math.floor(t * 10 + 1e-6);
+    near(await pixel(files[k]!, 128, 64, 32, 32), colourOf(n), `the video at ${t}s`);
+    if (t >= 0.5)
+      near(await pixel(files[k]!, 128, 64, 96, 32), colourOf(n), `its VideoFrame at ${t}s`);
+  }
+});
+
+test("a video inside a frame, drawn by the page around it, is drawn at film time", {
+  skip,
+}, async () => {
+  const page = join(dir, "inframe");
+  await exec("mkdir", ["-p", page]);
+  await numberedClip(join(page, "clip.mp4"));
+  await writeFile(
+    join(page, "inner.html"),
+    `<!doctype html><html><body style="margin:0"><video id="v" src="clip.mp4" muted autoplay style="width:64px;height:64px"></video></body></html>`,
+  );
+  await writeFile(
+    join(page, "index.html"),
+    `<!doctype html><html><body style="margin:0;width:128px;height:64px;background:#000">
+<iframe id="f" src="inner.html" style="position:absolute;left:0;top:0;width:64px;height:64px;border:0"></iframe>
+<canvas id="c" width="64" height="64" style="position:absolute;left:64px;top:0"></canvas>
+<script>
+window.__film = { duration: 2, width: 128, height: 64 };
+const c = document.getElementById("c").getContext("2d");
+window.__render = () => {
+  const v = document.getElementById("f").contentDocument?.getElementById("v");
+  if (v && v.readyState >= 2) c.drawImage(v, 0, 0, 64, 64);
+};
+</script></body></html>`,
+  );
+  // each still on its own: no shutter seeks the frame's video close to t first
+  const times = [0.25, 0.95, 1.55];
+  const files = await filmStills({
+    page,
+    outDir: join(page, "stills"),
+    at: times,
+    chromePath: chrome!,
+    blur: false,
+  });
+  for (const [k, t] of times.entries()) {
+    const n = Math.floor(t * 10 + 1e-6);
+    near(await pixel(files[k]!, 128, 64, 32, 32), colourOf(n), `the frame's video at ${t}s`);
+    near(
+      await pixel(files[k]!, 128, 64, 96, 32),
+      colourOf(n),
+      `drawn by the page around it at ${t}s`,
+    );
+  }
+});
+
+test("a 29.97 fps video's frames keep their exact times", async () => {
+  const out = join(dir, "ntsc");
+  await exec("mkdir", ["-p", join(out, "frames")]);
+  await numberedClip(join(out, "clip.mp4"), { rate: "30000/1001", seconds: 0.5 });
+  const { times } = await decodeFrames(join(out, "clip.mp4"), join(out, "frames"));
+  for (const [n, t] of times.slice(0, 6).entries())
+    assert.ok(
+      Math.abs(t - (n * 1001) / 30000) < 1e-9,
+      `frame ${n} at ${t}, not ${(n * 1001) / 30000}`,
+    );
+});
+
+test("at 1/30 s a 29.97 fps video still shows its first frame, as Chrome does", {
+  skip,
+}, async () => {
+  const page = join(dir, "ntsc-shown");
+  await exec("mkdir", ["-p", page]);
+  await numberedClip(join(page, "clip.mp4"), { rate: "30000/1001", seconds: 0.5 });
+  await writeFile(join(page, "index.html"), videoPage("clip.mp4", 64, 64));
+  const [still] = await filmStills({
+    page,
+    outDir: join(page, "stills"),
+    at: [1 / 30],
+    chromePath: chrome!,
+    blur: false,
+  });
+  // the next frame differs by 12 a channel: closer than that
+  near(
+    await pixel(still!, 64, 64, 32, 32),
+    colourOf(0),
+    "its first frame, which ends at 1001/30000 s",
+    5,
+  );
 });
