@@ -772,6 +772,60 @@ window.__render = async (t) => {
   near(await pixel(files[1]!, 128, 64, 32, 32), colourOf(15), "the video");
 });
 
+test("a frame asked earlier that comes later does not cover the video sought since", {
+  skip,
+}, async () => {
+  const page = join(dir, "late-frame");
+  await exec("mkdir", ["-p", page]);
+  await numberedClip(join(page, "clip.mp4"));
+  await writeFile(
+    join(page, "index.html"),
+    `<!doctype html><html><body style="margin:0;width:128px;height:64px;background:#000">
+<video id="a" src="clip.mp4" muted style="position:absolute;left:0;top:0;width:64px;height:64px"></video>
+<canvas id="c" width="64" height="64" style="position:absolute;left:64px;top:0"></canvas>
+<script>
+window.__film = { duration: 2, width: 128, height: 64 };
+const a = document.getElementById("a"), c = document.getElementById("c").getContext("2d");
+// frame 7's image is held until the page lets it go; once fail is on, frames fail
+const decode = HTMLImageElement.prototype.decode;
+let hold = null, fail = false;
+HTMLImageElement.prototype.decode = function () {
+  if (this.src.endsWith("/000007.jpg") && !hold)
+    return new Promise((r) => { hold = () => decode.call(this).then(r, r); });
+  if (fail && this.src.includes("/__open-take/frames/")) return Promise.reject(new Error("refused"));
+  return decode.call(this);
+};
+let done = false;
+window.__render = async (t) => {
+  if (a.readyState < 2) await new Promise((r) => a.addEventListener("loadeddata", r, { once: true }));
+  if (t < 0.5) {
+    await new Promise((r) => { a.addEventListener("seeked", r, { once: true }); a.currentTime = t; });
+    return;
+  }
+  if (done) return;
+  done = true;
+  // a seek to a frame that is slow to come, then one whose frame fails: that
+  // one is sought itself; then the slow frame arrives
+  a.currentTime = 0.75;
+  for (let i = 0; i < 100 && !hold; i++) await new Promise((r) => setTimeout(r, 1));
+  fail = true;
+  await new Promise((r) => { a.addEventListener("seeked", r, { once: true }); a.currentTime = 1.55; });
+  hold();
+  for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 1));
+  c.drawImage(a, 0, 0, 64, 64);
+};
+</script></body></html>`,
+  );
+  const files = await filmStills({
+    page,
+    outDir: join(page, "stills"),
+    at: [0.25, 0.95],
+    chromePath: chrome!,
+    blur: false,
+  });
+  near(await pixel(files[1]!, 128, 64, 96, 32), colourOf(15), "drawn after the slow frame came");
+});
+
 test("a page whose policy refuses images keeps its video, sought as before", { skip }, async () => {
   const page = join(dir, "no-images");
   await exec("mkdir", ["-p", page]);

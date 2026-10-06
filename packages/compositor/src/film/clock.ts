@@ -516,7 +516,7 @@ function installFilmClock(opts: FilmClockOptions): void {
     media.delete(el);
     loads.set(el, (loads.get(el) ?? 0) + 1);
     seeking.delete(el);
-    frameAsked.delete(el);
+    lastAsked.delete(el);
     unframe(el);
     inserted.set(el, clock());
     // from where it got it — in a film that draws itself, from film time 0,
@@ -902,20 +902,22 @@ function installFilmClock(opts: FilmClockOptions): void {
   };
   const frameUrl = (f: NonNullable<Frames>, i: number) =>
     `${f.base}${String(i).padStart(6, "0")}.${f.ext}`;
-  /** the frames asked of each video since it was last loaded, the last one
-   *  asked last: a frame shows only after those asked before it, so a slow
-   *  one asked earlier never covers a later one */
-  const frameAsked = new WeakMap<HTMLMediaElement, Promise<unknown>>();
+  /** the last frame asked of each video: only it is shown. One asked
+   *  earlier that comes later is not — not over a later frame, nor over the
+   *  video itself once a later one was not there and it was sought — and
+   *  answers as the last one does */
+  const lastAsked = new WeakMap<HTMLMediaElement, { n: number; shown: Promise<boolean> }>();
+  let askCount = 0;
   /** show the video at `at` seconds as its frame; false when it cannot be,
    *  or when it is read or loaded again while its frame comes — said at once
    *  when there is no frame to show */
   function showFrame(el: HTMLVideoElement, at: number): Promise<boolean> {
-    const before = frameAsked.get(el);
+    const n = ++askCount;
     const load = loads.get(el);
-    const shown = frameOf(el, at).then(async (frame) => {
-      if (!frame) return false;
-      await before;
-      if (readers.has(el) || loads.get(el) !== load) return false;
+    const shown = frameOf(el, at).then((frame): boolean | Promise<boolean> => {
+      const last = lastAsked.get(el);
+      if (last && last.n !== n) return last.shown;
+      if (!frame || readers.has(el) || loads.get(el) !== load) return false;
       if (asFrame.get(el) !== frame.url) {
         el.style.setProperty("content", `url("${frame.url}")`, "important");
         asFrame.set(el, frame.url);
@@ -928,11 +930,7 @@ function installFilmClock(opts: FilmClockOptions): void {
         });
       return true;
     });
-    // the next one asked shows after this one, and after those before it
-    frameAsked.set(
-      el,
-      Promise.all([before, shown]).catch(() => {}),
-    );
+    lastAsked.set(el, { n, shown });
     return shown;
   }
   /** the video's frame at `at` seconds, decoded; null when it has none: no
