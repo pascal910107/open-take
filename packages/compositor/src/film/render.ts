@@ -374,12 +374,10 @@ export async function patchFilm(
   const ffmpeg = await resolveFfmpeg();
   const master = await probeFilm(into);
   // its frames are swapped by number: frame n must be the one at n/fps, as in
-  // a master `film render` made — not in a file whose average rate only matches
-  const unlike = !master.made
-    ? "`film render` did not make it"
-    : !(await evenlySpaced(into))
-      ? "its frames are not evenly spaced"
-      : null;
+  // a master `film render` made — not in a file whose average rate only
+  // matches, nor one whose picture was moved off 0 (the range starts at 0,
+  // and the sound is kept where it is)
+  const unlike = !master.made ? "`film render` did not make it" : await framesOff(into);
   if (unlike)
     throw new Error(
       `film: ${opts.into} is not a whole master of this film (${unlike}) — render it whole`,
@@ -584,10 +582,10 @@ async function probeFilm(file: string): Promise<{
   };
 }
 
-/** every frame of the film's picture one frame's length after the one before
- *  — as `film render` encodes it; a file of varying rate is not, whatever
- *  its average */
-async function evenlySpaced(file: string): Promise<boolean> {
+/** why the film's picture is not as `film render` encodes it — its first
+ *  frame at 0 s, each one frame's length after the one before (a file of
+ *  varying rate is not, whatever its average); null when it is */
+async function framesOff(file: string): Promise<string | null> {
   const pts = (
     await runTool(await resolveFfprobe(), [
       "-v",
@@ -605,8 +603,12 @@ async function evenlySpaced(file: string): Promise<boolean> {
     .map((l) => Number.parseInt(l, 10))
     .filter((t) => Number.isFinite(t))
     .sort((a, b) => a - b);
-  const step = (pts[1] ?? 1) - (pts[0] ?? 0);
-  return step > 0 && pts.every((t, i) => t - pts[0]! === i * step);
+  if (!pts.length) return "it has no picture";
+  if (pts[0] !== 0) return "its picture does not start at 0 s";
+  const step = (pts[1] ?? 1) - pts[0];
+  return step > 0 && pts.every((t, i) => t === i * step)
+    ? null
+    : "its frames are not evenly spaced";
 }
 
 /** PNG stills of the film at the given times — `t012.500.png` … — as the

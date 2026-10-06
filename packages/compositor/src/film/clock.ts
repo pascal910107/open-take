@@ -515,7 +515,7 @@ function installFilmClock(opts: FilmClockOptions): void {
     const playing = hadNothing && !!media.get(el)?.playing;
     media.delete(el);
     loads.set(el, (loads.get(el) ?? 0) + 1);
-    seeks.delete(el);
+    seeking.delete(el);
     unframe(el);
     inserted.set(el, clock());
     // from where it got it — in a film that draws itself, from film time 0,
@@ -540,6 +540,17 @@ function installFilmClock(opts: FilmClockOptions): void {
       startOver(this, hadNothing);
     },
   });
+  // so does a stream, a MediaSource or a blob given as its source object
+  const sourceObject = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "srcObject");
+  if (sourceObject?.set)
+    Object.defineProperty(HTMLMediaElement.prototype, "srcObject", {
+      ...sourceObject,
+      set(this: HTMLMediaElement, v: unknown) {
+        const hadNothing = this.networkState === HTMLMediaElement.NETWORK_EMPTY;
+        sourceObject.set!.call(this, v);
+        startOver(this, hadNothing);
+      },
+    });
   const realSetAttribute = Element.prototype.setAttribute;
   Element.prototype.setAttribute = function (this: Element, name: string, value: string) {
     const n = `${name}`; // as the element converts it: once, and an error as its own
@@ -576,14 +587,16 @@ function installFilmClock(opts: FilmClockOptions): void {
     return Math.max(0, at);
   }
   // a video sought to its frame (below) reads as seeking until that frame is
-  // there, as one sought itself does until it has decoded it: how many such
-  // seeks each video has under way
-  const seeks = new WeakMap<HTMLMediaElement, number>();
+  // there, as one sought itself does until it has decoded it: the seek each
+  // video has under way, by number — a seek made while another is under way
+  // ends that one, as the element's own does
+  const seeking = new WeakMap<HTMLMediaElement, number>();
+  let seekCount = 0;
   const realSeeking = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "seeking")!;
   Object.defineProperty(HTMLMediaElement.prototype, "seeking", {
     ...realSeeking,
     get(this: HTMLMediaElement) {
-      return seeks.has(this) || realSeeking.get!.call(this);
+      return seeking.has(this) || realSeeking.get!.call(this);
     },
   });
   const seekTo = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "currentTime")!;
@@ -617,19 +630,18 @@ function installFilmClock(opts: FilmClockOptions): void {
       if (virtual) {
         // as a real seek does: seeking at once, then seeked once the frame is
         // there — the events in a later task, so a listener added right after
-        // the set still hears them. One loaded again in the meantime is not
-        // sought: loading ends a seek
+        // the set still hears them. One loaded or sought again in the
+        // meantime says no more: loading or a later seek ends it
         const el = this as HTMLVideoElement;
         const load = loads.get(el);
-        seeks.set(el, (seeks.get(el) ?? 0) + 1);
+        const seek = ++seekCount;
+        seeking.set(el, seek);
         realSetTimeout(() => {
           if (loads.get(el) !== load) return;
           el.dispatchEvent(new Event("seeking"));
           void showFrame(el, position(el) ?? n).then((shown) => {
-            if (loads.get(el) !== load) return;
-            const left = (seeks.get(el) ?? 1) - 1;
-            if (left > 0) seeks.set(el, left);
-            else seeks.delete(el);
+            if (loads.get(el) !== load || seeking.get(el) !== seek) return;
+            seeking.delete(el);
             // read in the meantime: a real seek, which tells the page itself
             if (!shown) return void seekTo.set!.call(el, n);
             el.dispatchEvent(new Event("timeupdate"));
@@ -856,30 +868,54 @@ function installFilmClock(opts: FilmClockOptions): void {
   };
   const frameUrl = (f: NonNullable<Frames>, i: number) =>
     `${f.base}${String(i).padStart(6, "0")}.${f.ext}`;
+  /** the frames asked of each video, the last one asked last: a frame shows
+   *  only after those asked before it, so a slow one asked earlier never
+   *  covers a later one */
+  const frameAsked = new WeakMap<HTMLMediaElement, Promise<unknown>>();
   /** show the video at `at` seconds as its frame; false when it cannot be,
    *  or when it is read or loaded again while its frame comes */
-  async function showFrame(el: HTMLVideoElement, at: number): Promise<boolean> {
-    if (typeof w.__otFrames !== "function" || readers.has(el)) return false;
-    const src = el.currentSrc || el.src;
-    if (!src?.startsWith(`${location.origin}/`)) return false;
+  function showFrame(el: HTMLVideoElement, at: number): Promise<boolean> {
+    const before = frameAsked.get(el);
     const load = loads.get(el);
-    const gone = () => readers.has(el) || loads.get(el) !== load;
+    const shown = frameOf(el, at).then(async (frame) => {
+      await before;
+      if (!frame || readers.has(el) || loads.get(el) !== load) return false;
+      if (asFrame.get(el) !== frame.url) {
+        el.style.setProperty("content", `url("${frame.url}")`, "important");
+        asFrame.set(el, frame.url);
+      }
+      if (shownOf(el)?.im !== frame.shown.im)
+        Object.defineProperty(el, SHOWN, {
+          value: frame.shown,
+          configurable: true,
+          writable: true,
+        });
+      return true;
+    });
+    frameAsked.set(
+      el,
+      shown.catch(() => {}),
+    );
+    return shown;
+  }
+  /** the video's frame at `at` seconds, decoded; null when it has none: no
+   *  renderer to ask, a source that is not a file the page serves (a stream
+   *  or a blob as its source object), a video read or loaded again */
+  async function frameOf(
+    el: HTMLVideoElement,
+    at: number,
+  ): Promise<{ url: string; shown: Shown } | null> {
+    if (typeof w.__otFrames !== "function" || readers.has(el) || el.srcObject) return null;
+    const src = el.currentSrc || el.src;
+    if (!src?.startsWith(`${location.origin}/`)) return null;
+    const load = loads.get(el);
     const f = await framesNow(src);
-    if (!f?.times.length || gone()) return false;
+    if (!f?.times.length || readers.has(el) || loads.get(el) !== load) return null;
     const i = frameAt(f.times, at);
     const url = frameUrl(f, i);
     const im = await decodeFrame(url);
     for (let k = 1; k <= 2 && i + k < f.times.length; k++) void decodeFrame(frameUrl(f, i + k));
-    if (gone()) return false;
-    if (asFrame.get(el) !== url) {
-      el.style.setProperty("content", `url("${url}")`, "important");
-      asFrame.set(el, url);
-    }
-    if (shownOf(el)?.im !== im) {
-      const shown: Shown = { im, at: f.times[i]!, bright: !!f.bright };
-      Object.defineProperty(el, SHOWN, { value: shown, configurable: true, writable: true });
-    }
-    return true;
+    return { url, shown: { im, at: f.times[i]!, bright: !!f.bright } };
   }
   function seekVideo(el: HTMLVideoElement, at: number): Promise<void> {
     return new Promise((ok) => {

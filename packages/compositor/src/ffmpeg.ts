@@ -406,27 +406,37 @@ async function hasEncoderOnce(name: string): Promise<boolean> {
 
 /** Run a tool to the end: what it printed on stdout — or on stderr, where
  *  ffmpeg's filters report — and a non-zero exit rejects with the end of its
- *  stderr. */
+ *  stderr. Given `timeoutMs`, one still running then is stopped, and rejects. */
 export function runTool(
   bin: string,
   args: string[],
-  { stderr = false }: { stderr?: boolean } = {},
+  { stderr = false, timeoutMs }: { stderr?: boolean; timeoutMs?: number } = {},
 ): Promise<string> {
   return new Promise((ok, fail) => {
     const p = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"] });
     let out = "";
     let err = "";
+    const timer =
+      timeoutMs === undefined
+        ? undefined
+        : setTimeout(() => {
+            p.kill("SIGKILL");
+            fail(new Error(`${bin} took longer than ${timeoutMs / 1000} s`));
+          }, timeoutMs);
     p.stdout.on("data", (d: Buffer) => {
       out += d.toString();
     });
     p.stderr.on("data", (d: Buffer) => {
       err += d.toString();
     });
-    p.on("error", fail);
-    p.on("close", (code) =>
-      code === 0
-        ? ok(stderr ? err : out)
-        : fail(new Error(`${bin} exited ${code}: ${err.trim().slice(-800)}`)),
-    );
+    p.on("error", (e) => {
+      clearTimeout(timer);
+      fail(e);
+    });
+    p.on("close", (code) => {
+      clearTimeout(timer);
+      if (code === 0) ok(stderr ? err : out);
+      else fail(new Error(`${bin} exited ${code}: ${err.trim().slice(-800)}`));
+    });
   });
 }

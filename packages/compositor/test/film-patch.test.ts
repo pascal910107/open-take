@@ -198,7 +198,7 @@ test("a new soundtrack goes under a film without rendering it again; none leaves
   assert.equal((await probe(silent)).streams.filter((s) => s.codec_type === "audio").length, 0);
 });
 
-test("a master whose frames are not evenly spaced, or that `film render` did not make, is refused", {
+test("a master whose frames are not evenly spaced, moved off 0, or that `film render` did not make, is refused", {
   skip,
 }, async () => {
   const page = join(dir, "uneven");
@@ -253,9 +253,56 @@ test("a master whose frames are not evenly spaced, or that `film render` did not
     "-y",
     elsewhere,
   ]);
+  // evenly spaced and carrying the record, but its picture (and sound)
+  // moved a second late, as a remux with an offset leaves it
+  const even = join(dir, "even.mp4");
+  await exec(ffmpeg, [
+    "-v",
+    "error",
+    "-f",
+    "lavfi",
+    "-i",
+    "color=c=gray:s=64x64:r=30:d=2",
+    "-f",
+    "lavfi",
+    "-i",
+    "sine=frequency=440:duration=2",
+    "-c:v",
+    "libx264",
+    "-pix_fmt",
+    "yuv420p",
+    "-c:a",
+    "aac",
+    "-metadata",
+    `open_take_film=${record}`,
+    "-movflags",
+    "+use_metadata_tags",
+    "-y",
+    even,
+  ]);
+  const late = join(dir, "late.mp4");
+  await exec(ffmpeg, [
+    "-v",
+    "error",
+    "-itsoffset",
+    "1",
+    "-i",
+    even,
+    "-map",
+    "0",
+    "-c",
+    "copy",
+    "-map_metadata",
+    "0",
+    "-movflags",
+    "+use_metadata_tags",
+    "-y",
+    late,
+  ]);
   for (const [into, why] of [
     [uneven, /not evenly spaced/],
     [elsewhere, /`film render` did not make it/],
+    [late, /does not start at 0 s/],
   ] as const)
     await assert.rejects(
       patchFilm({

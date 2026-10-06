@@ -315,6 +315,47 @@ test("a video too long, too large or too slow to decode as frames is refused wit
   await assert.rejects(decodeFrames(clip, join(out, "time"), { maxMs: 1 }), /seconds/);
 });
 
+test("a video in wide-gamut or HDR colours is not decoded as frames: Chrome maps those itself", async () => {
+  const out = join(dir, "gamut");
+  await exec("mkdir", ["-p", out]);
+  const cases: [string, string, RegExp][] = [
+    // Display P3 with sRGB's curve, BT.2020, and PQ: the H.264 colour fields
+    [
+      "p3",
+      "colour_primaries=12:transfer_characteristics=13:matrix_coefficients=1",
+      /smpte432 primaries/,
+    ],
+    [
+      "bt2020",
+      "colour_primaries=9:transfer_characteristics=1:matrix_coefficients=9",
+      /bt2020 primaries/,
+    ],
+    ["pq", "colour_primaries=9:transfer_characteristics=16:matrix_coefficients=9", /HDR/],
+  ];
+  for (const [name, fields, why] of cases) {
+    const clip = join(out, `${name}.mp4`);
+    await exec(await resolveFfmpeg(), [
+      "-v",
+      "error",
+      "-f",
+      "lavfi",
+      "-i",
+      "color=c=orange:s=64x64:r=10:d=1",
+      "-c:v",
+      "libx264",
+      "-pix_fmt",
+      "yuv420p",
+      "-bsf:v",
+      `h264_metadata=${fields}`,
+      "-y",
+      clip,
+    ]);
+    await exec("mkdir", ["-p", join(out, name)]);
+    await assert.rejects(decodeFrames(clip, join(out, name)), why, name);
+    assert.deepEqual(await readdir(join(out, name)), [], `${name}: nothing written`);
+  }
+});
+
 test("a video's frames keep the colours Chrome gives it, on the page and in a canvas — grey and red tagged BT.709, and a recording's orange", {
   skip,
 }, async () => {
@@ -434,6 +475,50 @@ window.__render = async (t) => {
     );
 });
 
+test("a seek made while another is under way ends it: the page draws the frame of the last", {
+  skip,
+}, async () => {
+  const page = join(dir, "seek-twice");
+  await exec("mkdir", ["-p", page]);
+  await numberedClip(join(page, "clip.mp4"));
+  await writeFile(
+    join(page, "index.html"),
+    `<!doctype html><html><body style="margin:0;width:128px;height:64px;background:#000">
+<video id="a" src="clip.mp4" muted style="position:absolute;left:0;top:0;width:64px;height:64px"></video>
+<canvas id="c" width="64" height="64" style="position:absolute;left:64px;top:0"></canvas>
+<script>
+window.__film = { duration: 2, width: 128, height: 64 };
+const a = document.getElementById("a"), c = document.getElementById("c").getContext("2d");
+window.__render = async (t) => {
+  if (a.readyState < 2) await new Promise((r) => a.addEventListener("loadeddata", r, { once: true }));
+  if (t < 0.5) {
+    await new Promise((r) => { a.addEventListener("seeked", r, { once: true }); a.currentTime = t; });
+    return;
+  }
+  // shown as its frames by now: a far frame (not decoded yet) and, once that
+  // seek is under way, straight back to the one it shows (decoded already, so
+  // it comes first) — drawn once it no longer reads as seeking
+  a.addEventListener("seeking", () => queueMicrotask(() => { a.currentTime = 0.25; }), { once: true });
+  a.currentTime = 1.85;
+  await new Promise((r) => {
+    const on = () => { if (!a.seeking) { a.removeEventListener("seeked", on); r(); } };
+    a.addEventListener("seeked", on);
+  });
+  c.drawImage(a, 0, 0, 64, 64);
+};
+</script></body></html>`,
+  );
+  const files = await filmStills({
+    page,
+    outDir: join(page, "stills"),
+    at: [0.25, 0.95],
+    chromePath: chrome!,
+    blur: false,
+  });
+  near(await pixel(files[1]!, 128, 64, 32, 32), colourOf(2), "the video, at its last seek");
+  near(await pixel(files[1]!, 128, 64, 96, 32), colourOf(2), "drawn once the seeks are done");
+});
+
 test("a video whose picture starts late shows each frame from its own time, as Chrome does", {
   skip,
 }, async () => {
@@ -497,6 +582,53 @@ window.__render = async (t) => {
   });
   near(await pixel(files[0]!, 64, 64, 32, 32), [255, 0, 0], "before: red");
   near(await pixel(files[1]!, 64, 64, 32, 32), [0, 0, 255], "after its new source: blue");
+});
+
+test("a video given a stream as its source object no longer shows its file's last frame", {
+  skip,
+}, async () => {
+  const page = join(dir, "source-object");
+  await exec("mkdir", ["-p", page]);
+  await flatClip(join(page, "red.mp4"), "red");
+  await writeFile(
+    join(page, "index.html"),
+    `<!doctype html><html><body style="margin:0;background:#000">
+<video id="a" src="red.mp4" muted style="position:absolute;left:0;top:0;width:64px;height:64px"></video>
+<script>
+window.__film = { duration: 2, width: 64, height: 64 };
+const a = document.getElementById("a");
+const blue = document.createElement("canvas");
+blue.width = blue.height = 64;
+let streaming = false;
+window.__render = async (t) => {
+  const loaded = () => new Promise((r) => a.addEventListener("loadeddata", r, { once: true }));
+  if (a.readyState < 2) await loaded();
+  if (t < 0.5) {
+    await new Promise((r) => { a.addEventListener("seeked", r, { once: true }); a.currentTime = t; });
+  } else if (!streaming) {
+    streaming = true;
+    const g = blue.getContext("2d");
+    const stream = blue.captureStream();
+    g.fillStyle = "#00f";
+    g.fillRect(0, 0, 64, 64);
+    a.srcObject = stream;
+    await loaded();
+  }
+};
+</script></body></html>`,
+  );
+  const files = await filmStills({
+    page,
+    outDir: join(page, "stills"),
+    at: [0.25, 1],
+    chromePath: chrome!,
+    blur: false,
+  });
+  near(await pixel(files[0]!, 64, 64, 32, 32), [255, 0, 0], "before: red");
+  // the stream itself shows as it did before frames (paused by the film
+  // clock, it may show nothing): what matters is that the red is gone
+  const [r] = await pixel(files[1]!, 64, 64, 32, 32);
+  assert.ok(r! < 64, `given the stream, the file's red frame stays: red ${r}`);
 });
 
 test("a VideoFrame made of a video shown as its frames holds the frame the video shows", {

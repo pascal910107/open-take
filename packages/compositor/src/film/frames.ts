@@ -114,18 +114,31 @@ export async function decodeFrames(
   const { maxFrames, maxBytes, maxMs } = { ...BUDGET, ...budget };
   const deadline = Date.now() + maxMs;
   const slow = () => new Error(`its frames take longer than ${maxMs / 1000} seconds to decode`);
+  /** what is left of the time to decode in, the probe's included */
+  const left = () => {
+    const ms = deadline - Date.now();
+    if (ms <= 0) throw slow();
+    return ms;
+  };
+  const ffprobe = await resolveFfprobe();
   const probe = JSON.parse(
-    await runTool(await resolveFfprobe(), [
-      "-v",
-      "error",
-      "-select_streams",
-      "v:0",
-      "-show_streams",
-      "-show_format",
-      "-of",
-      "json",
-      file,
-    ]),
+    await runTool(
+      ffprobe,
+      [
+        "-v",
+        "error",
+        "-select_streams",
+        "v:0",
+        "-show_streams",
+        "-show_format",
+        "-of",
+        "json",
+        file,
+      ],
+      { timeoutMs: left() },
+    ).catch((e: Error) => {
+      throw Date.now() >= deadline ? slow() : e;
+    }),
   ) as { streams?: Stream[]; format?: { start_time?: string; duration?: string } };
   const s = probe.streams?.[0];
   if (!s) throw new Error(`ffmpeg found no picture in ${file}`);
@@ -146,10 +159,10 @@ export async function decodeFrames(
   // before 0 it moves to 0 (ffmpeg's -copyts keeps them as they are)
   const start = Number(probe.format?.start_time);
   const shift = start < 0 ? -start : 0;
-  if (Date.now() > deadline) throw slow();
 
   const frame = (i: number) => join(out, `${String(i).padStart(6, "0")}.${ext}`);
   const ffmpeg = await resolveFfmpeg();
+  left();
   return new Promise((ok, fail) => {
     const p = spawn(
       ffmpeg,
@@ -287,6 +300,19 @@ const MATRIX: Record<string, string> = {
   bt2020nc: "bt2020",
   bt2020c: "bt2020",
 };
+/** the primaries of a picture Chrome shows as it decodes: BT.709's and
+ *  BT.601's, or none named. Others (Display P3, DCI-P3, BT.2020, film…) it
+ *  maps to the screen itself */
+const SHOWN_AS_DECODED = new Set([
+  "",
+  "unknown",
+  "unspecified",
+  "reserved",
+  "bt709",
+  "bt470bg",
+  "smpte170m",
+  "smpte240m",
+]);
 /** the curves Chrome on macOS shows through Apple's gamma: BT.709's */
 const APPLE_CURVES = new Set(["bt709", "smpte170m", "bt2020-10", "bt2020-12"]);
 /** a channel of such a video as Chrome on macOS shows it: through Apple's
@@ -305,12 +331,14 @@ const APPLE = `if(lte(${LIGHT},0.0031308),12.92*${LIGHT},1.055*pow(val/maxval,1.
  *  size, and up to 640×480 for a picture that names nothing (which it takes
  *  for BT.601), it also moves the colours from SMPTE-C primaries, by up to 5
  *  of 255: left out. Elsewhere Chrome takes BT.709's curve for sRGB's: the
- *  picture as it decodes. HDR and wide gamut Chrome maps itself: such a
- *  video is sought. */
+ *  picture as it decodes. HDR and wide gamut — any primaries but BT.709's
+ *  and BT.601's — Chrome maps itself: such a video is sought. */
 function colours(s: Stream, alpha: boolean): { vf: string; bright: boolean } {
   const curve = s.color_transfer ?? "";
-  if (curve === "smpte2084" || curve === "arib-std-b67" || s.color_primaries === "bt2020")
-    throw new Error("its colours are HDR or wide gamut, which Chrome maps itself");
+  if (curve === "smpte2084" || curve === "arib-std-b67")
+    throw new Error("its colours are HDR, which Chrome maps itself");
+  if (!SHOWN_AS_DECODED.has(s.color_primaries ?? ""))
+    throw new Error(`its colours are in ${s.color_primaries} primaries, which Chrome maps itself`);
   const named = !!curve && !["unknown", "unspecified", "reserved"].includes(curve);
   const rgb = /^(a?rgb|a?bgr|gbr|0rgb|0bgr|x2|gray|ya|pal)/.test(s.pix_fmt ?? "");
   let matrix = MATRIX[s.color_space ?? ""] ?? "bt709";
