@@ -647,8 +647,13 @@ function installFilmClock(opts: FilmClockOptions): void {
           void showFrame(el, position(el) ?? n).then((shown) => {
             if (loads.get(el) !== load || lastSeek.get(el) !== seek) return;
             seeking.delete(el);
-            // read in the meantime: a real seek, which tells the page itself
-            if (!shown) return void seekTo.set!.call(el, n);
+            // read in the meantime, or its frame did not come: a real seek,
+            // which tells the page itself — of the video itself, not the
+            // frame it showed
+            if (!shown) {
+              unframe(el);
+              return void seekTo.set!.call(el, n);
+            }
             el.dispatchEvent(new Event("timeupdate"));
             el.dispatchEvent(new Event("seeked"));
           });
@@ -855,8 +860,9 @@ function installFilmClock(opts: FilmClockOptions): void {
     return lo;
   };
   // decoded frames, a few held: the ones shown and the next ones fetched
-  // ahead. One that has not come in 10 s (a service worker of the page's can
-  // hold its request) is null — its video is sought — and not kept
+  // ahead. One that fails, or has not come in 10 s (a service worker of the
+  // page's can hold its request), is null — its video is sought — and not
+  // kept
   const DECODE_MS = 10_000;
   const decoded = new Map<string, Promise<HTMLImageElement | null>>();
   const decodeFrame = (url: string): Promise<HTMLImageElement | null> => {
@@ -865,13 +871,26 @@ function installFilmClock(opts: FilmClockOptions): void {
     else {
       const im = new Image();
       im.src = url;
-      const coming = Promise.race([
+      // one the page's policy refuses, or that does not decode, is null too
+      const coming = new Promise<HTMLImageElement | null>((ok) => {
+        let done = false;
+        realSetTimeout(() => {
+          if (done) return;
+          done = true;
+          im.removeAttribute("src"); // asked no longer
+          ok(null);
+        }, DECODE_MS);
         im.decode().then(
-          () => im,
-          () => im,
-        ),
-        new Promise<null>((ok) => realSetTimeout(() => ok(null), DECODE_MS)),
-      ]);
+          () => {
+            if (!done) ok(im);
+            done = true;
+          },
+          () => {
+            if (!done) ok(null);
+            done = true;
+          },
+        );
+      });
       void coming.then((x) => {
         if (!x && decoded.get(url) === coming) decoded.delete(url);
       });
@@ -969,9 +988,11 @@ function installFilmClock(opts: FilmClockOptions): void {
         el.autoplay = false;
         realPause.call(el);
       }
-      // a stream (its source object) has no film time to seek: it shows what
-      // it is sent — waiting on a seek it cannot make cost 10 s an instant
-      if (el.srcObject) continue;
+      // a stream (a MediaStream as its source object) has no film time to
+      // seek: it shows what it is sent — waiting on a seek it cannot make
+      // cost 10 s an instant. A MediaSource (a worker's handle) is sought
+      const object = el.srcObject as { getTracks?: unknown } | null;
+      if (object && typeof object.getTracks === "function") continue;
       const at = position(el);
       if (at === null) continue;
       const load = loads.get(el);

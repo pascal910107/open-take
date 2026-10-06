@@ -728,6 +728,103 @@ window.__render = async (t) => {
   assert.ok(r! < 64, `given the stream, the file's red frame stays: red ${r}`);
 });
 
+test("a frame that does not come in time leaves the video to its own seek, and the page draws the video", {
+  skip,
+}, async () => {
+  const page = join(dir, "frame-timeout");
+  await exec("mkdir", ["-p", page]);
+  await numberedClip(join(page, "clip.mp4"));
+  await writeFile(
+    join(page, "index.html"),
+    `<!doctype html><html><body style="margin:0;width:128px;height:64px;background:#000">
+<video id="a" src="clip.mp4" muted style="position:absolute;left:0;top:0;width:64px;height:64px"></video>
+<canvas id="c" width="64" height="64" style="position:absolute;left:64px;top:0"></canvas>
+<script>
+window.__film = { duration: 2, width: 128, height: 64 };
+const a = document.getElementById("a"), c = document.getElementById("c").getContext("2d");
+// as a service worker that holds a request would, while stall is on
+const decode = HTMLImageElement.prototype.decode;
+let stall = false;
+HTMLImageElement.prototype.decode = function () {
+  return stall && this.src.includes("/__open-take/frames/") ? new Promise(() => {}) : decode.call(this);
+};
+window.__render = async (t) => {
+  if (a.readyState < 2) await new Promise((r) => a.addEventListener("loadeddata", r, { once: true }));
+  if (t < 0.5) {
+    await new Promise((r) => { a.addEventListener("seeked", r, { once: true }); a.currentTime = t; });
+    return;
+  }
+  stall = true;
+  await new Promise((r) => { a.addEventListener("seeked", r, { once: true }); a.currentTime = 1.55; });
+  stall = false;
+  c.drawImage(a, 0, 0, 64, 64);
+};
+</script></body></html>`,
+  );
+  const files = await filmStills({
+    page,
+    outDir: join(page, "stills"),
+    at: [0.25, 0.95],
+    chromePath: chrome!,
+    blur: false,
+  });
+  near(await pixel(files[1]!, 128, 64, 96, 32), colourOf(15), "drawn once its own seek is done");
+  near(await pixel(files[1]!, 128, 64, 32, 32), colourOf(15), "the video");
+});
+
+test("a page whose policy refuses images keeps its video, sought as before", { skip }, async () => {
+  const page = join(dir, "no-images");
+  await exec("mkdir", ["-p", page]);
+  await numberedClip(join(page, "clip.mp4"));
+  await writeFile(
+    join(page, "index.html"),
+    videoPage("clip.mp4", 64, 64).replace(
+      "<body",
+      `<meta http-equiv="Content-Security-Policy" content="img-src 'none'"><body`,
+    ),
+  );
+  const server = await serveDirectory(page);
+  const store = frameStore({ root: page, server });
+  let b: Awaited<ReturnType<typeof launchHtmlBrowser>> | null = null;
+  try {
+    b = await launchHtmlBrowser({
+      chromePath: chrome!,
+      url: `${server.url}/index.html`,
+      width: 64,
+      height: 64,
+      initScript: filmClockSource({ seed: 1, epochMs: 0 }),
+      stillAnimations: true,
+      bindings: {
+        __otFrames: (payload: string) => {
+          const { src } = JSON.parse(payload) as { src: string };
+          const reply = (f: VideoFrames | null) =>
+            b?.evaluate(`window.__ot.framesReady(${JSON.stringify(src)}, ${JSON.stringify(f)})`);
+          store.frames(src).then(reply, () => reply(null));
+        },
+      },
+    });
+    await b.evaluate("window.__ot.prepare()");
+    // the frames are decoded and offered, but the page may not load them: the
+    // video stays itself, at the time it was sought to — not a broken image
+    for (const t of [0.25, 0.95, 1.55]) {
+      await b.evaluate(`window.__ot.seek(${t})`);
+      const v = "document.getElementById('v')";
+      assert.equal(
+        await b.evaluate<boolean>(
+          `getComputedStyle(${v}).content.includes("/__open-take/frames/")`,
+        ),
+        false,
+        `at ${t}s it shows a frame's image the page refuses`,
+      );
+      assert.equal(await b.evaluate<number>(`Math.round(${v}.currentTime * 1000)`), t * 1000);
+    }
+  } finally {
+    await b?.close();
+    await store.clean();
+    await server.close();
+  }
+});
+
 test("a VideoFrame made of a video shown as its frames holds the frame the video shows", {
   skip,
 }, async () => {
