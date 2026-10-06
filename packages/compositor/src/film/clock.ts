@@ -516,6 +516,7 @@ function installFilmClock(opts: FilmClockOptions): void {
     media.delete(el);
     loads.set(el, (loads.get(el) ?? 0) + 1);
     seeking.delete(el);
+    frameAsked.delete(el);
     unframe(el);
     inserted.set(el, clock());
     // from where it got it — in a film that draws itself, from film time 0,
@@ -587,9 +588,11 @@ function installFilmClock(opts: FilmClockOptions): void {
     return Math.max(0, at);
   }
   // a video sought to its frame (below) reads as seeking until that frame is
-  // there, as one sought itself does until it has decoded it: the seek each
-  // video has under way, by number — a seek made while another is under way
-  // ends that one, as the element's own does
+  // there, as one sought itself does until it has decoded it. Seeks are
+  // numbered — the last one asked of each video, and the one to a frame that
+  // is under way: a later seek, to a frame or the element's own, ends that
+  // one, as the element's own does
+  const lastSeek = new WeakMap<HTMLMediaElement, number>();
   const seeking = new WeakMap<HTMLMediaElement, number>();
   let seekCount = 0;
   const realSeeking = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "seeking")!;
@@ -627,20 +630,22 @@ function installFilmClock(opts: FilmClockOptions): void {
         m.playing = true;
       } else m.at = n;
       m.touched = true;
-      if (virtual) {
+      const seek = ++seekCount;
+      lastSeek.set(this, seek);
+      if (!virtual) seeking.delete(this);
+      else {
         // as a real seek does: seeking at once, then seeked once the frame is
         // there — the events in a later task, so a listener added right after
         // the set still hears them. One loaded or sought again in the
         // meantime says no more: loading or a later seek ends it
         const el = this as HTMLVideoElement;
         const load = loads.get(el);
-        const seek = ++seekCount;
         seeking.set(el, seek);
         realSetTimeout(() => {
           if (loads.get(el) !== load) return;
           el.dispatchEvent(new Event("seeking"));
           void showFrame(el, position(el) ?? n).then((shown) => {
-            if (loads.get(el) !== load || seeking.get(el) !== seek) return;
+            if (loads.get(el) !== load || lastSeek.get(el) !== seek) return;
             seeking.delete(el);
             // read in the meantime: a real seek, which tells the page itself
             if (!shown) return void seekTo.set!.call(el, n);
@@ -849,18 +854,28 @@ function installFilmClock(opts: FilmClockOptions): void {
     }
     return lo;
   };
-  // decoded frames, a few held: the ones shown and the next ones fetched ahead
-  const decoded = new Map<string, Promise<HTMLImageElement>>();
-  const decodeFrame = (url: string): Promise<HTMLImageElement> => {
+  // decoded frames, a few held: the ones shown and the next ones fetched
+  // ahead. One that has not come in 10 s (a service worker of the page's can
+  // hold its request) is null — its video is sought — and not kept
+  const DECODE_MS = 10_000;
+  const decoded = new Map<string, Promise<HTMLImageElement | null>>();
+  const decodeFrame = (url: string): Promise<HTMLImageElement | null> => {
     let p = decoded.get(url);
     if (p) decoded.delete(url);
     else {
       const im = new Image();
       im.src = url;
-      p = im.decode().then(
-        () => im,
-        () => im,
-      );
+      const coming = Promise.race([
+        im.decode().then(
+          () => im,
+          () => im,
+        ),
+        new Promise<null>((ok) => realSetTimeout(() => ok(null), DECODE_MS)),
+      ]);
+      void coming.then((x) => {
+        if (!x && decoded.get(url) === coming) decoded.delete(url);
+      });
+      p = coming;
     }
     decoded.set(url, p);
     while (decoded.size > 8) decoded.delete(decoded.keys().next().value!);
@@ -868,18 +883,20 @@ function installFilmClock(opts: FilmClockOptions): void {
   };
   const frameUrl = (f: NonNullable<Frames>, i: number) =>
     `${f.base}${String(i).padStart(6, "0")}.${f.ext}`;
-  /** the frames asked of each video, the last one asked last: a frame shows
-   *  only after those asked before it, so a slow one asked earlier never
-   *  covers a later one */
+  /** the frames asked of each video since it was last loaded, the last one
+   *  asked last: a frame shows only after those asked before it, so a slow
+   *  one asked earlier never covers a later one */
   const frameAsked = new WeakMap<HTMLMediaElement, Promise<unknown>>();
   /** show the video at `at` seconds as its frame; false when it cannot be,
-   *  or when it is read or loaded again while its frame comes */
+   *  or when it is read or loaded again while its frame comes — said at once
+   *  when there is no frame to show */
   function showFrame(el: HTMLVideoElement, at: number): Promise<boolean> {
     const before = frameAsked.get(el);
     const load = loads.get(el);
     const shown = frameOf(el, at).then(async (frame) => {
+      if (!frame) return false;
       await before;
-      if (!frame || readers.has(el) || loads.get(el) !== load) return false;
+      if (readers.has(el) || loads.get(el) !== load) return false;
       if (asFrame.get(el) !== frame.url) {
         el.style.setProperty("content", `url("${frame.url}")`, "important");
         asFrame.set(el, frame.url);
@@ -892,9 +909,10 @@ function installFilmClock(opts: FilmClockOptions): void {
         });
       return true;
     });
+    // the next one asked shows after this one, and after those before it
     frameAsked.set(
       el,
-      shown.catch(() => {}),
+      Promise.all([before, shown]).catch(() => {}),
     );
     return shown;
   }
@@ -915,6 +933,7 @@ function installFilmClock(opts: FilmClockOptions): void {
     const url = frameUrl(f, i);
     const im = await decodeFrame(url);
     for (let k = 1; k <= 2 && i + k < f.times.length; k++) void decodeFrame(frameUrl(f, i + k));
+    if (!im) return null;
     return { url, shown: { im, at: f.times[i]!, bright: !!f.bright } };
   }
   function seekVideo(el: HTMLVideoElement, at: number): Promise<void> {
@@ -950,6 +969,9 @@ function installFilmClock(opts: FilmClockOptions): void {
         el.autoplay = false;
         realPause.call(el);
       }
+      // a stream (its source object) has no film time to seek: it shows what
+      // it is sent — waiting on a seek it cannot make cost 10 s an instant
+      if (el.srcObject) continue;
       const at = position(el);
       if (at === null) continue;
       const load = loads.get(el);

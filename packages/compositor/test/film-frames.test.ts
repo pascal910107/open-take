@@ -519,6 +519,46 @@ window.__render = async (t) => {
   near(await pixel(files[1]!, 128, 64, 96, 32), colourOf(2), "drawn once the seeks are done");
 });
 
+test("a seek of the element's own, once the page reads the video frame by frame, ends a seek to a frame under way", {
+  skip,
+}, async () => {
+  const page = join(dir, "seek-handoff");
+  await exec("mkdir", ["-p", page]);
+  await numberedClip(join(page, "clip.mp4"));
+  await writeFile(
+    join(page, "index.html"),
+    `<!doctype html><html><body style="margin:0;width:128px;height:64px;background:#000">
+<video id="a" src="clip.mp4" muted style="position:absolute;left:0;top:0;width:64px;height:64px"></video>
+<canvas id="c" width="64" height="64" style="position:absolute;left:64px;top:0"></canvas>
+<script>
+window.__film = { duration: 2, width: 128, height: 64 };
+const a = document.getElementById("a"), c = document.getElementById("c").getContext("2d");
+window.__render = async (t) => {
+  if (a.readyState < 2) await new Promise((r) => a.addEventListener("loadeddata", r, { once: true }));
+  if (t < 0.5) {
+    await new Promise((r) => { a.addEventListener("seeked", r, { once: true }); a.currentTime = t; });
+    return;
+  }
+  // shown as its frames: a seek to a far frame; then the page reads the video
+  // frame by frame (sought from now on) and seeks it back
+  a.currentTime = 1.85;
+  a.requestVideoFrameCallback(() => {});
+  await new Promise((r) => { a.addEventListener("seeked", r, { once: true }); a.currentTime = 0.25; });
+  c.drawImage(a, 0, 0, 64, 64);
+};
+</script></body></html>`,
+  );
+  const files = await filmStills({
+    page,
+    outDir: join(page, "stills"),
+    at: [0.25, 0.95],
+    chromePath: chrome!,
+    blur: false,
+  });
+  near(await pixel(files[1]!, 128, 64, 96, 32), colourOf(2), "drawn once its own seek is done");
+  near(await pixel(files[1]!, 128, 64, 32, 32), colourOf(2), "the video, where it was sought last");
+});
+
 test("a video whose picture starts late shows each frame from its own time, as Chrome does", {
   skip,
 }, async () => {
@@ -627,6 +667,63 @@ window.__render = async (t) => {
   near(await pixel(files[0]!, 64, 64, 32, 32), [255, 0, 0], "before: red");
   // the stream itself shows as it did before frames (paused by the film
   // clock, it may show nothing): what matters is that the red is gone
+  const [r] = await pixel(files[1]!, 64, 64, 32, 32);
+  assert.ok(r! < 64, `given the stream, the file's red frame stays: red ${r}`);
+});
+
+test("a frame that never comes holds up neither its video's new source nor the render", {
+  skip,
+}, async () => {
+  const page = join(dir, "stalled-frame");
+  await exec("mkdir", ["-p", page]);
+  await flatClip(join(page, "red.mp4"), "red");
+  await writeFile(
+    join(page, "index.html"),
+    `<!doctype html><html><body style="margin:0;background:#000">
+<video id="a" src="red.mp4" muted style="position:absolute;left:0;top:0;width:64px;height:64px"></video>
+<script>
+window.__film = { duration: 2, width: 64, height: 64 };
+const a = document.getElementById("a");
+// as a service worker that holds a request would: from now on the frames'
+// images never decode
+const decode = HTMLImageElement.prototype.decode;
+let stall = false, stalled = false;
+HTMLImageElement.prototype.decode = function () {
+  if (!stall || !this.src.includes("/__open-take/frames/")) return decode.call(this);
+  stalled = true;
+  return new Promise(() => {});
+};
+const blue = document.createElement("canvas");
+blue.width = blue.height = 64;
+let streaming = false;
+window.__render = async (t) => {
+  const loaded = () => new Promise((r) => a.addEventListener("loadeddata", r, { once: true }));
+  if (a.readyState < 2) await loaded();
+  if (t < 0.5) {
+    await new Promise((r) => { a.addEventListener("seeked", r, { once: true }); a.currentTime = t; });
+  } else if (!streaming) {
+    streaming = true;
+    stall = true;
+    a.currentTime = 1.55;
+    for (let i = 0; i < 100 && !stalled; i++) await new Promise((r) => setTimeout(r, 1));
+    const g = blue.getContext("2d");
+    const stream = blue.captureStream();
+    g.fillStyle = "#00f";
+    g.fillRect(0, 0, 64, 64);
+    a.srcObject = stream;
+    await loaded();
+    a.play();
+  }
+};
+</script></body></html>`,
+  );
+  const files = await filmStills({
+    page,
+    outDir: join(page, "stills"),
+    at: [0.25, 1],
+    chromePath: chrome!,
+    blur: false,
+  });
   const [r] = await pixel(files[1]!, 64, 64, 32, 32);
   assert.ok(r! < 64, `given the stream, the file's red frame stays: red ${r}`);
 });
