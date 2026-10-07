@@ -26,7 +26,7 @@ import { existsSync, statSync } from "node:fs";
 import { copyFile, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { cpus, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { resolveFfmpeg, resolveFfprobe, runTool } from "../ffmpeg";
+import { resolveFfmpeg, resolveFfprobe, runTool, SRGB_TAG_ARGS, SRGB_TAGS } from "../ffmpeg";
 import { type HtmlBrowser, launchHtmlBrowser } from "../html/cdp";
 import { serveDirectory } from "../html/server";
 import { jpegDimensions, matroskaCluster, matroskaHead } from "../mjpeg-matroska";
@@ -823,7 +823,10 @@ export async function patchFilm(
       graph += `[0:v]trim=start_frame=${b},setpts=PTS-STARTPTS[after];`;
       parts.push("[after]");
     }
-    graph += `${parts.join("")}concat=n=${parts.length}:v=1:a=0,format=yuv420p[v]`;
+    // named as a master is named, whatever the master said: one `film render`
+    // made before named BT.709's curve (or, on ffmpeg 8, none) for the same
+    // sRGB values, and a patched master must not name two
+    graph += `${parts.join("")}concat=n=${parts.length}:v=1:a=0,format=yuv420p,${SRGB_TAGS}[v]`;
     const record = { ...(await probeFilm(range)).record, from: 0 };
     const out = join(tmp, "patched.mp4");
     // the same encoding as a master (see encodeArgs)
@@ -851,14 +854,7 @@ export async function patchFilm(
       "14",
       "-x264-params",
       `keyint=${Math.round(r.fps) * 2}:min-keyint=1:aq-mode=3`,
-      "-colorspace",
-      "bt709",
-      "-color_primaries",
-      "bt709",
-      "-color_trc",
-      "bt709",
-      "-color_range",
-      "tv",
+      ...SRGB_TAG_ARGS,
       "-metadata",
       `${FILM_TAG}=${JSON.stringify(record)}`,
       "-movflags",
@@ -1415,7 +1411,9 @@ function encodeArgs(film: Film, out: string, draft: boolean): string[] {
     "-i",
     "-",
     "-vf",
-    "pad=ceil(iw/2)*2:ceil(ih/2)*2,scale=out_color_matrix=bt709:out_range=tv:flags=accurate_rnd+full_chroma_int,format=yuv420p",
+    // the screenshots' sRGB values as limited-range BT.709, rounded exactly
+    // and named sRGB (see SRGB_TAGS)
+    `pad=ceil(iw/2)*2:ceil(ih/2)*2,scale=out_color_matrix=bt709:out_range=tv:flags=accurate_rnd+full_chroma_int,format=yuv420p,${SRGB_TAGS}`,
     "-c:v",
     "libx264",
     "-preset",
@@ -1424,14 +1422,7 @@ function encodeArgs(film: Film, out: string, draft: boolean): string[] {
     draft ? "23" : "14",
     "-x264-params",
     `keyint=${film.fps * 2}:min-keyint=1:aq-mode=3`,
-    "-colorspace",
-    "bt709",
-    "-color_primaries",
-    "bt709",
-    "-color_trc",
-    "bt709",
-    "-color_range",
-    "tv",
+    ...SRGB_TAG_ARGS,
     "-y",
     out,
   ];

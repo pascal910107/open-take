@@ -31,7 +31,7 @@ import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { renderVideo } from "@open-take/revideo-renderer";
 import { isCaptureUndecodable } from "./decode-guard";
-import { ffmpegHasEncoder, resolveFfmpeg, resolveFfprobe } from "./ffmpeg";
+import { ffmpegHasEncoder, resolveFfmpeg, resolveFfprobe, SRGB_TAGS } from "./ffmpeg";
 import { type PlanOpts, planComposition } from "./plan";
 import { withRenderLock } from "./render-lock";
 import {
@@ -171,7 +171,9 @@ async function toMp4(
  *  converts the scene's RGB frames with swscale's default bt601 matrix, so
  *  the intermediate is 601-coded. Convert to bt709 and tag it — verified by
  *  round-tripping primaries (601-coded red merely tagged 709 decodes to
- *  rgb(255,24,0); converted it decodes to rgb(252,0,0)). */
+ *  rgb(255,24,0); converted it decodes to rgb(252,0,0)). It rounds exactly
+ *  (swscale's fast path rounds down), and the values are the scene's sRGB
+ *  ones, so it names sRGB's curve (see SRGB_TAGS). */
 async function deliverMp4(
   inMov: string,
   outMp4: string,
@@ -184,9 +186,9 @@ async function deliverMp4(
     vf.push(`tmix=frames=${M}`, `fps=${baseFps}`);
   }
   vf.push(
-    "scale=in_color_matrix=bt601:out_color_matrix=bt709",
+    "scale=in_color_matrix=bt601:out_color_matrix=bt709:flags=accurate_rnd+full_chroma_int",
     "format=yuv420p",
-    "setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709",
+    SRGB_TAGS,
   );
   await run(await resolveFfmpeg(), [
     "-y",

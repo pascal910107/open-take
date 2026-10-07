@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { renderVideo } from "@open-take/revideo-renderer";
-import { resolveFfmpeg, resolveFfprobe } from "./ffmpeg";
+import { resolveFfmpeg, resolveFfprobe, SRGB_TAGS } from "./ffmpeg";
 import { launchAudioAtS, launchDurationS } from "./launch-evaluate";
 import type { LaunchAudioTrack, LaunchComposition, LaunchIssue } from "./launch-types";
 import { formatLaunchIssues, validateLaunchComposition } from "./launch-validate";
@@ -729,7 +729,8 @@ export async function deliverLaunchMedia(
       `launch render: renderer produced ${rawMedia.videoDuration.toFixed(6)}s of video for an authored ${total.toFixed(6)}s film; only one output frame (${frameDuration.toFixed(6)}s) of rounding is allowed. Re-render the complete composition before delivery.`,
     );
   }
-  const videoFilter = `tpad=stop_mode=clone:stop_duration=${frameDuration},scale=in_color_matrix=bt601:out_color_matrix=bt709,format=yuv420p,setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709`;
+  // the scene's sRGB values, rounded exactly into BT.709 and named sRGB (see SRGB_TAGS)
+  const videoFilter = `tpad=stop_mode=clone:stop_duration=${frameDuration},scale=in_color_matrix=bt601:out_color_matrix=bt709:flags=accurate_rnd+full_chroma_int,format=yuv420p,${SRGB_TAGS}`;
   const args = ["-y", "-loglevel", "error", "-i", raw];
   const loopSamples: (number | undefined)[] = [];
   for (const track of tracks) {

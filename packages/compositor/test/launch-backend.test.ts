@@ -422,6 +422,9 @@ async function probe(path: string) {
       codec_name: string;
       pix_fmt?: string;
       color_space?: string;
+      color_range?: string;
+      color_transfer?: string;
+      color_primaries?: string;
       width?: number;
       height?: number;
     }[];
@@ -459,7 +462,7 @@ function rms(data: Float32Array, from: number, to: number): number {
   return Math.sqrt(sum / (b - a));
 }
 
-test("actual FFmpeg delivery retains silent authored duration with H264 709 yuv420p", async () => {
+test("actual FFmpeg delivery retains silent authored duration with H264 709 yuv420p, named sRGB's curve", async () => {
   const c = comp(),
     path = join(dir, "silent.mp4");
   await deliverLaunchMedia(join(dir, "video.mp4"), path, c, join(dir, "launch.json"));
@@ -469,6 +472,11 @@ test("actual FFmpeg delivery retains silent authored duration with H264 709 yuv4
   assert.equal(video.codec_name, "h264");
   assert.equal(video.pix_fmt, "yuv420p");
   assert.equal(video.color_space, "bt709");
+  // the scene's sRGB values: named BT.709's curve, Chrome on macOS shows them lighter
+  assert.deepEqual(
+    [video.color_range, video.color_primaries, video.color_transfer],
+    ["tv", "bt709", "iec61966-2-1"],
+  );
   assert.equal(video.width, 160);
   assert.equal(video.height, 90);
   assert.equal(

@@ -28,6 +28,7 @@ import {
   MOTION,
   type MotionName,
   type ReviewBadge,
+  SRGB_TAGS,
   type TakeComposition,
   ZOOM_LEVELS,
   type ZoomLevelName,
@@ -544,7 +545,9 @@ export async function renderBeforeAfter(
   const cut = async (src: string, out: string) => {
     const args = ["-y", "-loglevel", "error", "-i", src];
     if (win) args.push("-ss", String(win[0] / 1000), "-t", String((win[1] - win[0]) / 1000));
-    args.push("-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p", "-an", out);
+    // the masters' values, named as the masters are (an older one named
+    // BT.709's curve for the same sRGB values)
+    args.push("-vf", SRGB_TAGS, "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p", "-an", out);
     await ffmpeg(args);
   };
   const before = takeFile(take, "ab.before.mp4");
@@ -602,7 +605,7 @@ async function concatWithGaps(
     seq.push(`[${i}:v]`);
     if (i < clips.length - 1) seq.push(gapUses > 1 ? `[g${i}]` : `[${gapIdx}:v]`);
   });
-  const filter = `${split}${seq.join("")}concat=n=${seq.length}:v=1:a=0[v]`;
+  const filter = `${split}${seq.join("")}concat=n=${seq.length}:v=1:a=0,${SRGB_TAGS}[v]`;
   args.push(
     "-filter_complex",
     filter,

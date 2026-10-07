@@ -22,6 +22,7 @@ export {
   resolveFfprobe,
   resolveManagedFfmpeg,
   resolveManagedFfprobe,
+  SRGB_TAGS,
 } from "./ffmpeg";
 export {
   type FilmBeats,

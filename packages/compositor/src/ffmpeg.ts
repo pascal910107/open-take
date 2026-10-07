@@ -364,6 +364,32 @@ function resolveCached(tool: Tool): Promise<string> {
 export const resolveFfmpeg = (): Promise<string> => resolveCached("ffmpeg");
 export const resolveFfprobe = (): Promise<string> => resolveCached("ffprobe");
 
+/** What every delivered video is, as a filter that names it: limited-range
+ *  BT.709 values with BT.709 primaries and sRGB's curve (iec61966-2-1). The
+ *  pictures are screenshots and pages — sRGB — and the encode keeps their
+ *  values; Chrome on macOS shows a video that names BT.709's curve, or none,
+ *  through Apple's gamma (1.961), not as it decodes — grey 128 came out 139,
+ *  #1d4d3c 32,86,70 — while one named sRGB shows as it decodes, as QuickTime
+ *  does. It goes in the filter graph, after the conversion: ffmpeg 7+ takes
+ *  an encoder's colour fields from its frames, over `-color_trc` and the
+ *  rest, so on ffmpeg 8 a film named only by those flags came out with no
+ *  curve or primaries at all. (The runtime names its captures the same way —
+ *  see runtime/src/cdp.ts encodeFrames.) */
+export const SRGB_TAGS =
+  "setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=iec61966-2-1";
+
+/** The encoder flags that name the same (for an ffmpeg that reads them). */
+export const SRGB_TAG_ARGS: readonly string[] = [
+  "-colorspace",
+  "bt709",
+  "-color_primaries",
+  "bt709",
+  "-color_trc",
+  "iec61966-2-1",
+  "-color_range",
+  "tv",
+];
+
 /** True when an `ffmpeg -encoders` table has a video-encoder ROW named
  *  `encoder` (" V....D libx264  ..."), not merely the name as a substring
  *  somewhere — descriptions repeat encoder names constantly. */
