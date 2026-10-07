@@ -35,10 +35,12 @@ import {
   ensureChrome,
   filmListen,
   filmPicture,
+  filmProbe,
   filmSheet,
   filmStills,
   formatFilmCheck,
   formatFilmListen,
+  formatFilmProbe,
   formatIssues,
   formatNotes,
   formatTakeStates,
@@ -112,6 +114,7 @@ const BOOL_FLAGS = new Set([
   "--skip-permissions",
   "--no-teaser",
   "--states",
+  "--no-product-audio",
   "--json",
   "--no-blur",
   "--no-render",
@@ -167,6 +170,7 @@ const FLAGS_BY_CMD: Record<string, string[]> = {
     "--headed",
     "--verbose",
     "--states",
+    "--no-product-audio",
     "--no-render",
   ],
   render: [
@@ -241,7 +245,7 @@ const USAGE = `open-take — agent-native demo recorder
 
 Usage:
   open-take inspect <url> [--viewport 1920x1080]
-  open-take make   --plan <plan.json> --out <out.mp4> [--fps 60] [--draft] [--no-open] [--states] [--no-render]
+  open-take make   --plan <plan.json> --out <out.mp4> [--fps 60] [--draft] [--no-open] [--states] [--no-product-audio] [--no-render]
   open-take render <take> [--review] [--draft] [--open] [--reveal] [--no-open] [--no-strict]
   open-take check  <take> [--no-strict]
   open-take beats  <take> [--card]
@@ -272,6 +276,7 @@ Usage:
   open-take film sheet  <film.mp4> [--out sheet.png] [--every <s> | --at <s>,<s>…]
   open-take film listen <film.mp4|score.wav> [--events <events.json>] [--stems <dir>] [--out <dir>]
                    [--every <s>] [--clips]
+  open-take film probe  <film.mp4> [--events <events.json>] [--out <dir>] [--every <s>]
   open-take film check  <film.mp4> [--size 1920x1080] [--fps 60] [--page <page.html|dir> [--root <dir>]]
                    [--json]
 
@@ -506,7 +511,15 @@ Usage:
           sections, bars repeated verbatim, pauses, which events have no
           sound within 40 ms, cut-to-onset offsets, with --stems how many dB
           each event's sound sits over the rest), each line measured,
-          estimated or not detected — never a grade; \`film check\` measures a finished
+          estimated or not detected — never a grade; \`film probe\` the film's
+          picture as information: probe.png (how much the picture changes each
+          frame, still stretches, shots, cuts per 5 s, each big change of
+          picture with what it carries across — something that stays or
+          moves on, only the background, nothing — cut-to-onset offsets,
+          when a subject the page declared leaves the frame, marked with the
+          sheet's times, then before/after thumbnails of every change) and
+          probe.md, each line measured, estimated or not detected — no
+          score; \`film check\` measures a finished
           film: format, hitches, cadence, cuts, flashes (a few frames unlike
           the frames on both sides), shots that start on near-blank frames,
           black frames, loudness, clicks. With --page (the film's page) it
@@ -541,6 +554,11 @@ Usage:
               adds a few hundred ms of take time per state (reported). Each
               state is fidelity-checked against a live screenshot; one that
               fails stays on disk, marked failed — use the recording there.
+  --no-product-audio   (make) don't record the app's own sound. By default
+              everything the page sends to its speakers is recorded onto the
+              capture timeline as <name>.take/product-audio.wav, and the audio
+              files it fetched are listed in product-sound.json (small ones
+              saved to product-sounds/). A silent page leaves no files.
   --no-strict (make/render/check) exit 0 even when plan steps were skipped
               (target not found, or a navigate destination that didn't
               resolve) or a post-shoot check found an error (mis-drawn cursor,
@@ -1134,6 +1152,7 @@ async function main() {
     const profile = flag("--profile");
     const headed = has("--headed");
     const states = has("--states");
+    const productAudio = !has("--no-product-audio");
     // a re-make (re-shoot) is a new generation: keep the old master as prev so
     // --before-after compares against the take the user just reacted to — and
     // keep the old COMPOSITION too: a re-make re-plans from the new capture, so
@@ -1164,7 +1183,7 @@ async function main() {
           );
           if (!has("--no-open")) openPath(p);
         },
-        ...(fps || captureScale || profile || headed || states
+        ...(fps || captureScale || profile || headed || states || !productAudio
           ? {
               capture: {
                 ...(fps ? { fps } : {}),
@@ -1172,6 +1191,7 @@ async function main() {
                 ...(profile ? { userDataDir: profileDir(profile) } : {}),
                 ...(headed ? { headless: false } : {}),
                 ...(states ? { states: true } : {}),
+                ...(productAudio ? {} : { productAudio: false }),
               },
             }
           : {}),
@@ -1239,6 +1259,9 @@ async function main() {
           (existsSync(join(takeDir, "states"))
             ? `states:      ${join(takeDir, "states")}/      (\`${INVOKE} states ${takeDir}\` lists them)\n`
             : "") +
+          (existsSync(join(takeDir, "product-sound.json"))
+            ? `product sound: ${join(takeDir, "product-sound.json")}\n`
+            : "") +
           `master it later: ${INVOKE} render ${takeDir}\n`,
       );
     else
@@ -1247,6 +1270,9 @@ async function main() {
           `working dir: ${takeDir}/      (everything below lives here)\n` +
           `composition: ${compositionPath}\n` +
           `capture:     ${capturePath}\ncapture log: ${captureLogPath}\n` +
+          (existsSync(join(takeDir, "product-sound.json"))
+            ? `product sound: ${join(takeDir, "product-sound.json")}\n`
+            : "") +
           dossierLine +
           `\nrefine by asking your agent for changes — or directly:\n` +
           `  ${INVOKE} frames ${mp4Path}            (beat-aware contact sheet — verify first)\n` +
@@ -1821,7 +1847,7 @@ async function main() {
     const target = positional[1];
     if (!action || !target || positional.length !== 2)
       throw new Error(
-        "film: expected init <dir>, render <page>, still <page> --at <s>, picture <state.html>, sheet <film.mp4>, listen <film.mp4>, check <film.mp4> or mux <film.mp4> --audio <file>",
+        "film: expected init <dir>, render <page>, still <page> --at <s>, picture <state.html>, sheet <film.mp4>, listen <film.mp4>, probe <film.mp4>, check <film.mp4> or mux <film.mp4> --audio <file>",
       );
     const only = (...allowed: string[]) => {
       for (const f of Object.keys(flags))
@@ -1993,6 +2019,20 @@ async function main() {
       );
       return;
     }
+    if (action === "probe") {
+      only("--events", "--out", "--every");
+      const r = await filmProbe({
+        input: target,
+        out: flag("--out"),
+        events: flag("--events"),
+        every: num("--every"),
+        chromePath: await ensureChrome(),
+      });
+      process.stdout.write(
+        `${formatFilmProbe(r.probe)}\n\nprobe: ${r.pages.length ? r.pages.join("\n       ") : "(no picture)"}\n       ${r.md}\n       ${r.json}\n`,
+      );
+      return;
+    }
     if (action === "check") {
       only("--size", "--fps", "--json", "--page", "--root", "--verbose");
       const page = flag("--page");
@@ -2011,7 +2051,9 @@ async function main() {
       if (c.issues.some((i) => i.severity === "error")) process.exitCode = 1;
       return;
     }
-    throw new Error(`film: unknown action ${action} — render, still, sheet, listen or check`);
+    throw new Error(
+      `film: unknown action ${action} — render, still, sheet, listen, probe or check`,
+    );
   }
 
   if (cmd === "--version" || cmd === "-v") {

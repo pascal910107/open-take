@@ -42,6 +42,12 @@ export {
 } from "./film/listen";
 export { type FilmPictureOptions, filmPicture } from "./film/picture";
 export {
+  type FilmProbe,
+  type FilmProbeOptions,
+  filmProbe,
+  formatFilmProbe,
+} from "./film/probe";
+export {
   type FilmProgress,
   type FilmRenderOptions,
   type FilmRenderResult,

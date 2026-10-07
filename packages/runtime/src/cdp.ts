@@ -285,6 +285,15 @@ export async function launchBrowser(opts: {
       "--disable-background-networking",
       "--disable-features=Translate,AcceptCHFrame,MediaRouter,OptimizationHints",
       "--mute-audio",
+      // Audio renders to a fake, timer-driven output, never the machine's own
+      // speakers. Every AudioContext's clock (and every playing media
+      // element's) is paced by the output device; when the host's device
+      // stops pulling — a stalled CoreAudio output (seen on a Mac whose
+      // default output is a DisplayPort monitor: afplay hung too), a CI box
+      // with no sound card — each context sits "running" at
+      // currentTime ≈ 0.005 forever, the page plays nothing and the take
+      // loses ALL product audio (product-audio.ts). The fake output always runs.
+      "--disable-audio-output",
       "about:blank",
     ],
     { stdio: ["ignore", "ignore", "pipe"] },

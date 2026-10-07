@@ -58,6 +58,11 @@ import {
 import { resolveNavigateUrl } from "./nav";
 import { PrecheckRefusal, precheckPlan } from "./precheck";
 import {
+  type ProductAudioRecorder,
+  type ProductSoundReport,
+  startProductAudio,
+} from "./product-audio";
+import {
   DEFAULT_SETTLE_BUDGET_MS,
   installActivityProbe,
   makeBudgetGovernor,
@@ -297,6 +302,11 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
     const { cdp } = browser;
     await cdp.send("Page.enable");
     await cdp.send("Runtime.enable");
+    // The product's own sound (on unless opted out): taps every AudioContext
+    // and playing media element from the first document on — see
+    // product-audio.ts. Installing can only fail into a note, never the take.
+    const productAudio: ProductAudioRecorder | null =
+      opts.productAudio === false ? null : await startProductAudio(cdp);
     // Grow the window so the natural viewport == requested (headless reserves
     // window chrome). This — NOT a metrics override — keeps the captured frame,
     // the viewport, and the event coordinate space all the same size (the
@@ -1225,6 +1235,9 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
     // a rejection from going unhandled while the states finish.
     const encoded = encodeFrames(screencast.frames, tEndMs + 400, out, fps);
     encoded.catch(() => {});
+    const sound = productAudio
+      ? productAudio.finish({ t0, endMs: tEndMs + 400, dir: dirname(out) })
+      : Promise.resolve(null);
     let stateItems: DomStateItem[] | undefined;
     if (statesDir && (states.length || movingStates.length)) {
       try {
@@ -1246,6 +1259,8 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
       }
     }
     await encoded;
+    const soundReport = await sound;
+    if (soundReport) console.error(summarizeProductSound(soundReport));
 
     const probe = await ffprobe(out);
     // Space-integrity check: the whole pipeline maps coordinates viewport →
@@ -1299,6 +1314,24 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
     await browser?.close();
     rmSync(frameDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
+}
+
+/** One stderr paragraph on what the product's sound left in the take. */
+function summarizeProductSound(r: ProductSoundReport): string {
+  const lines: string[] = [];
+  if (r.audio)
+    lines.push(
+      `product audio: ${r.audio.file} — sound at ${r.audio.soundAt.length} moment(s), peak ${r.audio.peakDbfs} dBFS (placement estimated; see product-sound.json)`,
+    );
+  else lines.push("product audio: not detected (the page sent nothing to its speakers)");
+  if (r.files.length) {
+    const saved = r.files.filter((f) => f.saved).length;
+    lines.push(
+      `product sound files: the page fetched ${r.files.length} audio file(s)${saved ? `, ${saved} saved to product-sounds/` : ""}`,
+    );
+  }
+  for (const n of r.notes) lines.push(`product audio: ${n}`);
+  return lines.join("\n");
 }
 
 // Navigate and wait for load (bounded) so the first frame isn't a blank page.

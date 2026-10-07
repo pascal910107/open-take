@@ -43,10 +43,12 @@ export {
   checkFilm,
   filmListen,
   filmPicture,
+  filmProbe,
   filmSheet,
   filmStills,
   formatFilmCheck,
   formatFilmListen,
+  formatFilmProbe,
   formatIssues,
   initFilm,
   muxFilm,
@@ -323,6 +325,13 @@ async function makeTakeIn(
   await rm(statesDst, { recursive: true, force: true });
   const statesSrc = join(work, "states");
   if (raw.states && existsSync(statesSrc)) await cp(statesSrc, statesDst, { recursive: true });
+  // The product's own sound, same rule: what an earlier make heard belonged to
+  // that capture's clock, so it goes even when this one heard nothing.
+  for (const name of ["product-audio.wav", "product-sound.json", "product-sounds"]) {
+    await rm(join(take.dir, name), { recursive: true, force: true });
+    const src = join(work, name);
+    if (existsSync(src)) await cp(src, join(take.dir, name), { recursive: true });
+  }
   try {
     opts.onCaptureReady?.(capturePath);
   } catch {

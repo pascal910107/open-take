@@ -544,6 +544,13 @@ export type CaptureOpts = {
    *  state (reported). Lands in `states/` beside the capture video, and on
    *  the log as `states` + per-event `state`/`target`. Default false. */
   states?: boolean;
+  /** PRODUCT AUDIO: record what the page sends to its speakers (every
+   *  AudioContext and playing media element) onto the capture timeline, and
+   *  list the audio files it fetched — `product-audio.wav`,
+   *  `product-sound.json` and `product-sounds/` beside the capture video (see
+   *  runtime/src/product-audio.ts). Nothing is created on a silent page; a
+   *  failure is a note, never a failed take. Default true. */
+  productAudio?: boolean;
 };
 
 /** Drive `plan` against the live app over CDP, return the ground-truth log. */
