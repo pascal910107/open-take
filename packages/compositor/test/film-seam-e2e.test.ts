@@ -8,9 +8,12 @@
 // moves at the swap and what differs there is no more than `make` measured at
 // the seam, the lifted card's first frame is the card where the page had it,
 // and the result shows on screen at its measured time, not the click's.
-// The recording's colours against the state's are checked apart (a todo on
-// macOS — see that test). Chrome for Testing; skipped without it. The take is
-// recorded by fixtures/seam-film/record.ts.
+// The recording's colours against the state's are checked apart, for the take
+// as the runtime records it (sRGB's curve named) and for one it recorded
+// before (BT.709's named, which Chrome on macOS shows through Apple's gamma).
+// Chrome for Testing; skipped without it. The take is recorded by
+// fixtures/seam-film/record.ts; take-bt709 is the same take as the runtime
+// recorded it up to 0.5.3, kept as it was.
 
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
@@ -37,10 +40,17 @@ const { FPS, WIDTH: W, HEIGHT: H } = plan as { FPS: number; WIDTH: number; HEIGH
 type Box = { x: number; y: number; width: number; height: number };
 
 let dir = "";
+/** the film of the take the runtime recorded before it named sRGB's curve */
+let older = "";
 before(async () => {
   dir = await mkdtemp(join(tmpdir(), "open-take-seam-e2e-"));
   await cp(FIXTURE, dir, { recursive: true });
   await initFilm({ dir: join(dir, "film") });
+  older = join(dir, "older");
+  await cp(FIXTURE, older, { recursive: true });
+  await rm(join(older, "take"), { recursive: true });
+  await cp(join(FIXTURE, "take-bt709"), join(older, "take"), { recursive: true });
+  await initFilm({ dir: join(older, "film") });
 });
 after(async () => {
   if (!process.env.KEEP_FILM_TEST) await rm(dir, { recursive: true, force: true });
@@ -129,6 +139,14 @@ const click = ev.find((e: { kind: string }) => e.kind === "click");
 const result = ev.find((e: { kind: string }) => e.kind === "result");
 const sm = seam(take, c, log.events[0].state, { video: { x: 0, y: 0, width: W, height: H } });
 const swap = Math.round(plan.swapAt(sm.window) * FPS);
+/** the frame the film of the take in `root` swaps to its saved state on */
+const swapOf = async (root: string): Promise<number> => {
+  const l = JSON.parse(await readFile(join(root, "take", "capture.json"), "utf8"));
+  const s = seam(fromLog(l, "http://x/take/capture.json"), c, l.events[0].state, {
+    video: { x: 0, y: 0, width: W, height: H },
+  });
+  return Math.round(plan.swapAt(s.window) * FPS);
+};
 const liftAt = Math.round(plan.LIFT_AT * FPS);
 /** the result card where the page has it, from the saved state's own index */
 const pageBox = async (): Promise<Box> => {
@@ -165,29 +183,35 @@ test("the take: the result showed after the click, measured, and the click's sta
 
 // --- rendered once, read by the tests below ------------------------------------
 
-let rendering: Promise<Buffer[]> | null = null;
+const renderings = new Map<string, Promise<Buffer[]>>();
 /** the film rendered as a master at its own 640×360 and 30 fps, decoded — without
  *  motion blur: a blurred first frame of the lift would already show the
- *  shutter's share of the move (the blur has its own tests) */
-const rendered = () => {
-  rendering ??= (async () => {
-    const out = join(dir, "seam.mp4");
-    const r = await renderFilm({
-      page: join(dir, "film", "index.html"),
-      root: dir,
-      out,
-      chromePath: chrome!,
-      workers: 1,
-      blur: false,
-    });
-    assert.equal(r.frames, plan.DURATION * FPS);
-    assert.deepEqual([r.width, r.height], [W, H]);
-    const f = await decode(out);
-    assert.equal(f.length, r.frames);
-    return f;
-  })();
+ *  shutter's share of the move (the blur has its own tests); the take in
+ *  `root`, by default the fixture's */
+const rendered = (root = dir) => {
+  let rendering = renderings.get(root);
+  if (!rendering) {
+    rendering = render(root);
+    renderings.set(root, rendering);
+  }
   return rendering;
 };
+async function render(root: string): Promise<Buffer[]> {
+  const out = join(root, "seam.mp4");
+  const r = await renderFilm({
+    page: join(root, "film", "index.html"),
+    root,
+    out,
+    chromePath: chrome!,
+    workers: 1,
+    blur: false,
+  });
+  assert.equal(r.frames, plan.DURATION * FPS);
+  assert.deepEqual([r.width, r.height], [W, H]);
+  const f = await decode(out);
+  assert.equal(f.length, r.frames);
+  return f;
+}
 
 /** luma edge profiles across x and down y: where the picture's edges are */
 function edges(f: Buffer): { x: number[]; y: number[] } {
@@ -255,34 +279,37 @@ test("the swap from recording to saved state does not jump", { skip }, async () 
   );
 });
 
-test("the recording's colours are the saved state's across the swap", {
-  skip,
-  // Measured 2026-10-07 on macOS: capture.mp4 names BT.709's curve, which
-  // Chrome on macOS shows through Apple's gamma (src/film/frames.ts copies
-  // that), so the recording's darks come out lighter than the saved state's —
-  // the card's green #1d4d3c as 28,87,65 against 29,76,61. The same take
-  // tagged with sRGB's curve (iec61966-2-1) comes within 4 of 255.
-  todo:
-    process.platform === "darwin"
-      ? "the recording's BT.709 curve is shown through Apple's gamma on macOS"
-      : false,
-}, async () => {
-  const frames = await rendered();
-  const want = await pageBox();
-  const card = { x: want.x + 10, y: want.y + 4, width: 40, height: 10 };
-  const page = { x: 600, y: 300, width: 30, height: 40 };
-  for (const [name, b] of [
-    ["the card", card],
-    ["the page", page],
-  ] as const) {
-    const a = meanOf(frames[swap - 1]!, b);
-    const s = meanOf(frames[swap]!, b);
-    assert.ok(
-      a.every((v, i) => Math.abs(v - s[i]!) <= 5),
-      `${name}: ${a.map(Math.round)} in the recording, ${s.map(Math.round)} in the saved state`,
-    );
-  }
-});
+// A screenshot is an sRGB picture, and the recording keeps its values: Chrome
+// on macOS showed a recording that named BT.709's curve through Apple's gamma
+// (src/film/frames.ts copies what Chrome shows), its darks lighter than the
+// saved state's — the card's green #1d4d3c as 28,87,65 against 29,76,61. The
+// runtime names sRGB's curve now, and a take it recorded before is read so;
+// that one's encode also rounded its colours down by up to 4 (the page's
+// #f4f1ea came out 241,242,233), which the runtime no longer does.
+for (const [label, root, within] of [
+  ["as the runtime records it, sRGB's curve named", () => dir, 2],
+  ["as it recorded before, BT.709's curve named", () => older, 5],
+] as const)
+  test(`the recording's colours are the saved state's across the swap: ${label}`, {
+    skip,
+  }, async () => {
+    const frames = await rendered(root());
+    const at = await swapOf(root());
+    const want = await pageBox();
+    const card = { x: want.x + 10, y: want.y + 4, width: 40, height: 10 };
+    const page = { x: 600, y: 300, width: 30, height: 40 };
+    for (const [name, b] of [
+      ["the card", card],
+      ["the page", page],
+    ] as const) {
+      const a = meanOf(frames[at - 1]!, b);
+      const s = meanOf(frames[at]!, b);
+      assert.ok(
+        a.every((v, i) => Math.abs(v - s[i]!) <= within),
+        `${name}: ${a.map(Math.round)} in the recording, ${s.map(Math.round)} in the saved state`,
+      );
+    }
+  });
 
 test("the lifted card starts exactly where the page had it, then fills the frame", {
   skip,

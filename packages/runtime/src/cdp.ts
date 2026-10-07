@@ -659,12 +659,22 @@ export async function encodeFrames(
   // a canvas preview, while ffmpeg/revideo honored the full-range tag and stayed
   // faithful. `scale` converts (and sets range+matrix); `setparams` adds the
   // primaries+transfer labels scale leaves unspecified, so all four are explicit.
+  // The transfer is sRGB's (iec61966-2-1), not BT.709's: the screenshots are
+  // sRGB pictures and the encode keeps their values. Chrome on macOS shows a
+  // video that names BT.709's curve through Apple's gamma (1.961), not as it
+  // decodes — #1d4d3c came out as 30,87,67 beside the same page's 29,77,60 —
+  // and a film that cuts from the recording to the page itself showed the
+  // jump. Named sRGB, Chrome shows the values as they decode. (Takes
+  // recorded with BT.709's label are read as sRGB by the film's frames.)
+  // swscale's fast path rounds the range and matrix conversion down — grey
+  // 128 came back 125, #f4f1ea 242,240,229 — so it rounds exactly, with
+  // chroma at full resolution in between (within 1 of the screenshot).
   const colorConvert = isWebm
     ? ""
-    : ":in_range=full:in_color_matrix=bt601:out_range=tv:out_color_matrix=bt709";
+    : ":in_range=full:in_color_matrix=bt601:out_range=tv:out_color_matrix=bt709:flags=bicubic+accurate_rnd+full_chroma_int";
   const colorLabel = isWebm
     ? ""
-    : ",setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709";
+    : ",setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=iec61966-2-1";
 
   return new Promise((resolve, reject) => {
     const args = [

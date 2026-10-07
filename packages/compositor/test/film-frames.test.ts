@@ -356,7 +356,7 @@ test("a video in wide-gamut or HDR colours is not decoded as frames: Chrome maps
   }
 });
 
-test("a video's frames keep the colours Chrome gives it, on the page and in a canvas — grey and red tagged BT.709, and a recording's orange", {
+test("a video's frames keep the colours Chrome gives it, on the page and in a canvas — grey and red tagged BT.709, a take's green and a recording's orange", {
   skip,
 }, async () => {
   const page = join(dir, "colours");
@@ -375,6 +375,13 @@ test("a video's frames keep the colours Chrome gives it, on the page and in a ca
       "red",
       "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p",
       "colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1",
+    ],
+    // as the runtime records a take: BT.709 limited range, sRGB's curve named
+    [
+      "recording",
+      "0x1d4d3c",
+      "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p",
+      "colour_primaries=1:transfer_characteristics=13:matrix_coefficients=1",
     ],
     // as ffmpeg makes a video of JPEG screenshots: BT.601 full range, nothing else said
     [

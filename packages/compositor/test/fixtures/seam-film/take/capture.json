@@ -24,14 +24,14 @@
         "w": 140,
         "h": 40
       },
-      "tMs": 2093,
+      "tMs": 2072,
       "sel": "#calc",
-      "settledMs": 2865,
+      "settledMs": 2841,
       "state": "s2",
       "target": "e14",
       "result": {
-        "atMs": 2867,
-        "doneMs": 2867,
+        "atMs": 2833,
+        "doneMs": 2833,
         "box": {
           "x": 373,
           "y": 53,
@@ -42,66 +42,64 @@
       "changeCoverage": 0
     }
   ],
-  "tEndMs": 4797,
+  "tEndMs": 4776,
   "captureCadence": {
-    "frameCount": 24,
+    "frameCount": 23,
     "timestampSource": "frame-swap",
     "frameOffsetsMs": [
-      12.835,
-      243.814,
-      476.239,
-      700.65,
-      975.81,
-      1156.626,
-      1263.826,
-      1479.516,
-      1702.387,
-      1876.635,
-      1954.538,
-      2310.388,
-      2540.988,
-      2770.824,
-      2876.04,
-      3163.873,
-      3414.594,
-      3644.327,
-      3918.868,
-      4151.029,
-      4382.167,
-      4560.974,
-      4737.239,
-      4984.234
+      21.287,
+      240.15,
+      477.667,
+      708.688,
+      975.498,
+      1152.478,
+      1234.318,
+      1456.838,
+      1686.013,
+      1865.077,
+      2307.57,
+      2538.932,
+      2773.032,
+      2852.615,
+      3128.721,
+      3384.898,
+      3618.373,
+      3903.322,
+      4135.238,
+      4370.411,
+      4548.365,
+      4717.902,
+      4978.392
     ],
     "arrivalOffsetsMs": [
-      20,
-      257,
-      490,
-      716,
-      988,
-      1171,
-      1270,
-      1493,
-      1722,
-      1887,
-      1961,
-      2324,
-      2555,
-      2781,
-      2890,
-      3175,
-      3430,
-      3660,
-      3930,
-      4172,
-      4396,
-      4574,
-      4753,
-      5006
+      28,
+      252,
+      491,
+      720,
+      989,
+      1162,
+      1241,
+      1470,
+      1697,
+      1876,
+      2321,
+      2551,
+      2785,
+      2866,
+      3139,
+      3401,
+      3635,
+      3916,
+      4150,
+      4380,
+      4566,
+      4729,
+      4998
     ],
-    "medianIntervalMs": 229.836,
-    "p95IntervalMs": 287.833,
-    "maxIntervalMs": 355.85,
-    "maxArrivalDelayMs": 21.766,
+    "medianIntervalMs": 231.916,
+    "p95IntervalMs": 284.949,
+    "maxIntervalMs": 442.493,
+    "maxArrivalDelayMs": 19.608,
     "outOfOrderFrames": 0,
     "note": "Delivered-frame timing, not unique image content or a smoothness score. Static pages may send no frames; inspect image changes within active action windows. Encoded fps is separate.",
     "rasterRefresh": "idle"
@@ -120,13 +118,13 @@
         "seam": {
           "dx": 0.01,
           "dy": 0.08,
-          "meanDiff": 4.21,
-          "diffFrac": 0.0035
+          "meanDiff": 3.44,
+          "diffFrac": 0.0042
         }
       },
       {
         "id": "s1",
-        "tMs": 1695,
+        "tMs": 1677,
         "step": 0,
         "fidelity": {
           "psnr": 99,
@@ -136,13 +134,13 @@
         "seam": {
           "dx": 0.01,
           "dy": 0.08,
-          "meanDiff": 4.21,
-          "diffFrac": 0.0035
+          "meanDiff": 3.44,
+          "diffFrac": 0.0042
         }
       },
       {
         "id": "s2",
-        "tMs": 3842,
+        "tMs": 3819,
         "step": 1,
         "fidelity": {
           "psnr": 99,
@@ -152,13 +150,13 @@
         "seam": {
           "dx": 0.01,
           "dy": 0.06,
-          "meanDiff": 4.37,
-          "diffFrac": 0.0035
+          "meanDiff": 3.69,
+          "diffFrac": 0.0042
         }
       },
       {
         "id": "s3",
-        "tMs": 4554,
+        "tMs": 4536,
         "step": 2,
         "fidelity": {
           "psnr": 99,
@@ -168,11 +166,11 @@
         "seam": {
           "dx": 0.01,
           "dy": 0.06,
-          "meanDiff": 4.37,
-          "diffFrac": 0.0035
+          "meanDiff": 3.69,
+          "diffFrac": 0.0042
         }
       }
     ]
   },
-  "url": "http://127.0.0.1:51593/"
+  "url": "http://127.0.0.1:58266/"
 }

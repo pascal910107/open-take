@@ -1,9 +1,9 @@
 {
   "version": 1,
   "id": "s2",
-  "url": "http://127.0.0.1:51593/",
+  "url": "http://127.0.0.1:58266/",
   "title": "Fee calculator (fixture)",
-  "tMs": 3842,
+  "tMs": 3819,
   "step": 1,
   "viewport": {
     "w": 640,

@@ -17,7 +17,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, stat, statfs } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { resolveFfmpeg, resolveFfprobe, runTool } from "../ffmpeg";
 import { fileFor, type StaticServer } from "../html/server";
 
@@ -154,7 +154,15 @@ export async function decodeFrames(
     throw new Error(`it has ${count} frames, more than ${maxFrames} to decode`);
   const alpha = /^(yuva|rgba|argb|abgr|bgra|gbrap|ya)/.test(s.pix_fmt ?? "");
   const ext = alpha ? "png" : "jpg";
-  const { vf, bright } = colours(s, alpha);
+  // a take the runtime recorded before it named sRGB's curve named BT.709's
+  // for the same sRGB values: its frames are those values, as a take
+  // recorded now shows, and as the page's saved states show the same screen
+  const { vf, bright } = colours(
+    s.color_transfer === "bt709" && takeRecording(file)
+      ? { ...s, color_transfer: "iec61966-2-1" }
+      : s,
+    alpha,
+  );
   // Chrome keeps a picture that starts late where it starts; one that starts
   // before 0 it moves to 0 (ffmpeg's -copyts keeps them as they are)
   const start = Number(probe.format?.start_time);
@@ -282,6 +290,11 @@ export async function decodeFrames(
     });
   });
 }
+
+/** a take's recording, as the runtime writes it: capture.mp4 with the
+ *  take's capture.json beside it */
+const takeRecording = (file: string) =>
+  basename(file) === "capture.mp4" && existsSync(join(dirname(file), "capture.json"));
 
 const size = (n: number) =>
   n >= 1e9

@@ -227,6 +227,77 @@ test("timestamped 60fps frames retain their timing through the encoder, on every
   }
 });
 
+/** the mean RGB of a YUV 4:4:4 picture, from its own matrix and range (the
+ *  exact sums, no decoder's rounding in between) */
+function rgbOf(yuv: Buffer, matrix: "bt601" | "bt709", range: "pc" | "tv"): number[] {
+  const n = yuv.length / 3;
+  const mean = (k: number) => {
+    let s = 0;
+    for (let i = k * n; i < (k + 1) * n; i++) s += yuv[i]!;
+    return s / n;
+  };
+  const [Y, U, V] = [mean(0), mean(1), mean(2)];
+  const [kr, kb] = matrix === "bt709" ? [0.2126, 0.0722] : [0.299, 0.114];
+  const y = range === "tv" ? (Y - 16) / 219 : Y / 255;
+  const u = (U - 128) / (range === "tv" ? 224 : 255);
+  const v = (V - 128) / (range === "tv" ? 224 : 255);
+  const r = y + 2 * (1 - kr) * v;
+  const b = y + 2 * (1 - kb) * u;
+  return [r, (y - kr * r - kb * b) / (1 - kr - kb), b].map((c) =>
+    Math.min(255, Math.max(0, 255 * c)),
+  );
+}
+
+test("the encode keeps the screenshots' colours and names them sRGB, on every ffmpeg", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "capture-colour-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const yuv = async (ffmpeg: string, file: string) =>
+    (
+      await exec(
+        ffmpeg,
+        ["-v", "error", "-i", file, "-frames:v", "1", "-pix_fmt", "yuv444p", "-f", "rawvideo", "-"],
+        {
+          encoding: "buffer",
+        },
+      )
+    ).stdout as Buffer;
+  for (const colour of ["f4f1ea", "1d4d3c", "808080", "ff7a3d"]) {
+    // a screencast frame: a full-range BT.601 JPEG of a flat colour
+    const jpeg = join(dir, `${colour}.jpg`);
+    await exec(await resolveFfmpeg(), [
+      ...["-v", "error", "-f", "lavfi", "-i", `color=c=0x${colour}:s=64x64:d=1`, "-frames:v", "1"],
+      ...[
+        "-vf",
+        "scale=out_color_matrix=bt601:out_range=pc:flags=bicubic+accurate_rnd+full_chroma_int",
+      ],
+      ...["-pix_fmt", "yuvj420p", "-q:v", "1", "-y", jpeg],
+    ]);
+    const want = rgbOf(await yuv(await resolveFfmpeg(), jpeg), "bt601", "pc");
+    for (const [name, ffmpeg] of await everyFfmpeg()) {
+      const out = join(dir, `${colour}-${name}.mp4`);
+      await encodeFrames(
+        [0, 100, 200].map((offMs) => ({ file: jpeg, offMs, arrivalMs: offMs })),
+        300,
+        out,
+        30,
+        ffmpeg,
+      );
+      const got = rgbOf(await yuv(ffmpeg, out), "bt709", "tv");
+      assert.ok(
+        got.every((c, i) => Math.abs(c - want[i]!) <= 1.5),
+        `${name}: #${colour} is ${want.map(Math.round)} in the frame, ${got.map(Math.round)} encoded`,
+      );
+      // the screenshots' values, named as what they are: limited-range BT.709
+      // with sRGB's curve (Chrome on macOS shows BT.709's through Apple's gamma)
+      const tags = await exec(await resolveFfprobe(), [
+        ...["-v", "error", "-select_streams", "v:0", "-of", "csv=p=0"],
+        ...["-show_entries", "stream=color_range,color_space,color_transfer,color_primaries", out],
+      ]);
+      assert.equal(tags.stdout.trim(), "tv,bt709,iec61966-2-1,bt709", `${name}: colour tags`);
+    }
+  }
+});
+
 test("a truncated first frame is skipped over for the header, not fatal", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "mjpeg-mkv-trunc-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
