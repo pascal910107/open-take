@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+html,body{margin:0;width:640px;height:360px;overflow:hidden;background:#000}
+#stage{position:relative;width:640px;height:360px}
+#rec{position:absolute;left:0;top:0;width:640px;height:360px}
+#layer{position:absolute;left:0;top:0;width:640px;height:360px;transform-origin:0 0;visibility:hidden}
+#shot{position:absolute;left:0;top:0;width:640px;height:360px;border:0}
+</style>
+</head>
+<body>
+<div id="stage">
+  <video id="rec" src="../take/capture.mp4" muted></video>
+  <div id="layer"><iframe id="shot" title="the saved state" src="../take/states/s2/state.html"></iframe></div>
+</div>
+<script type="module">
+// The real-material path in one shot: the recording plays the click; a moment
+// after its result showed, the film swaps to the saved state of that moment at
+// the seam; the result card is lifted out of the real interface and carried
+// to fill the frame.
+import { clip, lift, readTake, screen, seam } from "./kit/media.js";
+import { morphRect } from "./kit/motion.js";
+import { CLIP, DURATION, FPS, HEIGHT, LIFT_AT, MORPH, swapAt, WIDTH } from "./plan.js";
+
+const video = document.getElementById("rec");
+const layer = document.getElementById("layer");             // the saved state's layer
+const shot = document.getElementById("shot");
+const c = clip(CLIP);
+const s = screen(shot);
+let swap = Infinity;
+let card = null;
+const took = readTake("../take/").then(async (take) => {
+  const id = take.log.events[0].state;               // the state the click's hold saved
+  const sm = seam(take, c, id, { video: { x: 0, y: 0, width: WIDTH, height: HEIGHT } });
+  swap = swapAt(sm.window);
+  layer.style.transform = sm.transform;                       // lands it on the video
+  await s.ready;
+  card = lift(s, "#total");
+  await card.ready;
+});
+const loaded = video.readyState >= 2
+  ? Promise.resolve()
+  : new Promise((ok) => video.addEventListener("loadeddata", ok, { once: true }));
+window.__film = { duration: DURATION, fps: FPS, width: WIDTH, height: HEIGHT, ready: Promise.all([took, loaded]) };
+window.__render = async (t) => {
+  const onState = t >= swap - 1e-6;
+  layer.style.visibility = onState ? "visible" : "hidden";
+  video.style.visibility = onState ? "hidden" : "visible";
+  if (!onState) {
+    const at = c.videoTime(t);
+    if (Math.abs(video.currentTime - at) > 1e-4)
+      await new Promise((r) => { video.addEventListener("seeked", r, { once: true }); video.currentTime = at; });
+  }
+  const lifted = t >= LIFT_AT - 1e-6;
+  card.el.style.visibility = lifted ? "visible" : "hidden";
+  shot.contentDocument.getElementById("total").style.visibility = lifted ? "hidden" : "visible";
+  card.place(morphRect(t, LIFT_AT, LIFT_AT + MORPH, card.rect, { x: 0, y: 0, w: WIDTH, h: HEIGHT, r: 0 }), { fit: "cover" });
+};
+</script>
+</body>
+</html>

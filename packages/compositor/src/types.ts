@@ -60,6 +60,20 @@ export type CaptureEventBase = {
    *  in that state's `index.json` / `data-ot-id`. Absent when no element
    *  matched or the event carries no box. */
   target?: string;
+  /** CAPTURE-DERIVED (frame-diff pass): when the action's RESULT showed in the
+   *  recording, on the capture timeline (ms) — the input time is `tMs`, and a
+   *  result can come a second or more after it. `atMs`: the first frame where
+   *  at least half of what finally changed in the dominant changed region has
+   *  changed; `doneMs`: the first frame from which that region stays as it
+   *  ends up. `box` is that region (viewport CSS px). Read off the encoded
+   *  frames, so only as fine as what the screencast delivered. Absent when
+   *  nothing measurable changed before the next action. */
+  result?: { atMs: number; doneMs: number; box: BBox };
+  /** CAPTURE-DERIVED (settle probe): capture-timeline ms when the page's DOM,
+   *  requests and timers last went quiet after this action — an estimate from
+   *  page STRUCTURE (it cannot see paints inside a canvas or video). Absent
+   *  when the probe saw no activity after the input, or was not running. */
+  settledMs?: number;
 };
 
 /** A click (or a type's focus-click): an instantaneous action at a point. */
@@ -242,6 +256,15 @@ export type CaptureLog = {
       /** plan step index it follows (absent for s0) */
       step?: number;
       fidelity?: { psnr: number; diffFrac: number; ok: boolean };
+      /** CAPTURE-DERIVED (frame-diff pass): how the recording's frame at
+       *  `tMs` lines up with this state's reference screenshot (`live.png`).
+       *  `dx`,`dy`: where the state's content sits in the recording, CSS px
+       *  (state point p shows at p + (dx, dy)); `meanDiff`: the mean grey
+       *  difference (0..255) left at that shift, `diffFrac` the share of
+       *  pixels still differing by more than 48 grey levels — compression
+       *  and text antialiasing alone stay under that. Absent when it could
+       *  not be measured. */
+      seam?: { dx: number; dy: number; meanDiff: number; diffFrac: number };
       /** the page was still moving at this moment (it never went quiet, and
        *  its pixels moved): nothing was saved — reading a still of a moving
        *  page would stall the app being filmed, and misrepresent the moment */

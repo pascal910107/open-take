@@ -5,23 +5,40 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { resolveFfmpeg, runTool } from "../src/ffmpeg";
 import {
+  backAndForth,
+  cameraPath,
+  cameraRuns,
   cutDensity,
   filmProbe,
   findChanges,
   findCuts,
+  findSmallSwaps,
   findStills,
   frameEnergy,
   type GreyFrames,
   globalMotion,
+  readSegments,
+  repeatedRuns,
+  reversals,
+  sheetSegments,
   subjectExits,
   subjectTracks,
+  textPerSecond,
+  textTimeline,
 } from "../src/film/probe";
+import {
+  edgeShare,
+  type FrameText,
+  type PageTextSample,
+  readPageText,
+} from "../src/film/probe-text";
+import { renderFilm } from "../src/film/render";
 import { findChrome } from "./fixtures/find-chrome";
 
 const W = 192;
@@ -212,6 +229,339 @@ test("declared subjects: curves and events, out and partly out, by edge", () => 
   ]);
 });
 
+/** a big texture seen through the frame at scale s, shifted (x, y) px */
+function view(s: number, x: number, y: number, seed = 7): Uint8Array {
+  const TW = W * 3;
+  const T = texture(TW, H * 3, seed);
+  const at = (u: number, v: number) =>
+    T[Math.max(0, Math.min(H * 3 - 1, v)) * TW + Math.max(0, Math.min(TW - 1, u))]!;
+  const f = new Uint8Array(W * H);
+  for (let j = 0; j < H; j++)
+    for (let i = 0; i < W; i++) {
+      // bilinear: a move of a fraction of a pixel shows
+      const px = (i - W / 2 - x) / s + W * 1.5;
+      const py = (j - H / 2 - y) / s + H * 1.5;
+      const u = Math.floor(px);
+      const v = Math.floor(py);
+      const fu = px - u;
+      const fv = py - v;
+      f[j * W + i] = Math.round(
+        at(u, v) * (1 - fu) * (1 - fv) +
+          at(u + 1, v) * fu * (1 - fv) +
+          at(u, v + 1) * (1 - fu) * fv +
+          at(u + 1, v + 1) * fu * fv,
+      );
+    }
+  return f;
+}
+
+test("a word swapped on a held picture is a small swap, not a cut", () => {
+  const a = texture(W, H, 3);
+  const b = Uint8Array.from(a);
+  const patch = texture(32, 24, 4);
+  for (let r = 0; r < 24; r++)
+    for (let c = 0; c < 32; c++) b[(40 + r) * W + 80 + c] = 255 - patch[r * 32 + c]!;
+  const g = frames([...Array(20).fill(a), ...Array(20).fill(b)]);
+  const e = frameEnergy(g);
+  const cuts = findCuts(g, e);
+  assert.deepEqual(cuts, []);
+  const swaps = findSmallSwaps(g, e, cuts);
+  assert.deepEqual(
+    swaps.map((w) => w.frame),
+    [20],
+  );
+  assert.ok(swaps[0]!.changed >= 0.02 && swaps[0]!.changed < 0.12, `${swaps[0]!.changed}`);
+});
+
+test("the camera: zoom in and out read to a fraction of a pixel, its runs, its turns back", () => {
+  // 3 s at 30 fps: in for half a second, out for half a second, three times
+  const list: Uint8Array[] = [];
+  for (let i = 0; i < 90; i++) {
+    const ph = (i / 30) % 1;
+    list.push(view(1 + 0.06 * (ph < 0.5 ? ph * 2 : 2 - ph * 2), 0, 0));
+  }
+  const g = frames(list);
+  const path = cameraPath(g, []);
+  assert.equal(path.step, 1);
+  const read = path.logScale.filter((v) => v != null).length;
+  assert.ok(read >= 85, `read ${read}`);
+  const runs = cameraRuns(path, 30);
+  const zooms = runs.filter((r) => r.what === "zoom");
+  assert.deepEqual(
+    zooms.map((r) => r.dir),
+    ["in", "out", "in", "out", "in", "out"],
+  );
+  assert.ok(Math.abs(zooms[0]!.amount - 1.06) < 0.01, `${zooms[0]!.amount}`);
+  assert.equal(
+    runs.filter((r) => r.what !== "zoom").length,
+    0,
+    "no pan in a zoom about the centre",
+  );
+  assert.equal(reversals(runs).length, 5);
+  assert.deepEqual(
+    backAndForth(runs).map((b) => [b.what, b.runs]),
+    [["zoom", 6]],
+  );
+  // a short zoom out on every half second, the picture jumping back between
+  const pulse: Uint8Array[] = [];
+  for (let i = 0; i < 90; i++) {
+    const ph = (i % 15) / 15;
+    pulse.push(view(1 - 0.03 * Math.min(1, ph * 5), 0, 0));
+  }
+  const pg = frames(pulse);
+  const pe = frameEnergy(pg);
+  const pruns = cameraRuns(cameraPath(pg, findCuts(pg, pe)), 30);
+  assert.deepEqual(reversals(pruns), [], "never turns back: it jumps back");
+  assert.deepEqual(
+    repeatedRuns(pruns).map((r) => [r.what, r.dir, r.runs, r.every]),
+    [["zoom", "out", 6, 0.5]],
+  );
+  // a slow pan: 0.3 px a frame, under the change line, still read
+  const pan = frames(Array.from({ length: 60 }, (_, i) => view(1, 0.3 * i, 0)));
+  const pr = cameraRuns(cameraPath(pan, []), 30);
+  assert.deepEqual(
+    pr.map((r) => [r.what, r.dir]),
+    [["pan x", "right"]],
+  );
+  assert.ok(Math.abs(pr[0]!.amount - (0.3 * 59) / W) < 0.02, `${pr[0]!.amount}`);
+  // across a cut: the step is left out
+  const cut = frames([...Array(10).fill(view(1, 0, 0)), ...Array(10).fill(texture(W, H, 99))]);
+  const cp = cameraPath(cut, [10]);
+  assert.equal(cp.logScale[9], null);
+});
+
+test("the beat sheet beside the picture: a hold that moves, a handoff at a cut, a subject that leaves", () => {
+  assert.deepEqual(sheetSegments([{ from: 1, to: 0 }, { from: 0, to: 1, hold: true, x: 1 }, "x"]), [
+    { from: 0, to: 1, hold: true },
+  ]);
+  // 0–1 s held still, 1–2 s a slow pan, a cut at 2 s, 2–3 s held
+  const fps = 30;
+  const list: Uint8Array[] = [];
+  for (let i = 0; i < 90; i++)
+    list.push(i < 30 ? view(1, 0, 0) : i < 60 ? view(1, (i - 30) * 0.8, 0) : texture(W, H, 50));
+  const g = frames(list, fps);
+  const energy = frameEnergy(g);
+  const cuts = findCuts(g, energy);
+  assert.deepEqual(cuts, [60]);
+  const path = cameraPath(g, cuts);
+  const runs = cameraRuns(path, fps);
+  const changes = findChanges(g, energy, cuts);
+  const segs = readSegments(
+    [
+      { from: 0, to: 1, hold: true, label: "still" },
+      { from: 1, to: 2, hold: true, handoff: "matchcut", subject: "hero" },
+      { from: 2, to: 3, handoff: "carry", subject: "#nowhere" },
+    ],
+    {
+      duration: 3,
+      fps,
+      t0: 0,
+      energy,
+      stillUnder: 0.0015,
+      cuts: cuts.map((c) => c / fps),
+      swaps: [],
+      changes,
+      path,
+      runs,
+      tracks: [
+        {
+          name: "hero",
+          source: "curves",
+          samples: [
+            { t: 1, x: 100, y: 50 },
+            { t: 1.5, x: 300, y: 50 },
+          ],
+        },
+      ],
+      width: W,
+      height: H,
+      onsets: [2.01],
+    },
+  );
+  assert.equal(segs[0]!.moving, 0);
+  assert.ok(
+    segs[0]!.camera && Math.abs(segs[0]!.camera.x) < 0.003,
+    "the still segment does not move",
+  );
+  assert.ok(segs[1]!.moving > 0.5, `moving ${segs[1]!.moving}`);
+  assert.ok(segs[1]!.camera!.x > 0.08, `pan ${segs[1]!.camera!.x}`);
+  assert.deepEqual(
+    segs[1]!.runs.map((r) => [r.what, r.dir]),
+    [["pan x", "right"]],
+  );
+  assert.equal(segs[1]!.handoffSeen!.kind, "hard cut");
+  assert.equal(segs[1]!.handoffSeen!.at, 2);
+  assert.equal(segs[1]!.handoffSeen!.across, "nothing carried");
+  assert.equal(segs[1]!.handoffSeen!.nearestOnset, 0.01);
+  assert.deepEqual(segs[1]!.subjectSeen, {
+    how: "estimated",
+    source: "curves",
+    out: [{ start: 1.5, end: 2, how: "out", edge: "right" }],
+  });
+  assert.equal(segs[2]!.handoffSeen!.kind, "film ends");
+  assert.deepEqual(segs[2]!.subjectSeen, { how: "not measured", source: null, out: [] });
+  // the same sheet with the page's subject found by its selector
+  const page = readSegments([{ from: 0, to: 1, subject: "#card" }], {
+    duration: 3,
+    fps,
+    t0: 0,
+    energy,
+    stillUnder: 0.0015,
+    cuts: [],
+    swaps: [],
+    changes: [],
+    path,
+    runs: [],
+    tracks: [],
+    width: W,
+    height: H,
+    pageSubjects: () => [
+      { t: 0, box: [10, 10, 20, 20] },
+      { t: 0.5, box: [180, 10, 40, 20] },
+      { t: 0.75, box: null },
+    ],
+    onsets: null,
+  });
+  assert.deepEqual(page[0]!.subjectSeen, {
+    how: "measured",
+    source: "page",
+    out: [
+      { start: 0.5, end: 0.75, how: "partly out", edge: "right" },
+      { start: 0.75, end: 1, how: "not visible" },
+    ],
+  });
+  // a segment between two page samples is not read off the page; a name no
+  // element matches (null) is looked for among the declared tracks
+  const between = readSegments(
+    [
+      { from: 0.1, to: 0.4, subject: "#card" },
+      { from: 1, to: 2, subject: "hero" },
+    ],
+    {
+      duration: 3,
+      fps,
+      t0: 0,
+      energy,
+      stillUnder: 0.0015,
+      cuts: [],
+      swaps: [],
+      changes: [],
+      path,
+      runs: [],
+      tracks: [{ name: "hero", source: "curves", samples: [{ t: 1, x: 300, y: 50 }] }],
+      width: W,
+      height: H,
+      pageSubjects: (sel) => (sel === "#card" ? [{ t: 0, box: [10, 10, 20, 20] }] : null),
+      onsets: null,
+    },
+  );
+  assert.deepEqual(between[0]!.subjectSeen, { how: "not measured", source: null, out: [] });
+  assert.equal(between[1]!.subjectSeen!.source, "curves");
+  assert.equal(between[1]!.subjectSeen!.out[0]!.edge, "right");
+});
+
+test("text at film scale: the page's text apart from text in pictures, sizes, what the film's text sits over", () => {
+  const grid = Array.from({ length: 54 }, (_, y) =>
+    Array.from({ length: 96 }, (_, x) => (x >= 48 && y >= 27 ? "1" : "0")).join(""),
+  );
+  const page: PageTextSample[] = [0, 0.5].map((t) => ({
+    t,
+    own: [{ text: 'div "Caption"', chars: 7, px: 48, boxes: [[100, 100, 300, 60]] }],
+    product: { chars: 300, pieces: 20 },
+    sizes: [
+      [14, 300],
+      [48, 7],
+    ],
+    ownShare: 0.01,
+    productShare: 0.2,
+    grid,
+    media: [{ label: "img", box: [50, 50, 600, 400] }],
+    subjects: { "#hero": [120, 110, 50, 30] },
+  }));
+  const ocr: FrameText[] = [0, 0.5].map((t) => ({
+    t,
+    how: "ocr",
+    share: 0,
+    lines: [
+      // the caption itself, read off the frame
+      { box: [102, 104, 290, 52], chars: 7, conf: 1, text: "Caption" },
+      // the product's live text
+      { box: [1000, 600, 200, 14], chars: 20, conf: 1, text: "product" },
+      // text inside a screenshot, under the caption
+      { box: [110, 120, 200, 10], chars: 30, conf: 0.9, text: "in a picture" },
+      // noise the recognizer is not sure of
+      { box: [10, 10, 5, 3], chars: 1, conf: 0.1, text: "x" },
+    ],
+  }));
+  const { samples, overlaps } = textTimeline(page, ocr, {
+    width: 1920,
+    height: 1080,
+    segments: [{ from: 0, to: 1, subject: "#hero" }],
+    every: 0.5,
+  });
+  const s = samples[0]!;
+  assert.equal(s.pictureChars, 30);
+  assert.equal(s.chars, 7 + 300 + 30);
+  assert.equal(s.picture, Math.round(((200 * 10) / (1920 * 1080)) * 1000) / 1000);
+  assert.equal(s.smallest!.px, 10);
+  assert.equal(s.smallest!.from, "picture");
+  assert.equal(s.median, 14, "by character: the product's small text");
+  assert.deepEqual(
+    overlaps.map((o) => [o.over, o.from, o.to]),
+    [
+      ["text inside a picture", 0, 1],
+      ["the subject #hero", 0, 1],
+      ["a picture: img", 0, 1],
+    ],
+  );
+  // two pieces of the film's own text side by side, read back as one line
+  const pair = textTimeline(
+    [
+      {
+        ...page[0]!,
+        own: [
+          { text: 'div "One"', chars: 3, px: 100, boxes: [[200, 300, 300, 120]] },
+          { text: 'div "Two"', chars: 3, px: 100, boxes: [[600, 300, 300, 120]] },
+        ],
+        media: [],
+        subjects: {},
+      },
+    ],
+    [
+      {
+        t: 0,
+        how: "ocr",
+        share: 0,
+        lines: [{ box: [210, 290, 680, 130], chars: 6, conf: 1, text: "One Two" }],
+      },
+    ],
+    { width: 1920, height: 1080, segments: [], every: 0.5 },
+  );
+  assert.equal(pair.samples[0]!.pictureChars, 0);
+  assert.deepEqual(pair.overlaps, []);
+  // without the page: every line read counts, as text in pictures
+  const alone = textTimeline(null, ocr, { width: 1920, height: 1080, segments: [], every: 0.5 });
+  assert.equal(alone.samples[0]!.pictureChars, 57);
+  assert.equal(alone.samples[0]!.own, null);
+  const per = textPerSecond(samples, 1.2);
+  assert.equal(per.length, 2);
+  assert.equal(per[0]!.chars, 337);
+  assert.equal(per[1]!.chars, null);
+});
+
+test("the edge count finds text-like cells in lines of glyphs, not in flat ground or soft gradients", () => {
+  const w = 160;
+  const h = 64;
+  const flat = new Uint8Array(w * h).fill(240);
+  assert.equal(edgeShare(flat, w, h), 0);
+  const grad = Uint8Array.from({ length: w * h }, (_, i) => (i % w) * 1.5);
+  assert.equal(edgeShare(grad, w, h), 0);
+  const glyphs = Uint8Array.from(flat);
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) if (y % 16 < 10 && (x * 7 + y * 3) % 11 < 4) glyphs[y * w + x] = 20;
+  assert.ok(edgeShare(glyphs, w, h) >= 0.4, `${edgeShare(glyphs, w, h)}`);
+});
+
 // --- the whole command on a film -------------------------------------------------------
 
 let dir = "";
@@ -316,6 +666,7 @@ before(async () => {
       declaredCuts: [1.5],
       detectedCuts: [],
       curves: { names: [], t0: 0, dt: 1 / 30, rows: [] },
+      segments: [{ from: 0, to: 1.5, hold: true, handoff: "cut", subject: "logo" }],
     }),
   );
   await runTool(ffmpeg, ["-version"]);
@@ -352,6 +703,13 @@ test("film probe on a film: cuts, shots, onsets, declared cuts, subjects, marks,
     [["logo", 2.5, "out", "right"]],
   );
   assert.deepEqual(p.marks.list, [{ t: 1, label: "hold", still: true, nearestCut: 0.5 }]);
+  // the beat sheet as the events file has it, beside the picture
+  assert.equal(p.segments.source, "events file");
+  const seg = p.segments.list[0]!;
+  assert.equal(seg.moving, 0);
+  assert.equal(seg.handoffSeen!.kind, "hard cut");
+  assert.equal(seg.handoffSeen!.at, 1.5);
+  assert.deepEqual(seg.subjectSeen, { how: "not detected", source: "events", out: [] });
   // every change has its thumbnails
   for (const c of p.changes.list) {
     assert.ok(c.thumbs, "thumbnails");
@@ -364,4 +722,127 @@ test("film probe on a film: cuts, shots, onsets, declared cuts, subjects, marks,
   const json = JSON.parse(await readFile(r.json, "utf8"));
   assert.equal(json.energyPerFrame.length, 120);
   if (chrome) assert.ok(r.png && existsSync(r.png), "probe.png");
+});
+
+test("film probe with the film's page: its beat sheet, its text measured where it is drawn", {
+  skip: findChrome() ? false : "no Chrome for Testing",
+}, async () => {
+  const chrome = findChrome()!;
+  const page = join(dir, "page");
+  await mkdir(join(page, "kit"), { recursive: true });
+  await copyFile(join(import.meta.dirname, "..", "kit", "time.js"), join(page, "kit", "time.js"));
+  await writeFile(
+    join(page, "index.html"),
+    `<!doctype html><html><head><style>body{margin:0;width:320px;height:180px;overflow:hidden;background:#fff;font:24px sans-serif}
+canvas{position:absolute;left:20px;top:20px;width:200px;height:120px}
+#cap{position:absolute;left:40px;top:60px;color:#000;background:#ffd}
+#big{position:absolute;left:10px;top:150px;font-size:12px;line-height:12px;transform:scale(1.5);transform-origin:0 0}
+#clip{position:absolute;left:250px;top:0;width:40px;height:20px;overflow:hidden;font-size:12px;white-space:nowrap}
+#tight{position:absolute;left:200px;top:150px;width:120px;height:14px;overflow:hidden;font-size:14px;line-height:14px}</style></head><body>
+<canvas id="pic" width="200" height="120"></canvas><div id="cap">Hello film</div><div id="big">Big</div>
+<div id="clip">0123456789012345678901234567890123456789</div><div id="tight">abcdefghij</div>
+<script type="module">
+import { timeline } from "./kit/time.js";
+const tl = timeline({ at: { move: 0.5, end: 1 } });
+tl.segment(0, "move", { label: "still", hold: true, subject: "#cap" });
+tl.segment("move", "end", { label: "slides", hold: true, subject: "#cap" });
+tl.segment(0, "end", { subject: "the logo" });
+const g = document.getElementById("pic").getContext("2d");
+for (let i = 0; i < 40; i++) { g.fillStyle = i % 2 ? "#345" : "#9ab"; g.fillRect((i * 37) % 200, (i * 23) % 120, 30, 20); }
+window.__film = { duration: 1, width: 320, height: 180, fps: 10, ...tl.hooks() };
+window.__render = (t) => {
+  document.getElementById("cap").style.transform = \`translateX(\${Math.max(0, t - 0.5) * 800}px)\`;
+};
+</script></body></html>`,
+  );
+  const film2 = join(dir, "paged.mp4");
+  await renderFilm({ page, out: film2, chromePath: chrome, blur: false, audio: null, workers: 1 });
+  const r = await filmProbe({
+    input: film2,
+    page,
+    chromePath: chrome,
+    textEvery: 0.1,
+    out: join(dir, "paged.probe"),
+  });
+  const p = r.probe;
+  assert.equal(p.segments.source, "page");
+  assert.deepEqual(
+    p.segments.list.map((s) => [s.label, s.hold]),
+    [
+      ["still", true],
+      [undefined, undefined],
+      ["slides", true],
+    ],
+  );
+  // free words no element matches: not looked up as a selector that failed
+  assert.deepEqual(p.segments.list[1]!.subjectSeen, { how: "not measured", source: null, out: [] });
+  assert.equal(p.segments.list[0]!.moving, 0);
+  assert.ok(p.segments.list[2]!.moving > 0.5, `moving ${p.segments.list[2]!.moving}`);
+  // the caption is pushed out past the right edge as it slides
+  assert.equal(p.segments.list[0]!.subjectSeen!.out.length, 0);
+  assert.deepEqual(
+    p.segments.list[2]!.subjectSeen!.out.map((o) => [o.how, o.edge]),
+    [
+      ["partly out", "right"],
+      ["out", "right"],
+    ],
+  );
+  assert.equal(p.text.page.how, "measured");
+  const s0 = p.text.samples[0]!;
+  assert.equal(s0.ownChars, s0.chars! - (s0.pictureChars ?? 0) - (s0.productChars ?? 0));
+  // each piece of the page's own text, as read at 0 s
+  const read = await readPageText({
+    page,
+    chromePath: chrome,
+    from: 0,
+    times: [0],
+    fallback: { width: 320, height: 180 },
+  });
+  const own = (id: string) => read.samples[0]!.own.find((o) => o.text.startsWith(`div#${id}`))!;
+  assert.equal(own("cap").chars, 9);
+  assert.equal(own("cap").px, 24);
+  assert.equal(own("big").px, 18, "drawn at 12 px × 1.5");
+  // 40 digits of which the 40-px box shows a few, by width
+  assert.ok(own("clip").chars >= 4 && own("clip").chars <= 8, `clip ${own("clip").chars}`);
+  // a line box whose empty leading its box cuts off still shows every character
+  assert.equal(own("tight").chars, 10);
+  assert.ok(s0.own! > 0.01, `own share ${s0.own}`);
+  assert.ok(
+    p.text.overlaps.some((o) => o.over === "a picture: canvas#pic" && o.from === 0),
+    JSON.stringify(p.text.overlaps),
+  );
+  const md = await readFile(r.md, "utf8");
+  assert.match(md, /## Beat sheet\n\[measured\] 3 segment\(s\) from the page/);
+  assert.match(md, /written to hold — \[measured\] the picture still changes/);
+  assert.match(md, /## Text at film scale\n\[measured\]/);
+  assert.doesNotMatch(md, /\bscore\b|\bpass\b|\bgrade:|too small|too much/i);
+  // a film of part of the page: the sheet and the subject on the film's clock
+  const part = join(dir, "paged-part.mp4");
+  await renderFilm({
+    page,
+    out: part,
+    from: 0.5,
+    chromePath: chrome,
+    blur: false,
+    audio: null,
+    workers: 1,
+  });
+  const q = (
+    await filmProbe({
+      input: part,
+      page,
+      chromePath: chrome,
+      text: false,
+      textEvery: 0.1,
+      out: join(dir, "part.probe"),
+    })
+  ).probe;
+  assert.deepEqual(
+    q.segments.list.map((x) => [x.label, x.from, x.to]),
+    [
+      [undefined, -0.5, 0.5],
+      ["slides", 0, 0.5],
+    ],
+  );
+  assert.equal(q.segments.list[1]!.subjectSeen!.out[0]!.how, "partly out");
 });

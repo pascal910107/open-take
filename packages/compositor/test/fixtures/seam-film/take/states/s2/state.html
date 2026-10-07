@@ -1,0 +1,58 @@
+<!DOCTYPE html><html lang="en"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"><script type="application/x-open-take-inert"></script>
+
+<title>Fee calculator (fixture)</title>
+<style>
+/* A still, text-dense page — something for the seam to line up on — with no
+   hover styles, caret or animation: what the recording shows and what the
+   saved state shows can then only differ by what the encoder did. */
+html,body{margin:0;width:640px;height:360px;overflow:hidden;background:#f4f1ea;font:14px/1 sans-serif}
+p{position:absolute;left:20px;margin:0;color:#6d6a63;width:330px;white-space:nowrap;overflow:hidden}
+#calc{position:absolute;left:20px;top:300px;width:140px;height:40px;border:0;border-radius:8px;
+  background:#1d4d3c;color:#fff;font:bold 16px sans-serif;cursor:default;outline:none}
+#total{position:absolute;left:380px;top:60px;width:200px;height:120px;border-radius:12px;
+  background:#1d4d3c;display:none}
+#total b{position:absolute;left:16px;top:18px;font:bold 34px sans-serif;color:#ff7a3d}
+#total i{position:absolute;left:0;top:80px;width:200px;height:2px;background:#fff}
+#total span{position:absolute;left:16px;top:92px;color:#cfe3da;font-size:13px}
+.grid{position:absolute;left:380px;top:200px;width:200px;height:80px;
+  background:repeating-linear-gradient(90deg,#d8d2c4 0 1px,transparent 1px 20px),
+             repeating-linear-gradient(0deg,#d8d2c4 0 1px,transparent 1px 20px)}
+</style>
+<style data-ot-freeze>*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important}</style></head>
+<body>
+<p style="top: 12px;">Line 1 — monthly fee, transfer, cancellation Line 1 — monthly fee, transfer, cancellation </p><p style="top: 36px;">Line 2 — monthly fee, transfer, cancellation Line 2 — monthly fee, transfer, cancellation </p><p style="top: 60px;">Line 3 — monthly fee, transfer, cancellation Line 3 — monthly fee, transfer, cancellation </p><p style="top: 84px;">Line 4 — monthly fee, transfer, cancellation Line 4 — monthly fee, transfer, cancellation </p><p style="top: 108px;">Line 5 — monthly fee, transfer, cancellation Line 5 — monthly fee, transfer, cancellation </p><p style="top: 132px;">Line 6 — monthly fee, transfer, cancellation Line 6 — monthly fee, transfer, cancellation </p><p style="top: 156px;">Line 7 — monthly fee, transfer, cancellation Line 7 — monthly fee, transfer, cancellation </p><p style="top: 180px;">Line 8 — monthly fee, transfer, cancellation Line 8 — monthly fee, transfer, cancellation </p><p style="top: 204px;">Line 9 — monthly fee, transfer, cancellation Line 9 — monthly fee, transfer, cancellation </p><p style="top: 228px;">Line 10 — monthly fee, transfer, cancellation Line 10 — monthly fee, transfer, cancellation </p><p style="top: 252px;">Line 11 — monthly fee, transfer, cancellation Line 11 — monthly fee, transfer, cancellation </p>
+<div class="grid"></div>
+<button id="calc" type="button">Calculate</button>
+<div id="total" style="display: block;"><b>NT$3,176</b><i></i><span>a year, all fees in</span></div>
+
+
+
+</body><script data-ot-restore>(function(){
+var P={"scroll":{"x":0,"y":0},"scrolled":[],"inputs":[],"canvases":[],"videos":[],"animated":[],"custom":[],"focus":[1,12],"elements":[{"id":"e0","path":[],"tag":"html"},{"id":"e1","path":[1],"tag":"body"},{"id":"e2","path":[1,0],"tag":"p"},{"id":"e3","path":[1,1],"tag":"p"},{"id":"e4","path":[1,2],"tag":"p"},{"id":"e5","path":[1,3],"tag":"p"},{"id":"e6","path":[1,4],"tag":"p"},{"id":"e7","path":[1,5],"tag":"p"},{"id":"e8","path":[1,6],"tag":"p"},{"id":"e9","path":[1,7],"tag":"p"},{"id":"e10","path":[1,8],"tag":"p"},{"id":"e11","path":[1,9],"tag":"p"},{"id":"e12","path":[1,10],"tag":"p"},{"id":"e13","path":[1,11],"tag":"div"},{"id":"e14","path":[1,12],"tag":"button"},{"id":"e15","path":[1,13],"tag":"div"},{"id":"e16","path":[1,13,0],"tag":"b"},{"id":"e17","path":[1,13,1],"tag":"i"},{"id":"e18","path":[1,13,2],"tag":"span"}]};
+var doc=document;
+function resolve(path){var n=doc.documentElement;for(var i=0;i<path.length;i++){n=n.children[path[i]];if(!n)return null;}return n;}
+function paint(el,url){return new Promise(function(res){try{var ctx=el.getContext("2d");if(!ctx)return res();var im=new Image();im.onload=function(){try{ctx.clearRect(0,0,el.width,el.height);ctx.drawImage(im,0,0,el.width,el.height);}catch(e){}res();};im.onerror=function(){res();};im.src=url;}catch(e){res();}});}
+function run(){
+  var misses=0,i,j,el,waits=[];
+  for(i=0;i<P.custom.length;i++){var c=P.custom[i];try{if(!customElements.get(c.name)){if(c.extends){var Base=doc.createElement(c.extends).constructor;customElements.define(c.name,class extends Base{},{extends:c.extends});}else customElements.define(c.name,class extends HTMLElement{});}}catch(e){}}
+  for(i=0;i<P.elements.length;i++){var e=P.elements[i];el=resolve(e.path);if(el&&el.localName===e.tag)el.setAttribute("data-ot-id",e.id);else misses++;}
+  for(i=0;i<P.inputs.length;i++){var x=P.inputs[i];el=resolve(x.path);if(!el)continue;try{if("checked" in x)el.checked=x.checked;if(x.selected)for(var o=0;o<el.options.length;o++)el.options[o].selected=x.selected.indexOf(o)>=0;if("value" in x)el.value=x.value;}catch(e){}}
+  for(i=0;i<P.canvases.length;i++){var cv=P.canvases[i];el=resolve(cv.path);if(!el||el.localName!=="canvas")continue;waits.push(paint(el,cv.dataUrl));}
+  for(i=0;i<P.videos.length;i++){var vd=P.videos[i];el=resolve(vd.path);if(!el||el.localName!=="video")continue;try{el.removeAttribute("autoplay");el.removeAttribute("src");var ss=el.querySelectorAll("source");for(j=0;j<ss.length;j++)ss[j].remove();el.setAttribute("preload","none");el.setAttribute("poster",vd.dataUrl);el.load();}catch(e){}}
+  for(i=0;i<P.animated.length;i++){var an=P.animated[i];el=resolve(an.path);if(!el)continue;for(var k in an.styles){try{el.style.setProperty(k,an.styles[k],"important");}catch(e){}}}
+  var lazy=doc.querySelectorAll("img[loading=lazy]");for(i=0;i<lazy.length;i++)lazy[i].loading="eager";
+  try{var sheet=new CSSStyleSheet();sheet.replaceSync("*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important}");var all=doc.querySelectorAll("*");for(i=0;i<all.length;i++){var sr=all[i].shadowRoot;if(sr)sr.adoptedStyleSheets=sr.adoptedStyleSheets.concat([sheet]);}}catch(e){}
+  function applyScroll(){try{window.scrollTo({left:P.scroll.x,top:P.scroll.y,behavior:"instant"});}catch(e){window.scrollTo(P.scroll.x,P.scroll.y);}for(var s=0;s<P.scrolled.length;s++){var sc=P.scrolled[s];var se=resolve(sc.path);if(!se)continue;try{se.scrollTo({left:sc.left,top:sc.top,behavior:"instant"});}catch(e){se.scrollTop=sc.top;se.scrollLeft=sc.left;}}}
+  void doc.body.getBoundingClientRect();
+  if(P.focus){el=resolve(P.focus);if(el){try{el.focus({preventScroll:true});}catch(e){}}}
+  applyScroll();
+  try{waits.push(doc.fonts.ready);}catch(e){}
+  var imgs=doc.images;for(i=0;i<imgs.length;i++){try{if(typeof imgs[i].decode==="function")waits.push(imgs[i].decode().catch(function(){}));}catch(e){}}
+  var done=false;
+  function finish(){if(done)return;done=true;applyScroll();doc.documentElement.setAttribute("data-ot-misses",String(misses));doc.documentElement.setAttribute("data-ot-ready","1");}
+  Promise.all(waits).then(finish,finish);
+  setTimeout(finish,6000);
+}
+if(doc.readyState==="loading")doc.addEventListener("DOMContentLoaded",run);else run();
+})();</script>
+</html>

@@ -141,6 +141,10 @@ export type ActionSummary = {
   target?: ActionTarget;
   effectBox?: BBox;
   changeCoverage?: number;
+  /** when its result showed in the recording (measured; see CaptureEventBase.result) */
+  result?: { atMs: number; doneMs: number; box: BBox };
+  /** when the page went quiet after it (estimated from page structure) */
+  settledMs?: number;
   /** typed text (type) */
   text?: string;
   /** chord (press) */
@@ -665,6 +669,8 @@ function describeAction(
       : {}),
     ...(e.effectBox ? { effectBox: e.effectBox } : {}),
     ...(e.changeCoverage != null ? { changeCoverage: e.changeCoverage } : {}),
+    ...(e.result ? { result: e.result } : {}),
+    ...(e.settledMs != null ? { settledMs: e.settledMs } : {}),
     ...(e.kind === "type" ? { text: e.text } : {}),
     ...(e.kind === "press" ? { keys: e.keys } : {}),
     ...(e.kind === "scroll" ? { dy: e.dy } : {}),
@@ -1073,7 +1079,13 @@ function actionText(x: ActionSummary): string {
     const role = t.label ? "" : ` (${t.role ?? t.tag})`;
     target = ` · ${prep} ${t.ref}${name}${role}`;
   }
-  return `${x.id.padEnd(3)} ${head} · ${time}${target}`;
+  // the input is not when its payoff appears: say when it did, and how sure
+  const result = x.result
+    ? ` · result showed ${secs(x.result.atMs)}${x.result.doneMs > x.result.atMs ? `–${secs(x.result.doneMs)}` : ""} (measured)`
+    : x.settledMs != null
+      ? ` · page quiet ${secs(x.settledMs)} (estimated)`
+      : "";
+  return `${x.id.padEnd(3)} ${head} · ${time}${target}${result}`;
 }
 
 export type FormatOpts = {

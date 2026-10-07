@@ -119,6 +119,32 @@ export type FilmEvent = {
   label?: string;
 };
 
+/** One stretch of the film as the page means it (kit/time.js `segment`): in
+ *  seconds of page time, every other field the page's own free words;
+ *  `handoff` is how it hands over to what comes next, at `to`. */
+export type FilmSegment = {
+  from: number;
+  to: number;
+  label?: string;
+  hold?: boolean;
+  handoff?: string;
+  /** a CSS selector, or a subject's name in the curves */
+  subject?: string;
+  sound?: string;
+};
+
+/** Something the film uses that someone else made, and on what terms
+ *  (kit/time.js `credit`, or window.__film.credits): every field the page's
+ *  own free words, for the record only — nothing checks or acts on it. */
+export type FilmCredit = {
+  what?: string;
+  by?: string;
+  licence?: string;
+  url?: string;
+  /** the attribution line as it should appear, if one must */
+  text?: string;
+};
+
 /** <film>.events.json: what the score reads to put its sounds where the
  *  picture is. Times are page time (s). */
 export type FilmEvents = {
@@ -142,6 +168,11 @@ export type FilmEvents = {
   /** window.__film.curves(t) once per output frame: rows[i][j] is names[j] at
    *  t0 + i·dt; null where the page gave no number */
   curves: { names: string[]; t0: number; dt: number; rows: (number | null)[][] };
+  /** window.__film.segments(), by `from` — the page's beat sheet; [] when it has none */
+  segments: FilmSegment[];
+  /** window.__film.credits (a list, or a function that gives one), as the page
+   *  gave it; [] when it has none. Information only */
+  credits: FilmCredit[];
 };
 
 /** where a film's events file goes: beside it, `film.mp4` → `film.events.json` */
@@ -255,6 +286,8 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
     const workers = Math.max(1, Math.min(opts.workers ?? defaultWorkers(), frames));
     // what the page says happens, asked once; its curves are asked in the render loop
     const declared = await pageEvents(first, film.warnings);
+    const segments = await pageSegments(first, film.warnings);
+    const credits = await pageCredits(first, film.warnings);
     const hasCurves = await first.evaluate<boolean>(`typeof window.__film?.curves === "function"`);
     const curveRows: (Record<string, number | null> | null)[] = new Array(frames).fill(null);
 
@@ -376,7 +409,7 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
     const events = eventsPathFor(opts.out);
     await writeFile(
       events,
-      `${JSON.stringify(filmEvents(film, declared, sides, curveRows, film.blur))}\n`,
+      `${JSON.stringify(filmEvents(film, declared, sides, curveRows, film.blur, segments, credits))}\n`,
     );
     const { width: w, height: h } = outSize(film);
     return {
@@ -464,6 +497,115 @@ export function checkEvents(raw: unknown, warnings: string[] = []): FilmEvent[] 
     .map(([e]) => e);
 }
 
+/** window.__film.segments(), once, as plain values; [] when the page has none */
+async function pageSegments(b: HtmlBrowser, warnings: string[]): Promise<FilmSegment[]> {
+  let raw: unknown;
+  try {
+    raw = await b.evaluate<unknown>(
+      `(async () => {
+        const f = window.__film?.segments;
+        if (f === undefined) return null;
+        if (typeof f !== "function") return { notFunction: true };
+        return JSON.parse(JSON.stringify((await f()) ?? []));
+      })()`,
+    );
+  } catch (e) {
+    warnings.push(
+      `window.__film.segments threw (${(e as Error).message.split("\n")[0]}) — the events file has none`,
+    );
+    return [];
+  }
+  if (raw && typeof raw === "object" && "notFunction" in raw) {
+    warnings.push(
+      "window.__film.segments is not a function — it is asked once, as segments(); the events file has none",
+    );
+    return [];
+  }
+  return checkSegments(raw, warnings);
+}
+
+/** a page's beat sheet, checked and by `from` (see FilmSegment): a segment
+ *  without two times, or that ends before it starts, is left out and said so */
+export function checkSegments(raw: unknown, warnings: string[] = []): FilmSegment[] {
+  if (raw == null) return [];
+  if (!Array.isArray(raw)) {
+    warnings.push("window.__film.segments() gave no list — the events file has none");
+    return [];
+  }
+  const out: FilmSegment[] = [];
+  let dropped = 0;
+  for (const e of raw as Record<string, unknown>[]) {
+    if (!e || !finite(e.from) || !finite(e.to) || !(e.to > e.from)) {
+      dropped++;
+      continue;
+    }
+    const seg: FilmSegment = { from: e.from, to: e.to };
+    for (const k of ["label", "handoff", "subject", "sound"] as const)
+      if (typeof e[k] === "string" && e[k]) seg[k] = e[k] as string;
+    if (typeof e.hold === "boolean") seg.hold = e.hold;
+    out.push(seg);
+  }
+  if (dropped)
+    warnings.push(
+      `window.__film.segments(): ${dropped} segment(s) without a from and a later to (s) were left out`,
+    );
+  return out
+    .map((s, i) => [s, i] as const)
+    .sort((a, b) => a[0].from - b[0].from || a[1] - b[1])
+    .map(([s]) => s);
+}
+
+/** window.__film.credits — a list, or a function that gives one — once, as
+ *  plain values; [] when the page has none */
+async function pageCredits(b: HtmlBrowser, warnings: string[]): Promise<FilmCredit[]> {
+  let raw: unknown;
+  try {
+    raw = await b.evaluate<unknown>(
+      `(async () => {
+        let c = window.__film?.credits;
+        if (c === undefined) return null;
+        if (typeof c === "function") c = await c();
+        return JSON.parse(JSON.stringify(c ?? []));
+      })()`,
+    );
+  } catch (e) {
+    warnings.push(
+      `window.__film.credits threw (${(e as Error).message.split("\n")[0]}) — the events file has none`,
+    );
+    return [];
+  }
+  return checkCredits(raw, warnings);
+}
+
+/** a page's credits as given, each kept to its known fields as strings
+ *  ("license" read as "licence"); one that says nothing is left out and said so */
+export function checkCredits(raw: unknown, warnings: string[] = []): FilmCredit[] {
+  if (raw == null) return [];
+  if (!Array.isArray(raw)) {
+    warnings.push("window.__film.credits is not a list — the events file has none");
+    return [];
+  }
+  const out: FilmCredit[] = [];
+  let dropped = 0;
+  for (const e of raw as Record<string, unknown>[]) {
+    const c: FilmCredit = {};
+    if (e && typeof e === "object") {
+      const src: Record<string, unknown> = { ...e, licence: e.licence ?? e.license };
+      for (const k of ["what", "by", "licence", "url", "text"] as const) {
+        const v = src[k];
+        if ((typeof v === "string" && v) || finite(v)) c[k] = String(v);
+      }
+    }
+    if (Object.keys(c).length) out.push(c);
+    else dropped++;
+  }
+  if (dropped)
+    warnings.push(
+      `window.__film.credits: ${dropped} credit(s) with no what, by, licence, url or text were left out`,
+    );
+  return out;
+}
+
 /** window.__film.curves(t): every value that is a finite number, the rest null */
 async function pageCurves(
   b: HtmlBrowser,
@@ -509,6 +651,8 @@ export function filmEvents(
   sides: readonly number[],
   rows: readonly (Record<string, number | null> | null)[],
   probed: boolean,
+  segments: FilmSegment[] = [],
+  credits: FilmCredit[] = [],
 ): FilmEvents {
   const { fps, f0, f1, total } = film;
   const detected: number[] = [];
@@ -549,6 +693,8 @@ export function filmEvents(
       dt: 1 / fps,
       rows: names.length ? rows.map((r) => names.map((k) => r?.[k] ?? null)) : [],
     },
+    segments,
+    credits,
   };
 }
 
@@ -597,6 +743,10 @@ export function patchEvents(master: FilmEvents, patch: FilmEvents): FilmEvents |
     declaredCuts: patch.declaredCuts,
     detectedCuts,
     curves: { names, t0: 0, dt: 1 / master.fps, rows },
+    // the beat sheet as the page says it now, like its events
+    segments: patch.segments ?? master.segments ?? [],
+    // the credits as the page says them now
+    credits: patch.credits ?? master.credits ?? [],
   };
 }
 

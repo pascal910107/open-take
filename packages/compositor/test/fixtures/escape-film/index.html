@@ -1,0 +1,99 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<!-- A film that leaves the kit for one passage (test/film-escape.test.ts):
+     0–1 s and 2–3 s use kit/camera.js, kit/motion.js and kit/time.js on DOM;
+     1–2 s is drawn entirely by the page's own WebGL, no kit. kit/ is copied
+     in by `film init` before it is rendered. -->
+<style>
+  html, body { margin: 0; width: 320px; height: 180px; overflow: hidden; background: #202020; }
+  #layer { position: absolute; left: 0; top: 0; width: 320px; height: 180px; transform-origin: 0 0; }
+  .sq { position: absolute; width: 30px; height: 30px; }
+  #red { left: 130px; top: 80px; background: rgb(255, 0, 0); }
+  #blue { left: 40px; top: 120px; background: rgb(0, 0, 255); }
+  #gl { position: absolute; left: 0; top: 0; width: 320px; height: 180px; display: none; }
+</style>
+<script src="look.js"></script>
+</head>
+<body>
+<div id="layer"><div class="sq" id="red"></div><div class="sq" id="blue"></div></div>
+<canvas id="gl" width="320" height="180"></canvas>
+<script type="module">
+  import { camera } from "./kit/camera.js";
+  import { rise, spring } from "./kit/motion.js";
+  import { timeline } from "./kit/time.js";
+
+  const tl = timeline({ at: { gl: 1, back: 2 } });
+  tl.event("gl", "cut");
+  tl.event("back", "cut");
+  tl.event(1.5, "flash", { x: 145, y: 90, force: 1 });
+  // the beat sheet, where the kit has one
+  if (typeof tl.segment === "function") {
+    tl.segment(0, 1, { label: "kit", handoff: "cut" });
+    tl.segment(1, 2, { label: "webgl", handoff: "cut", subject: "#gl" });
+    tl.segment(2, 3, { label: "kit again" });
+  }
+
+  const cam = camera({ content: { width: 320, height: 180 } });
+  cam.frame({ x: 100, y: 50, width: 120, height: 80 }, { start: 0.1, dur: 0.6 });
+  cam.cut({ cx: 160, cy: 90, w: 320 }, 2);
+
+  // the passage of its own: a quad from a shader, on a background from look.js
+  const canvas = document.getElementById("gl");
+  const gl = canvas.getContext("webgl");
+  const shader = (type, src) => {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    return s;
+  };
+  const prog = gl.createProgram();
+  gl.attachShader(prog, shader(gl.VERTEX_SHADER, `
+    attribute vec2 p; uniform vec4 box; uniform vec2 size;
+    void main() {
+      vec2 px = box.xy + p * box.zw;
+      gl_Position = vec4(px.x / size.x * 2.0 - 1.0, 1.0 - px.y / size.y * 2.0, 0.0, 1.0);
+    }`));
+  gl.attachShader(prog, shader(gl.FRAGMENT_SHADER, `
+    precision mediump float; uniform vec3 colour;
+    void main() { gl_FragColor = vec4(colour, 1.0); }`));
+  gl.linkProgram(prog);
+  gl.useProgram(prog);
+  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]), gl.STATIC_DRAW);
+  const loc = gl.getAttribLocation(prog, "p");
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  gl.uniform2f(gl.getUniformLocation(prog, "size"), 320, 180);
+  const drawGl = (t) => {
+    const bg = window.PALETTE[Math.min(4, Math.floor((t - 1) / 0.2 + 1e-9))];
+    gl.viewport(0, 0, 320, 180);
+    gl.clearColor(bg[0], bg[1], bg[2], 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    const flash = t >= 1.5 && t < 1.6;
+    gl.uniform3f(gl.getUniformLocation(prog, "colour"), 1, flash ? 0 : 1, flash ? 1 : 0);
+    gl.uniform4f(gl.getUniformLocation(prog, "box"), 40 + 200 * (t - 1), 75, 30, 30);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  };
+
+  window.__film = { duration: 3, width: 320, height: 180, fps: 30, audio: "score.wav", ...tl.hooks() };
+  window.__render = (t) => {
+    const own = t >= 1 && t < 2;
+    canvas.style.display = own ? "block" : "none";
+    document.getElementById("layer").style.display = own ? "none" : "block";
+    if (own) return drawGl(t);
+    const w = rise(t, 0.2, { dy: 40 });
+    const red = document.getElementById("red");
+    red.style.display = t < 1 ? "block" : "none";
+    red.style.transform = `translate(${w.x}px, ${w.y}px)`;
+    red.style.opacity = String(w.opacity);
+    const blue = document.getElementById("blue");
+    blue.style.display = t >= 2 ? "block" : "none";
+    blue.style.transform = `translateX(${200 * spring(t, { start: 2.1 })}px)`;
+    document.getElementById("layer").style.transform = cam.transform(t);
+  };
+</script>
+</body>
+</html>

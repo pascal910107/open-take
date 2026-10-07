@@ -439,12 +439,12 @@ test("every block is a pure function of time: the same t gives the same answer, 
   assert.equal(first[0], first[4]);
 });
 
-test("film init copies motion.js into the film and the starting page imports it", async () => {
+test("film init copies motion.js into the film and the starting page lists it", async () => {
   const dir = await mkdtemp(join(tmpdir(), "film-motion-"));
   try {
     await initFilm({ dir });
     assert.ok(existsSync(join(dir, "kit", "motion.js")));
-    assert.match(await readFile(join(dir, "index.html"), "utf8"), /from "\.\/kit\/motion\.js"/);
+    assert.match(await readFile(join(dir, "index.html"), "utf8"), /kit\/motion\.js/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

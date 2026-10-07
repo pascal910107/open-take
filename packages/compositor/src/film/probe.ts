@@ -30,6 +30,16 @@ import {
   pickOnsets,
   spectrum,
 } from "./listen";
+import {
+  type Box,
+  type FrameText,
+  gridCover,
+  type PageTextSample,
+  PHONE_W,
+  readFrameText,
+  readPageText,
+} from "./probe-text";
+import { FILM_TAG } from "./render";
 
 // --- the picture as grey frames --------------------------------------------------------
 
@@ -144,6 +154,33 @@ export function findCuts(g: GreyFrames, energy: Float32Array): number[] {
     if (e < 2.5 * ref) continue;
     if (changedShare(g, frameAt(g, i - 1), frameAt(g, i)) < 0.12) continue;
     out.push(i);
+  }
+  return out;
+}
+
+/** one-frame jumps too small for a cut: a frame whose change stands as far
+ *  over the change around it as a cut's does, but that changes only 2–12 % of
+ *  the frame's blocks — a word, a number or a panel swapped inside a picture
+ *  that holds. `cuts` are left out. */
+export function findSmallSwaps(
+  g: GreyFrames,
+  energy: Float32Array,
+  cuts: readonly number[],
+): { frame: number; changed: number }[] {
+  const out: { frame: number; changed: number }[] = [];
+  const isCut = new Set(cuts);
+  for (let i = 1; i < g.count; i++) {
+    if (isCut.has(i)) continue;
+    const e = energy[i]!;
+    if (e < 0.002) continue;
+    const near: number[] = [];
+    for (let k = i - 4; k <= i + 4; k++)
+      if (k !== i && k >= 1 && k < g.count) near.push(energy[k]!);
+    near.sort((a, b) => b - a);
+    if (e < 2.5 * (near[1] ?? 0)) continue;
+    const share = changedShare(g, frameAt(g, i - 1), frameAt(g, i));
+    if (share < 0.02 || share >= 0.12) continue;
+    out.push({ frame: i, changed: share });
   }
   return out;
 }
@@ -548,6 +585,383 @@ export function findChanges(
   return out.sort((x, y) => x.frame - y.frame);
 }
 
+// --- the whole picture's scale and shift over time ----------------------------------------
+
+/** the picture's motion from one read frame to the next: a scale about the
+ *  frame's centre and a shift, fitted by gradient steps (sub-pixel) on the
+ *  grey copy, coarse to fine; pixels that move otherwise (a caption fading,
+ *  a cursor) are left out of the fit after its first step */
+function fitSimilarity(
+  A: Float32Array,
+  B: Float32Array,
+  w: number,
+  h: number,
+  init: { s: number; x: number; y: number },
+): { s: number; x: number; y: number; res: number } {
+  const cx = w / 2;
+  const cy = h / 2;
+  const gx = new Float32Array(w * h);
+  const gy = new Float32Array(w * h);
+  for (let y = 1; y < h - 1; y++)
+    for (let x = 1; x < w - 1; x++) {
+      const k = y * w + x;
+      gx[k] = (A[k + 1]! - A[k - 1]!) / 2;
+      gy[k] = (A[k + w]! - A[k - w]!) / 2;
+    }
+  let { s, x: tx, y: ty } = init;
+  let res = Number.POSITIVE_INFINITY;
+  let thr = Number.POSITIVE_INFINITY;
+  for (let it = 0; it < 12; it++) {
+    let h00 = 0;
+    let h01 = 0;
+    let h02 = 0;
+    let h11 = 0;
+    let h12 = 0;
+    let h22 = 0;
+    let b0 = 0;
+    let b1 = 0;
+    let b2 = 0;
+    let sumAbs = 0;
+    let n = 0;
+    const absR: number[] = [];
+    for (let y = 1; y < h - 1; y++)
+      for (let x = 1; x < w - 1; x++) {
+        const qx = cx + s * (x - cx) + tx;
+        const qy = cy + s * (y - cy) + ty;
+        if (qx < 0 || qy < 0 || qx >= w - 1 || qy >= h - 1) continue;
+        const x0 = Math.floor(qx);
+        const y0 = Math.floor(qy);
+        const fx = qx - x0;
+        const fy = qy - y0;
+        const k0 = y0 * w + x0;
+        const bv =
+          B[k0]! * (1 - fx) * (1 - fy) +
+          B[k0 + 1]! * fx * (1 - fy) +
+          B[k0 + w]! * (1 - fx) * fy +
+          B[k0 + w + 1]! * fx * fy;
+        const k = y * w + x;
+        const r = bv - A[k]!;
+        const ar = Math.abs(r);
+        if ((it & 3) === 0) absR.push(ar);
+        if (ar > thr) continue;
+        sumAbs += ar;
+        n++;
+        const j0 = gx[k]! * (x - cx) + gy[k]! * (y - cy);
+        const j1 = gx[k]!;
+        const j2 = gy[k]!;
+        h00 += j0 * j0;
+        h01 += j0 * j1;
+        h02 += j0 * j2;
+        h11 += j1 * j1;
+        h12 += j1 * j2;
+        h22 += j2 * j2;
+        b0 += j0 * r;
+        b1 += j1 * r;
+        b2 += j2 * r;
+      }
+    if (n < 0.2 * w * h) return { s, x: tx, y: ty, res: Number.POSITIVE_INFINITY };
+    res = sumAbs / n;
+    if (absR.length) {
+      absR.sort((a, b) => a - b);
+      thr = Math.max(6, 3 * absR[absR.length >> 1]!);
+    }
+    // solve the 3×3 normal equations
+    const det =
+      h00 * (h11 * h22 - h12 * h12) - h01 * (h01 * h22 - h12 * h02) + h02 * (h01 * h12 - h11 * h02);
+    if (!(Math.abs(det) > 1e-9)) break;
+    const i00 = (h11 * h22 - h12 * h12) / det;
+    const i01 = (h02 * h12 - h01 * h22) / det;
+    const i02 = (h01 * h12 - h02 * h11) / det;
+    const i11 = (h00 * h22 - h02 * h02) / det;
+    const i12 = (h01 * h02 - h00 * h12) / det;
+    const i22 = (h00 * h11 - h01 * h01) / det;
+    const ds = i00 * b0 + i01 * b1 + i02 * b2;
+    const dx = i01 * b0 + i11 * b1 + i12 * b2;
+    const dy = i02 * b0 + i12 * b1 + i22 * b2;
+    // the step is taken on A's side: compose with its inverse
+    const sd = 1 + ds;
+    if (!(sd > 0.5)) break;
+    s /= sd;
+    tx -= s * dx;
+    ty -= s * dy;
+    if (Math.abs(ds) < 1e-5 && Math.abs(dx) < 0.003 && Math.abs(dy) < 0.003) break;
+  }
+  return { s, x: tx, y: ty, res };
+}
+
+const halve = (A: Float32Array, w: number, h: number) => {
+  const W2 = Math.floor(w / 2);
+  const H2 = Math.floor(h / 2);
+  const o = new Float32Array(W2 * H2);
+  for (let y = 0; y < H2; y++)
+    for (let x = 0; x < W2; x++) {
+      const k = 2 * y * w + 2 * x;
+      o[y * W2 + x] = (A[k]! + A[k + 1]! + A[k + w]! + A[k + w + 1]!) / 4;
+    }
+  return { px: o, w: W2, h: H2 };
+};
+
+/** the whole picture's motion between frames a and b of the grey copy: scale
+ *  and shift (px of the copy, about its centre); null where no single motion
+ *  lays the two together (new content, a flat frame) */
+export function pictureMotion(
+  g: GreyFrames,
+  a: number,
+  b: number,
+): { s: number; x: number; y: number } | null {
+  const fa = frameAt(g, a);
+  const fb = frameAt(g, b);
+  const A = Float32Array.from(fa);
+  const B = Float32Array.from(fb);
+  let r0 = 0;
+  let textured = 0;
+  for (let y = 1; y < g.h - 1; y++)
+    for (let x = 1; x < g.w - 1; x++) {
+      const k = y * g.w + x;
+      r0 += Math.abs(A[k]! - B[k]!);
+      if (Math.abs(A[k + 1]! - A[k - 1]!) + Math.abs(A[k + g.w]! - A[k - g.w]!) > 8) textured++;
+    }
+  const inner = (g.w - 2) * (g.h - 2);
+  r0 /= inner;
+  if (r0 < 0.35) return { s: 1, x: 0, y: 0 };
+  if (textured < 0.02 * inner) return null;
+  const try1 = (init: { s: number; x: number; y: number }) => {
+    const ha = halve(A, g.w, g.h);
+    const hb = halve(B, g.w, g.h);
+    const c = fitSimilarity(ha.px, hb.px, ha.w, ha.h, { s: init.s, x: init.x / 2, y: init.y / 2 });
+    const start =
+      Number.isFinite(c.res) && Math.abs(c.s - 1) < 0.3 ? { s: c.s, x: c.x * 2, y: c.y * 2 } : init;
+    return fitSimilarity(A, B, g.w, g.h, start);
+  };
+  let f = try1({ s: 1, x: 0, y: 0 });
+  if (!(f.res <= 0.6 * r0)) {
+    const coarse = globalMotion(g, fa, fb);
+    if (coarse.s !== 1 || coarse.x || coarse.y) {
+      const f2 = try1(coarse);
+      if (f2.res < f.res) f = f2;
+    }
+  }
+  // a motion no better than none is none: something else changed
+  if (!(f.res <= 0.6 * r0) || Math.abs(f.s - 1) > 0.25) return null;
+  return { s: f.s, x: f.x, y: f.y };
+}
+
+export type CameraPath = {
+  /** the frames compared: every `step`-th, so the curve is read at about 30 Hz */
+  step: number;
+  /** per step: its end time (s); the picture's scale change as a log (ln s),
+   *  and its shift as a share of the frame's width / height; null where no
+   *  single motion lays the frames together or a cut lies between them */
+  t: number[];
+  logScale: (number | null)[];
+  dx: (number | null)[];
+  dy: (number | null)[];
+};
+
+/** the whole picture's scale and shift, step by step over the film; a cut
+ *  (or a small swap) between two read frames leaves that step out */
+export function cameraPath(g: GreyFrames, breaks: readonly number[]): CameraPath {
+  const step = Math.max(1, Math.round(g.fps / 30));
+  const br = [...breaks].sort((a, b) => a - b);
+  const out: CameraPath = { step, t: [], logScale: [], dx: [], dy: [] };
+  for (let b = step; b < g.count; b += step) {
+    const a = b - step;
+    out.t.push(frameTime(g, b));
+    if (br.some((c) => c > a && c <= b)) {
+      out.logScale.push(null);
+      out.dx.push(null);
+      out.dy.push(null);
+      continue;
+    }
+    const m = pictureMotion(g, a, b);
+    out.logScale.push(m ? Math.log(m.s) : null);
+    // the shift of the frame's centre, as a share of the frame
+    out.dx.push(m ? m.x / g.w : null);
+    out.dy.push(m ? m.y / g.h : null);
+  }
+  return out;
+}
+
+export type CameraRun = {
+  what: "zoom" | "pan x" | "pan y";
+  /** zoom: "in" (the picture grows) / "out"; pan: the way the picture moves */
+  dir: "in" | "out" | "left" | "right" | "up" | "down";
+  start: number;
+  end: number;
+  /** zoom: the scale over the run (×); pan: the shift, share of the frame */
+  amount: number;
+};
+
+/** stretches where the picture keeps zooming or moving one way: the motion
+ *  smoothed over about a sixth of a second, at least `minRate` a second
+ *  (zoom: in ln units; pan: share of the frame), adding up to at least
+ *  `minTotal`; a cut or an unread step ends one */
+export function cameraRuns(
+  path: CameraPath,
+  fps: number,
+  o: { zoomRate?: number; zoomTotal?: number; panRate?: number; panTotal?: number } = {},
+): CameraRun[] {
+  const dt = path.step / fps;
+  const out: CameraRun[] = [];
+  const series: [
+    CameraRun["what"],
+    (number | null)[],
+    number,
+    number,
+    [CameraRun["dir"], CameraRun["dir"]],
+  ][] = [
+    ["zoom", path.logScale, o.zoomRate ?? 0.01, o.zoomTotal ?? Math.log(1.012), ["in", "out"]],
+    ["pan x", path.dx, o.panRate ?? 0.02, o.panTotal ?? 0.03, ["right", "left"]],
+    ["pan y", path.dy, o.panRate ?? 0.02, o.panTotal ?? 0.03, ["down", "up"]],
+  ];
+  for (const [what, v, minRate, minTotal, [pos, neg]] of series) {
+    const n = v.length;
+    // smoothed rate per second; an unread step breaks the smoothing
+    const rate = new Array<number | null>(n).fill(null);
+    for (let i = 0; i < n; i++) {
+      if (v[i] == null) continue;
+      let s = 0;
+      let k = 0;
+      for (let j = i - 2; j <= i + 2; j++) {
+        if (j < 0 || j >= n) continue;
+        if (v[j] == null) {
+          if (Math.abs(j - i) <= 1) {
+            k = 0;
+            break;
+          }
+          continue;
+        }
+        s += v[j]!;
+        k++;
+      }
+      rate[i] = k ? s / k / dt : v[i]! / dt;
+    }
+    let i = 0;
+    while (i < n) {
+      const r = rate[i];
+      if (r == null || Math.abs(r) < minRate) {
+        i++;
+        continue;
+      }
+      const sign = Math.sign(r);
+      let j = i;
+      let total = 0;
+      let quiet = 0;
+      let last = i;
+      while (j < n && rate[j] != null) {
+        const rj = rate[j]!;
+        if (Math.sign(rj) === sign && Math.abs(rj) >= minRate) {
+          quiet = 0;
+          last = j;
+        } else if (Math.sign(rj) !== sign && Math.abs(rj) >= minRate) break;
+        else if (++quiet > 2) break;
+        j++;
+      }
+      for (let k = i; k <= last; k++) total += v[k] ?? 0;
+      if (Math.abs(total) >= minTotal)
+        out.push({
+          what,
+          dir: sign > 0 ? pos : neg,
+          start: round3(path.t[i]! - dt),
+          end: round3(path.t[last]!),
+          amount: what === "zoom" ? round3(Math.exp(total)) : round3(total),
+        });
+      i = last + 1;
+    }
+  }
+  return out.sort((a, b) => a.start - b.start);
+}
+
+export type CameraBackForth = {
+  what: CameraRun["what"];
+  start: number;
+  end: number;
+  /** the runs, each the other way to the one before */
+  runs: number;
+};
+
+/** runs of the same kind that turn back within `gap` s of each other, at
+ *  least `min` in a row — a zoom in, out, in…, a pan back and forth */
+export function backAndForth(runs: readonly CameraRun[], gap = 1, min = 3): CameraBackForth[] {
+  const out: CameraBackForth[] = [];
+  for (const what of ["zoom", "pan x", "pan y"] as const) {
+    const rs = runs.filter((r) => r.what === what);
+    let a = 0;
+    for (let i = 1; i <= rs.length; i++) {
+      const turns =
+        i < rs.length && rs[i]!.dir !== rs[i - 1]!.dir && rs[i]!.start - rs[i - 1]!.end <= gap;
+      if (turns) continue;
+      if (i - a >= min) out.push({ what, start: rs[a]!.start, end: rs[i - 1]!.end, runs: i - a });
+      a = i;
+    }
+  }
+  return out.sort((x, y) => x.start - y.start);
+}
+
+export type CameraRepeat = {
+  what: CameraRun["what"];
+  dir: CameraRun["dir"];
+  start: number;
+  end: number;
+  runs: number;
+  /** the median time from one run's start to the next */
+  every: number;
+};
+
+/** the same short move made again and again: runs of one kind and way, each
+ *  after a pause (at least 0.1 s with no such run), starting within `gap` s
+ *  of the one before, of about the same size (within 2×), at least `min` in a
+ *  row — a pulse on every beat, a push that resets each time */
+export function repeatedRuns(runs: readonly CameraRun[], gap = 1.5, min = 3): CameraRepeat[] {
+  const out: CameraRepeat[] = [];
+  for (const what of ["zoom", "pan x", "pan y"] as const) {
+    const rs = runs.filter((r) => r.what === what);
+    const size = (r: CameraRun) =>
+      what === "zoom" ? Math.abs(Math.log(r.amount)) : Math.abs(r.amount);
+    let a = 0;
+    for (let i = 1; i <= rs.length; i++) {
+      const p = rs[i - 1]!;
+      const q = rs[i];
+      const goesOn =
+        !!q &&
+        q.dir === p.dir &&
+        q.start - p.end >= 0.1 &&
+        q.start - p.start <= gap &&
+        Math.max(size(p), size(q)) <= 2 * Math.min(size(p), size(q));
+      if (goesOn) continue;
+      if (i - a >= min) {
+        const starts = rs.slice(a, i).map((r) => r.start);
+        out.push({
+          what,
+          dir: p.dir,
+          start: rs[a]!.start,
+          end: p.end,
+          runs: i - a,
+          every: round3(median(starts.slice(1).map((t, k) => t - starts[k]!))),
+        });
+      }
+      a = i;
+    }
+  }
+  return out.sort((x, y) => x.start - y.start);
+}
+
+/** every turn back: a run the other way to the run of its kind before it,
+ *  starting within `gap` s of its end */
+export function reversals(
+  runs: readonly CameraRun[],
+  gap = 1,
+): { t: number; what: CameraRun["what"] }[] {
+  const out: { t: number; what: CameraRun["what"] }[] = [];
+  for (const what of ["zoom", "pan x", "pan y"] as const) {
+    const rs = runs.filter((r) => r.what === what);
+    for (let i = 1; i < rs.length; i++)
+      if (rs[i]!.dir !== rs[i - 1]!.dir && rs[i]!.start - rs[i - 1]!.end <= gap)
+        out.push({ t: rs[i]!.start, what });
+  }
+  return out.sort((a, b) => a.t - b.t);
+}
+
 // --- subjects the page declared ---------------------------------------------------------
 
 export type SubjectTrack = {
@@ -686,6 +1100,453 @@ export function subjectExits(
   return out.sort((a, b) => a.start - b.start);
 }
 
+// --- the beat sheet against what happened -------------------------------------------------
+
+/** a segment of the page's beat sheet (kit/time.js `segment`), in film time */
+export type SheetSegment = {
+  from: number;
+  to: number;
+  label?: string;
+  hold?: boolean;
+  handoff?: string;
+  subject?: string;
+  sound?: string;
+};
+
+/** a beat sheet as an events file or a page gives it: kept where it has two
+ *  times in order, by `from` */
+export function sheetSegments(raw: unknown): SheetSegment[] {
+  if (!Array.isArray(raw)) return [];
+  const out: SheetSegment[] = [];
+  for (const e of raw as Record<string, unknown>[]) {
+    if (!e || typeof e.from !== "number" || typeof e.to !== "number") continue;
+    if (!Number.isFinite(e.from) || !Number.isFinite(e.to) || !(e.to > e.from)) continue;
+    const s: SheetSegment = { from: e.from, to: e.to };
+    for (const k of ["label", "handoff", "subject", "sound"] as const)
+      if (typeof e[k] === "string" && e[k]) s[k] = e[k] as string;
+    if (typeof e.hold === "boolean") s.hold = e.hold;
+    out.push(s);
+  }
+  return out.sort((a, b) => a.from - b.from);
+}
+
+export type SegmentReading = SheetSegment & {
+  /** share of the segment's frames whose picture changes (≥ the still line) */
+  moving: number;
+  /** where it moves, stretches of at least 0.1 s */
+  movingSpans: { start: number; end: number }[];
+  cuts: number[];
+  swaps: number[];
+  /** the whole picture's motion summed over the segment's read steps: scale
+   *  (×) and shift (share of the frame); null when no step could be read */
+  camera: { zoom: number; x: number; y: number; read: number } | null;
+  runs: CameraRun[];
+  /** the declared subject, when the segment names one */
+  subjectSeen?: {
+    how: "measured" | "estimated" | "not detected" | "not measured";
+    /** page: a selector found on the page; curves/events: a declared track by name */
+    source: "page" | "curves" | "events" | null;
+    out: { start: number; end: number; how: "out" | "partly out" | "not visible"; edge?: string }[];
+  };
+  /** what the picture does at the segment's end, where its handoff is */
+  handoffSeen?: {
+    how: "measured" | "estimated";
+    kind:
+      | "hard cut"
+      | "small swap"
+      | "gradual: carried"
+      | "gradual: background only"
+      | "gradual: nothing carried"
+      | "continuous, camera moving"
+      | "continuous, no change"
+      | "film ends";
+    at: number | null;
+    /** a hard cut: what crosses it */
+    across?: CarryKind;
+    nearestOnset: number | null;
+  };
+};
+
+/** set each segment beside what the picture did over it */
+export function readSegments(
+  segments: readonly SheetSegment[],
+  c: {
+    duration: number;
+    fps: number;
+    t0: number;
+    energy: Float32Array;
+    stillUnder: number;
+    cuts: readonly number[];
+    swaps: readonly number[];
+    changes: readonly PictureChange[];
+    path: CameraPath;
+    runs: readonly CameraRun[];
+    tracks: readonly SubjectTrack[];
+    width: number;
+    height: number;
+    /** where the page drew each subject selector, sample by sample (box null:
+     *  not visible); null when no element on the page ever matches it */
+    pageSubjects?: (
+      sel: string,
+    ) => { t: number; box: [number, number, number, number] | null }[] | null;
+    onsets: readonly number[] | null;
+  },
+): SegmentReading[] {
+  const win = Math.max(0.35, 3 / c.fps);
+  return segments.map((s) => {
+    const a = Math.max(0, Math.round((s.from - c.t0) * c.fps));
+    const b = Math.min(c.energy.length, Math.round((s.to - c.t0) * c.fps));
+    let moving = 0;
+    const spans: { start: number; end: number }[] = [];
+    let open: number | null = null;
+    for (let i = a; i < b; i++) {
+      const m = i > 0 && c.energy[i]! >= c.stillUnder;
+      if (m) moving++;
+      if (m && open == null) open = i;
+      if ((!m || i === b - 1) && open != null) {
+        const end = m ? i + 1 : i;
+        if ((end - open) / c.fps >= 0.1)
+          spans.push({ start: round3(c.t0 + open / c.fps), end: round3(c.t0 + end / c.fps) });
+        open = null;
+      }
+    }
+    let ls = 0;
+    let x = 0;
+    let y = 0;
+    let read = 0;
+    c.path.t.forEach((t, k) => {
+      if (t <= s.from + 1e-9 || t > s.to + 1e-9) return;
+      const v = c.path.logScale[k];
+      if (v == null) return;
+      ls += v;
+      x += c.path.dx[k] ?? 0;
+      y += c.path.dy[k] ?? 0;
+      read++;
+    });
+    const r: SegmentReading = {
+      ...s,
+      moving: round2(b > a ? moving / (b - a) : 0),
+      movingSpans: spans,
+      cuts: c.cuts.filter((t) => t > s.from + 1e-9 && t < s.to - 1e-9),
+      swaps: c.swaps.filter((t) => t > s.from + 1e-9 && t < s.to - 1e-9),
+      camera: read ? { zoom: round3(Math.exp(ls)), x: round3(x), y: round3(y), read } : null,
+      runs: c.runs.filter((u) => u.end > s.from && u.start < s.to),
+    };
+    if (s.subject) {
+      const page = c.pageSubjects?.(s.subject) ?? null;
+      const track = c.tracks.find((t) => t.name === s.subject);
+      // the page's samples inside the segment (none: the segment falls between two)
+      const inSeg = (page ?? []).filter((p) => p.t >= s.from - 1e-9 && p.t < s.to - 1e-9);
+      if (inSeg.length) {
+        const out: NonNullable<SegmentReading["subjectSeen"]>["out"] = [];
+        // a stretch per state: not visible, or out / partly out by edge
+        let cur: {
+          start: number;
+          how: "out" | "partly out" | "not visible";
+          edge?: string;
+        } | null = null;
+        const close = (t: number) => {
+          if (cur) out.push({ ...cur, end: round3(t) });
+          cur = null;
+        };
+        for (const p of inSeg) {
+          let st: { how: "out" | "partly out" | "not visible"; edge?: string } | null = null;
+          if (!p.box) st = { how: "not visible" };
+          else {
+            const [bx, by, bw, bh] = p.box;
+            const ex = subjectExits(
+              [
+                {
+                  name: "",
+                  source: "events",
+                  samples: [{ t: 0, x: bx + bw / 2, y: by + bh / 2, w: bw, h: bh }],
+                },
+              ],
+              c.width,
+              c.height,
+              0,
+            )[0];
+            if (ex) st = { how: ex.how, edge: ex.edge };
+          }
+          const same = (q: typeof cur) => !!q && !!st && q.how === st.how && q.edge === st.edge;
+          if (cur && !same(cur)) close(p.t);
+          if (st && !cur) cur = { start: round3(p.t), ...st };
+        }
+        close(s.to);
+        r.subjectSeen = { how: out.length ? "measured" : "not detected", source: "page", out };
+      } else if (track) {
+        const ex = subjectExits([track], c.width, c.height, c.duration).filter(
+          (e) => e.end > s.from && e.start < s.to,
+        );
+        r.subjectSeen = {
+          how: ex.length ? "estimated" : "not detected",
+          source: track.source,
+          out: ex.map((e) => ({
+            start: round3(Math.max(e.start, s.from)),
+            end: round3(Math.min(e.end, s.to)),
+            how: e.how,
+            edge: e.edge,
+          })),
+        };
+      } else r.subjectSeen = { how: "not measured", source: null, out: [] };
+    }
+    if (s.handoff) {
+      const at = s.to;
+      const nearestOnset = c.onsets?.length ? nearestOffset([...c.onsets], at) : null;
+      const near = (t: number) => Math.abs(t - at) <= win;
+      const cut = c.cuts.filter(near).sort((p, q) => Math.abs(p - at) - Math.abs(q - at))[0];
+      const grad = c.changes.find(
+        (ch) =>
+          ch.kind !== "hard cut" &&
+          c.t0 + ch.before / c.fps <= at + win &&
+          c.t0 + ch.after / c.fps >= at - win,
+      );
+      const swap = c.swaps.filter(near)[0];
+      const camMoves = c.runs.some((u) => u.start <= at + 0.05 && u.end >= at - 0.05);
+      if (at >= c.duration - 1.5 / c.fps)
+        r.handoffSeen = { how: "measured", kind: "film ends", at: null, nearestOnset };
+      else if (cut != null) {
+        const ch = c.changes.find(
+          (x) => x.kind === "hard cut" && Math.abs(x.t - cut) < 0.5 / c.fps,
+        );
+        r.handoffSeen = {
+          how: "measured",
+          kind: "hard cut",
+          at: round3(cut),
+          ...(ch ? { across: ch.across } : {}),
+          nearestOnset,
+        };
+      } else if (grad)
+        r.handoffSeen = {
+          how: "estimated",
+          kind: `gradual: ${grad.kind as CarryKind}`,
+          at: round3(grad.t),
+          nearestOnset,
+        };
+      else if (swap != null)
+        r.handoffSeen = { how: "measured", kind: "small swap", at: round3(swap), nearestOnset };
+      else
+        r.handoffSeen = {
+          how: "estimated",
+          kind: camMoves ? "continuous, camera moving" : "continuous, no change",
+          at: null,
+          nearestOnset,
+        };
+    }
+    return r;
+  });
+}
+
+// --- text at film scale -----------------------------------------------------------------
+
+export type TextSample = {
+  t: number;
+  /** share of the frame under text: the page's own, the product's (saved
+   *  screens), inside pictures (read off the film); null: not read */
+  own: number | null;
+  product: number | null;
+  picture: number | null;
+  /** all of it */
+  share: number;
+  /** characters visible: the same split */
+  ownChars: number | null;
+  productChars: number | null;
+  pictureChars: number | null;
+  chars: number | null;
+  /** the smallest and the median (by character) text size, film px; where
+   *  each came from */
+  smallest: { px: number; from: "page" | "picture"; text: string } | null;
+  median: number | null;
+};
+
+export type TextOverlap = {
+  from: number;
+  to: number;
+  /** the page's own text */
+  text: string;
+  over: string;
+};
+
+/** the page's text and the film's read text, sample by sample, put together */
+export function textTimeline(
+  page: PageTextSample[] | null,
+  frames: FrameText[] | null,
+  o: {
+    width: number;
+    height: number;
+    segments: readonly SheetSegment[];
+    every: number;
+  },
+): { samples: TextSample[]; overlaps: TextOverlap[] } {
+  const area = o.width * o.height;
+  // every time either reader has (a page can leave a time out)
+  const times = [...new Set([...(page ?? []), ...(frames ?? [])].map((s) => s.t))].sort(
+    (a, b) => a - b,
+  );
+  const byT = (list: { t: number }[] | null, t: number) =>
+    list?.find((s) => Math.abs(s.t - t) < 1e-6) ?? null;
+  const samples: TextSample[] = [];
+  const raw: { t: number; text: string; over: string }[] = [];
+  for (const t of times) {
+    const p = byT(page, t) as PageTextSample | null;
+    const f = byT(frames, t) as FrameText | null;
+    // the read lines that are not the page's own text: text in pictures
+    // (a line over the product's live text is that text)
+    const pictureLines = (f?.lines ?? []).filter((l) => {
+      if (l.conf < 0.3 || l.box[3] < 4) return false;
+      if (!p) return true;
+      if (gridCover(p.grid, o.width, o.height, l.box) >= 0.3) return false;
+      // the film's own text read back: mostly on its pieces at about the
+      // line's size (a line the recognizer reads across two pieces side by
+      // side included)
+      const la = l.box[2] * l.box[3];
+      const onOwn = p.own
+        .filter((x) => l.box[3] >= 0.6 * x.px && l.box[3] <= 1.8 * x.px)
+        .reduce((a, x) => a + x.boxes.reduce((s, b) => s + overlapArea(b, l.box), 0), 0);
+      return onOwn < 0.5 * la;
+    });
+    const sizes: { px: number; chars: number; from: "page" | "picture"; text: string }[] = [];
+    if (p) {
+      for (const [px, chars] of p.sizes) sizes.push({ px, chars, from: "page", text: "" });
+      // name the smallest piece of the film's own text, when it is that
+      for (const x of p.own) {
+        const hit = sizes.find((s) => s.from === "page" && Math.abs(s.px - x.px) < 0.26 && !s.text);
+        if (hit) hit.text = x.text;
+      }
+    }
+    for (const l of pictureLines)
+      sizes.push({ px: l.box[3], chars: l.chars, from: "picture", text: l.text });
+    let pictureShare: number | null = null;
+    let pictureChars: number | null = null;
+    if (f?.how === "ocr") {
+      pictureShare = round3(
+        Math.min(1, pictureLines.reduce((a, l) => a + l.box[2] * l.box[3], 0) / area),
+      );
+      pictureChars = pictureLines.reduce((a, l) => a + l.chars, 0);
+    } else if (f?.how === "edges") pictureShare = f.share;
+    const own = p ? p.ownShare : null;
+    const product = p ? p.productShare : null;
+    const share =
+      f?.how === "edges"
+        ? Math.max(f.share, (own ?? 0) + (product ?? 0))
+        : Math.min(1, (own ?? 0) + (product ?? 0) + (pictureShare ?? 0));
+    const ownChars = p ? p.own.reduce((a, x) => a + x.chars, 0) : null;
+    const productChars = p ? p.product.chars : null;
+    const chars =
+      ownChars == null && pictureChars == null
+        ? null
+        : (ownChars ?? 0) + (productChars ?? 0) + (pictureChars ?? 0);
+    const sorted = sizes.filter((s) => s.px > 0).sort((a, b) => a.px - b.px);
+    const total = sorted.reduce((a, s) => a + s.chars, 0);
+    let median: number | null = null;
+    if (total) {
+      let k = 0;
+      for (const s of sorted) {
+        k += s.chars;
+        if (k >= total / 2) {
+          median = round1(s.px);
+          break;
+        }
+      }
+    }
+    samples.push({
+      t,
+      own,
+      product,
+      picture: pictureShare,
+      share: round3(share),
+      ownChars,
+      productChars,
+      pictureChars,
+      chars,
+      smallest: sorted[0]
+        ? { px: round1(sorted[0].px), from: sorted[0].from, text: sorted[0].text }
+        : null,
+      median,
+    });
+    // the film's own text over pictures, the product's text, text in
+    // pictures, the subject of the segment it is in
+    if (p) {
+      const subjects = o.segments
+        .filter((s) => s.subject && t >= s.from - 1e-9 && t < s.to - 1e-9)
+        .map((s) => [s.subject!, p.subjects[s.subject!] ?? null] as const);
+      for (const x of p.own) {
+        const a = x.boxes.reduce((s, b) => s + b[2] * b[3], 0);
+        if (!a) continue;
+        // over a picture: a share of the text; over a line or a subject: a
+        // share of the smaller of the two
+        const cover = (box: Box) => x.boxes.reduce((s, b) => s + overlapArea(b, box), 0) / a;
+        const meet = (box: Box) =>
+          x.boxes.reduce((s, b) => s + overlapArea(b, box), 0) / Math.min(a, box[2] * box[3]);
+        const add = (over: string) => raw.push({ t, text: x.text, over });
+        if (x.boxes.some((b) => gridCover(p.grid, o.width, o.height, b) >= 0.2))
+          add("the product's text");
+        if (pictureLines.some((l) => meet(l.box) >= 0.2)) add("text inside a picture");
+        for (const [sel, box] of subjects) if (box && meet(box) >= 0.2) add(`the subject ${sel}`);
+        for (const m of p.media)
+          if (cover(m.box) >= 0.2 && m.box[2] * m.box[3] < 0.9 * area) add(`a picture: ${m.label}`);
+      }
+    }
+  }
+  // samples in a row with the same text over the same thing: one stretch
+  const overlaps: TextOverlap[] = [];
+  const openO = new Map<string, TextOverlap & { last: number }>();
+  for (const t of times) {
+    const now = raw.filter((r) => r.t === t);
+    const keys = new Set<string>();
+    for (const r of now) {
+      const k = `${r.text}|${r.over}`;
+      keys.add(k);
+      const cur = openO.get(k);
+      if (cur && t - cur.last <= o.every * 1.5 + 1e-6) {
+        cur.last = t;
+        cur.to = round3(t + o.every);
+      } else {
+        if (cur) overlaps.push({ from: cur.from, to: cur.to, text: cur.text, over: cur.over });
+        openO.set(k, {
+          from: round3(t),
+          to: round3(t + o.every),
+          text: r.text,
+          over: r.over,
+          last: t,
+        });
+      }
+    }
+    for (const [k, cur] of [...openO])
+      if (!keys.has(k) && t - cur.last > o.every * 1.5) {
+        overlaps.push({ from: cur.from, to: cur.to, text: cur.text, over: cur.over });
+        openO.delete(k);
+      }
+  }
+  for (const cur of openO.values())
+    overlaps.push({ from: cur.from, to: cur.to, text: cur.text, over: cur.over });
+  return { samples, overlaps: overlaps.sort((a, b) => a.from - b.from) };
+}
+
+const overlapArea = (a: Box, b: Box) => {
+  const w = Math.min(a[0] + a[2], b[0] + b[2]) - Math.max(a[0], b[0]);
+  const h = Math.min(a[1] + a[3], b[1] + b[3]) - Math.max(a[1], b[1]);
+  return w > 0 && h > 0 ? w * h : 0;
+};
+
+/** the text samples per `binS` second: mean share, most characters at once,
+ *  the smallest size, the median of the samples' medians */
+export function textPerSecond(samples: readonly TextSample[], duration: number, binS = 1) {
+  return Array.from({ length: Math.max(1, Math.ceil(duration / binS - 1e-9)) }, (_, k) => {
+    const inBin = samples.filter((s) => s.t >= k * binS - 1e-9 && s.t < (k + 1) * binS - 1e-9);
+    const meds = inBin.map((s) => s.median).filter((v): v is number => v != null);
+    const smalls = inBin.map((s) => s.smallest?.px).filter((v): v is number => v != null);
+    const chars = inBin.map((s) => s.chars).filter((v): v is number => v != null);
+    return {
+      t: k * binS,
+      share: inBin.length ? round3(inBin.reduce((a, s) => a + s.share, 0) / inBin.length) : 0,
+      chars: chars.length ? Math.max(...chars) : null,
+      smallest: smalls.length ? Math.min(...smalls) : null,
+      median: meds.length ? round1(median(meds)) : null,
+    };
+  });
+}
+
 // --- the whole probe ---------------------------------------------------------------------
 
 type How = "measured" | "estimated" | "not detected" | "not measured";
@@ -734,6 +1595,8 @@ export type FilmProbe = {
     /** the same, ended only by the cuts that change at least NEW_PICTURE of
      *  the frame */
     newPicture: ShotStats;
+    /** the same, ended by small swaps too */
+    withSwaps: ShotStats;
   };
   changes: { how: How; list: (PictureChange & { thumbs?: { before: string; after: string } })[] };
   sound: {
@@ -764,6 +1627,44 @@ export type FilmProbe = {
   marks: {
     how: How;
     list: { t: number; label: string; still: boolean; nearestCut: number | null }[];
+  };
+  /** one-frame jumps that change 2–12 % of the frame: too small for a cut */
+  smallSwaps: { how: How; list: { t: number; changed: number }[]; perMin: number };
+  /** the whole picture's scale and shift, read step by step (a camera move,
+   *  or anything large enough to carry the picture with it) */
+  camera: {
+    how: How;
+    /** seconds between the frames compared */
+    stepS: number;
+    /** share of the steps a single motion could be read for */
+    read: number;
+    /** over the film: every read step's zoom in multiplied together, and
+     *  every zoom out (×), and how far the picture travelled (frame widths) */
+    zoomIn: number | null;
+    zoomOut: number | null;
+    travel: number | null;
+    runs: CameraRun[];
+    reversals: { t: number; what: CameraRun["what"] }[];
+    backAndForth: CameraBackForth[];
+    repeated: CameraRepeat[];
+  };
+  /** the page's beat sheet beside what the picture did */
+  segments: { how: How; source: "page" | "events file" | null; list: SegmentReading[] };
+  /** how much of the frame is text, and how big */
+  text: {
+    how: How;
+    every: number;
+    /** the page's text (measured), read on the film clock */
+    page: { how: How; file: string | null; note?: string };
+    /** text read off the film's frames (estimated) */
+    picture: { how: How; reader: "ocr" | "edges" | null };
+    /** the width a phone is taken to show the film at (CSS px) */
+    phoneWidth: number;
+    /** film px × phoneScale = px on that phone */
+    phoneScale: number;
+    samples: TextSample[];
+    perSecond: ReturnType<typeof textPerSecond>;
+    overlaps: TextOverlap[];
   };
 };
 
@@ -801,6 +1702,17 @@ export type FilmProbeOptions = {
   chromePath?: string;
   /** the seconds between `film sheet`'s frames, to mark the same times */
   every?: number;
+  /** the film's page (an .html file or its folder): its text is read on the
+   *  film clock (needs chromePath) and its beat sheet taken from it */
+  page?: string;
+  /** the directory the page is served from (as for `film render`) */
+  root?: string;
+  /** read the film's frames for text (default true): the system's text
+   *  recognizer on macOS, else an edge count */
+  text?: boolean;
+  /** seconds between text samples (default 0.5) */
+  textEvery?: number;
+  onConsole?: (level: string, text: string) => void;
 };
 
 export async function filmProbe(opts: FilmProbeOptions): Promise<{
@@ -822,7 +1734,7 @@ export async function filmProbe(opts: FilmProbeOptions): Promise<{
       "-v",
       "error",
       "-show_entries",
-      "stream=codec_type,width,height,r_frame_rate,start_time:format=duration,start_time",
+      "stream=codec_type,width,height,r_frame_rate,start_time:format=duration,start_time:format_tags",
       "-of",
       "json",
       input,
@@ -835,7 +1747,7 @@ export async function filmProbe(opts: FilmProbeOptions): Promise<{
       r_frame_rate?: string;
       start_time?: string;
     }[];
-    format?: { duration?: string; start_time?: string };
+    format?: { duration?: string; start_time?: string; tags?: Record<string, string> };
   };
   const video = info.streams?.find((s) => s.codec_type === "video");
   const audio = info.streams?.find((s) => s.codec_type === "audio");
@@ -867,6 +1779,13 @@ export async function filmProbe(opts: FilmProbeOptions): Promise<{
   const stillMin = 0.5;
   const stillRanges = findStills(energy, fps, stillMin, stillUnder);
   const changes = findChanges(grey, energy, cutFrames);
+  const swaps = findSmallSwaps(grey, energy, cutFrames);
+  const swapTimes = swaps.map((w) => round3(frameTime(grey, w.frame)));
+  const path = cameraPath(grey, [...cutFrames, ...swaps.map((w) => w.frame)]);
+  const runs = cameraRuns(path, fps);
+  // what `film render` wrote into the film: where it starts on the page's
+  // timeline and the size it was laid out at
+  const record = filmRecordOf(info.format?.tags?.[FILM_TAG]);
 
   // the sound's onsets, as `film listen` finds them
   let onsets: number[] = [];
@@ -912,7 +1831,11 @@ export async function filmProbe(opts: FilmProbeOptions): Promise<{
     .filter((v): v is number => typeof v === "number" && Number.isFinite(v))
     .sort((a, b) => a - b);
   const tol = 1.5 / fps;
-  const tracks = rawEvents ? subjectTracks(rawEvents) : [];
+  // the events file is on the page's clock; the film starts at `from` on it
+  const tracks = (rawEvents ? subjectTracks(rawEvents) : []).map((tr) => ({
+    ...tr,
+    samples: tr.samples.map((x) => ({ ...x, t: x.t - (record?.from ?? 0) })),
+  }));
   const exits = subjectExits(tracks, video.width, video.height, duration);
   const marks = (ev?.events ?? [])
     .filter((e) => e.kind === "mark")
@@ -925,6 +1848,96 @@ export async function filmProbe(opts: FilmProbeOptions): Promise<{
         nearestCut: cutTimes.length ? nearestOffset(cutTimes, e.t) : null,
       };
     });
+
+  // the camera over the film: its zoom against the start, its travel
+  const vw = video.width;
+  const vh = video.height;
+  let zin = 0;
+  let zout = 0;
+  let travel = 0;
+  let readSteps = 0;
+  path.logScale.forEach((v, k) => {
+    if (v == null) return;
+    readSteps++;
+    if (v > 0) zin += v;
+    else zout += v;
+    travel += Math.hypot(path.dx[k] ?? 0, ((path.dy[k] ?? 0) * vh) / vw);
+  });
+
+  // the page: its text over the film's time, its beat sheet as it is now
+  const textEvery = opts.textEvery ?? 0.5;
+  const sampleTimes: number[] = [];
+  for (let k = 0; k * textEvery < duration - 0.5 / fps; k++)
+    sampleTimes.push(round3(k * textEvery));
+  const from = record?.from ?? 0;
+  let pageRead: Awaited<ReturnType<typeof readPageText>> | null = null;
+  let pageNote: string | undefined;
+  if (opts.page && !opts.chromePath) pageNote = "no Chrome to play the page in";
+  else if (opts.page)
+    pageRead = await readPageText({
+      page: opts.page,
+      root: opts.root,
+      chromePath: opts.chromePath!,
+      from,
+      times: sampleTimes,
+      width: record?.width || undefined,
+      height: record?.height || undefined,
+      fallback: { width: video.width, height: video.height },
+      onConsole: opts.onConsole,
+    }).catch((e: Error) => {
+      // the rest of the probe does not need the page
+      pageNote = `the page could not be played: ${e.message.split("\n")[0]}`;
+      return null;
+    });
+  if (pageRead?.failed.length)
+    pageNote = `the page threw at ${pageRead.failed.length} of ${sampleTimes.length} sample time(s), left out (first at ${pageRead.failed[0]!.t} s: ${pageRead.failed[0]!.error})`;
+  // the page's CSS px as the film's px
+  const k = pageRead ? video.width / pageRead.width : 1;
+  const pageSamples = pageRead?.samples.map((x) => scalePageSample(x, k)) ?? null;
+  const sheetRaw =
+    pageRead && Array.isArray(pageRead.segments) ? pageRead.segments : rawObj.segments;
+  // on the film's clock; a segment wholly outside a film of part of the page is left out
+  const sheet = sheetSegments(sheetRaw)
+    .map((x) => ({ ...x, from: x.from - from, to: x.to - from }))
+    .filter((x) => x.to > 0 && x.from < duration);
+  const frameText =
+    opts.text === false
+      ? null
+      : await readFrameText({
+          ffmpeg,
+          input,
+          times: sampleTimes,
+          width: video.width,
+          height: video.height,
+        });
+  const text = textTimeline(pageSamples, frameText?.frames ?? null, {
+    width: video.width,
+    height: video.height,
+    segments: sheet,
+    every: textEvery,
+  });
+  const segReadings = readSegments(sheet, {
+    duration,
+    fps,
+    t0,
+    energy,
+    stillUnder,
+    cuts: cutTimes,
+    swaps: swapTimes,
+    changes,
+    path,
+    runs,
+    tracks,
+    width: video.width,
+    height: video.height,
+    pageSubjects: pageSamples
+      ? (sel) =>
+          pageSamples.some((x) => sel in x.subjects)
+            ? pageSamples.map((x) => ({ t: x.t, box: x.subjects[sel] ?? null }))
+            : null
+      : undefined,
+    onsets: pcm ? onsets : null,
+  });
 
   const probe: FilmProbe = {
     input,
@@ -962,6 +1975,10 @@ export async function filmProbe(opts: FilmProbeOptions): Promise<{
       how: "measured",
       ...shotStats(cutTimes, duration),
       newPicture: shotStats(newPictureTimes, duration),
+      withSwaps: shotStats(
+        [...cutTimes, ...swapTimes].sort((a, b) => a - b),
+        duration,
+      ),
     },
     changes: { how: changes.length ? "estimated" : "not detected", list: changes.map(roundChange) },
     sound: {
@@ -992,6 +2009,47 @@ export async function filmProbe(opts: FilmProbeOptions): Promise<{
       how: !rawEvents ? "not measured" : marks.length ? "measured" : "not detected",
       list: marks,
     },
+    smallSwaps: {
+      how: swaps.length ? "measured" : "not detected",
+      list: swaps.map((w, i) => ({ t: swapTimes[i]!, changed: round2(w.changed) })),
+      perMin: round1((swaps.length / duration) * 60),
+    },
+    camera: {
+      how: !path.t.length ? "not measured" : readSteps ? "estimated" : "not detected",
+      stepS: round3(path.step / fps),
+      read: round2(path.t.length ? readSteps / path.t.length : 0),
+      zoomIn: readSteps ? round3(Math.exp(zin)) : null,
+      zoomOut: readSteps ? round3(Math.exp(zout)) : null,
+      travel: readSteps ? round2(travel) : null,
+      runs,
+      reversals: reversals(runs),
+      backAndForth: backAndForth(runs),
+      repeated: repeatedRuns(runs),
+    },
+    segments: {
+      how: sheet.length ? "measured" : pageRead || rawEvents ? "not detected" : "not measured",
+      source: sheet.length
+        ? pageRead && Array.isArray(pageRead.segments)
+          ? "page"
+          : "events file"
+        : null,
+      list: segReadings,
+    },
+    text: {
+      how: pageSamples ? "measured" : frameText ? "estimated" : "not measured",
+      every: textEvery,
+      page: {
+        how: pageSamples ? "measured" : "not measured",
+        file: opts.page ? resolve(opts.page) : null,
+        ...(pageNote ? { note: pageNote } : {}),
+      },
+      picture: { how: frameText ? "estimated" : "not measured", reader: frameText?.how ?? null },
+      phoneWidth: PHONE_W,
+      phoneScale: round4(PHONE_W / video.width),
+      samples: text.samples,
+      perSecond: textPerSecond(text.samples, duration),
+      overlaps: text.overlaps,
+    },
   };
 
   await mkdir(outDir, { recursive: true });
@@ -1005,7 +2063,16 @@ export async function filmProbe(opts: FilmProbeOptions): Promise<{
   await writeFile(md, `${formatFilmProbe(probe)}\n`);
   await writeFile(
     json,
-    `${JSON.stringify({ ...probe, energyPerFrame: Array.from(energy, round4) })}\n`,
+    `${JSON.stringify({
+      ...probe,
+      energyPerFrame: Array.from(energy, round4),
+      cameraPerStep: {
+        t: path.t.map(round3),
+        logScale: path.logScale.map((v) => (v == null ? null : round6(v))),
+        dx: path.dx.map((v) => (v == null ? null : round6(v))),
+        dy: path.dy.map((v) => (v == null ? null : round6(v))),
+      },
+    })}\n`,
   );
   let png: string | null = null;
   let pages: string[] = [];
@@ -1016,6 +2083,7 @@ export async function filmProbe(opts: FilmProbeOptions): Promise<{
       out: png,
       energy,
       onsets,
+      path,
       every: opts.every ?? defaultSheetEvery(duration),
       outDir,
     });
@@ -1170,6 +2238,7 @@ const ms = (v: number | null) =>
 
 export function formatFilmProbe(p: FilmProbe): string {
   const L: string[] = [];
+  const frameS = 1 / p.fps;
   L.push(`# film probe — ${basename(p.input)}`);
   L.push("");
   L.push(
@@ -1182,34 +2251,41 @@ export function formatFilmProbe(p: FilmProbe): string {
   );
   L.push(`Mean per second: ${p.energy.bins.map((v) => v.toFixed(3)).join(" ")}`);
   L.push("");
-  L.push("## Still stretches");
+  L.push("## No change seen at 192 px");
   L.push(
     p.stills.list.length
-      ? `[measured] ${p.stills.list.length} stretch(es) of ≥ ${p.stills.minS} s with no frame changing (each frame under ${p.stills.under}), ${pct(p.stills.share)} of the film: ${p.stills.list.map((s) => `${fmtT(s.start)}–${fmtT(s.end)}`).join(", ")}`
-      : `[not detected] no stretch of ≥ ${p.stills.minS} s without change`,
+      ? `[measured] ${p.stills.list.length} stretch(es) of ≥ ${p.stills.minS} s where no frame changes by ${p.stills.under} or more on the ${p.read.width}-px grey copy, ${pct(p.stills.share)} of the film: ${p.stills.list.map((s) => `${fmtT(s.start)}–${fmtT(s.end)}`).join(", ")}. A slow cursor, a slow push or a sub-pixel shake can sit under this line — the camera section reads slow motion that this does not.`
+      : `[not detected] no stretch of ≥ ${p.stills.minS} s without a change on the ${p.read.width}-px grey copy`,
   );
   L.push("");
   L.push("## Cuts and shots");
   if (p.cuts.list.length) {
-    const np = p.cuts.list.filter((c) => c.changed >= p.cuts.newPictureShare).length;
     L.push(
       `[measured] ${p.cuts.list.length} hard cuts (a one-frame jump of the picture), ${p.cuts.perMin} per minute: ${p.cuts.list.map((c) => fmtT(c.t)).join(" ")}`,
     );
-    L.push(
-      `[measured] ${np} of them change ≥ ${pct(p.cuts.newPictureShare)} of the frame (called a new picture here); ${p.cuts.list.length - np} change less — a word, a colour or a panel swapped inside a picture that holds, or a reframing over flat ground (see each one's thumbnails below)`,
-    );
-    L.push(`[measured] cuts per ${p.cuts.densityBinS} s, all: ${p.cuts.density.join(" ")}`);
-    L.push(
-      `[measured] cuts per ${p.cuts.densityBinS} s, new picture only: ${p.cuts.densityNewPicture.join(" ")}`,
-    );
   } else L.push("[not detected] no hard cut — the picture never jumps in one frame");
+  L.push(
+    p.smallSwaps.list.length
+      ? `[measured] ${p.smallSwaps.list.length} small swap(s) besides — a one-frame jump of 2–12 % of the frame (a word, a number, a panel swapped while the picture holds), ${p.smallSwaps.perMin} per minute: ${p.smallSwaps.list.map((w) => `${fmtT(w.t)} (${pct(w.changed)})`).join(" ")}`
+      : "[not detected] no small swap (a one-frame jump of 2–12 % of the frame)",
+  );
   const shotLine = (what: string, s: ShotStats) =>
     `[measured] ${s.lengths.length} ${what}; length median ${s.median} s, shortest ${s.shortest} s, longest ${s.longest} s${s.cv != null ? `, spread (sd/mean) ${s.cv}` : ""}`;
   L.push(shotLine("stretch(es) between any two hard cuts", p.shots));
   L.push(`Lengths (s): ${p.shots.lengths.join(" ")}`);
-  if (p.shots.newPicture.lengths.length !== p.shots.lengths.length) {
-    L.push(shotLine("shot(s) between new-picture cuts only", p.shots.newPicture));
-    L.push(`Lengths (s): ${p.shots.newPicture.lengths.join(" ")}`);
+  if (p.shots.withSwaps.lengths.length !== p.shots.lengths.length) {
+    L.push(shotLine("stretch(es) between any jump, small swaps included", p.shots.withSwaps));
+    L.push(`Lengths (s): ${p.shots.withSwaps.lengths.join(" ")}`);
+  }
+  if (p.cuts.list.length) {
+    L.push(`[measured] cuts per ${p.cuts.densityBinS} s: ${p.cuts.density.join(" ")}`);
+    const np = p.cuts.list.filter((c) => c.changed >= p.cuts.newPictureShare).length;
+    L.push(
+      `Of the cuts, ${np} change ≥ ${pct(p.cuts.newPictureShare)} of the frame (a new picture); per ${p.cuts.densityBinS} s: ${p.cuts.densityNewPicture.join(" ")}${p.shots.newPicture.lengths.length !== p.shots.lengths.length ? `; shots between them: median ${p.shots.newPicture.median} s, longest ${p.shots.newPicture.longest} s` : ""}`,
+    );
+    L.push(
+      "Cut counts and shot lengths describe pace; on their own they have not gone one way with which films people preferred.",
+    );
   }
   if (p.declaredCuts.how !== "not measured") {
     L.push(
@@ -1219,29 +2295,37 @@ export function formatFilmProbe(p: FilmProbe): string {
     );
   }
   L.push("");
-  L.push("## Big changes of picture");
-  L.push(
-    "[estimated] every cut, and every moment where ≥ 40 % of the frame differs between ¼ s before and ¼ s after. What crosses each: carried = textured regions covering ≥ 10 % of the frame stay in place or are followed frame to frame into the new picture; background only = less than that, but ≥ 25 % of the frame is flat and keeps its grey; nothing carried = neither. The share numbers are the frame's blocks (8×8 on the grey copy). Thumbnails: changes/NNN-before.jpg, -after.jpg.",
-  );
-  if (!p.changes.list.length) L.push("[not detected] no big change of picture");
-  const counts = new Map<string, number>();
-  for (const c of p.changes.list) counts.set(c.kind, (counts.get(c.kind) ?? 0) + 1);
-  if (p.changes.list.length)
-    L.push(`Counts: ${[...counts].map(([k, n]) => `${k} ${n}`).join(", ")}`);
-  p.changes.list.forEach((c, i) => {
-    const across = c.kind === "hard cut" ? ` — across it: ${c.across}` : "";
-    const shift =
-      c.shift &&
-      c.carried >= CARRIED_SHARE &&
-      (Math.abs(c.shift.x) >= 1 || Math.abs(c.shift.y) >= 1)
-        ? `, carried part moves ${c.shift.x > 0 ? "+" : ""}${c.shift.x}% x ${c.shift.y > 0 ? "+" : ""}${c.shift.y}% y`
-        : "";
-    const span =
-      c.after - c.before > 1 ? ` (over ${((c.after - c.before) / p.fps).toFixed(2)} s)` : "";
+  L.push("## Camera");
+  const cam = p.camera;
+  if (cam.how === "estimated") {
     L.push(
-      `${String(i + 1).padStart(3)}. ${fmtT(c.t)} ${c.kind}${across}${span}: changed ${pct(c.changed)}, stays ${pct(c.stays)}, carried ${pct(c.carried)}, background kept ${pct(c.background)}${shift}`,
+      `[estimated] the whole picture's scale and shift, read every ${cam.stepS} s on the grey copy to a fraction of a pixel — a camera move, or anything large enough to carry the picture with it; read for ${pct(cam.read)} of the steps (not across cuts or swaps, nor where the picture changes otherwise). Over the film the zooming in adds up to ×${cam.zoomIn}, the zooming out to ×${cam.zoomOut} (sub-pixel steps included); the picture travels ${cam.travel} frame widths in all.`,
     );
-  });
+    const runText = (r: CameraRun) =>
+      r.what === "zoom"
+        ? `zoom ${r.dir} ×${r.amount} ${fmtT(r.start)}–${fmtT(r.end)}`
+        : `moves ${r.dir} ${pct(Math.abs(r.amount))} ${fmtT(r.start)}–${fmtT(r.end)}`;
+    L.push(
+      cam.runs.length
+        ? `Runs (zoom ≥ 1 %/s adding up to ≥ 1.2 %; the picture moving ≥ 2 % of the frame a second, adding up to ≥ 3 %): ${cam.runs.map(runText).join(", ")}`
+        : "[not detected] no run of zoom or movement",
+    );
+    if (cam.reversals.length)
+      L.push(
+        `Turns back (a run the other way within 1 s of the last of its kind), ${cam.reversals.length}: ${cam.reversals.map((r) => `${fmtT(r.t)} ${r.what}`).join(", ")}`,
+      );
+    for (const r of cam.repeated)
+      L.push(
+        `- the same ${r.what === "zoom" ? `zoom ${r.dir}` : `move ${r.dir}`} again and again ${fmtT(r.start)}–${fmtT(r.end)}: ${r.runs} times, one every ${r.every} s, each after a pause (information — a pulse on the beat can be meant)`,
+      );
+    for (const b of cam.backAndForth)
+      L.push(
+        `- ${b.what === "zoom" ? "zoom in and out" : `${b.what === "pan x" ? "side to side" : "up and down"}`} ${fmtT(b.start)}–${fmtT(b.end)}: ${b.runs} runs in a row, each the other way to the one before (information — it can be meant)`,
+      );
+  } else
+    L.push(
+      `[${cam.how}] no motion of the whole picture could be read${cam.how === "not detected" ? " (every step changed in a way no single scale and shift explains)" : ""}`,
+    );
   L.push("");
   L.push("## Cuts against the sound");
   if (p.sound.how === "not measured") L.push("[not measured] the film has no sound");
@@ -1251,13 +2335,34 @@ export function formatFilmProbe(p: FilmProbe): string {
       `[measured] ${p.sound.onsets} onsets (${p.sound.onsetsPerS}/s); no cuts to set against them`,
     );
   else {
+    const off = p.cuts.list.filter(
+      (c) => c.nearestOnset != null && Math.abs(c.nearestOnset) > frameS + 1e-6,
+    ).length;
     L.push(
-      `[measured] ${p.sound.onsets} onsets (${p.sound.onsetsPerS}/s, as \`film listen\` finds them). Cuts with an onset within 40 ms: ${pct(p.sound.within40)} (a cut at a random time: ${pct(p.sound.chance40)}); within 80 ms: ${pct(p.sound.within80)} (random: ${pct(p.sound.chance80)}); median distance ${ms(p.sound.medianAbsOffset)}.`,
+      `[measured] median distance from a cut to the nearest onset ${ms(p.sound.medianAbsOffset)}; ${off} of ${p.cuts.list.length} cut(s) sit more than one frame (${Math.round(frameS * 1000)} ms) from any onset (${p.sound.onsets} onsets, ${p.sound.onsetsPerS}/s, as \`film listen\` finds them).`,
     );
     L.push(
       `Offset of each cut to its nearest onset (− = the onset comes first): ${p.cuts.list.map((c) => `${fmtT(c.t)} ${ms(c.nearestOnset)}`).join(", ")}`,
     );
+    L.push(
+      `Cuts with an onset within 40 ms: ${pct(p.sound.within40)} (a cut at a random time: ${pct(p.sound.chance40)}); within 80 ms: ${pct(p.sound.within80)} (random: ${pct(p.sound.chance80)}). Cutting on onsets is one way to cut; a film can cut across them on purpose.`,
+    );
   }
+  L.push("");
+  L.push("## Beat sheet");
+  if (p.segments.how === "not measured")
+    L.push(
+      "[not measured] no beat sheet: none in an events file and no page given (kit/time.js `tl.segment(from, to, { hold, handoff, subject, sound })`)",
+    );
+  else if (!p.segments.list.length) L.push("[not detected] the page declares no segments");
+  else {
+    L.push(
+      `[measured] ${p.segments.list.length} segment(s) from the ${p.segments.source}, each set beside what the picture did. The sheet is yours; a difference is information, not an error.`,
+    );
+    for (const s of p.segments.list) L.push(...formatSegment(s, p));
+  }
+  L.push("");
+  L.push(...formatText(p));
   L.push("");
   L.push("## Declared subjects");
   if (p.subjects.how === "not measured")
@@ -1279,11 +2384,188 @@ export function formatFilmProbe(p: FilmProbe): string {
       L.push('[not detected] the events file names no moments (kind "mark")');
     for (const m of p.marks.list)
       L.push(
-        `- [measured] ${fmtT(m.t)} ${m.label || "(unnamed)"}: picture ${m.still ? "still" : "moving"}${m.nearestCut != null ? `, nearest cut ${ms(m.nearestCut)}` : ""}`,
+        `- [measured] ${fmtT(m.t)} ${m.label || "(unnamed)"}: ${m.still ? "no change seen at 192 px" : "picture changing"}${m.nearestCut != null ? `, nearest cut ${ms(m.nearestCut)}` : ""}`,
       );
+  }
+  L.push("");
+  L.push("## Big changes of picture");
+  L.push(
+    "[estimated] every cut, and every moment where ≥ 40 % of the frame differs between ¼ s before and ¼ s after. What crosses each: carried = textured regions covering ≥ 10 % of the frame stay in place or are followed frame to frame into the new picture; background only = less than that, but ≥ 25 % of the frame is flat and keeps its grey; nothing carried = neither. The share numbers are the frame's blocks (8×8 on the grey copy). Thumbnails: changes/NNN-before.jpg, -after.jpg.",
+  );
+  if (!p.changes.list.length) L.push("[not detected] no big change of picture");
+  p.changes.list.forEach((c, i) => {
+    const across = c.kind === "hard cut" ? ` — across it: ${c.across}` : "";
+    const shift =
+      c.shift &&
+      c.carried >= CARRIED_SHARE &&
+      (Math.abs(c.shift.x) >= 1 || Math.abs(c.shift.y) >= 1)
+        ? `, carried part moves ${c.shift.x > 0 ? "+" : ""}${c.shift.x}% x ${c.shift.y > 0 ? "+" : ""}${c.shift.y}% y`
+        : "";
+    const span =
+      c.after - c.before > 1 ? ` (over ${((c.after - c.before) / p.fps).toFixed(2)} s)` : "";
+    L.push(
+      `${String(i + 1).padStart(3)}. ${fmtT(c.t)} ${c.kind}${across}${span}: changed ${pct(c.changed)}, stays ${pct(c.stays)}, carried ${pct(c.carried)}, background kept ${pct(c.background)}${shift}`,
+    );
+  });
+  if (p.changes.list.length) {
+    const counts = new Map<string, number>();
+    for (const c of p.changes.list) counts.set(c.kind, (counts.get(c.kind) ?? 0) + 1);
+    L.push(`Counts: ${[...counts].map(([k, n]) => `${k} ${n}`).join(", ")}`);
   }
   return L.join("\n");
 }
+
+function formatSegment(s: SegmentReading, p: FilmProbe): string[] {
+  const L: string[] = [];
+  const said = [
+    s.label ? `"${s.label}"` : "",
+    s.hold ? "hold" : "",
+    s.handoff ? `handoff: ${s.handoff}` : "",
+    s.subject ? `subject: ${s.subject}` : "",
+    s.sound ? `sound: ${s.sound}` : "",
+  ].filter(Boolean);
+  L.push(`- ${fmtT(s.from)}–${fmtT(s.to)}${said.length ? ` ${said.join(" · ")}` : ""}`);
+  const cam = s.camera;
+  const camText = cam
+    ? Math.abs(cam.zoom - 1) < 0.003 && Math.abs(cam.x) < 0.003 && Math.abs(cam.y) < 0.003
+      ? s.runs.length
+        ? "the picture ends at the scale and place it started"
+        : "no camera motion read (under ×1.003 and 0.3 % of the frame)"
+      : `the picture ${Math.abs(cam.zoom - 1) >= 0.003 ? `scales ×${cam.zoom}` : "keeps its scale"}${Math.abs(cam.x) >= 0.003 || Math.abs(cam.y) >= 0.003 ? `, moves ${signed(cam.x)} x ${signed(cam.y)} y of the frame` : ""}`
+    : "camera not read";
+  const where = s.movingSpans.length
+    ? ` (changing ${s.movingSpans
+        .slice(0, 6)
+        .map((m) => `${fmtT(m.start)}–${fmtT(m.end)}`)
+        .join(", ")}${s.movingSpans.length > 6 ? ", …" : ""})`
+    : "";
+  const jumps = [
+    s.cuts.length ? `${s.cuts.length} cut(s) ${s.cuts.map(fmtT).join(" ")}` : "",
+    s.swaps.length ? `${s.swaps.length} small swap(s)` : "",
+  ]
+    .filter(Boolean)
+    .join(", ");
+  // the runs too: a zoom in and back out sums to no zoom over the segment
+  const runs = s.runs.length
+    ? ` — runs: ${s.runs.map((r) => (r.what === "zoom" ? `zoom ${r.dir} ×${r.amount}` : `moves ${r.dir}`)).join(", ")}`
+    : "";
+  if (s.hold) {
+    const still = s.moving === 0 && !s.cuts.length && !s.swaps.length;
+    const camStill =
+      !s.runs.length &&
+      (!cam ||
+        (Math.abs(cam.zoom - 1) < 0.003 && Math.abs(cam.x) < 0.003 && Math.abs(cam.y) < 0.003));
+    L.push(
+      `  written to hold${still && camStill ? ":" : " —"} [measured] ${
+        still
+          ? `no change seen at ${p.read.width} px`
+          : `the picture still changes in ${pct(s.moving)} of its frames${where}${jumps ? `; ${jumps}` : ""}`
+      }; [estimated] ${camText}${runs}`,
+    );
+  } else
+    L.push(
+      `  [measured] the picture changes in ${pct(s.moving)} of its frames${jumps ? `; ${jumps}` : ""}; [estimated] ${camText}${runs}`,
+    );
+  if (s.subjectSeen) {
+    const ss = s.subjectSeen;
+    const src =
+      ss.source === "page" ? "found on the page" : ss.source ? `declared ${ss.source}` : "";
+    L.push(
+      ss.how === "not measured"
+        ? `  subject ${s.subject}: [not measured] no element on the page and no declared track has that name${p.text.page.how === "not measured" ? " (give the page to look it up)" : ""}`
+        : ss.out.length
+          ? `  subject ${s.subject} [${ss.how}, ${src}]: ${ss.out.map((o) => `${o.how}${o.edge ? ` past the ${o.edge} edge` : ""} ${fmtT(o.start)}–${fmtT(o.end)}`).join(", ")} (information — leaving can be meant)`
+          : `  subject ${s.subject} [${ss.how === "not detected" ? (ss.source === "page" ? "measured" : "estimated") : ss.how}, ${src}]: stays in the frame`,
+    );
+  }
+  if (s.handoff && s.handoffSeen) {
+    const h = s.handoffSeen;
+    L.push(
+      `  handoff written: ${s.handoff} · seen at ${fmtT(s.to)} [${h.how}]: ${h.kind}${h.at != null ? ` at ${fmtT(h.at)}` : ""}${h.across ? `, across it: ${h.across}` : ""}${h.nearestOnset != null ? `; nearest onset ${ms(h.nearestOnset)}` : ""}`,
+    );
+  }
+  return L;
+}
+
+function formatText(p: FilmProbe): string[] {
+  const L: string[] = [];
+  const T = p.text;
+  const ph = (px: number | null) =>
+    px == null ? "–" : `${round1(px)} (${round1(px * T.phoneScale)})`;
+  L.push("## Text at film scale");
+  if (T.how === "not measured") {
+    L.push(
+      "[not measured] no text read: give the page (`film probe <film.mp4> --page film/`) and leave the frames' text reading on",
+    );
+    return L;
+  }
+  L.push(
+    `[${T.how}] how much of the frame is text and how big it is drawn, every ${T.every} s. Sizes are film px (${p.size.width} wide), and in brackets as on a phone showing the film ${T.phoneWidth} px wide (×${T.phoneScale}; for scale, a phone's body text is about 17 px). Information, not a limit.`,
+  );
+  L.push(
+    T.page.how === "measured"
+      ? `Page text [measured]: read on the film clock where its glyphs are drawn, at the size drawn — the film's own text apart from the product's text in saved screens (iframes); its share counts its line boxes.${T.page.note ? ` Note: ${T.page.note}.` : ""}`
+      : `Page text [not measured]: ${T.page.note ?? "no page given (--page <film folder>)"}`,
+  );
+  L.push(
+    T.picture.reader === "ocr"
+      ? `Text in pictures [estimated]: the frames read by the system's text recognizer${T.page.how === "measured" ? " — lines that are not page text" : " (all text: no page given to tell page text apart)"}; a size is the line's height as read (close to the font size); very small or stylised text can be missed.`
+      : T.picture.reader === "edges"
+        ? "Text in pictures [estimated]: an edge count of text-like cells — a share only, no size; photos and fine texture count too."
+        : "Text in pictures [not measured]: the frames were not read.",
+  );
+  const S = T.samples;
+  const withText = S.filter((s) => s.share > 0.002).length;
+  const shares = S.map((s) => s.share);
+  const busiest = [...S].sort((a, b) => b.share - a.share)[0];
+  const mostChars = [...S].filter((s) => s.chars != null).sort((a, b) => b.chars! - a.chars!)[0];
+  const smallest = [...S]
+    .filter((s) => s.smallest)
+    .sort((a, b) => a.smallest!.px - b.smallest!.px)[0];
+  const meds = S.map((s) => s.median).filter((v): v is number => v != null);
+  L.push(
+    `Over the film: text on screen in ${withText} of ${S.length} samples; share of the frame median ${pct(median(shares))}, most ${pct(busiest?.share ?? 0)} at ${busiest ? fmtT(busiest.t) : "–"}${busiest && busiest.own != null ? ` (the film's own ${pct(busiest.own)}, the product's ${pct(busiest.product)}${busiest.picture != null ? `, in pictures ${pct(busiest.picture)}` : ""})` : busiest?.picture != null ? "" : ""}.`,
+  );
+  if (mostChars)
+    L.push(
+      `Most characters on screen at once: ${mostChars.chars} at ${fmtT(mostChars.t)}${mostChars.ownChars != null ? ` (own ${mostChars.ownChars}, product ${mostChars.productChars}${mostChars.pictureChars != null ? `, in pictures ${mostChars.pictureChars}` : ""})` : ""}; median over the samples ${median(S.map((s) => s.chars ?? 0))}.`,
+    );
+  if (smallest?.smallest)
+    L.push(
+      `Smallest text: ${ph(smallest.smallest.px)} px at ${fmtT(smallest.t)} (${smallest.smallest.from === "page" ? "page, measured" : "in a picture, estimated"})${smallest.smallest.text ? ` — ${smallest.smallest.text}` : ""}; median size over the samples ${ph(meds.length ? median(meds) : null)} px.`,
+    );
+  const ps = T.perSecond;
+  L.push(
+    `Per second, share of the frame that is text: ${ps.map((b) => Math.round(b.share * 100)).join(" ")} (%)`,
+  );
+  if (ps.some((b) => b.chars != null))
+    L.push(`Per second, most characters at once: ${ps.map((b) => b.chars ?? "–").join(" ")}`);
+  if (ps.some((b) => b.median != null)) {
+    L.push(
+      `Per second, median text size, film px: ${ps.map((b) => (b.median == null ? "–" : Math.round(b.median))).join(" ")}`,
+    );
+    L.push(
+      `Per second, median text size on the phone, px: ${ps.map((b) => (b.median == null ? "–" : round1(b.median * T.phoneScale))).join(" ")}`,
+    );
+    L.push(
+      `Per second, smallest text, film px: ${ps.map((b) => (b.smallest == null ? "–" : Math.round(b.smallest))).join(" ")}`,
+    );
+  }
+  if (T.page.how === "measured")
+    L.push(
+      T.overlaps.length
+        ? `The film's own text over something else [measured on the page; text in pictures estimated]: ${T.overlaps
+            .slice(0, 40)
+            .map((o) => `${o.text} over ${o.over} ${fmtT(o.from)}–${fmtT(o.to)}`)
+            .join(
+              "; ",
+            )}${T.overlaps.length > 40 ? `; … ${T.overlaps.length - 40} more in probe.json` : ""}`
+        : "[not detected] the film's own text never sits over pictures, the product's text, text in pictures or a segment's subject",
+    );
+  return L;
+}
+
+const signed = (v: number) => `${v >= 0 ? "+" : "−"}${Math.round(Math.abs(v) * 1000) / 10}%`;
 
 // --- the picture -----------------------------------------------------------------------------
 
@@ -1322,6 +2604,7 @@ async function drawProbe(
     out: string;
     energy: Float32Array;
     onsets: number[];
+    path: CameraPath;
     every: number;
     outDir: string;
   },
@@ -1377,8 +2660,8 @@ async function drawProbe(
   }
   // shots
   rows.push({
-    label: `shots<br><small>any cut: ${p.shots.lengths.length}<br>new pic.: ${p.shots.newPicture.lengths.length}</small>`,
-    h: 46,
+    label: `shots<br><small>any cut: ${p.shots.lengths.length}<br>new pic.: ${p.shots.newPicture.lengths.length}<br><span style="color:#f08c00">| small swap</span></small>`,
+    h: 58,
     svg: (() => {
       let t = 0;
       const lower = p.shots.newPicture.lengths
@@ -1390,8 +2673,15 @@ async function drawProbe(
         })
         .join("");
       t = 0;
+      const swaps = p.smallSwaps.list
+        .map(
+          (w) =>
+            `<line x1="${x(w.t)}" x2="${x(w.t)}" y1="0" y2="27" stroke="#f08c00" stroke-width="1.5"/>`,
+        )
+        .join("");
       return (
         lower +
+        swaps +
         p.shots.lengths
           .map((len, i) => {
             const a = x(t);
@@ -1443,9 +2733,56 @@ async function drawProbe(
         .join(""),
     });
   }
+  // the camera: the picture's scale against the start (a log scale), its
+  // runs, and where a run turns back
+  if (p.camera.how === "estimated") {
+    const H = 84;
+    const path = o.path;
+    let cum = 0;
+    const pts: [number, number][] = [];
+    path.t.forEach((t, k) => {
+      cum += path.logScale[k] ?? 0;
+      pts.push([t, cum]);
+    });
+    const lo = Math.min(0, ...pts.map((q) => q[1]));
+    const hi = Math.max(0, ...pts.map((q) => q[1]));
+    const span = Math.max(Math.log(1.05), hi - lo);
+    const y = (v: number) => round1(H - 8 - ((v - lo) / span) * (H - 16));
+    const line = pts.map(([t, v]) => `${x(t)},${y(v)}`).join(" ");
+    const runs = p.camera.runs
+      .map((r) => {
+        const col = r.what === "zoom" ? (r.dir === "in" ? "#2f9e44" : "#9c36b5") : "#868e96";
+        const yy = r.what === "zoom" ? 2 : r.what === "pan x" ? H - 6 : H - 3;
+        return `<rect x="${x(r.start)}" y="${yy}" width="${Math.max(1, x(r.end) - x(r.start))}" height="3" fill="${col}"/>`;
+      })
+      .join("");
+    const turns = p.camera.reversals
+      .map(
+        (r) =>
+          `<line x1="${x(r.t)}" x2="${x(r.t)}" y1="0" y2="${H}" stroke="#e8590c" stroke-width="1.5" stroke-dasharray="3 2"/>`,
+      )
+      .join("");
+    const rep = p.camera.repeated
+      .map(
+        (b) =>
+          `<rect x="${x(b.start)}" y="0" width="${Math.max(1, x(b.end) - x(b.start))}" height="${H}" fill="#f59f00" opacity="0.15"/>`,
+      )
+      .join("");
+    const bf = p.camera.backAndForth
+      .map(
+        (b) =>
+          `<rect x="${x(b.start)}" y="0" width="${Math.max(1, x(b.end) - x(b.start))}" height="${H}" fill="#e8590c" opacity="0.12"/>`,
+      )
+      .join("");
+    rows.push({
+      label: `camera<br><small>summed scale<br><span style="color:#2f9e44">in</span>/<span style="color:#9c36b5">out</span>, grey: moves<br><span style="color:#e8590c">┆turn</span> <span style="color:#f59f00">▒repeat</span></small>`,
+      h: H,
+      svg: `${rep}${bf}<line x1="0" x2="${W}" y1="${y(0)}" y2="${y(0)}" stroke="#ced4da"/><polyline points="${line}" fill="none" stroke="#1971c2" stroke-width="1.5"/>${runs}${turns}<text x="2" y="10" class="s">×${round3(Math.exp(hi))}</text><text x="2" y="${H - 1}" class="s">×${round3(Math.exp(lo))}</text>`,
+    });
+  }
   // onsets and the cuts' offsets
   if (p.sound.how !== "not measured") {
-    const H = 44;
+    const H = 52;
     const ticks = o.onsets
       .map((t) => `<line x1="${x(t)}" x2="${x(t)}" y1="${H - 8}" y2="${H}" stroke="#d9480f"/>`)
       .join("");
@@ -1456,10 +2793,90 @@ async function drawProbe(
       })
       .join("");
     rows.push({
-      label: `cuts × onsets<br><small>${pct(p.sound.within40)} ≤40ms (chance ${pct(p.sound.chance40)})</small>`,
+      label: `cuts × onsets<br><small>median ${ms(p.sound.medianAbsOffset)}<br>${pct(p.sound.within40)} ≤40ms (chance ${pct(p.sound.chance40)})</small>`,
       h: H,
       svg: cuts + ticks,
     });
+  }
+  // the beat sheet
+  if (p.segments.list.length) {
+    const H = 34;
+    rows.push({
+      label: `segments<br><small>blue: written to hold<br>▸ handoff</small>`,
+      h: H,
+      svg: p.segments.list
+        .map((s, i) => {
+          const a = x(s.from);
+          const b = x(s.to);
+          const moved = s.hold && (s.moving > 0 || s.cuts.length || s.swaps.length);
+          return (
+            `<rect x="${a}" y="${i % 2 ? 12 : 3}" width="${Math.max(1, b - a - 1)}" height="14" fill="${s.hold ? "#a5d8ff" : "#e9ecef"}" stroke="${moved ? "#e8590c" : "#adb5bd"}"/>` +
+            (b - a > 24
+              ? `<text x="${a + 3}" y="${i % 2 ? 23 : 14}" class="s">${esc((s.label ?? "").slice(0, Math.floor((b - a) / 6)))}</text>`
+              : "") +
+            (s.handoff
+              ? `<text x="${b - 4}" y="${H - 1}" class="s">▸${esc(s.handoff.slice(0, 8))}</text>`
+              : "")
+          );
+        })
+        .join(""),
+    });
+  }
+  // text: the share of the frame, stacked by where it is; the median size on a phone
+  if (p.text.samples.length) {
+    const H = 100;
+    const S = p.text.samples;
+    const top = Math.max(0.1, ...S.map((s) => s.share));
+    const bw = Math.max(1, (W / p.duration) * p.text.every - 1);
+    const hgt = (v: number) => (v / top) * (H - 26);
+    const bars = S.map((s) => {
+      const own = s.own ?? 0;
+      const prod = s.product ?? 0;
+      const pic = s.picture ?? (s.own == null ? s.share : 0);
+      let yy = H - 12;
+      let out = "";
+      for (const [v, col] of [
+        [own, "#1864ab"],
+        [prod, "#74c0fc"],
+        [pic, "#ffa94d"],
+      ] as const) {
+        const hh = hgt(v);
+        if (hh > 0.2)
+          out += `<rect x="${x(s.t)}" y="${round1(yy - hh)}" width="${round1(bw)}" height="${round1(hh)}" fill="${col}"/>`;
+        yy -= hh;
+      }
+      return out;
+    }).join("");
+    const medLine = S.filter((s) => s.median != null)
+      .map(
+        (s) =>
+          `${x(s.t + p.text.every / 2)},${round1(H - 12 - Math.min(1, (s.median! * p.text.phoneScale) / 20) * (H - 26))}`,
+      )
+      .join(" ");
+    const every = Math.max(1, Math.ceil((p.text.perSecond.length * 34) / W));
+    const labels = p.text.perSecond
+      .map((b, i) =>
+        i % every || b.median == null
+          ? ""
+          : `<text x="${x(b.t)}" y="${H - 1}" class="s">${round1(b.median * p.text.phoneScale)}</text>`,
+      )
+      .join("");
+    rows.push({
+      label: `text<br><small>share, top ${pct(top)}<br><span style="color:#1864ab">own</span> <span style="color:#4dabf7">product</span> <span style="color:#e8590c">pictures</span><br><span style="color:#c92a2a">median px, phone</span></small>`,
+      h: H,
+      svg: `${bars}${medLine ? `<polyline points="${medLine}" fill="none" stroke="#c92a2a" stroke-width="1.2"/>` : ""}${labels}`,
+    });
+    if (p.text.overlaps.length)
+      rows.push({
+        label: "<small>own text over</small>",
+        h: 22,
+        svg: p.text.overlaps
+          .map(
+            (ov) =>
+              `<rect x="${x(ov.from)}" y="4" width="${Math.max(1, x(ov.to) - x(ov.from))}" height="14" fill="#c92a2a" opacity="0.35"/>`,
+          )
+          .join(""),
+      });
   }
   // declared subjects
   for (const tr of p.subjects.tracks) {
@@ -1611,3 +3028,32 @@ const round1 = (v: number) => Math.round(v * 10) / 10;
 const round2 = (v: number) => Math.round(v * 100) / 100;
 const round3 = (v: number) => Math.round(v * 1000) / 1000;
 const round4 = (v: number) => Math.round(v * 10000) / 10000;
+const round6 = (v: number) => Math.round(v * 1e6) / 1e6;
+
+/** what `film render` wrote into a film about its page (FILM_TAG); null for
+ *  a film from anywhere else */
+function filmRecordOf(
+  raw: string | undefined,
+): { from: number; width: number; height: number } | null {
+  if (!raw) return null;
+  try {
+    const r = JSON.parse(raw) as Record<string, unknown>;
+    const pos = (v: unknown) => (typeof v === "number" && v > 0 ? v : 0);
+    return { from: pos(r.from), width: pos(r.width), height: pos(r.height) };
+  } catch {
+    return null;
+  }
+}
+
+/** a page sample in the film's px: sizes and boxes times k */
+function scalePageSample(s: PageTextSample, k: number): PageTextSample {
+  if (k === 1) return s;
+  const b = (x: Box): Box => [x[0] * k, x[1] * k, x[2] * k, x[3] * k];
+  return {
+    ...s,
+    own: s.own.map((o) => ({ ...o, px: o.px * k, boxes: o.boxes.map(b) })),
+    sizes: s.sizes.map(([px, n]) => [px * k, n] as [number, number]),
+    media: s.media.map((m) => ({ ...m, box: b(m.box) })),
+    subjects: Object.fromEntries(Object.entries(s.subjects).map(([n, x]) => [n, x ? b(x) : null])),
+  };
+}

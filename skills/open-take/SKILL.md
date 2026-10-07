@@ -676,10 +676,16 @@ with the editable `<out>.take/composition.json`.
 canvas, WebGL, any library — with the story, copy, typography, motion and sound you decide;
 open-take plays it frame-exactly into a 1080p60 master with measured motion blur and the
 soundtrack you make, hands you the real product's UI as material (`make --states`, and
-`shoot` for stills from a capture script of your own), and
-measures what you cannot see or hear (`film check`, `film listen`). Read
-[film.md](references/film.md) (or `npx open-take skill film`) before starting; nothing in it
-is a template.
+`shoot` for stills from a capture script of your own) — the recording, the saved screens
+and the real results on one clock, with real parts liftable as layers — reads the product's
+own look (`film look`) and the music's grid (`film beats`), and measures what you cannot see
+or hear (`film probe`, `film listen`, `film check`; `film gallery` draws what each kit block
+does). Every report line is measured, estimated or not detected — information, not a grade.
+Read [film.md](references/film.md) (or `npx open-take skill film`) before starting; nothing in it
+is a template, and its kit, beat sheet and workflow are all optional.
+[references/cases/README.md](references/cases/README.md) takes apart films a viewer judged,
+indexed by what a segment wants to say — each is "this film got this comment", not a pattern
+to follow.
 
 The older route — a JSON launch composition wrapped around one finished recording — still
 works for a quick cut. Initialize from a real recording, edit the portable JSON, validate

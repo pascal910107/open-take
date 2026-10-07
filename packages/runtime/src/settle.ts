@@ -198,6 +198,9 @@ export type SettleOutcome = {
    *  Past PAINT_BLIND_FRAC the "idle" verdict above says nothing about what was
    *  painted inside it — see the module header. */
   paintFrac: number;
+  /** on "idle": how long the page had already been quiet when the wait
+   *  ended (ms) — so the moment it went quiet is now minus this */
+  quietForMs?: number;
 };
 
 /** Install the activity probe for the current document AND every future one
@@ -257,7 +260,8 @@ export async function settle(
     const waitedMs = Date.now() - t0;
     if (!p) return { heldMs, waitedMs, reason: "unavailable", paintFrac };
     paintFrac = Math.max(paintFrac, p.paint);
-    if (p.quietMs >= QUIET_MS) return { heldMs, waitedMs, reason: "idle", paintFrac };
+    if (p.quietMs >= QUIET_MS)
+      return { heldMs, waitedMs, reason: "idle", paintFrac, quietForMs: p.quietMs };
     if (waitedMs >= budget) return { heldMs, waitedMs, reason: "budget", paintFrac };
     await sleep(POLL_MS);
   }

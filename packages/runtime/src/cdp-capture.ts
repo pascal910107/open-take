@@ -487,6 +487,7 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
     await captureState(undefined, true);
     for (let stepIdx = 0; stepIdx < plan.steps.length; stepIdx++) {
       const step = plan.steps[stepIdx]!;
+      const firstEvent = events.length; // this step's events start here
       const skip = (action: string, target: string | undefined, reason: string) => {
         skipped.push({ step: stepIdx, action, ...(target ? { target } : {}), reason });
         console.error(`captureTakeCDP: ${action} ${reason}, skipped: ${JSON.stringify(target)}`);
@@ -501,6 +502,13 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
         const budgeted = governor.budgetMs > 0;
         const r = await settle(cdp, heldMs, { budgetMs: governor.budgetMs });
         paintedFrac = Math.max(paintedFrac, r.paintFrac);
+        // when the page went quiet after this step's input (an estimate from
+        // structure; the frame-diff pass measures when the result SHOWED)
+        if (r.quietForMs != null) {
+          const quietAt = Math.round(Date.now() - t0 - r.quietForMs);
+          for (let i = firstEvent; i < events.length; i++)
+            if (quietAt > events[i]!.tMs) events[i]!.settledMs = quietAt;
+        }
         if (paintedFrac >= PAINT_BLIND_FRAC && !paintNoted) {
           paintNoted = true;
           console.error(

@@ -44,6 +44,15 @@ test("a settled page costs one probe and no extra time", async () => {
   assert.equal(f.reads, 1, "one round-trip, not a poll loop");
 });
 
+test("an idle page says how long it had been quiet, so the capture can date when it went quiet", async () => {
+  const f = fakeCdp([300]);
+  const r = await settle(f.cdp, 10);
+  assert.equal(r.reason, "idle");
+  assert.equal(r.quietForMs, 300);
+  const busy = await settle(fakeCdp([0]).cdp, 0, { budgetMs: 60 });
+  assert.equal(busy.quietForMs, undefined, "a page that never went quiet has no such time");
+});
+
 test("a busy page gets extra time, and the hold is never cut short", async () => {
   // busy, busy, then quiet — the page needed ~2 polls more than the hold
   const f = fakeCdp([0, 0, 5000]);

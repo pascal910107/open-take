@@ -9,7 +9,7 @@
 //
 // The refine loop is conversational: the user talks, the agent edits
 // composition.json and drives these verbs. See skills/open-take/SKILL.md.
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { stat as fsStat, readFile, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -33,13 +33,18 @@ import {
   emitGithubOutputs,
   emitStepSummary,
   ensureChrome,
+  filmBeats,
+  filmGallery,
   filmListen,
+  filmLook,
   filmPicture,
   filmProbe,
   filmSheet,
   filmStills,
+  formatFilmBeats,
   formatFilmCheck,
   formatFilmListen,
+  formatFilmLook,
   formatFilmProbe,
   formatIssues,
   formatNotes,
@@ -78,6 +83,7 @@ import {
   SAY_IT_CARD,
   settleDefects,
   skippedDefects,
+  measureTake,
   stagePrev,
   type TakeComposition,
   type TakePaths,
@@ -119,6 +125,9 @@ const BOOL_FLAGS = new Set([
   "--no-blur",
   "--no-render",
   "--clips",
+  "--measure",
+  "--no-text",
+  "--no-picture",
 ]);
 
 const argv = process.argv.slice(2);
@@ -188,7 +197,7 @@ const FLAGS_BY_CMD: Record<string, string[]> = {
   ],
   check: ["--no-strict", "--verbose"],
   beats: ["--card"],
-  states: ["--state", "--json"],
+  states: ["--state", "--json", "--measure"],
   frames: ["--beat", "--tile", "--open", "--verbose"],
   ab: ["--set", "--beat", "--full", "--draft", "--before-after", "--no-open", "--verbose"],
   edit: ["--port", "--no-open"],
@@ -249,7 +258,7 @@ Usage:
   open-take render <take> [--review] [--draft] [--open] [--reveal] [--no-open] [--no-strict]
   open-take check  <take> [--no-strict]
   open-take beats  <take> [--card]
-  open-take states <take> [--state <id>] [--json]
+  open-take states <take> [--state <id>] [--json] [--measure]
   open-take frames <take> [--beat N] [--tile 720]
   open-take ab     <take> --set <knob>=<v1>,<v2>[,<v3>] [--beat N] [--full] [--draft] [--no-open]
   open-take ab     <take> --before-after [--beat N] [--full] [--no-open]
@@ -275,8 +284,14 @@ Usage:
   open-take film picture <state.html|dir> [--scale 2] [--out picture.png]
   open-take film sheet  <film.mp4> [--out sheet.png] [--every <s> | --at <s>,<s>…]
   open-take film listen <film.mp4|score.wav> [--events <events.json>] [--stems <dir>] [--out <dir>]
-                   [--every <s>] [--clips]
-  open-take film probe  <film.mp4> [--events <events.json>] [--out <dir>] [--every <s>]
+                   [--every <s>] [--clips] [--vs <previous.wav|mp4>]
+  open-take film beats  <music|film.mp4> [--out <name>.beats.json]
+  open-take film look   <take|states|state|url|look.json> [--out look] [--state s0,s3] [--text <words>]
+                   [--page <page.html|dir>] [--fonts <dir>] [--font-files <a.woff2,…>] [--size 1920x1080] [--no-picture]
+  open-take film probe  <film.mp4|film dir> [--page <page.html|dir> [--root <dir>]] [--events <events.json>]
+                   [--out <dir>] [--every <s>] [--text-every <s>] [--no-text]
+  open-take film gallery [<film dir>] [--blocks rise,camera.shake,…] [--with <picture|state|take>]
+                   [--subject <id|text|x,y,w,h>] [--beats <beats.json>] [--out <dir>]
   open-take film check  <film.mp4> [--size 1920x1080] [--fps 60] [--page <page.html|dir> [--root <dir>]]
                    [--json]
 
@@ -341,7 +356,10 @@ Usage:
           recording is marked FIDELITY FAILED — use the recording there.
           --state <id> outlines one state instead: its regions, the cards a
           film could lift out, and every control and text with its box.
-          --json prints the same as data.
+          --json prints the same as data. --measure first re-reads the
+          recording into capture.json: when each action's result showed (not
+          just when it was clicked) and how each state lines up with the
+          recording (for takes made before \`make\` recorded these).
   frames  extract a beat-aware contact sheet (<take>/frames.png) from the
           delivered mp4: an intro row, one row per beat (a mid-travel cell +
           4 samples across the beat's camera HOLD, timed off the real camera
@@ -503,6 +521,24 @@ Usage:
           renders only those seconds and puts them into that master, in place
           of its own; \`film mux\` puts a new soundtrack under a film without
           rendering it again.
+          \`film beats\` reads a piece of music (or a film's sound) as a grid
+          to cut on and writes <name>.beats.json: tempo, beats, downbeats and
+          bars, sections with their energy, drops, onsets — each field
+          measured, estimated (with a confidence) or not detected; the kit's
+          cut.js and audio.mjs (cutToBars) read it.
+          \`film look\` reads the product's look off its real interface (a
+          take's saved screens, or a URL): every colour with how much of the
+          screen it paints and where, an estimate of the roles (bg, surface,
+          text, muted, accent, on-accent, border), the families the text is
+          set in with their actual font files, the type sizes, radii, shadows
+          and the motion timings its CSS declares — look.json, look.css and
+          look.png (a specimen at film size), each part measured, estimated
+          or not detected, none of it a preset. With --text or --page (the
+          film's own page) it checks every character of the film's words
+          against those font files (CJK included) and says which none has;
+          --fonts <dir> writes the files the words need, cut down to them,
+          with a fonts.css. The kit's look.js fits text to a box, measures
+          contrast and how big a size reads on a phone.
           \`film still\` writes PNG stills at given times; \`film sheet\` a
           timed contact sheet of any video; \`film listen\` the film's sound as
           information: listen.png (spectrum, loudness, onsets and beat grid,
@@ -510,16 +546,30 @@ Usage:
           marked with the sheet's times) and listen.md (loudness, tempo,
           sections, bars repeated verbatim, pauses, which events have no
           sound within 40 ms, cut-to-onset offsets, with --stems how many dB
-          each event's sound sits over the rest), each line measured,
+          each event's sound sits over the rest; with --vs <previous> what
+          changed against an earlier version — loudness, tempo, onsets,
+          sections, which events gained or lost a sound, where the two differ
+          most — and A/B clips of those moments in vs/), each line measured,
           estimated or not detected — never a grade; \`film probe\` the film's
           picture as information: probe.png (how much the picture changes each
-          frame, still stretches, shots, cuts per 5 s, each big change of
-          picture with what it carries across — something that stays or
-          moves on, only the background, nothing — cut-to-onset offsets,
-          when a subject the page declared leaves the frame, marked with the
-          sheet's times, then before/after thumbnails of every change) and
-          probe.md, each line measured, estimated or not detected — no
-          score; \`film check\` measures a finished
+          frame, where no change is seen, shots, small swaps, cuts per 5 s,
+          the whole picture's zoom and movement with where it turns back,
+          cut-to-onset offsets, the page's beat sheet (tl.segment) beside
+          what happened, how much of the frame is text and how big it is on
+          the film and on a phone — with --page or a film folder the page's
+          text read on the film clock, text inside pictures read off the
+          frames (macOS text recognition, else an edge count) — when a
+          subject leaves the frame, marked with the sheet's times, then
+          before/after thumbnails of every big change) and probe.md, each
+          line measured, estimated or not detected — no score; \`film gallery\` draws each block of the kit (the film's own
+          kit/ when given its folder) — motion, camera options, cut helpers —
+          at six instants with its value and speed over time, its default
+          beside three other settings, on a neutral stand-in or, with --with,
+          on the product's own picture, saved screen or take (one element of
+          it, --subject or one chosen and said, is what the blocks move;
+          --beats draws the cut helpers on the film's own music):
+          a PNG per block, index.md and gallery.json, every number measured
+          on the function, none a target; \`film check\` measures a finished
           film: format, hitches, cadence, cuts, flashes (a few frames unlike
           the frames on both sides), shots that start on near-blank frames,
           black frames, loudness, clicks. With --page (the film's page) it
@@ -1743,6 +1793,15 @@ async function main() {
     const takeArg = positional[0];
     if (!takeArg) throw new Error("states: missing <take> (its .mp4, its .take/ dir, or a dir)");
     const take = await resolveTakePaths(takeArg);
+    // --measure: re-read the recording for when each result showed and how
+    // each state lines up with it, into capture.json (takes made before
+    // `make` recorded these)
+    if (has("--measure")) {
+      const m = await measureTake(take.dir);
+      process.stderr.write(
+        `states: measured ${m.results}/${m.actions} action result time(s), ${m.seams}/${m.states} state seam(s) → ${join(take.dir, "capture.json")}\n`,
+      );
+    }
     // reads capture.json + states/<id>/index.json; a take made without
     // --states has neither and gets told so
     const data = describeTake(take.dir);
@@ -1844,10 +1903,12 @@ async function main() {
 
   if (cmd === "film") {
     const action = positional[0];
-    const target = positional[1];
-    if (!action || !target || positional.length !== 2)
+    // gallery's film folder is optional: without it, the kit this package ships
+    const bare = action === "gallery" && positional.length === 1;
+    const target = positional[1] ?? "";
+    if (!action || (!bare && (!target || positional.length !== 2)))
       throw new Error(
-        "film: expected init <dir>, render <page>, still <page> --at <s>, picture <state.html>, sheet <film.mp4>, listen <film.mp4>, probe <film.mp4>, check <film.mp4> or mux <film.mp4> --audio <file>",
+        "film: expected init <dir>, render <page>, still <page> --at <s>, picture <state.html>, sheet <film.mp4>, listen <film.mp4>, beats <music>, probe <film.mp4>, gallery [<film dir>], check <film.mp4> or mux <film.mp4> --audio <file>",
       );
     const only = (...allowed: string[]) => {
       for (const f of Object.keys(flags))
@@ -2003,8 +2064,14 @@ async function main() {
       process.stdout.write(`sheet: ${r.out} (${r.times.length} frames)\n`);
       return;
     }
+    if (action === "beats") {
+      only("--out");
+      const r = await filmBeats({ input: target, out: flag("--out") });
+      process.stdout.write(`${formatFilmBeats(r.beats)}\n\nbeats: ${r.out}\n`);
+      return;
+    }
     if (action === "listen") {
-      only("--events", "--stems", "--out", "--every", "--clips");
+      only("--events", "--stems", "--out", "--every", "--clips", "--vs");
       const r = await filmListen({
         input: target,
         out: flag("--out"),
@@ -2012,6 +2079,7 @@ async function main() {
         stems: flag("--stems"),
         every: num("--every"),
         clips: has("--clips"),
+        vs: flag("--vs"),
         chromePath: await ensureChrome(),
       });
       process.stdout.write(
@@ -2019,17 +2087,104 @@ async function main() {
       );
       return;
     }
+    if (action === "gallery") {
+      only("--blocks", "--with", "--subject", "--beats", "--out");
+      const r = await filmGallery({
+        chromePath: await ensureChrome(),
+        kit: target || undefined,
+        out: flag("--out") ?? "gallery",
+        blocks: flag("--blocks")
+          ?.split(",")
+          .map((b) => b.trim())
+          .filter(Boolean),
+        with: flag("--with"),
+        subject: flag("--subject"),
+        beats: flag("--beats"),
+      });
+      for (const e of r.entries)
+        process.stdout.write(
+          e.png ? `${e.png}\n` : `skipped ${e.name}: ${e.error ?? "could not be drawn"}\n`,
+        );
+      const s = r.material.subject;
+      process.stdout.write(
+        `\ngallery: ${r.index}\n         ${r.json}\nkit: ${r.kit}\nsubject: ${s.label} — ${s.how}\n`,
+      );
+      return;
+    }
     if (action === "probe") {
-      only("--events", "--out", "--every");
+      only("--events", "--out", "--every", "--page", "--root", "--text-every", "--no-text");
+      // a film folder: its page, and the film rendered from it (film.mp4
+      // beside the folder, in it, or here)
+      let input = target;
+      let page = flag("--page");
+      if (existsSync(target) && statSync(target).isDirectory()) {
+        page ??= target;
+        const found = [
+          join(dirname(resolve(target)), "film.mp4"),
+          join(resolve(target), "film.mp4"),
+          resolve("film.mp4"),
+        ].find((f) => existsSync(f));
+        if (!found)
+          throw new Error(
+            `film probe: no film.mp4 beside or in ${target} — give the film: film probe <film.mp4> --page ${target}`,
+          );
+        input = found;
+      }
+      if (has("--root") && !page)
+        throw new Error("film probe: --root is where --page is served from; give --page too");
       const r = await filmProbe({
-        input: target,
+        input,
         out: flag("--out"),
         events: flag("--events"),
         every: num("--every"),
+        page,
+        root: flag("--root"),
+        text: !has("--no-text"),
+        textEvery: num("--text-every"),
         chromePath: await ensureChrome(),
       });
       process.stdout.write(
         `${formatFilmProbe(r.probe)}\n\nprobe: ${r.pages.length ? r.pages.join("\n       ") : "(no picture)"}\n       ${r.md}\n       ${r.json}\n`,
+      );
+      return;
+    }
+    if (action === "look") {
+      only(
+        "--out",
+        "--state",
+        "--text",
+        "--page",
+        "--fonts",
+        "--font-files",
+        "--size",
+        "--no-picture",
+        "--json",
+        "--verbose",
+      );
+      const r = await filmLook({
+        source: target,
+        out: flag("--out"),
+        states: flag("--state")
+          ?.split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
+        text: flag("--text"),
+        page: flag("--page"),
+        fonts: flag("--fonts"),
+        fontFiles: flag("--font-files")
+          ?.split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
+        width: size?.width,
+        height: size?.height,
+        noPicture: has("--no-picture"),
+        chromePath: await ensureChrome(),
+        onConsole: has("--verbose") ? onConsole : undefined,
+      });
+      process.stdout.write(
+        has("--json")
+          ? `${JSON.stringify(r.look, null, 2)}\n`
+          : `${formatFilmLook(r.look)}\n\nlook: ${r.json}\n      ${r.png ?? "(no picture)"}\n${r.css ? `fonts: ${r.css}\n` : ""}`,
       );
       return;
     }
@@ -2052,7 +2207,7 @@ async function main() {
       return;
     }
     throw new Error(
-      `film: unknown action ${action} — render, still, sheet, listen, probe or check`,
+      `film: unknown action ${action} — render, still, sheet, listen, beats, probe or check`,
     );
   }
 

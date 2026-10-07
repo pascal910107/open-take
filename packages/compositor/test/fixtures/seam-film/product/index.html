@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fee calculator (fixture)</title>
+<style>
+/* A still, text-dense page — something for the seam to line up on — with no
+   hover styles, caret or animation: what the recording shows and what the
+   saved state shows can then only differ by what the encoder did. */
+html,body{margin:0;width:640px;height:360px;overflow:hidden;background:#f4f1ea;font:14px/1 sans-serif}
+p{position:absolute;left:20px;margin:0;color:#6d6a63;width:330px;white-space:nowrap;overflow:hidden}
+#calc{position:absolute;left:20px;top:300px;width:140px;height:40px;border:0;border-radius:8px;
+  background:#1d4d3c;color:#fff;font:bold 16px sans-serif;cursor:default;outline:none}
+#total{position:absolute;left:380px;top:60px;width:200px;height:120px;border-radius:12px;
+  background:#1d4d3c;display:none}
+#total b{position:absolute;left:16px;top:18px;font:bold 34px sans-serif;color:#ff7a3d}
+#total i{position:absolute;left:0;top:80px;width:200px;height:2px;background:#fff}
+#total span{position:absolute;left:16px;top:92px;color:#cfe3da;font-size:13px}
+.grid{position:absolute;left:380px;top:200px;width:200px;height:80px;
+  background:repeating-linear-gradient(90deg,#d8d2c4 0 1px,transparent 1px 20px),
+             repeating-linear-gradient(0deg,#d8d2c4 0 1px,transparent 1px 20px)}
+</style>
+</head>
+<body>
+<script>
+for (let i = 0; i < 11; i++) {
+  const p = document.createElement("p");
+  p.style.top = `${12 + i * 24}px`;
+  p.textContent = `Line ${i + 1} — monthly fee, transfer, cancellation `.repeat(2);
+  document.body.appendChild(p);
+}
+</script>
+<div class="grid"></div>
+<button id="calc" type="button">Calculate</button>
+<div id="total"><b>NT$3,176</b><i></i><span>a year, all fees in</span></div>
+<script>
+// the result shows 0.7 s after the click, as a real app's request would
+document.getElementById("calc").addEventListener("click", () => {
+  setTimeout(() => { document.getElementById("total").style.display = "block"; }, 700);
+});
+</script>
+</body>
+</html>

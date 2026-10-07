@@ -11,7 +11,6 @@
 // a tempo from how the onset strength repeats, sections from where the
 // texture stops resembling what came before, bars that repeat verbatim.
 
-import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -19,6 +18,44 @@ import { basename, extname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { resolveFfmpeg, resolveFfprobe, runTool } from "../ffmpeg";
 import { launchHtmlBrowser } from "../html/cdp";
+import {
+  BANDS,
+  chanceWithin,
+  chromagram,
+  decodeMono,
+  estimateKey,
+  estimateMeter,
+  estimateTempo,
+  FLOOR_DB,
+  findSections,
+  LISTEN_RATE,
+  lowPattern,
+  nearestOffset,
+  onsetStrength,
+  pickOnsets,
+  type Section,
+  type Spectrum,
+  spectrum,
+  type Tempo,
+  WIN,
+} from "./beats";
+import scoreCorpus from "./data/score-corpus.json";
+
+// the analysis lives in ./beats (shared with `film beats` and `film probe`);
+// what this module has always exported is still exported from here
+export {
+  chanceWithin,
+  estimateTempo,
+  findSections,
+  LISTEN_RATE,
+  nearestOffset,
+  onsetStrength,
+  pickOnsets,
+  type Section,
+  type Spectrum,
+  spectrum,
+  type Tempo,
+} from "./beats";
 
 // --- the page's events (the file `film render` writes beside the film) ------------
 
@@ -88,437 +125,7 @@ export function parseFilmEvents(raw: unknown): FilmEvents {
   };
 }
 
-// --- the spectrum, onsets, tempo ----------------------------------------------------
-
-/** the rate the sound is analysed at: everything a film's rhythm and texture
- *  needs sits below its 11 kHz */
-export const LISTEN_RATE = 22_050;
-const WIN = 1024; // 46 ms
-const HOP = 256; // 11.6 ms
-const BANDS = 48;
-const LOW_HZ = 40;
-const HIGH_HZ = 10_000;
-/** below this a frame is silence, not a quiet texture */
-const FLOOR_DB = -70;
-
-export type Spectrum = {
-  /** seconds between frames */
-  hopS: number;
-  /** frame i covers [i·hop, i·hop + win) samples; its time is its centre */
-  frameTime: (i: number) => number;
-  /** per frame, log energy (dB) in BANDS log-spaced bands from 40 Hz to 10 kHz */
-  bands: Float32Array[];
-  /** per frame, the level (dBFS RMS) */
-  level: Float32Array;
-};
-
-export function spectrum(pcm: Float32Array, rate = LISTEN_RATE): Spectrum {
-  const n = pcm.length < WIN ? 0 : Math.floor((pcm.length - WIN) / HOP) + 1;
-  const hann = new Float32Array(WIN);
-  for (let i = 0; i < WIN; i++) hann[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / WIN);
-  // which FFT bins each band sums; a band narrower than a bin takes the nearest one
-  const binHz = rate / WIN;
-  const edges = Array.from(
-    { length: BANDS + 1 },
-    (_, b) => LOW_HZ * (HIGH_HZ / LOW_HZ) ** (b / BANDS),
-  );
-  const ranges = Array.from({ length: BANDS }, (_, b) => {
-    const lo = Math.max(1, Math.round(edges[b]! / binHz));
-    const hi = Math.max(lo + 1, Math.round(edges[b + 1]! / binHz));
-    return [lo, Math.min(hi, WIN / 2)] as const;
-  });
-  const fft = makeFft(WIN);
-  const re = new Float64Array(WIN);
-  const im = new Float64Array(WIN);
-  const bands: Float32Array[] = [];
-  const level = new Float32Array(n);
-  // a full-scale sine's windowed peak bin power, so bands read near dBFS
-  const ref = (WIN * 0.5 * 0.5) ** 2;
-  for (let f = 0; f < n; f++) {
-    let sq = 0;
-    for (let i = 0; i < WIN; i++) {
-      const x = pcm[f * HOP + i]!;
-      sq += x * x;
-      re[i] = x * hann[i]!;
-      im[i] = 0;
-    }
-    level[f] = 10 * Math.log10(sq / WIN + 1e-12);
-    fft(re, im);
-    const row = new Float32Array(BANDS);
-    for (let b = 0; b < BANDS; b++) {
-      const [lo, hi] = ranges[b]!;
-      let e = 0;
-      for (let k = lo; k < hi; k++) e += re[k]! * re[k]! + im[k]! * im[k]!;
-      row[b] = Math.max(FLOOR_DB - 20, 10 * Math.log10(e / ref + 1e-12));
-    }
-    bands.push(row);
-  }
-  const hopS = HOP / rate;
-  return { hopS, frameTime: (i) => (i * HOP + WIN / 2) / rate, bands, level };
-}
-
-/** in-place radix-2 FFT of a fixed size */
-function makeFft(size: number): (re: Float64Array, im: Float64Array) => void {
-  const bits = Math.log2(size);
-  const rev = new Uint32Array(size);
-  for (let i = 0; i < size; i++) {
-    let r = 0;
-    for (let b = 0; b < bits; b++) r |= ((i >> b) & 1) << (bits - 1 - b);
-    rev[i] = r;
-  }
-  const cos = new Float64Array(size / 2);
-  const sin = new Float64Array(size / 2);
-  for (let i = 0; i < size / 2; i++) {
-    cos[i] = Math.cos((2 * Math.PI * i) / size);
-    sin[i] = -Math.sin((2 * Math.PI * i) / size);
-  }
-  return (re, im) => {
-    for (let i = 0; i < size; i++) {
-      const j = rev[i]!;
-      if (j > i) {
-        [re[i], re[j]] = [re[j]!, re[i]!];
-        [im[i], im[j]] = [im[j]!, im[i]!];
-      }
-    }
-    for (let len = 2; len <= size; len <<= 1) {
-      const half = len >> 1;
-      const step = size / len;
-      for (let i = 0; i < size; i += len)
-        for (let k = 0; k < half; k++) {
-          const wr = cos[k * step]!;
-          const wi = sin[k * step]!;
-          const a = i + k;
-          const b = a + half;
-          const tr = re[b]! * wr - im[b]! * wi;
-          const ti = re[b]! * wi + im[b]! * wr;
-          re[b] = re[a]! - tr;
-          im[b] = im[a]! - ti;
-          re[a] = re[a]! + tr;
-          im[a] = im[a]! + ti;
-        }
-    }
-  };
-}
-
-/** how much new energy each frame brings: the summed rise of every band over
- *  the louder of the two frames before it (a rise, never a fall) */
-export function onsetStrength(s: Spectrum): Float32Array {
-  const env = new Float32Array(s.bands.length);
-  for (let f = 1; f < s.bands.length; f++) {
-    const cur = s.bands[f]!;
-    const a = s.bands[f - 1]!;
-    const b = s.bands[Math.max(0, f - 2)]!;
-    let rise = 0;
-    for (let k = 0; k < BANDS; k++) {
-      const floor = Math.max(a[k]!, b[k]!, FLOOR_DB);
-      if (cur[k]! > floor) rise += cur[k]! - floor;
-    }
-    env[f] = rise / BANDS;
-  }
-  return env;
-}
-
-/** onset times (s): frames whose new energy is a local peak and stands clear
- *  of its neighbourhood (the median of the surrounding 0.6 s plus half the
- *  film's spread), each placed on the sample where the sound itself rises */
-export function pickOnsets(
-  s: Spectrum,
-  env: Float32Array,
-  pcm?: Float32Array,
-  rate = LISTEN_RATE,
-): number[] {
-  const n = env.length;
-  if (!n) return [];
-  let mean = 0;
-  for (const v of env) mean += v;
-  mean /= n;
-  let sd = 0;
-  for (const v of env) sd += (v - mean) ** 2;
-  sd = Math.sqrt(sd / n);
-  const W = Math.round(0.3 / s.hopS);
-  const near = 3; // ±35 ms
-  const out: number[] = [];
-  const window: number[] = [];
-  for (let f = 0; f < n; f++) {
-    const v = env[f]!;
-    if (v <= 0 || s.level[f]! < FLOOR_DB + 10) continue;
-    let peak = true;
-    for (let k = Math.max(0, f - near); k <= Math.min(n - 1, f + near) && peak; k++)
-      if (env[k]! > v || (env[k] === v && k < f)) peak = false;
-    if (!peak) continue;
-    window.length = 0;
-    for (let k = Math.max(0, f - W); k <= Math.min(n - 1, f + W); k++) window.push(env[k]!);
-    window.sort((a, b) => a - b);
-    const median = window[window.length >> 1]!;
-    if (v < median + 0.5 * sd || v < 0.5) continue;
-    out.push(pcm ? refineOnset(pcm, rate, s.frameTime(f)) : s.frameTime(f));
-  }
-  return out;
-}
-
-/** within ±one window of a frame's onset, the 2 ms step where the level rises
- *  most — the onset as heard, not as the spectrum's 46 ms window blurs it */
-function refineOnset(pcm: Float32Array, rate: number, t: number): number {
-  const step = Math.round(rate * 0.002);
-  const span = WIN / rate;
-  const a = Math.max(0, Math.round((t - span) * rate));
-  const b = Math.min(pcm.length - step, Math.round((t + span * 0.5) * rate));
-  if (b - a < step * 4) return t;
-  const lv: number[] = [];
-  for (let i = a; i + step <= b; i += step) {
-    let sq = 0;
-    for (let k = i; k < i + step; k++) sq += pcm[k]! * pcm[k]!;
-    lv.push(10 * Math.log10(sq / step + 1e-12));
-  }
-  let best = -1;
-  let rise = 0;
-  for (let i = 2; i < lv.length; i++) {
-    const r = lv[i]! - Math.max(lv[i - 1]!, lv[i - 2]!);
-    if (r > rise) {
-      rise = r;
-      best = i;
-    }
-  }
-  // a rise under 6 dB is no edge: leave the frame's time
-  return best < 0 || rise < 6 ? t : (a + best * step) / rate;
-}
-
-export type Tempo = {
-  bpm: number;
-  /** how strongly the onset strength repeats at this period: its
-   *  autocorrelation there over at zero lag (0..1) */
-  strength: number;
-  /** the other periods that repeat almost as strongly (half, double…) */
-  alternatives: { bpm: number; strength: number }[];
-  /** the beat grid laid at this tempo, at the phase most onsets fall on */
-  beats: number[];
-  /** the share of beats with an onset within 40 ms */
-  gridFit: number;
-};
-
-/** the period (60–200 BPM) at which the onset strength repeats most; null
- *  when nothing repeats */
-export function estimateTempo(
-  s: Spectrum,
-  env: Float32Array,
-  onsets: readonly number[],
-  duration: number,
-): Tempo | null {
-  const n = env.length;
-  const lagOf = (bpm: number) => 60 / bpm / s.hopS;
-  const minLag = Math.floor(lagOf(200));
-  const maxLag = Math.ceil(lagOf(60));
-  if (n < maxLag * 3) return null;
-  let mean = 0;
-  for (const v of env) mean += v;
-  mean /= n;
-  const x = Float64Array.from(env, (v) => v - mean);
-  let zero = 0;
-  for (const v of x) zero += v * v;
-  if (!(zero > 0)) return null;
-  const ac = new Float64Array(maxLag + 2);
-  for (let lag = minLag - 1; lag <= maxLag + 1; lag++) {
-    let sum = 0;
-    for (let i = 0; i + lag < n; i++) sum += x[i]! * x[i + lag]!;
-    // unbiased: a long lag sums fewer products
-    ac[lag] = (sum / (n - lag)) * (n / zero);
-  }
-  const peaks: { lag: number; v: number }[] = [];
-  for (let lag = minLag; lag <= maxLag; lag++)
-    if (ac[lag]! > 0 && ac[lag]! >= ac[lag - 1]! && ac[lag]! > ac[lag + 1]!) {
-      // the peak between whole frames, from the parabola through its neighbours
-      const a = ac[lag - 1]!;
-      const b = ac[lag]!;
-      const c = ac[lag + 1]!;
-      const d = a - 2 * b + c;
-      peaks.push({ lag: d < 0 ? lag + (0.5 * (a - c)) / d : lag, v: b });
-    }
-  if (!peaks.length) return null;
-  peaks.sort((p, q) => q.v - p.v);
-  // a pulse repeats at every multiple of its period too, so a slower period
-  // only counts as the beat when it repeats clearly more strongly: among the
-  // periods within 10% of the strongest that it is a whole multiple of, the
-  // shortest is the beat
-  const top = peaks
-    .filter((p) => {
-      const r = peaks[0]!.lag / p.lag;
-      return p.v >= peaks[0]!.v * 0.9 && Math.abs(r - Math.round(r)) < 0.04;
-    })
-    .reduce((a, b) => (b.lag < a.lag ? b : a));
-  const bpmOf = (lag: number) => Math.round((60 / (lag * s.hopS)) * 10) / 10;
-  const period = top.lag * s.hopS;
-  // the phase where the grid collects the most onset strength
-  let bestPhase = 0;
-  let bestSum = -1;
-  const steps = Math.max(1, Math.round(top.lag));
-  for (let p = 0; p < steps; p++) {
-    let sum = 0;
-    for (let f = p; f < n; f += top.lag) sum += env[Math.round(f)] ?? 0;
-    if (sum > bestSum) {
-      bestSum = sum;
-      bestPhase = p;
-    }
-  }
-  const beats: number[] = [];
-  for (let t = s.frameTime(bestPhase); t < duration; t += period) beats.push(round3(t));
-  // the grid's phase onto the onsets near it (the frame's time is coarse)
-  const offs = beats
-    .map((b) => nearestOffset(onsets, b))
-    .filter((d): d is number => d != null && Math.abs(d) <= 0.06);
-  if (offs.length) {
-    const shift = median(offs);
-    for (let i = 0; i < beats.length; i++) beats[i] = round3(beats[i]! + shift);
-    while (beats.length && beats[0]! < 0) beats.shift();
-  }
-  const fit = beats.filter((b) => {
-    const d = nearestOffset(onsets, b);
-    return d != null && Math.abs(d) <= 0.04;
-  }).length;
-  return {
-    bpm: bpmOf(top.lag),
-    strength: round2(Math.min(1, top.v)),
-    alternatives: peaks
-      .filter((p) => p !== top && p.v >= peaks[0]!.v * 0.6)
-      .slice(0, 3)
-      .map((p) => ({ bpm: bpmOf(p.lag), strength: round2(Math.min(1, p.v)) })),
-    beats,
-    gridFit: beats.length ? round2(fit / beats.length) : 0,
-  };
-}
-
-// --- sections and repeats -------------------------------------------------------------
-
-export type Section = {
-  start: number;
-  end: number;
-  /** how sharply the texture changes at its start (0 for the first) */
-  change: number;
-  /** level (dBFS RMS, mean over the section's sounding frames) */
-  levelDb: number;
-  onsetsPerS: number;
-  /** spectral centre of mass (Hz) */
-  centroidHz: number;
-};
-
-const BLOCK_S = 0.5;
-
-/** where the texture changes: half-second blocks of band energy, compared
- *  with each other (cosine), and the boundaries where the blocks before stop
- *  resembling the blocks after (a checkerboard over the similarity matrix) */
-export function findSections(s: Spectrum, onsets: readonly number[], duration: number): Section[] {
-  const per = Math.max(1, Math.round(BLOCK_S / s.hopS));
-  const blocks: Float64Array[] = [];
-  for (let f = 0; f < s.bands.length; f += per) {
-    const v = new Float64Array(BANDS);
-    let k = 0;
-    for (let g = f; g < Math.min(f + per, s.bands.length); g++, k++)
-      for (let b = 0; b < BANDS; b++) v[b] = v[b]! + s.bands[g]![b]!;
-    for (let b = 0; b < BANDS; b++) v[b] = v[b]! / Math.max(1, k);
-    blocks.push(v);
-  }
-  const m = blocks.length;
-  if (m < 4) return [describe(s, onsets, 0, duration, 0)];
-  // centred on the film's mean texture, so similarity is about what differs
-  const mean = new Float64Array(BANDS);
-  for (const v of blocks) for (let b = 0; b < BANDS; b++) mean[b] = mean[b]! + v[b]! / m;
-  const unit = blocks.map((v) => {
-    const u = Float64Array.from(v, (x, b) => x - mean[b]!);
-    const norm = Math.hypot(...u) || 1;
-    return u.map((x) => x / norm);
-  });
-  const sim = (i: number, j: number) => {
-    let d = 0;
-    for (let b = 0; b < BANDS; b++) d += unit[i]![b]! * unit[j]![b]!;
-    return d;
-  };
-  const L = Math.min(6, Math.floor(m / 2)); // 3 s each side
-  const novelty = new Float64Array(m);
-  for (let c = 1; c < m; c++) {
-    let sum = 0;
-    let w = 0;
-    for (let i = -L; i < L; i++)
-      for (let j = -L; j < L; j++) {
-        const a = c + i;
-        const b = c + j;
-        if (a < 0 || b < 0 || a >= m || b >= m) continue;
-        // a taper so the blocks next to the boundary count most
-        const g = Math.exp(-(((i + 0.5) / L) ** 2 + ((j + 0.5) / L) ** 2) * 2);
-        sum += (i < 0 === j < 0 ? 1 : -1) * g * sim(a, b);
-        w += g;
-      }
-    novelty[c] = w ? Math.max(0, sum / w) : 0;
-  }
-  let nm = 0;
-  for (const v of novelty) nm += v / m;
-  let nsd = 0;
-  for (const v of novelty) nsd += (v - nm) ** 2 / m;
-  nsd = Math.sqrt(nsd);
-  const minGap = Math.round(2 / BLOCK_S);
-  const cand: { at: number; v: number }[] = [];
-  for (let c = 1; c < m; c++) {
-    const v = novelty[c]!;
-    if (v < nm + nsd || v < 0.05) continue;
-    let peak = true;
-    for (let k = Math.max(1, c - minGap); k <= Math.min(m - 1, c + minGap); k++)
-      if (novelty[k]! > v || (novelty[k] === v && k < c)) peak = false;
-    if (peak) cand.push({ at: c, v });
-  }
-  const top = Math.max(...cand.map((c) => c.v), 1e-9);
-  const bounds = cand
-    .map((c) => ({ t: c.at * per * s.hopS, v: c.v / top }))
-    .filter((b) => b.t >= 2 && b.t <= duration - 2);
-  const out: Section[] = [];
-  let start = 0;
-  let change = 0;
-  for (const b of bounds) {
-    out.push(describe(s, onsets, start, b.t, change));
-    start = b.t;
-    change = b.v;
-  }
-  out.push(describe(s, onsets, start, duration, change));
-  return out;
-}
-
-function describe(
-  s: Spectrum,
-  onsets: readonly number[],
-  start: number,
-  end: number,
-  change: number,
-): Section {
-  const a = Math.max(0, Math.floor(start / s.hopS));
-  const b = Math.min(s.bands.length, Math.ceil(end / s.hopS));
-  let lv = 0;
-  let lvN = 0;
-  let wsum = 0;
-  let csum = 0;
-  for (let f = a; f < b; f++) {
-    if (s.level[f]! > FLOOR_DB) {
-      lv += 10 ** (s.level[f]! / 10);
-      lvN++;
-    }
-    for (let k = 0; k < BANDS; k++) {
-      const e = 10 ** (s.bands[f]![k]! / 10);
-      const hz = Math.sqrt(
-        LOW_HZ *
-          (HIGH_HZ / LOW_HZ) ** (k / BANDS) *
-          LOW_HZ *
-          (HIGH_HZ / LOW_HZ) ** ((k + 1) / BANDS),
-      );
-      wsum += e;
-      csum += e * hz;
-    }
-  }
-  const len = Math.max(1e-6, end - start);
-  return {
-    start: round2(start),
-    end: round2(end),
-    change: round2(change),
-    levelDb: lvN ? round1(10 * Math.log10(lv / lvN)) : -120,
-    onsetsPerS: round1(onsets.filter((t) => t >= start && t < end).length / len),
-    centroidHz: lvN && wsum > 0 ? Math.round(csum / wsum) : 0,
-  };
-}
+// --- repeats --------------------------------------------------------------------------
 
 export type BarRepeats = {
   beatsPerBar: number;
@@ -609,39 +216,6 @@ export function repeatedBars(s: Spectrum, beats: readonly number[], beatsPerBar 
   return { beatsPerBar, bars: bars.length, repeats, longestRun };
 }
 
-// --- events against the sound ---------------------------------------------------------
-
-/** signed seconds from t to the nearest onset (an onset before t is negative);
- *  null without onsets. `onsets` is sorted. */
-export function nearestOffset(onsets: readonly number[], t: number): number | null {
-  if (!onsets.length) return null;
-  let lo = 0;
-  let hi = onsets.length - 1;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    if (onsets[mid]! < t) lo = mid + 1;
-    else hi = mid;
-  }
-  let best = onsets[lo]! - t;
-  if (lo > 0 && Math.abs(onsets[lo - 1]! - t) <= Math.abs(best)) best = onsets[lo - 1]! - t;
-  return round3(best);
-}
-
-/** the share of the film within ±w of some onset: how often a time picked at
- *  random would already sit that close to a sound */
-export function chanceWithin(onsets: readonly number[], duration: number, w = 0.04): number {
-  if (!(duration > 0) || !onsets.length) return 0;
-  let covered = 0;
-  let end = -Infinity;
-  for (const t of onsets) {
-    const a = Math.max(0, t - w, end);
-    const b = Math.min(duration, t + w);
-    if (b > a) covered += b - a;
-    end = Math.max(end, b);
-  }
-  return round2(covered / duration);
-}
-
 // --- the whole listen ------------------------------------------------------------------
 
 type How = "measured" | "estimated" | "not detected" | "not measured";
@@ -688,7 +262,116 @@ export type FilmListen = {
   };
   curves: FilmEvents["curves"];
   clips: string[];
+  /** this film's tempo, key and low-end pattern beside earlier Opus films' scores */
+  inertia: Inertia;
+  /** what the sound is like — instruments, synthesized or recorded — is not measured */
+  timbre: { how: "not measured" };
+  /** the events file's "credits", as written there (absent: no such field) */
+  credits?: string[];
+  /** this sound beside a previous version of it (`--vs`) */
+  vs?: ListenVs;
 };
+
+// --- beside earlier films ---------------------------------------------------------------
+
+export type ScoreCorpusFilm = {
+  id: string;
+  group: string;
+  music: string;
+  declaredBpm: number | null;
+  bpm: number | null;
+  tempoConfidence: number;
+  key: string | null;
+  keyCorrelation: number | null;
+  lowPattern: string | null;
+  duration: number;
+};
+
+export type Inertia = {
+  how: How;
+  /** the earlier films compared with (this film left out if it is one of them) */
+  of: number;
+  /** a corpus film this input is (by its path), left out of the counts */
+  self: string | null;
+  tempo: {
+    value: number | null;
+    /** earlier films with a clear beat grid (confidence ≥ 0.2) within 1.5% of it */
+    same: number;
+    withGrid: number;
+    /** how many earlier films sit at each tempo (rounded), most first */
+    spread: { bpm: number; films: number }[];
+  };
+  key: {
+    value: string | null;
+    correlation: number | null;
+    same: number;
+    /** the same key or its relative major/minor */
+    sameOrRelative: number;
+    spread: { key: string; films: number }[];
+  };
+  lowPattern: { value: string | null; same: number; spread: { pattern: string; films: number }[] };
+};
+
+const RELATIVE: Record<string, string> = {};
+{
+  const notes = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
+  notes.forEach((n, i) => {
+    const major = `${notes[(i + 3) % 12]} major`;
+    RELATIVE[`${n} minor`] = major;
+    RELATIVE[major] = `${n} minor`;
+  });
+}
+
+const spreadOf = <T extends string | number>(xs: T[]) =>
+  [...xs.reduce((m, x) => m.set(x, (m.get(x) ?? 0) + 1), new Map<T, number>())].sort(
+    (a, b) => b[1] - a[1],
+  );
+
+/** this film's tempo, key and low-end pattern counted against the corpus:
+ *  how many earlier films share each — information, never a judgement */
+export function inertiaOf(
+  input: string,
+  tempo: number | null,
+  key: { name: string; correlation: number } | null,
+  pattern: string | null,
+  corpus: ScoreCorpusFilm[] = (scoreCorpus as { films: ScoreCorpusFilm[] }).films,
+): Inertia {
+  const path = input.replaceAll("\\", "/");
+  const self = corpus.find((f) => path.endsWith(`/${f.id}/film.mp4`))?.id ?? null;
+  const films = corpus.filter((f) => f.id !== self);
+  const grid = films.filter((f) => f.bpm != null && f.tempoConfidence >= 0.2);
+  return {
+    how: films.length ? "estimated" : "not measured",
+    of: films.length,
+    self,
+    tempo: {
+      value: tempo,
+      same:
+        tempo == null ? 0 : grid.filter((f) => Math.abs(f.bpm! - tempo) <= tempo * 0.015).length,
+      withGrid: grid.length,
+      spread: spreadOf(grid.map((f) => Math.round(f.bpm!))).map(([bpm, n]) => ({ bpm, films: n })),
+    },
+    key: {
+      value: key?.name ?? null,
+      correlation: key?.correlation ?? null,
+      same: key ? films.filter((f) => f.key === key.name).length : 0,
+      sameOrRelative: key
+        ? films.filter((f) => f.key === key.name || f.key === RELATIVE[key.name]).length
+        : 0,
+      spread: spreadOf(films.flatMap((f) => (f.key ? [f.key] : []))).map(([k, n]) => ({
+        key: k,
+        films: n,
+      })),
+    },
+    lowPattern: {
+      value: pattern,
+      same: pattern ? films.filter((f) => f.lowPattern === pattern).length : 0,
+      spread: spreadOf(films.flatMap((f) => (f.lowPattern ? [f.lowPattern] : []))).map(
+        ([p, n]) => ({ pattern: p, films: n }),
+      ),
+    },
+  };
+}
 
 export type FilmListenOptions = {
   /** the film (an mp4) or the score alone (a wav, or any sound) */
@@ -707,6 +390,9 @@ export type FilmListenOptions = {
   /** the seconds between `film sheet`'s frames, to mark the same times
    *  (default: the sheet's own default for this length) */
   every?: number;
+  /** a previous version of the film or its sound (any file ffmpeg reads):
+   *  what changed, on the same film time, and A/B clips of where it changed most */
+  vs?: string;
 };
 
 const SOUND_EXT = new Set([
@@ -766,7 +452,10 @@ export async function filmListen(opts: FilmListenOptions): Promise<{
       : null;
   if (opts.events && !existsSync(eventsPath!))
     throw new Error(`film listen: no events file at ${eventsPath}`);
-  const ev = eventsPath ? parseFilmEvents(JSON.parse(await readFile(eventsPath, "utf8"))) : null;
+  const evRaw: unknown = eventsPath ? JSON.parse(await readFile(eventsPath, "utf8")) : null;
+  const ev = eventsPath ? parseFilmEvents(evRaw) : null;
+  const vsPath = opts.vs ? resolve(opts.vs) : null;
+  if (vsPath && !existsSync(vsPath)) throw new Error(`film listen: no file at ${vsPath} (--vs)`);
 
   const stemFiles = opts.stems
     ? (await readdir(resolve(opts.stems)))
@@ -804,8 +493,8 @@ export async function filmListen(opts: FilmListenOptions): Promise<{
         ],
         { stderr: true },
       ),
-      decode(ffmpeg, input).then((x) => padTo(x, duration)),
-      Promise.all(stemFiles.map((f) => decode(ffmpeg, f))),
+      decodeMono(ffmpeg, input).then((x) => padTo(x, duration)),
+      Promise.all(stemFiles.map((f) => decodeMono(ffmpeg, f))),
       wantCuts ? detectCuts(ffmpeg, input) : Promise.resolve([] as number[]),
       opts.chromePath
         ? runTool(ffmpeg, [
@@ -855,6 +544,16 @@ export async function filmListen(opts: FilmListenOptions): Promise<{
     const tempo = estimateTempo(s, env, onsets, duration);
     const sections = findSections(s, onsets, duration);
     const bars = tempo && tempo.beats.length >= 8 ? repeatedBars(s, tempo.beats) : null;
+    const chroma = chromagram(pcm);
+    const meter = tempo ? estimateMeter(s, chroma, tempo.beats) : null;
+    const downbeats =
+      tempo && meter ? tempo.beats.filter((_, k) => k % meter.beatsPerBar === meter.first) : [];
+    const inertia = inertiaOf(
+      input,
+      tempo && tempo.gridFit > tempo.chance ? tempo.bpm : null,
+      estimateKey(chroma),
+      lowPattern(s, downbeats),
+    );
 
     const events = (ev?.events ?? []).map((e) => ({
       ...e,
@@ -922,10 +621,27 @@ export async function filmListen(opts: FilmListenOptions): Promise<{
       },
       curves: ev?.curves ?? { names: [], t0: 0, dt: 1 / 60, rows: [] },
       clips: [],
+      inertia,
+      timbre: { how: "not measured" },
     };
+
+    const credits = creditLines(evRaw);
+    if (credits) listen.credits = credits;
 
     await mkdir(outDir, { recursive: true });
     if (opts.clips && stemFiles.length) listen.clips = await writeClips(ffmpeg, stemFiles, outDir);
+    if (vsPath)
+      listen.vs = await listenVs({
+        ffmpeg,
+        ffprobe,
+        input,
+        previous: vsPath,
+        outDir,
+        listen,
+        pcm,
+        s,
+        env,
+      });
     const md = join(outDir, "listen.md");
     const json = join(outDir, "listen.json");
     await writeFile(md, `${formatFilmListen(listen)}\n`);
@@ -958,42 +674,6 @@ function padTo(pcm: Float32Array, duration: number): Float32Array {
   const out = new Float32Array(n);
   out.set(pcm);
   return out;
-}
-
-function decode(ffmpeg: string, file: string): Promise<Float32Array> {
-  return new Promise((ok, fail) => {
-    const p = spawn(
-      ffmpeg,
-      [
-        "-v",
-        "error",
-        "-i",
-        file,
-        "-vn",
-        "-ac",
-        "1",
-        "-ar",
-        String(LISTEN_RATE),
-        "-f",
-        "f32le",
-        "-",
-      ],
-      { stdio: ["ignore", "pipe", "pipe"] },
-    );
-    const chunks: Buffer[] = [];
-    let err = "";
-    p.stdout.on("data", (d: Buffer) => chunks.push(d));
-    p.stderr.on("data", (d: Buffer) => {
-      err += d.toString();
-    });
-    p.on("error", fail);
-    p.on("close", (code) => {
-      if (code !== 0)
-        return fail(new Error(`ffmpeg could not decode ${file}: ${err.trim().slice(-400)}`));
-      const all = Buffer.concat(chunks);
-      ok(new Float32Array(all.buffer.slice(all.byteOffset, all.byteOffset + (all.length & ~3))));
-    });
-  });
 }
 
 /** hard cuts read from the picture (scene change ≥ 0.3 on a small grey copy),
@@ -1140,6 +820,489 @@ async function writeClips(ffmpeg: string, stems: string[], outDir: string): Prom
     );
   }
   return written.sort();
+}
+
+// --- beside a previous version (--vs) ------------------------------------------------
+
+type Loud = { integratedLufs: number | null; lra: number | null; truePeakDb: number | null };
+
+export type ListenVsMoment = {
+  start: number;
+  end: number;
+  /** spectrumDiff's frame differences, averaged over the stretch (dB) */
+  diffDb: number;
+  /** dBFS RMS over the stretch */
+  levelDb: { this: number; previous: number };
+  /** onsets in the stretch with none within 40 ms in the other */
+  onlyThis: number;
+  onlyPrevious: number;
+};
+
+export type ListenVs = {
+  previous: string;
+  durations: { this: number; previous: number };
+  /** the time compared: the longer of the two, the shorter silent after its end */
+  duration: number;
+  /** where the previous one's onset strength lines up best with this one's, ±2 s
+   *  (both are still compared on the same film time) */
+  offset: { how: How; seconds: number | null };
+  loudness: { how: How; this: Loud; previous: Loud };
+  tempo: { how: How; this: number | null; previous: number | null };
+  onsets: {
+    how: How;
+    this: number;
+    previous: number;
+    /** onset times with none within 40 ms in the other */
+    onlyThis: number[];
+    onlyPrevious: number[];
+  };
+  sections: {
+    how: How;
+    this: number[];
+    previous: number[];
+    /** boundaries with none within 0.5 s in the other */
+    onlyThis: number[];
+    onlyPrevious: number[];
+  };
+  /** the events file's events: an onset within 40 ms in this one and not the previous (gained), or the reverse */
+  events: {
+    how: How;
+    gained: { t: number; kind: string; label?: string }[];
+    lost: { t: number; kind: string; label?: string }[];
+  };
+  /** the 1 s stretches whose spectra differ most (1 dB or more), most first;
+   *  typicalDb: the median 1 s stretch's difference, to read them against */
+  moments: { how: How; list: ListenVsMoment[]; typicalDb: number };
+  /** <out>/vs/: moment-N.this.m4a and moment-N.previous.m4a (the same film time,
+   *  1 s either side), aba.m4a (this, previous, this at the first moment) */
+  clips: string[];
+};
+
+async function loudnessOf(ffmpeg: string, file: string): Promise<Loud> {
+  const log = await runTool(
+    ffmpeg,
+    ["-nostats", "-v", "info", "-i", file, "-vn", "-af", "ebur128=peak=true", "-f", "null", "-"],
+    { stderr: true },
+  );
+  const summary = log.slice(log.lastIndexOf("Summary:"));
+  const num = (re: RegExp) => {
+    const m = re.exec(summary);
+    return m ? Number(m[1]) : null;
+  };
+  return {
+    integratedLufs: num(/I:\s+(-?[\d.]+) LUFS/),
+    lra: num(/LRA:\s+(-?[\d.]+) LU/),
+    truePeakDb: num(/Peak:\s+(-?[\d.]+) dBFS/),
+  };
+}
+
+/** the lag (s, positive = the previous one comes later) at which two onset
+ *  strengths correlate best within ±maxS, or null when either is flat */
+export function bestLag(a: Float32Array, b: Float32Array, hopS: number, maxS = 2): number | null {
+  const n = Math.min(a.length, b.length);
+  const norm = (x: Float32Array) => {
+    let m = 0;
+    for (let i = 0; i < n; i++) m += x[i]!;
+    m /= n || 1;
+    const y = new Float32Array(n);
+    let e = 0;
+    for (let i = 0; i < n; i++) {
+      y[i] = x[i]! - m;
+      e += y[i]! * y[i]!;
+    }
+    return e > 1e-12 ? y : null;
+  };
+  const p = norm(a);
+  const q = norm(b);
+  if (!p || !q) return null;
+  const maxLag = Math.round(maxS / hopS);
+  let best = 0;
+  let bestV = Number.NEGATIVE_INFINITY;
+  for (let lag = -maxLag; lag <= maxLag; lag++) {
+    let v = 0;
+    for (let i = Math.max(0, -lag); i < Math.min(n, n - lag); i++) v += p[i]! * q[i + lag]!;
+    if (v > bestV || (v === bestV && Math.abs(lag) < Math.abs(best))) {
+      bestV = v;
+      best = lag;
+    }
+  }
+  return round3(best * hopS);
+}
+
+/** per frame, how far two spectra's band energies differ (dB, each floored at
+ *  FLOOR_DB): the mean of the largest quarter of the band differences, so a
+ *  sound in a few bands counts as much as a broad one; frames past either
+ *  one's end count as silence */
+export function spectrumDiff(a: Spectrum, b: Spectrum): Float32Array {
+  const n = Math.max(a.bands.length, b.bands.length);
+  const out = new Float32Array(n);
+  const top = Math.max(1, Math.round(BANDS / 4));
+  const d = new Float64Array(BANDS);
+  for (let f = 0; f < n; f++) {
+    for (let k = 0; k < BANDS; k++)
+      d[k] = Math.abs(
+        Math.max(FLOOR_DB, a.bands[f]?.[k] ?? FLOOR_DB) -
+          Math.max(FLOOR_DB, b.bands[f]?.[k] ?? FLOOR_DB),
+      );
+    d.sort();
+    let sum = 0;
+    for (let k = BANDS - top; k < BANDS; k++) sum += d[k]!;
+    out[f] = sum / top;
+  }
+  return out;
+}
+
+/** every `windowS` stretch, `stepS` apart, with its mean frame difference (dB) */
+function stretchDiffs(
+  diff: Float32Array,
+  hopS: number,
+  duration: number,
+  windowS: number,
+  stepS: number,
+): { start: number; end: number; diffDb: number }[] {
+  const out: { start: number; end: number; diffDb: number }[] = [];
+  const last = Math.max(0, duration - windowS);
+  for (let a = 0; a <= last + 1e-9; a += stepS) {
+    const b = Math.min(duration, a + windowS);
+    const f0 = Math.floor(a / hopS);
+    const f1 = Math.min(diff.length, Math.max(f0 + 1, Math.floor(b / hopS)));
+    let sum = 0;
+    for (let f = f0; f < f1; f++) sum += diff[f]!;
+    out.push({ start: round2(a), end: round2(b), diffDb: round1(f1 > f0 ? sum / (f1 - f0) : 0) });
+  }
+  return out;
+}
+
+/** the median of every 1 s stretch's difference: what the two differ by
+ *  anywhere, e.g. from encoding twice, to read the moments against */
+export function typicalDiff(diff: Float32Array, hopS: number, duration: number): number {
+  const xs = stretchDiffs(diff, hopS, duration, 1, 0.25)
+    .map((x) => x.diffDb)
+    .sort((a, b) => a - b);
+  if (!xs.length) return 0;
+  const m = xs.length >> 1;
+  return round1(xs.length % 2 ? xs[m]! : (xs[m - 1]! + xs[m]!) / 2);
+}
+
+/** the stretches of `windowS` whose mean frame difference is largest, at least
+ *  `minDb`, none overlapping, most first */
+export function changedMoments(
+  diff: Float32Array,
+  hopS: number,
+  duration: number,
+  { windowS = 1, stepS = 0.25, minDb = 1, max = 3 } = {},
+): { start: number; end: number; diffDb: number }[] {
+  const cands = stretchDiffs(diff, hopS, duration, windowS, stepS).filter((c) => c.diffDb >= minDb);
+  cands.sort((x, y) => y.diffDb - x.diffDb || x.start - y.start);
+  const out: typeof cands = [];
+  for (const c of cands) {
+    if (out.length >= max) break;
+    if (out.every((o) => c.end <= o.start || c.start >= o.end)) out.push(c);
+  }
+  return out;
+}
+
+const rmsDb = (pcm: Float32Array, a: number, b: number) => {
+  const i0 = Math.max(0, Math.round(a * LISTEN_RATE));
+  const i1 = Math.min(pcm.length, Math.round(b * LISTEN_RATE));
+  let sq = 0;
+  for (let i = i0; i < i1; i++) sq += pcm[i]! * pcm[i]!;
+  return round1(i1 > i0 ? Math.max(-120, 10 * Math.log10(sq / (i1 - i0) + 1e-12)) : -120);
+};
+
+const onlyIn = (xs: readonly number[], other: readonly number[], w: number) =>
+  xs.filter((t) => {
+    const d = nearestOffset(other, t);
+    return d == null || Math.abs(d) > w;
+  });
+
+async function listenVs(o: {
+  ffmpeg: string;
+  ffprobe: string;
+  input: string;
+  previous: string;
+  outDir: string;
+  listen: FilmListen;
+  pcm: Float32Array;
+  s: Spectrum;
+  env: Float32Array;
+}): Promise<ListenVs> {
+  const { ffmpeg, listen: l } = o;
+  const probed = JSON.parse(
+    await runTool(o.ffprobe, [
+      "-v",
+      "error",
+      "-show_entries",
+      "stream=codec_type:format=duration",
+      "-of",
+      "json",
+      o.previous,
+    ]),
+  ) as { streams?: { codec_type?: string }[]; format?: { duration?: string } };
+  if (!probed.streams?.some((x) => x.codec_type === "audio"))
+    throw new Error(`film listen: ${o.previous} (--vs) has no sound to compare with`);
+  const [pcmPrevRaw, loudPrev] = await Promise.all([
+    decodeMono(ffmpeg, o.previous),
+    loudnessOf(ffmpeg, o.previous),
+  ]);
+  const durPrev = Number(probed.format?.duration) || pcmPrevRaw.length / LISTEN_RATE;
+  const D = Math.max(l.duration, durPrev);
+  const pcmThis = padTo(o.pcm, D);
+  const pcmPrev = padTo(pcmPrevRaw, D);
+  const sThis = pcmThis === o.pcm ? o.s : spectrum(pcmThis);
+  const envThis = sThis === o.s ? o.env : onsetStrength(sThis);
+  const sPrev = spectrum(pcmPrev);
+  const envPrev = onsetStrength(sPrev);
+  const onsPrev = pickOnsets(sPrev, envPrev, pcmPrev).map(round3);
+  const tempoPrev = estimateTempo(sPrev, envPrev, onsPrev, D);
+  const secPrev = findSections(sPrev, onsPrev, D);
+  const onsThis = l.onsets.times;
+  const W = 0.04;
+  const onlyThis = onlyIn(onsThis, onsPrev, W);
+  const onlyPrevious = onlyIn(onsPrev, onsThis, W);
+  const bThis = l.sections.list.slice(1).map((x) => x.start);
+  const bPrev = secPrev.slice(1).map((x) => x.start);
+  // a lag read off a handful of onsets is noise, not an offset
+  const lag =
+    onsThis.length >= 4 && onsPrev.length >= 4 ? bestLag(envThis, envPrev, sThis.hopS) : null;
+  const diff = spectrumDiff(sThis, sPrev);
+  const typicalDb = typicalDiff(diff, sThis.hopS, D);
+  const moments = changedMoments(diff, sThis.hopS, D).map((m) => ({
+    ...m,
+    levelDb: { this: rmsDb(pcmThis, m.start, m.end), previous: rmsDb(pcmPrev, m.start, m.end) },
+    onlyThis: onlyThis.filter((t) => t >= m.start && t < m.end).length,
+    onlyPrevious: onlyPrevious.filter((t) => t >= m.start && t < m.end).length,
+  }));
+  const ev = (e: FilmEvent) =>
+    e.label ? { t: e.t, kind: e.kind, label: e.label } : { t: e.t, kind: e.kind };
+  const sounded = (d: number | null) => d != null && Math.abs(d) <= W;
+  const gained = l.events.list.filter(
+    (e) => sounded(e.nearestOnset) && !sounded(nearestOffset(onsPrev, e.t)),
+  );
+  const lost = l.events.list.filter(
+    (e) => !sounded(e.nearestOnset) && sounded(nearestOffset(onsPrev, e.t)),
+  );
+  const prevSounds = loudPrev.integratedLufs != null && loudPrev.integratedLufs > -70;
+
+  // the clips: the same film time from each, 1 s either side of the stretch
+  const clips: string[] = [];
+  if (moments.length) {
+    const dir = join(o.outDir, "vs");
+    await mkdir(dir, { recursive: true });
+    const span = (m: { start: number; end: number }) => {
+      const a = round2(Math.max(0, m.start - 1));
+      return { a, b: round2(Math.min(D, m.end + 1)) };
+    };
+    const cut = (a: number, b: number) =>
+      `apad=whole_dur=${b},atrim=start=${a}:end=${b},asetpts=PTS-STARTPTS`;
+    const jobs = moments.flatMap((m, i) => {
+      const { a, b } = span(m);
+      return [
+        [o.input, join(dir, `moment-${i + 1}.this.m4a`), a, b] as const,
+        [o.previous, join(dir, `moment-${i + 1}.previous.m4a`), a, b] as const,
+      ];
+    });
+    await Promise.all(
+      jobs.map(([src, out, a, b]) =>
+        runTool(ffmpeg, [
+          "-v",
+          "error",
+          "-i",
+          src,
+          "-vn",
+          "-af",
+          cut(a, b),
+          "-c:a",
+          "aac",
+          "-b:a",
+          "192k",
+          "-y",
+          out,
+        ]),
+      ),
+    );
+    clips.push(...jobs.map((j) => j[1]));
+    const { a, b } = span(moments[0]!);
+    const fmt = "aformat=sample_rates=48000:channel_layouts=stereo";
+    const aba = join(dir, "aba.m4a");
+    await runTool(ffmpeg, [
+      "-v",
+      "error",
+      "-i",
+      o.input,
+      "-i",
+      o.previous,
+      "-filter_complex",
+      `[0:a]${cut(a, b)},${fmt},asplit=2[a1][a2];[1:a]${cut(a, b)},${fmt}[b];` +
+        `anullsrc=r=48000:cl=stereo,atrim=duration=0.4,asplit=2[g1][g2];` +
+        `[a1][g1][b][g2][a2]concat=n=5:v=0:a=1[o]`,
+      "-map",
+      "[o]",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "192k",
+      "-y",
+      aba,
+    ]);
+    clips.push(aba);
+  }
+
+  return {
+    previous: o.previous,
+    durations: { this: l.duration, previous: round3(durPrev) },
+    duration: round3(D),
+    offset: { how: lag == null ? "not detected" : "estimated", seconds: lag },
+    loudness: {
+      how: l.loudness.how === "measured" || prevSounds ? "measured" : "not detected",
+      this: {
+        integratedLufs: l.loudness.integratedLufs,
+        lra: l.loudness.lra,
+        truePeakDb: l.loudness.truePeakDb,
+      },
+      previous: loudPrev,
+    },
+    tempo: {
+      how: l.tempo.value || tempoPrev ? "estimated" : "not detected",
+      this: l.tempo.value?.bpm ?? null,
+      previous: tempoPrev?.bpm ?? null,
+    },
+    onsets: {
+      how: onsThis.length || onsPrev.length ? "measured" : "not detected",
+      this: onsThis.length,
+      previous: onsPrev.length,
+      onlyThis,
+      onlyPrevious,
+    },
+    sections: {
+      how: "estimated",
+      this: bThis,
+      previous: bPrev,
+      onlyThis: onlyIn(bThis, bPrev, 0.5),
+      onlyPrevious: onlyIn(bPrev, bThis, 0.5),
+    },
+    events: {
+      how: !l.events.file ? "not measured" : l.events.list.length ? "measured" : "not detected",
+      gained: gained.map(ev),
+      lost: lost.map(ev),
+    },
+    moments: { how: moments.length ? "measured" : "not detected", list: moments, typicalDb },
+    clips,
+  };
+}
+
+function formatListenVs(v: ListenVs): string[] {
+  const L: string[] = [];
+  const tag = (h: How) => `(${h})`;
+  const fmtS = (t: number) => `${t.toFixed(2)}s`;
+  const list = (xs: number[], max = 12) =>
+    xs.length > max
+      ? `${xs.slice(0, max).map(fmtS).join(", ")}, … (${xs.length})`
+      : xs.map(fmtS).join(", ");
+  const lu = (a: number | null, b: number | null, unit: string) =>
+    a == null || b == null
+      ? `this ${a ?? "?"}, previous ${b ?? "?"} ${unit}`
+      : `this ${a}, previous ${b} ${unit} (${a - b >= 0 ? "+" : ""}${round1(a - b)})`;
+  const lvl = (db: number) => (db <= -120 ? "silent" : `${db} dBFS`);
+  L.push(`## Beside the previous version — ${basename(v.previous)}`, "");
+  L.push(
+    `- lengths: this ${fmtS(v.durations.this)}, previous ${fmtS(v.durations.previous)}; compared on the same film time over ${fmtS(v.duration)}, the shorter one silent after its end ${tag("measured")}`,
+  );
+  L.push(
+    v.offset.seconds == null
+      ? `- alignment: too few onsets (under 4 in one of the two) to line them up ${tag(v.offset.how)}`
+      : v.offset.seconds === 0
+        ? `- alignment: the onsets line up best with no shift (searched ±2 s) ${tag(v.offset.how)}`
+        : `- alignment: the onsets line up best with the previous one's sound ${Math.round(Math.abs(v.offset.seconds) * 1000)} ms ${v.offset.seconds > 0 ? "later" : "earlier"} than this one's (searched ±2 s); everything below still compares the same film time ${tag(v.offset.how)}`,
+  );
+  const a = v.loudness.this;
+  const b = v.loudness.previous;
+  L.push(
+    `- loudness: integrated ${lu(a.integratedLufs, b.integratedLufs, "LUFS")}; range ${lu(a.lra, b.lra, "LU")}; true peak ${lu(a.truePeakDb, b.truePeakDb, "dBFS")} ${tag(v.loudness.how)}`,
+  );
+  L.push(
+    v.tempo.this == null && v.tempo.previous == null
+      ? `- tempo: neither has a repeating period between 60 and 200 BPM ${tag(v.tempo.how)}`
+      : `- tempo: this ${v.tempo.this != null ? `≈ ${v.tempo.this} BPM` : "no grid"}, previous ${v.tempo.previous != null ? `≈ ${v.tempo.previous} BPM` : "no grid"} ${tag(v.tempo.how)}`,
+  );
+  L.push(
+    `- onsets: this ${v.onsets.this}, previous ${v.onsets.previous}; ${v.onsets.onlyThis.length} only in this, ${v.onsets.onlyPrevious.length} only in the previous (none in the other within 40 ms) ${tag(v.onsets.how)}`,
+  );
+  if (v.onsets.onlyThis.length)
+    L.push(`  - only in this: ${list(v.onsets.onlyThis)} ${tag(v.onsets.how)}`);
+  if (v.onsets.onlyPrevious.length)
+    L.push(`  - only in the previous: ${list(v.onsets.onlyPrevious)} ${tag(v.onsets.how)}`);
+  L.push(
+    `- section boundaries: this ${v.sections.this.length ? list(v.sections.this) : "none"}; previous ${v.sections.previous.length ? list(v.sections.previous) : "none"}; new (none in the previous within 0.5 s): ${v.sections.onlyThis.length ? list(v.sections.onlyThis) : "none"}; gone: ${v.sections.onlyPrevious.length ? list(v.sections.onlyPrevious) : "none"} ${tag(v.sections.how)}`,
+  );
+  const evs = (xs: ListenVs["events"]["gained"]) =>
+    xs.map((x) => `${fmtS(x.t)} ${x.kind}${x.label ? ` "${x.label}"` : ""}`).join(", ");
+  if (v.events.how === "not measured")
+    L.push(`- events that gained or lost a sound: no events file ${tag(v.events.how)}`);
+  else if (v.events.how === "not detected")
+    L.push(`- events: the events file lists none ${tag(v.events.how)}`);
+  else {
+    L.push(
+      `- events that gained a sound (an onset within 40 ms in this, none in the previous): ${v.events.gained.length ? evs(v.events.gained) : "none"} ${tag(v.events.how)}`,
+    );
+    L.push(
+      `- events that lost one (an onset within 40 ms in the previous, none in this): ${v.events.lost.length ? evs(v.events.lost) : "none"} ${tag(v.events.how)}`,
+    );
+  }
+  if (!v.moments.list.length)
+    L.push(
+      `- where they differ most: no 1 s stretch whose spectra differ by 1 dB or more (per frame the mean of the largest quarter of the 48 band-energy differences) ${tag(v.moments.how)}`,
+    );
+  else {
+    L.push(
+      `- where they differ most (1 s stretches; per frame the mean of the largest quarter of the 48 band-energy differences, averaged over the stretch; the median stretch differs by ${v.moments.typicalDb} dB, so a moment near that differs about as much as the two do everywhere, e.g. from encoding):`,
+    );
+    for (const [i, m] of v.moments.list.entries())
+      L.push(
+        `  ${i + 1}. ${fmtS(m.start)}–${fmtS(m.end)}: ${m.diffDb} dB; level this ${lvl(m.levelDb.this)}, previous ${lvl(m.levelDb.previous)}; ${m.onlyThis} onset${m.onlyThis === 1 ? "" : "s"} only in this, ${m.onlyPrevious} only in the previous ${tag(v.moments.how)}`,
+      );
+  }
+  if (v.clips.length)
+    L.push(
+      "",
+      "Clips (each moment from both, the same film time, 1 s either side; aba.m4a plays this, the previous, this at the first one; levels as they are, not matched):",
+      "",
+      ...v.clips.map((f) => `- ${f}`),
+    );
+  return L;
+}
+
+/** the events file's "credits" field as lines. `film render` writes a list of
+ *  { what?, by?, licence?, url?, text? } (render.ts FilmCredit); read leniently
+ *  besides: a string, a list of strings, other names for the same fields
+ *  (title/name/file, author/artist, license, source), or an object of
+ *  name → credit; null when there is no such field */
+export function creditLines(raw: unknown): string[] | null {
+  if (!raw || typeof raw !== "object" || !("credits" in raw)) return null;
+  const c = (raw as { credits: unknown }).credits;
+  const str = (x: unknown) =>
+    typeof x === "string" || typeof x === "number" ? String(x).trim() : "";
+  const one = (x: unknown): string => {
+    if (typeof x !== "object" || !x) return str(x);
+    const o = x as Record<string, unknown>;
+    const by = str(o.by) || str(o.author) || str(o.artist);
+    const parts = [
+      str(o.what) || str(o.title) || str(o.name) || str(o.file),
+      by ? `by ${by}` : "",
+      str(o.licence) || str(o.license),
+      str(o.url) || str(o.source),
+    ].filter(Boolean);
+    const text = str(o.text);
+    // the attribution line as the page wants it shown, after what it credits
+    if (text) return parts.length ? `${parts.join(", ")} — "${text}"` : text;
+    return parts.length ? parts.join(", ") : JSON.stringify(x);
+  };
+  const lines = Array.isArray(c)
+    ? c.map(one)
+    : c && typeof c === "object"
+      ? Object.entries(c as Record<string, unknown>).map(([k, x]) => `${k}: ${one(x)}`)
+      : [one(c)];
+  return lines.filter(Boolean);
 }
 
 // --- the text --------------------------------------------------------------------------
@@ -1314,7 +1477,42 @@ export function formatFilmListen(l: FilmListen): string {
       "",
       `- ${l.curves.names.join(", ")} — drawn in listen.png`,
     );
+  const n = l.inertia;
+  L.push("", "## Beside earlier Opus films' scores", "");
+  if (!n.of) L.push(`- no earlier films to set this one beside ${tag("not measured")}`);
+  else {
+    const corpus = `${n.of} earlier film${n.of === 1 ? "" : "s"}${n.self ? ` (${n.self}, this film, left out)` : ""}, measured the same way`;
+    const top = <T>(xs: T[], fmt: (x: T) => string) =>
+      xs.length > 5 ? `${xs.slice(0, 5).map(fmt).join(", ")}, …` : xs.map(fmt).join(", ");
+    L.push(
+      n.tempo.value == null
+        ? `- tempo: no beat grid in this one; of ${corpus}, ${n.tempo.withGrid} have one: ${top(n.tempo.spread, (x) => `${x.bpm} BPM ×${x.films}`)} ${tag("estimated")}`
+        : `- tempo: this one ≈ ${n.tempo.value} BPM; of ${corpus}, ${n.tempo.same} sit within 1.5% of it (${n.tempo.withGrid} have a clear beat grid: ${top(n.tempo.spread, (x) => `${x.bpm} BPM ×${x.films}`)}) ${tag("estimated")}`,
+    );
+    L.push(
+      n.key.value == null
+        ? `- key: nothing pitched to read ${tag("not detected")}`
+        : `- key: this one reads as ${n.key.value} (profile correlation ${n.key.correlation}); ${n.key.same} of ${n.of} read the same, ${n.key.sameOrRelative} the same or its relative ${RELATIVE[n.key.value] ?? ""} (all: ${top(n.key.spread, (x) => `${x.key} ×${x.films}`)}) ${tag("estimated")}`,
+    );
+    L.push(
+      n.lowPattern.value == null
+        ? `- where the low end lands in a bar: no bars or no low end to read ${tag("not detected")}`
+        : `- where the low end (under 160 Hz) lands in a bar, 16 steps from the downbeat: this one ${n.lowPattern.value}; ${n.lowPattern.same} of ${n.of} have the same (most common: ${top(n.lowPattern.spread.slice(0, 3), (x) => `${x.pattern} ×${x.films}`)}) ${tag("estimated")}`,
+    );
+  }
+  L.push(
+    "",
+    "## What it sounds like",
+    "",
+    `- its instruments, whether it sounds synthesized or recorded, whether the action sounds resemble the product's own: nothing here hears timbre ${tag(l.timbre.how)}`,
+  );
   if (l.clips.length) L.push("", "## Clips", "", ...l.clips.map((f) => `- ${f}`));
+  if (l.vs) L.push("", ...formatListenVs(l.vs));
+  if (l.credits) {
+    L.push("", "## Credits (as the events file lists them)", "");
+    if (l.credits.length) L.push(...l.credits.map((c) => `- ${c}`));
+    else L.push(`- the "credits" field is empty ${tag("not detected")}`);
+  }
   return L.join("\n");
 }
 

@@ -1186,8 +1186,10 @@ export function load(path, { sampleRate = RATE, channels } = {}) {
 
 /**
  * <film>.events.json, as `film render` writes it beside the film: the page's
- * events (t, kind, x, y, force, label), its cuts, and its curves sampled once
- * a frame — for `curveOf`.
+ * events (t, kind, x, y, force, label), its cuts, its curves sampled once
+ * a frame — for `curveOf` — and the credits the page kept (what it uses that
+ * someone else made, and on what licence; [] in a file written before there
+ * were credits).
  * @param {string} path
  * @returns {FilmEvents}
  */
@@ -1201,6 +1203,7 @@ export function readEvents(path) {
   }
   if (ev?.version !== 1 || !Array.isArray(ev.events) || !ev.curves)
     throw new Error(`readEvents: ${path} is not an events file \`film render\` writes (version 1)`);
+  if (!Array.isArray(ev.credits)) ev.credits = [];
   return ev;
 }
 
@@ -1215,43 +1218,110 @@ export function readEvents(path) {
  * @property {number[]} [declaredCuts]
  * @property {number[]} [detectedCuts]
  * @property {{ names: string[], t0: number, dt: number, rows: (number | null)[][] }} curves
+ * @property {{ what?: string, by?: string, licence?: string, url?: string, text?: string }[]} [credits]
+ *   window.__film.credits: information only, nothing checks it
  */
 
 /**
  * One of the film's curves as a function of film time, for an `Auto`: linear
  * between frames — and across frames the page gave no number — held past the ends.
  * `map` turns its value into what you want (a gain, a pan, a send).
+ *
+ * A hard cut is not a move: the curve is split there, not drawn straight
+ * across. Each shot is its own curve — linear inside it, its last value held
+ * up to the cut, the next shot's first value from the cut on — so a level
+ * that follows the camera steps with the picture instead of gliding into the
+ * cut a frame early or spiking over it. The cuts are, by default, the events
+ * file's (`declaredCuts` and `detectedCuts`, merged when less than half a
+ * frame apart); `{ cuts: [...] }` gives your own (times, or events of kind
+ * "cut"), `{ cuts: [] }` draws straight across them all. A cut at c belongs to
+ * the shot that starts at c. A shot the page gave no number in (or one
+ * shorter than a frame, e.g. a declared cut a frame off the one the picture
+ * shows) holds the last number before it, or the first after. A step is a step: smooth it in the
+ * score (e.g. a short crossfade) if you want it softer.
+ *
+ *   gain: curveOf(ev, "camSpeed", (v) => 0.2 + v / 4000)            // split at the film's cuts
+ *   gain: curveOf(ev, "camSpeed", { map: (v) => v / 4000, cuts: [] }) // straight across
+ *
  * @param {FilmEvents} ev
  * @param {string} name
- * @param {(v: number) => number} [map]
+ * @param {((v: number) => number) | CurveOptions} [mapOrOptions]
+ * @param {CurveOptions} [options]
  * @returns {(t: number) => number}
+ * @typedef {object} CurveOptions
+ * @property {(v: number) => number} [map]
+ * @property {readonly (number | { t?: number, t0?: number, kind?: string })[]} [cuts] default the events file's
  */
-export function curveOf(ev, name, map = (v) => v) {
+export function curveOf(ev, name, mapOrOptions, options = {}) {
+  const o =
+    typeof mapOrOptions === "function"
+      ? { ...options, map: mapOrOptions }
+      : { ...(mapOrOptions ?? {}), ...options };
+  const map = o.map ?? ((v) => v);
   const j = ev.curves.names.indexOf(name);
   if (j < 0)
     throw new Error(
       `curveOf: the film has no curve "${name}" (it has: ${ev.curves.names.join(", ") || "none"})`,
     );
-  // the frames the page gave a number for, with the number
+  const { t0, dt } = ev.curves;
+  // the cuts, ascending: the caller's, or the events file's own
+  /** @param {readonly (number | { t?: number, t0?: number, kind?: string })[] | undefined} list */
+  const times = (list) =>
+    (list ?? [])
+      .map((c) =>
+        typeof c === "number"
+          ? c
+          : c && c.kind === "cut"
+            ? (c.t ?? c.t0 ?? Number.NaN)
+            : Number.NaN,
+      )
+      .filter((t) => Number.isFinite(t));
+  const cuts = (
+    o.cuts != null
+      ? times(o.cuts)
+      : times([...(ev.declaredCuts ?? []), ...(ev.detectedCuts ?? []), ...(ev.cuts ?? [])])
+  )
+    .sort((a, b) => a - b)
+    .filter((t, i, all) => i === 0 || t - (all[i - 1] ?? 0) >= dt / 2);
+  // which shot a time is in: how many cuts lie at or before it
+  const tol = Math.min(1e-6, dt / 1000);
+  /** @param {number} t */
+  const shotOf = (t) => {
+    let k = 0;
+    while (k < cuts.length && t >= (cuts[k] ?? 0) - tol) k++;
+    return k;
+  };
+  // the frames the page gave a number for, with the number, and the shot each is in
   /** @type {number[]} */
   const at = [];
   /** @type {number[]} */
   const vs = [];
+  /** @type {number[]} */
+  const shots = [];
   ev.curves.rows.forEach((row, i) => {
     const v = row[j];
     if (typeof v === "number" && Number.isFinite(v)) {
       at.push(i);
       vs.push(v);
+      shots.push(shotOf(t0 + i * dt));
     }
   });
   if (!at.length) throw new Error(`curveOf: the curve "${name}" has no numbers`);
-  const { t0, dt } = ev.curves;
-  return (t) => {
-    const f = (t - t0) / dt;
-    if (f <= (at[0] ?? 0)) return map(vs[0] ?? 0);
-    if (f >= (at[at.length - 1] ?? 0)) return map(vs[vs.length - 1] ?? 0);
-    let lo = 0;
-    let hi = at.length - 1;
+  // each shot's run of frames in `at` (frames are in time order, so shots are runs)
+  /** @type {Map<number, [number, number]>} */
+  const runs = new Map();
+  shots.forEach((k, i) => {
+    const r = runs.get(k);
+    if (r) r[1] = i + 1;
+    else runs.set(k, [i, i + 1]);
+  });
+  /** linear between the frames lo..hi-1 of `at`, held past them @param {number} f @param {number} first @param {number} end */
+  const within = (f, first, end) => {
+    const last = end - 1;
+    if (f <= (at[first] ?? 0)) return vs[first] ?? 0;
+    if (f >= (at[last] ?? 0)) return vs[last] ?? 0;
+    let lo = first;
+    let hi = last;
     while (hi - lo > 1) {
       const mid = (lo + hi) >> 1;
       if ((at[mid] ?? 0) <= f) lo = mid;
@@ -1260,7 +1330,20 @@ export function curveOf(ev, name, map = (v) => v) {
     const a = at[lo] ?? 0;
     const b = at[hi] ?? a + 1;
     const u = (f - a) / (b - a);
-    return map((vs[lo] ?? 0) * (1 - u) + (vs[hi] ?? 0) * u);
+    return (vs[lo] ?? 0) * (1 - u) + (vs[hi] ?? 0) * u;
+  };
+  return (t) => {
+    const f = (t - t0) / dt;
+    if (!cuts.length) return map(within(f, 0, at.length));
+    const k = shotOf(t);
+    const run = runs.get(k);
+    if (run) return map(within(f, run[0], run[1]));
+    // a shot with no numbers (none given there, or shorter than a frame): the
+    // nearest number before it held, else the first after — never a glide
+    // across a cut
+    let i = shots.length - 1;
+    while (i >= 0 && (shots[i] ?? 0) > k) i--;
+    return map(vs[i >= 0 ? i : shots.findIndex((s) => s > k)] ?? 0);
   };
 }
 
@@ -1618,6 +1701,245 @@ export function crossfade(a, b, at, dur, { shape = "power" } = {}) {
     return o;
   });
   return withRate(out, sr);
+}
+
+// ---------------------------------------------------------------- bars
+
+// A licensed or recorded track edited by whole bars, the way an editor cuts
+// music under a film: keep some bars, skip others, loop one, each join a
+// short crossfade that ends on the bar line, so the incoming bar's downbeat
+// lands whole. The bars come from `open-take film beats track.mp3` (an
+// estimate — its confidence is in the file; listen to the joins).
+//
+//   const track = load("track.mp3");
+//   const beats = JSON.parse(readFileSync("track.beats.json", "utf8"));
+//   // bar 40 (the drop) on the film's 16.0 s, then on through bar 46
+//   const edit = cutToBars(track, beats, [...landOn(beats, { bar: 40, at: 16 }), { from: 40, to: 46 }]);
+//   play(music, edit.sound, 0);
+//   writeFileSync("music.beats.json", JSON.stringify(edit.beats));  // the edit's own grid, for cut.js
+
+/**
+ * `<name>.beats.json` as `open-take film beats` writes it (the fields used here).
+ * @typedef {object} BeatsFile
+ * @property {1} version
+ * @property {string} [source]
+ * @property {number} duration
+ * @property {{ bpm: number | null, periodS?: number }} tempo
+ * @property {number[]} beats
+ * @property {number[]} downbeats
+ * @property {{ t: number, index: number }[]} [bars]
+ * @property {{ beatsPerBar: number | null }} [meter]
+ * @property {{ t: number, end: number }[]} [sections]
+ * @property {number[]} [drops]
+ * @property {number[]} [onsets]
+ */
+
+/**
+ * Source bars [from, to), played `times` over (default once). Bars count from
+ * 0 at the first downbeat; `from` may fall mid-bar (a pickup into the first
+ * piece), `to` may be "end" — the track's own ending.
+ * @typedef {{ from: number, to: number | "end", times?: number }} BarPiece
+ */
+
+/** when a bar starts in the source (s): its downbeat, or past the known ones,
+ *  a bar's length on; fractional bars fall between @param {BeatsFile} beats */
+function barClock(beats) {
+  const d = (beats.downbeats ?? []).filter((t) => Number.isFinite(t));
+  if (d.length < 2)
+    throw new Error(
+      "cutToBars: the beats file has no bars (no downbeats were found) — cut by seconds with slice and crossfade",
+    );
+  const gaps = d
+    .slice(1)
+    .map((t, i) => t - /** @type {number} */ (d[i]))
+    .sort((a, b) => a - b);
+  const len = /** @type {number} */ (gaps[gaps.length >> 1]);
+  const n = d.length;
+  /** @param {number} i */
+  return (i) => {
+    if (i <= 0) return (d[0] ?? 0) + i * len;
+    if (i >= n - 1) return (d[n - 1] ?? 0) + (i - (n - 1)) * len;
+    const k = Math.floor(i);
+    const a = d[k] ?? 0;
+    const b = d[k + 1] ?? a;
+    return a + (b - a) * (i - k);
+  };
+}
+
+/**
+ * The pieces that put source bar `bar`'s downbeat on film time `at` when the
+ * edit starts playing at film time `start` (default 0): the bars just before
+ * it, as many as fit, the first one entered part-way. Add the bars after it
+ * yourself. When the track has too little before that bar, it says so.
+ * @param {BeatsFile} beats
+ * @param {{ bar: number, at: number, start?: number }} o
+ * @returns {BarPiece[]}
+ */
+export function landOn(beats, { bar, at, start = 0 }) {
+  if (![bar, at, start].every(Number.isFinite))
+    throw new Error("landOn: bar, at and start are numbers");
+  const clock = barClock(beats);
+  const lead = at - start;
+  if (lead < 0) throw new Error(`landOn: the edit starts at ${start} s, after ${at} s`);
+  // the fractional bar `lead` s before it, along the bars as they fall (they
+  // need not all be one length)
+  const want = clock(bar) - lead;
+  let lo = bar - lead / (clock(bar) - clock(bar - 1)) - 2;
+  while (clock(lo) > want) lo -= 2;
+  let hi = bar;
+  for (let k = 0; k < 60; k++) {
+    const mid = (lo + hi) / 2;
+    if (clock(mid) < want) lo = mid;
+    else hi = mid;
+  }
+  const from = (lo + hi) / 2;
+  if (want < 0)
+    throw new Error(
+      `landOn: bar ${bar} is ${secs(clock(bar))} s into the track — it cannot sound ${secs(lead)} s after the edit starts; start the edit later (start: ${secs(at - clock(bar))}) or loop a bar before it`,
+    );
+  return lead > 0 ? [{ from, to: bar }] : [];
+}
+
+/**
+ * A track cut by whole bars: the pieces in order, each `times` over, joined
+ * by an equal-power crossfade of `xfade` s (default 30 ms) that ends on the
+ * join — the outgoing bar fades under the incoming one's last moment before
+ * its bar line, so the downbeat after the join is the incoming bar's own,
+ * whole. Pieces that follow on in the source (one's `to` the next one's
+ * `from`) play straight through. The first piece fades in over `fadeIn` s
+ * (default 5 ms); the last fades out over `fadeOut` s (default 30 ms) unless it
+ * runs to the track's "end". Returns the sound; `map`, where each piece sits
+ * in the edit and where it came from; `joins`, the edit's seams; and `beats`,
+ * the beats file laid onto the edit's own time — every time plus `at` (default
+ * 0), where you will place the edit in the film — for cut.js grid().
+ * @param {Channels} sound
+ * @param {BeatsFile} beats
+ * @param {BarPiece[]} plan
+ * @param {{ xfade?: number, fadeIn?: number, fadeOut?: number, at?: number }} [o]
+ */
+export function cutToBars(
+  sound,
+  beats,
+  plan,
+  { xfade = 0.03, fadeIn = 0.005, fadeOut = 0.03, at = 0 } = {},
+) {
+  const sr = rateOf(sound);
+  const src = chans(sound);
+  const total = (src[0]?.length ?? 0) / sr;
+  const clock = barClock(beats);
+  if (!Array.isArray(plan) || !plan.length)
+    throw new Error("cutToBars: the plan is a list of { from, to } bars");
+  if (!(xfade >= 0 && fadeIn >= 0 && fadeOut >= 0)) throw new Error("cutToBars: fades are ≥ 0 s");
+  /** @type {{ s0: number, s1: number, from: number, to: number | "end", toEnd: boolean }[]} */
+  const runs = [];
+  for (const p of plan) {
+    const times = p.times ?? 1;
+    if (!(Number.isInteger(times) && times >= 1))
+      throw new Error(`cutToBars: times is a whole number ≥ 1 (got ${p.times})`);
+    if (!Number.isFinite(p.from) || !(p.to === "end" || Number.isFinite(p.to)))
+      throw new Error(`cutToBars: a piece is { from, to } bars (got ${JSON.stringify(p)})`);
+    const s0 = Math.max(0, clock(p.from));
+    const s1 = p.to === "end" ? total : Math.min(total, clock(p.to));
+    if (!(s1 > s0))
+      throw new Error(`cutToBars: bars ${p.from}–${p.to} hold no sound in this track`);
+    for (let k = 0; k < times; k++)
+      runs.push({ s0, s1, from: p.from, to: p.to, toEnd: p.to === "end" || s1 >= total });
+  }
+  // a piece that carries straight on from the last is no join
+  /** @type {typeof runs} */
+  const pieces = [];
+  for (const r of runs) {
+    const last = pieces[pieces.length - 1];
+    if (last && Math.abs(last.s1 - r.s0) < 1 / sr && last.to !== "end") {
+      last.s1 = r.s1;
+      last.to = r.to;
+      last.toEnd = r.toEnd;
+    } else pieces.push({ ...r });
+  }
+  // in whole samples, piece by piece, as they are laid in below
+  const n = pieces.reduce((a, p) => a + Math.round(p.s1 * sr) - Math.round(p.s0 * sr), 0);
+  const length = n / sr;
+  const out = src.map(() => new Float32Array(n));
+  const xf = Math.round(xfade * sr);
+  /** @type {{ at: number, end: number, from: number, to: number | "end", source: [number, number] }[]} */
+  const map = [];
+  /** the same, unrounded: the beats are moved by these, so a mark on a join stays on it
+   *  @type {{ at: number, s0: number, s1: number }[]} */
+  const exact = [];
+  /** @type {number[]} */
+  const joins = [];
+  let pos = 0; // samples into the edit
+  pieces.forEach((p, i) => {
+    const a = Math.round(p.s0 * sr);
+    const b = Math.round(p.s1 * sr);
+    // the incoming piece starts xf before its bar line, under the outgoing one's tail
+    const pre = i === 0 ? 0 : Math.min(xf, a, pos);
+    for (let c = 0; c < out.length; c++) {
+      const o = /** @type {Float32Array} */ (out[c]);
+      const s = /** @type {Signal} */ (src[c]);
+      for (let j = 0; j < pre; j++) {
+        const u = (j + 0.5) / pre;
+        const at_ = pos - pre + j;
+        o[at_] =
+          (o[at_] ?? 0) * Math.cos((u * Math.PI) / 2) +
+          (s[a - pre + j] ?? 0) * Math.sin((u * Math.PI) / 2);
+      }
+      for (let j = 0; j < b - a && pos + j < n; j++) o[pos + j] = s[a + j] ?? 0;
+    }
+    if (i > 0) joins.push(secs(at + pos / sr));
+    map.push({
+      at: secs(at + pos / sr),
+      end: secs(at + (pos + b - a) / sr),
+      from: p.from,
+      to: p.to,
+      source: [secs(p.s0), secs(p.s1)],
+    });
+    exact.push({ at: at + pos / sr, s0: p.s0, s1: p.s1 });
+    pos += b - a;
+  });
+  const edges = {
+    in: Math.min(n, Math.round(fadeIn * sr)),
+    out: pieces[pieces.length - 1]?.toEnd ? 0 : Math.min(n, Math.round(fadeOut * sr)),
+  };
+  for (const o of out) {
+    for (let i = 0; i < edges.in; i++)
+      o[i] = (o[i] ?? 0) * Math.sin(((i + 0.5) / edges.in) * (Math.PI / 2));
+    for (let i = 0; i < edges.out; i++)
+      o[n - 1 - i] = (o[n - 1 - i] ?? 0) * Math.sin(((i + 0.5) / edges.out) * (Math.PI / 2));
+  }
+  // the beats file on the edit's time: each source time inside a piece, moved with it
+  /** @param {number[] | undefined} xs */
+  const moved = (xs) =>
+    exact.flatMap((m) =>
+      (xs ?? [])
+        .filter((t) => t >= m.s0 - 1e-6 && t < m.s1 - 1e-6)
+        .map((t) => secs(m.at + (t - m.s0))),
+    );
+  const downbeats = moved(beats.downbeats);
+  return {
+    sound: withRate(out, sr),
+    map,
+    joins,
+    beats: {
+      ...beats,
+      source: `${beats.source ?? "a track"}, cut to bars`,
+      duration: secs(length),
+      beats: moved(beats.beats),
+      downbeats,
+      bars: downbeats.map((t, index) => ({ t, index })),
+      onsets: moved(beats.onsets),
+      drops: moved(beats.drops),
+      sections: exact.flatMap((m) =>
+        (beats.sections ?? [])
+          .filter((s) => s.end > m.s0 && s.t < m.s1)
+          .map((s) => ({
+            ...s,
+            t: secs(m.at + Math.max(0, s.t - m.s0)),
+            end: secs(m.at + Math.min(m.s1, s.end) - m.s0),
+          })),
+      ),
+    },
+  };
 }
 
 // ---------------------------------------------------------------- files

@@ -9,7 +9,10 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { resolveFfmpeg, runTool } from "../src/ffmpeg";
 import {
+  bestLag,
   chanceWithin,
+  changedMoments,
+  creditLines,
   estimateTempo,
   filmListen,
   findSections,
@@ -20,6 +23,8 @@ import {
   pickOnsets,
   repeatedBars,
   spectrum,
+  spectrumDiff,
+  typicalDiff,
 } from "../src/film/listen";
 import { findChrome } from "./fixtures/find-chrome";
 
@@ -356,4 +361,123 @@ test("film listen on silence says nothing was found", async () => {
   const md = await readFile(r.md, "utf8");
   assert.match(md, /nothing sounds above .*\(not detected\)/);
   assert.match(md, /0\.00s–5\.00s: silent/);
+});
+
+// --- beside a previous version (--vs) -------------------------------------------------
+
+test("--vs pieces: the stretch that changed, the lag, the credits read leniently", () => {
+  const { pcm } = groove();
+  const changed = Float32Array.from(pcm);
+  knock(changed, 5.1, 3000, 0.6);
+  const a = spectrum(changed);
+  const b = spectrum(pcm);
+  const m = changedMoments(spectrumDiff(a, b), a.hopS, 16);
+  assert.ok(m.length >= 1 && m[0]!.start <= 5.1 && m[0]!.end >= 5.2, JSON.stringify(m));
+  assert.ok(m.every((x, i) => !i || x.diffDb <= m[i - 1]!.diffDb));
+  // the moment stands well above what the two differ by anywhere
+  assert.ok(typicalDiff(spectrumDiff(a, b), a.hopS, 16) < m[0]!.diffDb / 4);
+  // the same sound: nothing differs
+  assert.deepEqual(changedMoments(spectrumDiff(b, b), b.hopS, 16), []);
+  assert.equal(typicalDiff(spectrumDiff(b, b), b.hopS, 16), 0);
+  // the previous one 300 ms later
+  const late = new Float32Array(pcm.length);
+  late.set(pcm.subarray(0, pcm.length - Math.round(R * 0.3)), Math.round(R * 0.3));
+  const lag = bestLag(onsetStrength(b), onsetStrength(spectrum(late)), b.hopS);
+  assert.ok(lag != null && Math.abs(lag - 0.3) <= 0.015, String(lag));
+  assert.equal(bestLag(onsetStrength(b), new Float32Array(1000), b.hopS), null);
+
+  assert.equal(creditLines({ events: [] }), null);
+  assert.equal(creditLines(null), null);
+  assert.deepEqual(creditLines({ credits: "Music: me" }), ["Music: me"]);
+  assert.deepEqual(
+    creditLines({
+      credits: [
+        "a.wav — CC0",
+        { title: "Click", by: "someone", license: "CC0", url: "https://x" },
+        { text: "as written" },
+        null,
+      ],
+    }),
+    ["a.wav — CC0", "Click, by someone, CC0, https://x", "as written"],
+  );
+  // the shape `film render` writes (render.ts FilmCredit)
+  assert.deepEqual(
+    creditLines({
+      credits: [
+        { what: "font: Inter", licence: "OFL-1.1" },
+        { what: "music", by: "me", text: "Music by me" },
+      ],
+    }),
+    ["font: Inter, OFL-1.1", 'music, by me — "Music by me"'],
+  );
+  assert.deepEqual(creditLines({ credits: { music: "me" } }), ["music: me"]);
+  assert.deepEqual(creditLines({ credits: [] }), []);
+});
+
+test("film listen --vs: what changed against the previous version, with A/B clips; credits printed", async () => {
+  const sub = join(dir, "vs");
+  await mkdir(sub, { recursive: true });
+  const music = new Float32Array(R * 10);
+  tone(music, 0, 10, 140, 0.15);
+  for (let k = 0; k < 20; k++) knock(music, 0.25 + k * 0.5, 90, 0.3);
+  // this version: clicks at 1.6, 3.1 and 7.6 (all off the beat); the previous: 1.6, 3.1 and one at the land (6.6)
+  const now = Float32Array.from(music);
+  const before = Float32Array.from(music);
+  for (const t of [1.6, 3.1, 7.6]) knock(now, t, 2500, 0.5);
+  for (const t of [1.6, 3.1, 6.6]) knock(before, t, 2500, 0.5);
+  await writeFile(join(sub, "film.wav"), wav(now));
+  await writeFile(join(sub, "previous.wav"), wav(before));
+  await writeFile(
+    join(sub, "film.events.json"),
+    JSON.stringify({
+      version: 1,
+      duration: 10,
+      fps: 60,
+      events: [
+        { t: 1.6, kind: "click" },
+        { t: 3.1, kind: "click" },
+        { t: 6.6, kind: "land", label: "card" },
+        { t: 7.6, kind: "click" },
+      ],
+      cuts: [],
+      credits: [{ what: "Click", by: "someone", licence: "CC0" }],
+    }),
+  );
+  const r = await filmListen({ input: join(sub, "film.wav"), vs: join(sub, "previous.wav") });
+  const v = r.listen.vs!;
+  assert.ok(v, "a comparison");
+  assert.deepEqual(
+    v.events.gained.map((e) => e.t),
+    [7.6],
+  );
+  assert.deepEqual(v.events.lost, [{ t: 6.6, kind: "land", label: "card" }]);
+  assert.ok(
+    v.onsets.onlyThis.some((t) => Math.abs(t - 7.6) < 0.01),
+    String(v.onsets.onlyThis),
+  );
+  assert.ok(v.onsets.onlyPrevious.some((t) => Math.abs(t - 6.6) < 0.01));
+  // the two moments that differ are the two clicks, nothing else
+  assert.equal(v.moments.list.length >= 2, true, JSON.stringify(v.moments.list));
+  for (const t of [6.6, 7.6])
+    assert.ok(
+      v.moments.list.slice(0, 2).some((m) => m.start <= t && m.end >= t + 0.1),
+      `${t}: ${JSON.stringify(v.moments.list)}`,
+    );
+  assert.equal(v.offset.seconds, 0);
+  for (const f of v.clips) assert.ok(existsSync(f), f);
+  assert.ok(existsSync(join(sub, "film.listen", "vs", "aba.m4a")));
+  assert.ok(existsSync(join(sub, "film.listen", "vs", "moment-1.previous.m4a")));
+  const md = await readFile(r.md, "utf8");
+  assert.match(md, /## Beside the previous version — previous\.wav/);
+  assert.match(md, /gained a sound .*7\.60s click \(measured\)/);
+  assert.match(md, /lost one .*6\.60s land "card" \(measured\)/);
+  assert.match(md, /loudness: integrated this -?[\d.]+, previous -?[\d.]+ LUFS/);
+  assert.match(md, /## Credits[^\n]*\n\n- Click, by someone, CC0/);
+  assert.match(md, /the median stretch differs by [\d.]+ dB/);
+  assert.ok(v.moments.typicalDb < v.moments.list[0]!.diffDb);
+  assert.doesNotMatch(md, /\b(pass|fail|good|bad|should|better|worse)\b/i);
+  await assert.rejects(
+    filmListen({ input: join(sub, "film.wav"), vs: join(sub, "nope.wav"), out: join(sub, "x") }),
+    /no file at .*--vs/,
+  );
 });

@@ -9,9 +9,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { curveOf, readEvents } from "../kit/audio.mjs";
+import { camera } from "../kit/camera.js";
 import { speed, timeline } from "../kit/time.js";
 import {
+  checkCredits,
   checkEvents,
+  checkSegments,
   eventsPathFor,
   type FilmEvents,
   filmEvents,
@@ -185,6 +188,61 @@ test("the timeline declares events and curves for the page to hand over", () => 
   assert.equal(timeline({ bpm: 90 }).beat(3), 2);
 });
 
+test("the timeline keeps a beat sheet: segments by from, every field optional, handed over", () => {
+  const tl = timeline({ at: { hook: 0, search: 2.5, end: 4 } });
+  const a = tl.segment("search", "end", {
+    subject: "#search",
+    handoff: "matchcut",
+    sound: 3 as never,
+  });
+  assert.deepEqual(a, { from: 2.5, to: 4, handoff: "matchcut", subject: "#search", sound: "3" });
+  tl.segment("hook", 2.5, { label: "the problem", hold: true });
+  tl.segment(1, 2);
+  assert.throws(() => tl.segment(2, 2), /ends before it starts/);
+  assert.throws(() => tl.segment("nope", 2), /no moment named/);
+  assert.throws(() => tl.segment(Number.NaN, 2), /not between two times/);
+  assert.deepEqual(tl.segments(), [
+    { from: 0, to: 2.5, label: "the problem", hold: true },
+    { from: 1, to: 2 },
+    { from: 2.5, to: 4, handoff: "matchcut", subject: "#search", sound: "3" },
+  ]);
+  const hooks = tl.hooks();
+  assert.equal(hooks.segments().length, 3);
+  hooks.segments()[0]!.from = 99;
+  assert.equal(tl.segments()[0]!.from, 0, "a copy each time");
+});
+
+test("a page's segments: checked, by from, the bad ones left out and said so", () => {
+  const warnings: string[] = [];
+  const seg = checkSegments(
+    [
+      { from: 2, to: 3, handoff: "cut", hold: "yes", extra: 1 },
+      { from: 0, to: 1, label: "a", hold: false, subject: "" },
+      { from: 1, to: 1 },
+      { from: "0", to: 1 },
+      null,
+    ],
+    warnings,
+  );
+  assert.deepEqual(seg, [
+    { from: 0, to: 1, label: "a", hold: false },
+    { from: 2, to: 3, handoff: "cut" },
+  ]);
+  assert.match(warnings.join("\n"), /3 segment\(s\) without a from and a later to/);
+  assert.deepEqual(checkSegments(undefined), []);
+  const w2: string[] = [];
+  assert.deepEqual(checkSegments({ from: 0, to: 1 }, w2), []);
+  assert.match(w2[0]!, /no list/);
+  // into the events file: [] without, the page's own with; a range put into
+  // a master carries the page's sheet as it is now
+  const film = { fps: 10, f0: 0, f1: 10, total: 10 };
+  assert.deepEqual(filmEvents(film, [], [], [], false).segments, []);
+  const master = filmEvents(film, [], [], [], false, [{ from: 0, to: 1, label: "old" }]);
+  assert.deepEqual(master.segments, [{ from: 0, to: 1, label: "old" }]);
+  const range = filmEvents({ fps: 10, f0: 2, f1: 5, total: 10 }, [], [], [], false, seg);
+  assert.deepEqual(patchEvents(master, range)!.segments, seg);
+});
+
 /** a 1 s page, 64×64 at 30 fps, that cuts at 0.5 s; kit/time.js beside it */
 /** `hooks`: the kit's (true), none (false), or a script of the page's own */
 async function eventPage(page: string, opts: { hooks: boolean | string; curveBase?: number }) {
@@ -197,6 +255,8 @@ async function eventPage(page: string, opts: { hooks: boolean | string; curveBas
         ? `tl.event("cut", "cut");
 tl.event(0.2, "click", { x: 16, y: 32, force: 0.5, label: "go" });
 tl.curve("v", (t) => ${opts.curveBase ?? 0} + t);
+tl.segment(0, "cut", { label: "red", hold: true, handoff: "cut", subject: "#a" });
+tl.credit({ what: "music: Night Drive", by: "A. Artist", license: "CC BY 4.0" });
 Object.assign(window.__film, tl.hooks());`
         : "";
   await writeFile(
@@ -250,6 +310,12 @@ test("a render writes the page's events, its curves once a frame and the cuts be
   assert.ok(Math.abs(v(0.25) - 0.5) < 1e-9, "linear between frames");
   assert.equal(v(5), (29 / 30) * 2, "held past the end");
   assert.throws(() => curveOf(ev, "nope"), /has no curve "nope" \(it has: v\)/);
+  assert.deepEqual((await read(r.events!)).segments, [
+    { from: 0, to: 0.5, label: "red", hold: true, handoff: "cut", subject: "#a" },
+  ]);
+  assert.deepEqual(ev.credits, [
+    { what: "music: Night Drive", by: "A. Artist", licence: "CC BY 4.0" },
+  ]);
 });
 
 test("without the hooks the file is still written, with nothing in it but the cuts found", {
@@ -264,6 +330,8 @@ test("without the hooks the file is still written, with nothing in it but the cu
   assert.deepEqual(ev.declaredCuts, []);
   assert.deepEqual(ev.cuts, [0.5], "the clock's own cut");
   assert.deepEqual(ev.curves, { names: [], t0: 0, dt: 1 / 30, rows: [] });
+  assert.deepEqual(ev.segments, []);
+  assert.deepEqual(ev.credits, [], "no credits: an empty list, not a missing field");
   // a draft probes nothing: no cut is found
   const d = await renderFilm({
     page,
@@ -309,6 +377,22 @@ window.__film.curves = (t) => { if (t > 0.5) throw new Error("late"); return { v
   });
   assert.deepEqual((await read(l.events!)).events, []);
   assert.ok(l.warnings.some((w) => /events is not a function/.test(w)));
+  // credits by hand: a plain list on window.__film, read as it is
+  const credited = join(dir, "credited");
+  await eventPage(credited, {
+    hooks: `window.__film.credits = [{ what: "font: Inter", licence: "OFL-1.1", url: "https://rsms.me/inter/" }, {}];`,
+  });
+  const c = await renderFilm({
+    page: credited,
+    out: join(dir, "credited.mp4"),
+    chromePath: chrome!,
+    draft: true,
+    audio: null,
+  });
+  assert.deepEqual((await read(c.events!)).credits, [
+    { what: "font: Inter", licence: "OFL-1.1", url: "https://rsms.me/inter/" },
+  ]);
+  assert.ok(c.warnings.some((w) => /1 credit\(s\) with no what/.test(w)));
 });
 
 test("a range rendered into a master puts its curves into the master's events file", {
@@ -337,4 +421,109 @@ test("a range rendered into a master puts its curves into the master's events fi
   assert.ok(Math.abs(v[6]! - (100 + 6 / 30)) < 1e-9, "the range: new");
   assert.ok(Math.abs(v[11]! - (100 + 11 / 30)) < 1e-9, "its last frame: new");
   assert.ok(Math.abs(v[12]! - 12 / 30) < 1e-9, "after it: as it was");
+});
+
+test("speed at a hard cut: each shot measured on its own, no spike between the framings", () => {
+  // the camera pans at 100 px/s, then a cut at 1 s jumps it 5000 px over
+  const cam = (t: number) => ({ x: t < 1 ? 100 * t : 5000 + 100 * t, y: 0 });
+  const across = speed(cam, 0.01);
+  assert.ok(across(0.995) > 10_000, `straight across: the jump reads as speed (${across(0.995)})`);
+  for (const cuts of [
+    [1],
+    [
+      { t: 1, kind: "cut" },
+      { t: 0.3, kind: "click" },
+    ],
+    () => [1],
+  ]) {
+    const s = speed(cam, 0.01, { cuts });
+    for (const t of [0.5, 0.995, 0.9999, 1, 1.002, 1.5])
+      assert.ok(Math.abs(s(t) - 100) < 1e-6, `${JSON.stringify(cuts)} at ${t}: ${s(t)}`);
+  }
+  // a cut declared after the curve still counts when cuts is a function
+  const tl = timeline({ at: { a: 0 } });
+  tl.curve("cam", speed(cam, 0.01, { cuts: tl.events }));
+  tl.event(1, "cut");
+  assert.ok(Math.abs(tl.curves(0.998).cam! - 100) < 1e-6);
+  assert.equal(speed(cam, 0.01, { cuts: [] })(0.995), across(0.995), "no cuts: as before");
+});
+
+test("curveOf splits at the events file's cuts: held to the cut, the next shot from it", () => {
+  const ev = filmEvents(
+    { fps: 10, f0: 0, f1: 20, total: 20 },
+    [{ t: 1, kind: "cut" }],
+    [],
+    Array.from({ length: 20 }, (_, i) => ({ zoom: i < 10 ? 1 : 3 })),
+    false,
+  );
+  assert.deepEqual(ev.declaredCuts, [1]);
+  const split = curveOf(ev, "zoom");
+  assert.equal(split(0.95), 1, "the old shot held to the cut — no glide a frame early");
+  assert.equal(split(0.99999), 1);
+  assert.equal(split(1), 3, "the new shot from the cut");
+  const straight = curveOf(ev, "zoom", { cuts: [] });
+  assert.ok(Math.abs(straight(0.95) - 2) < 1e-9, "cuts: [] draws straight across");
+  // detected cuts count too; the map still applies; own cuts override
+  const found = { ...ev, declaredCuts: [], cuts: [1], detectedCuts: [1] };
+  assert.equal(curveOf(found, "zoom", (v) => v * 10)(0.95), 10);
+  assert.ok(
+    Math.abs(curveOf(ev, "zoom", (v) => v, { cuts: [0.5] })(0.95) - 2) < 1e-9,
+    "only the cut it was given",
+  );
+  // a shot with no numbers holds the last number before it
+  const gap = filmEvents(
+    { fps: 10, f0: 0, f1: 20, total: 20 },
+    [{ t: 1, kind: "cut" }],
+    [],
+    Array.from({ length: 20 }, (_, i) => (i < 10 ? { zoom: i } : null)),
+    false,
+  );
+  assert.equal(curveOf(gap, "zoom")(1.5), 9);
+  // a declared cut between frames and the frame the probe found it on: the
+  // sliver between them holds, no glide from one shot's value to the next
+  const off = { ...ev, declaredCuts: [0.95], detectedCuts: [1], cuts: [0.95, 1] };
+  assert.equal(curveOf(off, "zoom")(0.97), 1);
+  assert.equal(curveOf(off, "zoom")(1), 3);
+});
+
+test("speed follows a camera's own cam.cut through cam.moves", () => {
+  const cam = camera({
+    content: { width: 4000, height: 2000 },
+    view: { width: 1000, height: 500 },
+  });
+  cam.frame({ x: 0, y: 0, width: 1000, height: 500 }, { start: 0.2, dur: 1.6 });
+  cam.cut({ x: 3000, y: 1500, width: 1000, height: 500 }, 1);
+  const across = speed((t) => cam.at(t), 1 / 240);
+  const split = speed((t) => cam.at(t), 1 / 240, { cuts: cam.moves });
+  assert.ok(across(0.999) > 100_000, `straight across: a spike (${across(0.999)})`);
+  assert.ok(split(0.999) < 2 * split(0.99), `held up to the cut (${split(0.999)})`);
+  for (const t of [0.5, 0.9, 1.2]) assert.equal(split(t), across(t), `away from the cut at ${t}`);
+});
+
+test("credits: kept as given, information only, into the events file", () => {
+  const tl = timeline({ at: {} });
+  assert.deepEqual(tl.credits(), []);
+  assert.deepEqual(tl.credit({ what: "sfx: click", licence: "CC0", url: "https://x" }), {
+    what: "sfx: click",
+    licence: "CC0",
+    url: "https://x",
+  });
+  tl.credit({ text: "Track by B (CC BY 4.0)", license: "CC BY 4.0" });
+  assert.throws(() => tl.credit({}), /says nothing/);
+  assert.equal(tl.hooks().credits().length, 2);
+  const warnings: string[] = [];
+  assert.deepEqual(
+    checkCredits([{ what: "a", by: 3, extra: "x" }, null, { url: "" }, "b"], warnings),
+    [{ what: "a", by: "3" }],
+  );
+  assert.match(warnings[0]!, /3 credit\(s\)/);
+  assert.deepEqual(checkCredits(null), []);
+  const w2: string[] = [];
+  assert.deepEqual(checkCredits({ what: "a" }, w2), []);
+  assert.match(w2[0]!, /not a list/);
+  const film = { fps: 10, f0: 0, f1: 10, total: 10 };
+  assert.deepEqual(filmEvents(film, [], [], [], false).credits, []);
+  const master = filmEvents(film, [], [], [], false, [], [{ what: "old" }]);
+  const range = filmEvents({ ...film, f0: 2, f1: 5 }, [], [], [], false, [], [{ what: "new" }]);
+  assert.deepEqual(patchEvents(master, range)!.credits, [{ what: "new" }]);
 });

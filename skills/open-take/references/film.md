@@ -8,14 +8,40 @@ encoding, measuring what you cannot see or hear.
 open-take adds no look of its own: the story, the type, the colours, the
 motion and the music are the film's author's, and so is how good the film is.
 
+## One way to work
+
+A path through a film, there when it helps. Any step can be skipped,
+reordered or done another way; nothing checks that it was followed.
+
+1. **What the product has.** What can be recorded (`make`), saved as a
+   screen (`make --states`), what it really puts out — a number it works out,
+   a file it makes, a sound — and what exists about it outside the app (its
+   About page, repository, store listing, changelog). In earlier films the
+   pace often followed the material more than the plan
+   ([material](#material-from-the-real-product)).
+2. **The main line** — what the film is about, in one sentence.
+3. **A beat sheet**, if you keep one: `tl.segment` in `time.js` — what each
+   stretch is meant to do, what moves, what holds, how it hands over to the
+   next, what is heard. Free words; nothing grades them.
+4. **A draft** — `film render --draft`, `film still`, `film sheet`.
+5. **Look and listen** — `film probe`, `film listen`, `film check`: what the
+   picture and the sound did, beside what the page declared, each line
+   measured, estimated or not detected ([look at it](#look-at-it)).
+6. **The seconds that matter, as the master will show them** — a handoff, a
+   whip, a burst of cuts: `film render --from --to`, blurred, alone.
+7. **Change what you decide to change**, and go round 4–6 as often as it
+   helps. The reports are there to see by, not to satisfy.
+8. **The master.**
+
 ## Start
 
 ```sh
 npx open-take film init film/     # kit/ and a page to start from
 ```
 
-`kit/` holds what every film needs underneath and twelve films without it
-each wrote again — and often got wrong:
+`kit/` holds plain functions — much of it what twelve films without it each
+wrote again, and often got wrong. The page `film init` starts from imports
+only `time.js` and lists the rest; its length is a placeholder.
 
 - `camera.js` — say when to see what (`cam.frame(box, { arrive: 12 })`); the
   path is open-take's take camera, tuned by eye on recordings: the view itself
@@ -61,11 +87,34 @@ each wrote again — and often got wrong:
   page and the score both import; no tempo unless you give one. What happens
   in the picture and how fast it moves can be said there too, for the score:
   `tl.event(at, kind, { x, y, force, label })`, `tl.curve(name, (t) => n)`
-  (`speed(fn)` turns a position — `cam.at` too — into px a second), and
-  `window.__film = { …, ...tl.hooks() }` hands both to the renderer.
+  (`speed(fn)` turns a position — `cam.at` too — into px a second; with
+  `{ cuts: tl.events }` — or `cam.moves` for the camera's own `cam.cut`s —
+  each shot is measured on its own, so a hard cut is not read as a jump of
+  thousands of px a second), and
+  `window.__film = { …, ...tl.hooks() }` hands both to the renderer. A beat
+  sheet can live there too: `tl.segment(from, to, { label, hold, handoff,
+  subject, sound })` (moments' names or seconds; `handoff` is how it hands
+  over at `to` — `"carry"`, `"cut"`, `"matchcut"`, `"sound"` or your own
+  words; `subject` a CSS selector or a subject's name). Every field is
+  optional; `film render` writes the sheet into the events file and `film
+  probe` sets it beside what the picture did. What the film uses that
+  someone else made can be kept there as well: `tl.credit({ what, by,
+  licence, url, text })` (or a plain `window.__film.credits` list) goes into
+  the events file as `credits` — a record for whoever publishes the film,
+  nothing checks it.
 - `media.js` — a saved screen's parts measured where they are now
-  (`screen(iframe).box("#search")`), and shot stills played by film time,
-  their boxes and cursor read from the shoot's log.
+  (`screen(iframe).box("#search")`), shot stills played by film time, their
+  boxes and cursor read from the shoot's log; a take's recording mapped onto
+  film time with its actions and the moments their results showed, the seam
+  where a saved screen can stand in for the recording, and one real part
+  lifted out of a saved screen as a layer of its own
+  ([material](#material-from-the-real-product)).
+- `cut.js` — cutting on the music ([below](#cutting-on-the-music)): the
+  music's grid, a match cut's framing, cuts declared for the score. Nothing
+  in it cuts on its own.
+- `look.js` — type and colour at film scale ([below](#the-products-look)):
+  the biggest size a text fits a box at and where its lines break, contrast,
+  how big a size reads on a phone, the product's colours by role.
 - `audio.mjs` — for the score's Node script: buffers and a mix, an envelope
   that releases from the level it reached (one that releases from the
   sustain level clicks), filters that stop and name their track when they
@@ -79,8 +128,11 @@ each wrote again — and often got wrong:
   send })` lands its start, its attack (`"onset"`), its peak or any point of
   it on `at`, with gain, pan and send as numbers or functions of film time;
   `buses`, `space` (one shared room) and `crossfade` go with it, and
-  `readEvents`/`curveOf`/`panFor` read what the page exported. The music
-  itself is yours: no melodies, instruments or samples.
+  `readEvents`/`curveOf`/`panFor` read what the page exported (`curveOf`
+  splits a curve at the film's cuts — each shot held to its cut, the next
+  from its own first value; `{ cuts: [] }` draws straight across); `cutToBars`
+  and `landOn` edit a track by whole bars ([below](#cutting-on-the-music)).
+  The music itself is yours: no melodies, instruments or samples.
 
 It is the film's code from then on: read it, change it, drop it for any
 scene. The renderer only ever reads `__film` and `__render`. One flat layer
@@ -152,7 +204,8 @@ Every render also writes `<film>.events.json` beside the film: the page's
 events and named moments, each curve sampled once a frame, and the cuts —
 the page's events of kind `"cut"` (`declaredCuts`) and those the blur probe saw
 (`detectedCuts`; a draft or `--no-blur` sees none, and a cut between two
-shutters can be missed). A page without hooks gets empty lists. A
+shutters can be missed) — and the page's beat sheet as `segments`
+(`tl.segment`). A page without hooks gets empty lists. A
 `--from --to --into` patch updates the master's file in place. The score's
 script reads it, so the sound follows the picture as rendered.
 
@@ -185,7 +238,44 @@ npx open-take film still film/index.html --at 3.5,12,12.4 --out stills   # PNGs 
 npx open-take film sheet film.mp4                                        # every ~second on one timed sheet
 npx open-take film check film.mp4 --size 1920x1080 --fps 60              # format, hitches, cadence, cuts, black, loudness, clicks
 npx open-take film listen film.mp4                                       # the sound, laid out on the sheet's times
+npx open-take film probe film/                                           # the picture, beside what the page declared
+npx open-take film gallery film/ --with takes/x.take                     # what each kit block does, on your material
 ```
+
+`film probe` (a film, or the film's folder: it finds `film.mp4` beside or
+in it and reads the page) writes `film.probe/`: `probe.png` on the sheet's
+ruler and `probe.md`/`probe.json`. It reports how much the picture changes
+each frame and where no change is seen; shots, cuts per 5 s, and small swaps
+(jumps that change 2–12 % of the frame); every big change with thumbnails
+before and after; each cut's offset to the nearest sound onset; the whole
+picture's zoom and travel, with its runs, where it turns back, stretches
+that go back and forth and moves repeated at an even pace. With a beat sheet
+(`tl.segment`) it sets each segment beside what happened: written to hold
+and the picture still moved (where, and how much), the subject leaving the
+frame (from the page by selector, or from the positions the page declared as
+curves `<name>.x`/`<name>.y`), and the handoff written next to the one seen
+at its end. Its text lane says how much of the frame is text, how many
+characters are on screen at once and how big they are — on the film and on
+an upright phone — with the film's own words, the product's words in saved
+screens (both read from the page) and text inside pictures (read off the
+frames: macOS text recognition, elsewhere an edge count with no sizes) kept
+apart, and where the film's words sit over a picture or the subject.
+`--page`/`--root` say where the page is when it is not beside the film;
+`--no-text` skips that lane. No line is a score or a target.
+
+`film probe`, `film listen` and `film beats` read any film, not only yours —
+a reference you like, say — and describe it the same way. That is a
+description of that film, not a number to reach.
+
+`film gallery` draws each block of the kit — every motion, each camera
+option, the cut helpers — at six moments, with its value and its speed over
+time, the default beside three other settings, measured on the function
+(settles at, swings past rest, top speed; "not detected" when it never
+does). Given the film's folder it draws the film's own `kit/`, as you have
+changed it. `--with` puts the blocks on the product's picture, saved screen
+or take, moving one real element of it (`--subject <id|text|x,y,w,h>`, or one
+it picks and names); `--beats` draws the cut helpers on the film's own music.
+`--blocks rise,camera.shake` or `motion`/`camera`/`cut` narrow it.
 
 `film listen` (a film or a WAV) writes `film.listen/`: `listen.png` — the
 spectrum, loudness, onsets with a beat grid, sections, the page's events
@@ -193,10 +283,19 @@ spectrum, loudness, onsets with a beat grid, sections, the page's events
 the same ruler as `film sheet` — and `listen.md`/`listen.json`: loudness,
 tempo with its alternatives, sections, bars that repeat an earlier one
 verbatim, silences, which events have no sound within 40 ms (next to how
-often chance would), each cut's offset to the nearest onset. With
+often chance would), each cut's offset to the nearest onset, and the film's
+tempo, key and kick pattern beside those of earlier films' scores (counts
+only — most of those sat near 120 BPM). With
 `--stems <dir>` it says which stem rises at each event and how far over the
-rest, and `--clips` writes each stem solo and muted. Every line says whether it
-is measured, estimated or not detected; none is a grade.
+rest, and `--clips` writes each stem solo and muted. `--vs <previous.wav|mp4>`
+sets it beside an earlier version on the same film time: loudness, tempo,
+onsets and section boundaries in one and not the other, which events gained or
+lost a sound, the 1 s stretches where the two differ most (seconds) beside
+what the median stretch differs by (encoding alone leaves a little
+everywhere), and `vs/` clips of those moments from each plus `aba.m4a`
+(this, previous, this; levels as they are, not matched). The events file's
+`credits` are printed as written. Every line says
+whether it is measured, estimated or not detected; none is a grade.
 
 `film check` reports measured defects with times — a frame that repeats inside
 motion, motion updating at a lower rate than the film, black frames inside the
@@ -234,7 +333,72 @@ the capture's clock (sample 0 is the zero of every event `tMs`;
 fetched are listed there, the smaller ones saved in `product-sounds/`. `load`
 reads either, and `play` can put any slice of them on a real event.
 
+## Cutting on the music
+
+A long take and fast cuts are not modes of a film: each boundary hands over
+its own way — carried by a move, cut, cut to the same place, bridged by a
+sound — and a cut can sit on a beat, an onset, a word, or off them on
+purpose.
+
+```sh
+npx open-take film beats track.mp3     # → track.beats.json (a film.mp4 works too)
+```
+
+`film beats` reads music as a grid: tempo (with its confidence and the
+half/double readings), beats, downbeats and bars, sections with their energy,
+drops, onsets — each field labelled measured, estimated or not detected.
+`kit/cut.js` reads it:
+
+```js
+import { grid, matchCut, cuts, density } from "./kit/cut.js";
+import { throughCamera } from "./kit/media.js";
+const g = grid(await (await fetch("music.beats.json")).json());
+// or a pulse of your own: grid({ bpm: /* the music's */, offset: /* s */, beatsPerBar: /* its meter */ })
+g.bar(4); g.beat(8.5);               // when bar 4 starts; the "and" of beat 8
+g.snap(3.1, { to: "onset", within: 0.08 });  // to: beat | half | quarter | bar | onset | section | drop
+g.between(8, 12, { to: "bar" });     // the bar lines in [8, 12)
+```
+
+- `matchCut(fromBox, toBox, { width, height }, { fit })` frames the next
+  shot so its copy of the subject lands where the last shot left it: a view
+  `{ cx, cy, w }` for `cam.cut(view, t, { keepInside: false })`. `fromBox` is
+  where the subject showed in the picture — `throughCamera(box, cam, t)`;
+  `fit` is `"area"` (default), `"width"`, `"height"`, `"contain"`, `"cover"`.
+- `cuts(tl, times, { grid, to, within })` declares each as `tl.event(t,
+  "cut")` (snapped onto the grid when one is given), so the events file and
+  the score have them.
+- `density(g, [{ from, to, intent }])` is one way to turn "this part holds,
+  this one bursts" into cut times on the grid: `intent` a word from `PACE`
+  (`hold`, `calm` 8 beats, `steady` 4, `pulse` 2, `burst` 1, `flurry` ½), a
+  number of beats, or `{ every: [4, 0.5] }` for a pace that changes across
+  the section; `on: "onset"` lands each on a nearby onset. Change what it
+  gives or place every cut by hand.
+
+A track can be edited by whole bars in the score's script (`audio.mjs`):
+`cutToBars(sound, beats, [{ from, to, times }], { xfade, fadeIn, fadeOut, at })`
+joins bars with an equal-power crossfade that ends on the bar line, and
+returns `{ sound, map, joins, beats }` — `beats` is the edit's own grid, to
+write out for the page's `grid()`. `landOn(beats, { bar, at, start })` gives
+the lead-in so source bar `bar` sounds at film time `at`:
+
+```js
+const edit = cutToBars(load("track.mp3"), beats,
+  [...landOn(beats, { bar: 40, at: 16 }), { from: 40, to: 46 }]);
+play(music, edit.sound, 0);
+writeFileSync("music.beats.json", JSON.stringify(edit.beats));
+```
+
+A track you did not make needs a licence that covers the film.
+
 ## Material from the real product
+
+One moment of the product comes three ways from one `make --states`
+recording, on one clock: the **recording** (the real action at its real
+speed), the **saved screen** (the interface itself — sharp at any size, its
+parts separable) and the **real output** (what the product actually made,
+which can become the next shot's subject). A film can go from one to another
+— the real action, its real result lifted out, the result where it is used —
+as one continuous shot or as cuts on the music.
 
 - The product's own assets: its fonts, colours, logo and illustrations are in
   its repository — use them rather than lookalikes.
@@ -264,7 +428,122 @@ reads either, and `play` can put any slice of them on a real event.
   and `states/s3/index.json` beside the saved page lists every element.
 - The recording itself (`takes/x.take/capture.mp4`) plays as a `<video>` on
   film time, frame-exact, and `capture.json` holds every click, keystroke and
-  cursor position with its time.
+  cursor position with its time — and, measured off the recording, when each
+  action's result showed and when it stopped changing (`result.atMs`,
+  `doneMs`, its box) and when the page went quiet (`settledMs`). A click and
+  its result are often not one moment: a result measured 1.5 s after its
+  click is not rare, and a film whose cuts follow the click times cuts away
+  before the result shows. `open-take states <take> --measure` adds
+  these readings to a take recorded before them; `open-take states` prints
+  them.
+
+`kit/media.js` joins the three on the film's clock:
+
+```js
+import { screen, readTake, clip, clipEvents, seam, lift, isolate } from "./kit/media.js";
+import { morphRect, smooth } from "./kit/motion.js";
+import { tl } from "./timeline.js";                     // your timeline (kit/time.js)
+const s = screen(document.querySelector("#app"));      // states/s3/state.html in an iframe
+const c = clip({ at: 0, from: 12.0, to: 16 });          // film 0 s shows the recording's 12.0 s
+const card = lift(s, "e126", { around: "clear" });      // the part the app just produced
+const rest = isolate(s, ["e126"]);                      // the rest fades into the page
+let T = Infinity;
+const took = readTake("../takes/x.take/").then((take) => {
+  T = clipEvents(take, c, { tl }).find((e) => e.kind === "result" && e.action === "a2").t;
+});
+window.__film = { duration: 6, ready: Promise.all([took, card.ready, rest.ready]), ...tl.hooks() };
+window.__render = (t) => {
+  rest.set(smooth((t - T) / 0.4));
+  card.place(morphRect(t, T, T + 0.6, card.rect, { x: 0, y: 0, w: 1920, h: 1080, r: 0 }), { fit: "cover" });
+};
+```
+
+- `readTake(url)` reads a take's `capture.json` (`fromLog(log, base)` for
+  one in hand): its actions, its recording, its saved states.
+- `clip({ at, from, to, speed })` — or `clip({ keys: [[film, rec], …] })`, a
+  clip that slows down round a click and hurries through the waiting — maps
+  film time onto the recording: `toCapture(t)`, `toFilm(c)`, `videoTime(t)`.
+- `clipEvents(take, clip, { tl, kinds })` turns the actions inside the clip
+  into film events — the input, and apart from it `"result"`,
+  `"resultDone"` and `"settled"` — each `basis: "measured"` or
+  `"estimated"`, a result after the clip's end `"outside the clip"`, none
+  found `"not detected"`; with `tl` they are declared for the score too.
+- `seam(take, clip, "s3", { video })` says when the saved screen shows the
+  same thing as the recording (`window`, in film time) and where to put it
+  so it lands on the video (`transform` — for a positioned box at the
+  stage's 0, 0 holding its iframe; on the iframe itself `lift`, `isolate`
+  and `box` cannot measure through it), with what `make` measured between
+  the two (`residual`). Measured on a rendered swap (test/film-seam-e2e):
+  nothing moves at the swap frame, and it differs from the frame before by
+  no more than `residual`; on macOS the recording's darks show lighter than
+  the saved screen's (a dark green 76 → 87 of 255) — the recording is
+  tagged with BT.709's curve, which Chrome on macOS shows through Apple's
+  gamma. A part lifted inside that box moves with it, so its `rect` and
+  `place()` are in the state's px: a stage box `b` is
+  `((b.x − offset.x) / scale, (b.y − offset.y) / scale, b.width / scale,
+  b.height / scale)` there — full frame is the stage's size only at scale 1
+  (checked on a 2× stage: the plain stage box carries the card twice too big).
+- `lift(screen, part, { around, into, pad, radius, background, css, fit })`
+  lifts one real part — a selector, an index id (`"e126"`), an element or a
+  box — as a layer of its own, sitting exactly where it was, live DOM so it
+  stays sharp at any size. `box`/`rect` are where it sat (what `morphRect`,
+  `hop` and the other handoffs start from); `place(rect, { opacity, fit })`
+  moves it; `restyle(css)` changes only the copy. `around: "clear"` keeps the
+  part alone, see-through around it.
+- `isolate(screen, parts, { color, opacity, blur })` fades everything but
+  those parts; `set(p)`, 0 to 1.
+- `throughCamera(box, cam, t)` is a box under a camera as it shows in the
+  picture — to carry a part out of a moving layer, or into `matchCut`;
+  `fitTransform(from, to, fit)` the transform from one box onto another.
+
+## The product's look
+
+```sh
+npx open-take film look takes/x.take --out film/look --page film --fonts film/fonts
+```
+
+`film look` reads the look off the product's real interface — a take's
+saved screens, one state, or a URL: every colour with how much of the screen
+it paints and where (and its CSS variable names), an estimate of the roles
+(bg, surface, text, muted, accent, on-accent, border) with the reason and
+the alternatives, the families the text is set in with their actual font
+files, type sizes, radii, shadows, and the motion timings its CSS declares
+(declared, not necessarily played). It writes `look.json`, `look.css` (the
+product's `@font-face` rules and `--look-*` colours) and `look.png`, a
+specimen at film size in the product's fonts and words. With `--page` (the
+film's page) or `--text` it checks every character of the film's words
+against those font files, at each weight used, and names what none of them
+has; `--fonts <dir>` writes the files cut down to those words, with a
+`fonts.css`. Roles are estimated, the rest measured; none of it is a preset.
+
+`kit/look.js` executes type and colour at film scale:
+
+```js
+import { fitText, contrast, readable, palette, loadLook, fontsReady } from "./kit/look.js";
+const look = palette(await loadLook("look/look.json"));   // look.bg, look.text, look.accent, look.font()…
+await fontsReady(look.font(), "800", words);
+const f = fitText({ width: 1500, height: 420 }, words, { font: look.font(), weight: 800, lines: 2 });
+title.style.font = f.font; title.innerHTML = f.lines.join("<br>");
+contrast(look.text, look.bg);   // the WCAG ratio
+f.readable.on[0];               // how big that size shows on an upright phone, px and mm
+```
+
+`fitText(box, text, { font, weight, min, max, lines, lineHeight,
+letterSpacing, balance })` returns the biggest size that fits and its lines
+(`fits: false` when even `min` does not): CJK broken by phrase and never
+before a closing mark, Latin at spaces, lines balanced. `breakLines`,
+`measurer` and `readable(px)` are there on their own.
+
+## Cases
+
+[`cases/README.md`](cases/README.md), beside this guide (in the installed
+skill, `references/cases/`), takes apart films a viewer said they would post —
+and the one human-made launch film he liked best — segment by segment: what
+moves, what holds, how each part hands over, what the sound does, the
+material, and the comment the film got, quoted. It is indexed by what a
+segment wants to say ("show a result appearing from an input", "let it
+breathe"). Each case is "this film got this comment" — one viewer, one film,
+another product's material — not a template or a rule.
 
 ## Numbers that are facts, not taste
 

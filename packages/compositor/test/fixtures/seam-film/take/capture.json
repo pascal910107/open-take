@@ -1,0 +1,178 @@
+{
+  "video": {
+    "width": 1280,
+    "height": 720,
+    "fps": "30/1",
+    "durationS": 5.366667
+  },
+  "viewport": {
+    "w": 640,
+    "h": 360
+  },
+  "start": {
+    "x": 320,
+    "y": 200
+  },
+  "events": [
+    {
+      "kind": "click",
+      "x": 90,
+      "y": 320,
+      "box": {
+        "x": 20,
+        "y": 300,
+        "w": 140,
+        "h": 40
+      },
+      "tMs": 2093,
+      "sel": "#calc",
+      "settledMs": 2865,
+      "state": "s2",
+      "target": "e14",
+      "result": {
+        "atMs": 2867,
+        "doneMs": 2867,
+        "box": {
+          "x": 373,
+          "y": 53,
+          "w": 213,
+          "h": 128
+        }
+      },
+      "changeCoverage": 0
+    }
+  ],
+  "tEndMs": 4797,
+  "captureCadence": {
+    "frameCount": 24,
+    "timestampSource": "frame-swap",
+    "frameOffsetsMs": [
+      12.835,
+      243.814,
+      476.239,
+      700.65,
+      975.81,
+      1156.626,
+      1263.826,
+      1479.516,
+      1702.387,
+      1876.635,
+      1954.538,
+      2310.388,
+      2540.988,
+      2770.824,
+      2876.04,
+      3163.873,
+      3414.594,
+      3644.327,
+      3918.868,
+      4151.029,
+      4382.167,
+      4560.974,
+      4737.239,
+      4984.234
+    ],
+    "arrivalOffsetsMs": [
+      20,
+      257,
+      490,
+      716,
+      988,
+      1171,
+      1270,
+      1493,
+      1722,
+      1887,
+      1961,
+      2324,
+      2555,
+      2781,
+      2890,
+      3175,
+      3430,
+      3660,
+      3930,
+      4172,
+      4396,
+      4574,
+      4753,
+      5006
+    ],
+    "medianIntervalMs": 229.836,
+    "p95IntervalMs": 287.833,
+    "maxIntervalMs": 355.85,
+    "maxArrivalDelayMs": 21.766,
+    "outOfOrderFrames": 0,
+    "note": "Delivered-frame timing, not unique image content or a smoothness score. Static pages may send no frames; inspect image changes within active action windows. Encoded fps is separate.",
+    "rasterRefresh": "idle"
+  },
+  "states": {
+    "dir": "states",
+    "items": [
+      {
+        "id": "s0",
+        "tMs": 965,
+        "fidelity": {
+          "psnr": 99,
+          "diffFrac": 0,
+          "ok": true
+        },
+        "seam": {
+          "dx": 0.01,
+          "dy": 0.08,
+          "meanDiff": 4.21,
+          "diffFrac": 0.0035
+        }
+      },
+      {
+        "id": "s1",
+        "tMs": 1695,
+        "step": 0,
+        "fidelity": {
+          "psnr": 99,
+          "diffFrac": 0,
+          "ok": true
+        },
+        "seam": {
+          "dx": 0.01,
+          "dy": 0.08,
+          "meanDiff": 4.21,
+          "diffFrac": 0.0035
+        }
+      },
+      {
+        "id": "s2",
+        "tMs": 3842,
+        "step": 1,
+        "fidelity": {
+          "psnr": 99,
+          "diffFrac": 0,
+          "ok": true
+        },
+        "seam": {
+          "dx": 0.01,
+          "dy": 0.06,
+          "meanDiff": 4.37,
+          "diffFrac": 0.0035
+        }
+      },
+      {
+        "id": "s3",
+        "tMs": 4554,
+        "step": 2,
+        "fidelity": {
+          "psnr": 99,
+          "diffFrac": 0,
+          "ok": true
+        },
+        "seam": {
+          "dx": 0.01,
+          "dy": 0.06,
+          "meanDiff": 4.37,
+          "diffFrac": 0.0035
+        }
+      }
+    ]
+  },
+  "url": "http://127.0.0.1:51593/"
+}

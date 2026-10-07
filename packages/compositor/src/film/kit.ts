@@ -26,7 +26,26 @@ export type FilmInitResult = {
   kept: string[];
 };
 
-const PAGE = `<!doctype html>
+/** what one kit file is, from its header's first line: "// Motion for a film
+ *  page — open-take's film kit. …" → "motion for a film page" */
+function kitRole(source: string): string {
+  const line = source.split("\n").find((l) => /^\/\/ (?!@ts-)/.test(l)) ?? "";
+  const role = line
+    .replace(/^\/\/\s*/, "")
+    .split(" — ")[0]!
+    .trim();
+  return role ? role[0]!.toLowerCase() + role.slice(1) : "";
+}
+
+/** The page `film init` starts a film from: wiring only. No story, no look,
+ *  no length — the duration is a placeholder — and of the kit it imports only
+ *  the timeline, whose hooks carry the page's events to the score; the rest
+ *  of the kit is listed, not imported, so nothing in the page suggests which
+ *  blocks a film is made of. */
+export function starterPage(kit: { name: string; role: string }[]): string {
+  const w = Math.max(...kit.map((k) => k.name.length)) + 6;
+  const list = kit.map((k) => `  //   ${`kit/${k.name}`.padEnd(w)}${k.role}`.trimEnd()).join("\n");
+  return `<!doctype html>
 <html>
 <head>
 <meta charset="utf-8">
@@ -37,17 +56,23 @@ const PAGE = `<!doctype html>
 <body>
 <script type="module">
   // open-take renders this page frame by frame: npx open-take film render .
-  // kit/ is yours: the camera, the cursor, motion (springs, entrances,
-  // handoffs, contact — functions of t), one timeline, the real interface as
-  // material, and (kit/audio.mjs, for a Node script) the sound's plumbing.
-  // Read it; change or drop any of it as the film needs.
-  import { camera } from "./kit/camera.js";
-  import { cursor } from "./kit/cursor.js";
-  import * as motion from "./kit/motion.js";
+  // It asks only for window.__film and window.__render(t), the film at t
+  // seconds — drawn with the kit, without it, or on a canvas or in WebGL of
+  // the page's own, any part of it.
+  // kit/ is yours to read, change or drop (npx open-take film gallery draws
+  // what each of its blocks does):
+${list}
   import { timeline } from "./kit/time.js";
-  import { screen, stills } from "./kit/media.js";
 
-  window.__film = { duration: 10, width: 1920, height: 1080 };
+  // the film's moments and what happens when — <film>.events.json, for the score
+  const tl = timeline();
+
+  window.__film = {
+    duration: 1, // s — a placeholder: the film is as long as it needs to be
+    width: 1920,
+    height: 1080,
+    ...tl.hooks(),
+  };
   window.__render = (t) => {
     // the film at t seconds
   };
@@ -55,6 +80,7 @@ const PAGE = `<!doctype html>
 </body>
 </html>
 `;
+}
 
 export async function initFilm(opts: { dir: string; force?: boolean }): Promise<FilmInitResult> {
   const dir = resolve(opts.dir);
@@ -62,7 +88,10 @@ export async function initFilm(opts: { dir: string; force?: boolean }): Promise<
   const written: string[] = [];
   const kept: string[] = [];
   await mkdir(join(dir, "kit"), { recursive: true });
+  const roles: { name: string; role: string }[] = [];
   for (const name of (await readdir(kit)).filter((f) => /\.m?js$/.test(f)).sort()) {
+    const role = kitRole(await readFile(join(kit, name), "utf8"));
+    roles.push({ name, role: name.endsWith(".mjs") ? `${role}, for a Node script` : role });
     const to = join(dir, "kit", name);
     if (existsSync(to) && !opts.force) {
       const [mine, theirs] = await Promise.all([readFile(join(kit, name)), readFile(to)]);
@@ -76,7 +105,7 @@ export async function initFilm(opts: { dir: string; force?: boolean }): Promise<
   }
   const page = join(dir, "index.html");
   if (!existsSync(page)) {
-    await writeFile(page, PAGE);
+    await writeFile(page, starterPage(roles));
     written.push(page);
   }
   return { written, kept };

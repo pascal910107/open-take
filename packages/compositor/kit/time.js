@@ -15,7 +15,7 @@
 // A pulse is there if the film has one — its tempo is the film's to choose,
 // from its music or from nothing at all; none is assumed:
 //
-//   const tl = timeline({ bpm: 96, at: { … } });
+//   const tl = timeline({ bpm: /* the music's */, at: { … } });
 //   tl.beat(8)                  // when the 8th beat falls (s)
 //   tl.snap(3.1)                // the nearest beat to 3.1 s
 //
@@ -32,6 +32,29 @@
 //   window.__film = { duration: tl.t("end"), audio: "score.wav", ...tl.hooks() };
 //
 //   tl.events()                 // the moments (kind "mark") and the events, in time order
+//
+// A beat sheet, if you keep one: what each stretch of the film is meant to
+// do, in free words. Every field is optional and nothing checks it is "right";
+// `film render` writes the list into the events file and `film probe` sets it
+// beside what the picture did — "this segment was written to hold; the picture
+// still moves 4.2–4.9 s" — as information, for you to keep or change.
+//
+//   tl.segment("hook", "search", { label: "the problem", hold: true, sound: "one low hit" });
+//   tl.segment("search", "result", {
+//     subject: "#search",        // a CSS selector (or a subject's name in the curves)
+//     handoff: "matchcut",       // how it hands over to the next: carry | cut | matchcut | sound | your words
+//   });
+//   tl.segments()               // [{ from, to, label?, hold?, handoff?, subject?, sound? }], by from
+//
+// What the film uses that someone else made — a track, a sound, a font, a
+// photo — and on what terms, if you keep a record of it. Nothing checks it or
+// acts on it: `film render` writes it into the events file as "credits" (an
+// empty list when there is none), for whoever publishes the film.
+//
+//   tl.credit({ what: "music: Night Drive", by: "A. Artist", licence: "CC BY 4.0",
+//     url: "https://…", text: "Night Drive by A. Artist (CC BY 4.0)" });
+//   tl.credits()                // [{ what?, by?, licence?, url?, text? }], as given
+//   // or by hand: window.__film = { …, credits: [{ what: "font: Inter", licence: "OFL-1.1" }] }
 
 /**
  * One thing that happens in the film, in seconds; where on the stage (CSS px)
@@ -45,6 +68,42 @@
  * @property {string} [label]
  * @property {string} [id] the moment's name, on the moments `events()` lists
  */
+
+/**
+ * One stretch of the film as the author means it, in seconds of page time.
+ * `handoff` is how it hands over to what comes next, at `to`.
+ * @typedef {object} FilmSegment
+ * @property {number} from
+ * @property {number} to
+ * @property {string} [label]
+ * @property {boolean} [hold] the picture is meant to hold still here
+ * @property {"carry" | "cut" | "matchcut" | "sound" | string} [handoff]
+ * @property {string} [subject] what the eye should be on: a CSS selector, or a name
+ * @property {string} [sound]
+ */
+
+/**
+ * Something the film uses that someone else made, and on what terms — every
+ * field optional free words, for the record only.
+ * @typedef {object} FilmCredit
+ * @property {string} [what] e.g. "music: Night Drive", "font: Inter"
+ * @property {string} [by]
+ * @property {string} [licence] e.g. "CC0", "CC BY 4.0", "OFL-1.1", "bought, standard licence"
+ * @property {string} [url]
+ * @property {string} [text] the attribution line as it should appear, if one must
+ */
+
+/** a credit's known fields as strings; "license" is read as "licence"
+ * @param {Record<string, unknown>} o @returns {FilmCredit} */
+const creditOf = (o) => {
+  /** @type {FilmCredit} */
+  const c = {};
+  /** @type {Record<string, unknown>} */
+  const src = { ...o, licence: o.licence ?? o.license };
+  for (const k of /** @type {const} */ (["what", "by", "licence", "url", "text"]))
+    if (src[k] != null && src[k] !== "") c[k] = String(src[k]);
+  return c;
+};
 
 /**
  * @param {object} opts
@@ -74,6 +133,17 @@ export function timeline({ at = {}, bpm, offset = 0 } = {}) {
   const declared = [];
   /** @type {Map<string, (t: number) => number>} */
   const curves = new Map();
+  /** @type {FilmSegment[]} */
+  const sheet = [];
+  /** @type {FilmCredit[]} */
+  const credited = [];
+  const credits = () => credited.map((c) => ({ ...c }));
+  /** the beat sheet, by `from` (same from: as declared) */
+  const segments = () =>
+    sheet
+      .map((s, i) => /** @type {const} */ ([s, i]))
+      .sort((a, b) => a[0].from - b[0].from || a[1] - b[1])
+      .map(([s]) => ({ ...s }));
 
   /** every named moment and declared event, in time order (same time: as declared) */
   const events = () =>
@@ -158,22 +228,99 @@ export function timeline({ at = {}, bpm, offset = 0 } = {}) {
     },
     /** every curve at t, by name */
     curves: sample,
-    /** window.__film's `events` and `curves`, to spread into it */
-    hooks: () => ({ events, curves: sample }),
+    /**
+     * Say what a stretch of the film is meant to do — a line of a beat sheet,
+     * every field optional free words (`hold` true or false). From and to are
+     * moments' names or seconds. Returns the segment.
+     * @param {string | number} from
+     * @param {string | number} to
+     * @param {{ label?: string, hold?: boolean, handoff?: string, subject?: string, sound?: string }} [o]
+     */
+    segment: (from, to, o = {}) => {
+      const a = when(from);
+      const b = when(to);
+      if (!Number.isFinite(a) || !Number.isFinite(b))
+        throw new Error(`timeline: segment ${from}–${to} is not between two times`);
+      if (!(b > a)) throw new Error(`timeline: segment ${from}–${to} ends before it starts`);
+      /** @type {FilmSegment} */
+      const seg = { from: a, to: b };
+      for (const k of /** @type {const} */ (["label", "handoff", "subject", "sound"]))
+        if (o[k] != null) seg[k] = String(o[k]);
+      if (o.hold != null) seg.hold = !!o.hold;
+      sheet.push(seg);
+      return { ...seg };
+    },
+    /** the beat sheet, by `from` */
+    segments,
+    /**
+     * Keep a record of something the film uses that someone else made: what,
+     * by whom, under what licence, where from, and the attribution line —
+     * every field optional, nothing checked. Returns the credit.
+     * @param {{ what?: string, by?: string, licence?: string, license?: string, url?: string, text?: string }} o
+     */
+    credit: (o) => {
+      if (!o || typeof o !== "object") throw new Error("timeline: a credit is an object");
+      const c = creditOf(/** @type {Record<string, unknown>} */ (o));
+      if (!Object.keys(c).length)
+        throw new Error("timeline: a credit says nothing (what, by, licence, url or text)");
+      credited.push(c);
+      return { ...c };
+    },
+    /** every credit, as given */
+    credits,
+    /** window.__film's `events`, `curves`, `segments` and `credits`, to spread into it */
+    hooks: () => ({ events, curves: sample, segments, credits }),
     bpm,
     offset,
   };
 }
 
 /**
+ * Cut times from a list of numbers, or of events (those of kind "cut"), or of
+ * a camera's moves (kit/camera.js `cam.moves()`: those of kind "cut", at
+ * their `t0`), or a function that gives any of these when asked — ascending,
+ * finite only.
+ * @param {CutList | (() => CutList) | undefined} cuts
+ * @returns {number[]}
+ * @typedef {readonly (number | { t?: number, t0?: number, kind?: string })[]} CutList
+ */
+export function cutTimes(cuts) {
+  const list = typeof cuts === "function" ? cuts() : cuts;
+  if (list == null) return [];
+  if (!Array.isArray(list)) throw new Error("cuts: a list of times (s) or of events");
+  /** @type {number[]} */
+  const out = [];
+  for (const c of list) {
+    const t = typeof c === "number" ? c : c && c.kind === "cut" ? (c.t ?? c.t0) : Number.NaN;
+    if (t != null && Number.isFinite(t)) out.push(t);
+  }
+  return out.sort((a, b) => a - b);
+}
+
+/**
  * How fast something moves at t (units a second): `fn` gives a number, an
  * { x, y } point (a camera's view also counts its width, `w`), or [x, y];
  * the speed is measured across `h` s either side.
+ *
+ * At a hard cut the picture does not travel from one framing to the next, it
+ * replaces it — so given `cuts` (times, or events of kind "cut", or a
+ * function that gives them: `tl.events` for the cuts declared on the
+ * timeline, `cam.moves` for a camera's own `cam.cut`s), each shot is measured on its
+ * own: within `h` of a cut the difference is taken one-sided, inside the
+ * shot t is in. The speed holds the shot's own value up to the cut, and the
+ * next shot starts from its own first frames; the jump between the two
+ * framings never shows up as a spike. A cut at time c belongs to the shot
+ * that starts at c. Without `cuts` it differences straight across.
+ *
+ *   tl.curve("camSpeed", speed((t) => cam.at(t), 1 / 240, { cuts: cam.moves }));
+ *   // cuts on the timeline too: { cuts: () => [...tl.events(), ...cam.moves()] }
+ *
  * @param {(t: number) => number | number[] | { x?: number, y?: number, cx?: number, cy?: number, w?: number }} fn
  * @param {number} [h]
+ * @param {{ cuts?: CutList | (() => CutList) }} [o]
  * @returns {(t: number) => number}
  */
-export function speed(fn, h = 1 / 240) {
+export function speed(fn, h = 1 / 240, { cuts } = {}) {
   if (!(h > 0)) throw new Error(`speed: h is a time step above 0 (got ${h})`);
   /** @param {ReturnType<typeof fn>} v @returns {number[]} */
   const vec = (v) => {
@@ -181,10 +328,22 @@ export function speed(fn, h = 1 / 240) {
     if (Array.isArray(v)) return v;
     return [v.x ?? v.cx ?? 0, v.y ?? v.cy ?? 0, v.w ?? 0];
   };
+  // a fixed list is read once; a function is asked each time (cuts declared later count)
+  const fixed = typeof cuts === "function" ? null : cutTimes(cuts);
+  /** how far before a cut the shot ends (s): the last instant of the old picture */
+  const edge = h * 1e-3;
   return (t) => {
-    const a = vec(fn(Math.max(0, t - h)));
-    const b = vec(fn(t + h));
-    const span = t + h - Math.max(0, t - h);
+    let lo = Math.max(0, t - h);
+    let hi = t + h;
+    const cs = fixed ?? cutTimes(cuts);
+    for (const c of cs) {
+      if (c <= t) lo = Math.max(lo, c);
+      else hi = Math.min(hi, c - edge);
+    }
+    const span = hi - lo;
+    if (!(span > 0)) return 0;
+    const a = vec(fn(lo));
+    const b = vec(fn(hi));
     let d = 0;
     for (let i = 0; i < a.length; i++) d += ((b[i] ?? 0) - (a[i] ?? 0)) ** 2;
     return Math.sqrt(d) / span;

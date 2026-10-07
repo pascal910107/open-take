@@ -24,12 +24,26 @@ export {
   resolveManagedFfprobe,
 } from "./ffmpeg";
 export {
+  type FilmBeats,
+  type FilmBeatsOptions,
+  filmBeats,
+  formatFilmBeats,
+} from "./film/beats";
+export {
   checkFilm,
   type FilmCheck,
   type FilmCheckExpect,
   type FilmCheckIssue,
   formatFilmCheck,
 } from "./film/check";
+export {
+  type FilmGalleryOptions,
+  type FilmGalleryResult,
+  filmGallery,
+  type GalleryEntry,
+  type GalleryMaterial,
+  type GalleryStats,
+} from "./film/gallery";
 export { type FilmInitResult, filmKitDir, initFilm } from "./film/kit";
 export {
   type FilmEvent,
@@ -40,17 +54,39 @@ export {
   formatFilmListen,
   parseFilmEvents,
 } from "./film/listen";
+export {
+  contrastRatio,
+  type FilmLook,
+  type FilmLookOptions,
+  type FilmLookResult,
+  type FontInfo,
+  filmLook,
+  filmText,
+  formatFilmLook,
+  glyphChars,
+  glyphCoverage,
+  packageFonts,
+  parseCssColor,
+  parseFont,
+  readableSize,
+  relativeLuminance,
+  sizeForCapHeight,
+  subsetFont,
+  textWidth,
+} from "./film/look";
 export { type FilmPictureOptions, filmPicture } from "./film/picture";
 export {
   type FilmProbe,
   type FilmProbeOptions,
   filmProbe,
   formatFilmProbe,
+  type SheetSegment,
 } from "./film/probe";
 export {
   type FilmProgress,
   type FilmRenderOptions,
   type FilmRenderResult,
+  type FilmSegment,
   type FilmStillsOptions,
   filmStills,
   muxFilm,
