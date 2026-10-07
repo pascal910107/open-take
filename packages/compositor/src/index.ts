@@ -31,6 +31,15 @@ export {
   formatFilmCheck,
 } from "./film/check";
 export { type FilmInitResult, filmKitDir, initFilm } from "./film/kit";
+export {
+  type FilmEvent,
+  type FilmEvents,
+  type FilmListen,
+  type FilmListenOptions,
+  filmListen,
+  formatFilmListen,
+  parseFilmEvents,
+} from "./film/listen";
 export { type FilmPictureOptions, filmPicture } from "./film/picture";
 export {
   type FilmProgress,

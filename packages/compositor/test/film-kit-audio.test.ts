@@ -14,14 +14,27 @@ import { promisify } from "node:util";
 import {
   biquad,
   buffer,
+  buses,
+  crossfade,
+  curveOf,
   diagnose,
   duck,
   envelope,
+  fade as fadeEdges,
+  load,
   loudness,
   mix,
   normalize,
+  onsetOf,
+  panFor,
+  peakOf,
+  play,
+  readEvents,
   reverb,
   rng,
+  slice,
+  space,
+  varispeed,
   writeWav,
 } from "../kit/audio.mjs";
 import { resolveFfmpeg } from "../src/ffmpeg";
@@ -796,4 +809,224 @@ test("normalize says so when the target cannot be reached, rather than run away"
   const x = new Float32Array(48000);
   x[24000] = 1;
   assert.throws(() => normalize([x], 48000), /cannot reach −16 LUFS/);
+});
+
+// ---------------------------------------------------------------- material
+
+const sine = (f: number, secs: number, amp = 0.5, rate = SR) =>
+  Float32Array.from(
+    { length: Math.round(secs * rate) },
+    (_, i) => amp * Math.sin((2 * Math.PI * f * i) / rate),
+  );
+/** the frequency of a steady tone, by its upward zero crossings */
+const freqOf = (x: Float32Array, rate = SR) => {
+  const ups: number[] = [];
+  for (let i = 1; i < x.length; i++) if (x[i - 1]! < 0 && x[i]! >= 0) ups.push(i);
+  return ((ups.length - 1) * rate) / (ups.at(-1)! - ups[0]!);
+};
+/** 0.1 s of silence, then a 5 ms click of a 2 kHz tone, then silence: 0.3 s */
+const click = () => {
+  const x = new Float32Array(Math.round(0.3 * SR));
+  for (let i = 0; i < 240; i++)
+    x[4800 + i] = Math.sin((2 * Math.PI * 2000 * i) / SR) * (1 - i / 240);
+  return x;
+};
+
+test("load decodes any file ffmpeg reads to the film's rate; mono stays mono", async () => {
+  const wav = join(dir, "tone44.wav");
+  writeWav(wav, [sine(441, 1, 0.5, 44100)], 44100);
+  const mono = load(wav);
+  assert.equal(mono.length, 1, "a mono file stays mono");
+  assert.equal(mono.sampleRate, SR);
+  near(mono[0]!.length, SR, 2, "1 s, at 48 kHz");
+  near(freqOf(mono[0]!.subarray(2000, 46000)), 441, 0.5, "the same tone after resampling");
+  near(rmsOf(mono[0]!, 2000, 46000), 0.5 / Math.SQRT2, 0.005, "the same level");
+  // a compressed stereo file, as a product's sound or a licensed track comes
+  const m4a = join(dir, "stereo.m4a");
+  const pcm = join(dir, "stereo.f32");
+  const l = sine(500, 1);
+  const r = sine(1000, 1);
+  const inter = new Float32Array(l.length * 2);
+  for (let i = 0; i < l.length; i++) {
+    inter[2 * i] = l[i]!;
+    inter[2 * i + 1] = r[i]!;
+  }
+  await writeFile(pcm, new Uint8Array(inter.buffer));
+  await exec(await resolveFfmpeg(), [
+    "-v",
+    "error",
+    "-y",
+    "-f",
+    "f32le",
+    "-ar",
+    "48000",
+    "-ac",
+    "2",
+    "-i",
+    pcm,
+    "-c:a",
+    "aac",
+    "-b:a",
+    "192k",
+    m4a,
+  ]);
+  const st = load(m4a);
+  assert.equal(st.length, 2);
+  near(freqOf(st[0]!.subarray(4800, 40000)), 500, 1, "left is left");
+  near(freqOf(st[1]!.subarray(4800, 40000)), 1000, 1, "right is right");
+  assert.equal(load(m4a, { channels: 1 }).length, 1, "or as many channels as asked");
+  assert.throws(() => load(join(dir, "nothing.wav")), /no file/);
+  const notSound = join(dir, "not-sound.txt");
+  await writeFile(notSound, "hello");
+  assert.throws(() => load(notSound), /no sound|could not decode/);
+});
+
+test("slice, gentle edges, and where a sound's attack and peak are", () => {
+  const c = click();
+  const s = slice([c], 0.05, 0.2);
+  assert.equal(s[0]!.length, Math.round(0.15 * SR));
+  near(onsetOf([c])!, 0.1, 0.0005, "the attack, not the silence before it");
+  near(onsetOf(s)!, 0.05, 0.0005, "in the slice, 0.05 s in");
+  near(peakOf([c])!, 0.1 + 12 / SR, 0.0003, "the loudest sample");
+  assert.equal(onsetOf([new Float32Array(100)]), null, "silence has none");
+  assert.equal(peakOf([new Float32Array(100)]), null);
+  const f = fadeEdges([new Float32Array(4800).fill(1)], { in: 0.01, out: 0.01 });
+  assert.equal(f[0]![0], 0, "starts from nothing");
+  near(f[0]![4799]!, 0, 0.001, "ends at nothing");
+  assert.equal(f[0]![2400], 1, "the middle untouched");
+});
+
+test("play lands a sound's attack or peak on the moment, panned, with automation and a send", () => {
+  const bus = buffer(2);
+  const c = click();
+  const r = play(bus, [c], 1, { align: "onset", pan: -1, gain: 0.5 });
+  near(r.start, 0.9, 0.0005, "the click's start, 0.1 s before its attack");
+  near(onsetOf([bus[0]!])!, 1, 0.0005, "its attack on the moment");
+  near(Math.max(...bus[0]!.map(Math.abs)), 0.5 * peakAbs(c), 1e-3, "all of it left, at the gain");
+  assert.ok(Math.max(...bus[1]!.map(Math.abs)) < 1e-6, "nothing right");
+  const mid = buffer(2);
+  play(mid, [c], 1, { align: "peak", pan: 0 });
+  near(peakOf([mid[0]!])!, 1, 1 / SR + 1e-9, "the peak on the moment");
+  near(
+    Math.max(...mid[0]!.map(Math.abs)),
+    peakAbs(c) * Math.SQRT1_2,
+    1e-3,
+    "equal power: −3 dB a side in the middle",
+  );
+  const plain = buffer(2);
+  play(plain, [c], 0.5);
+  near(
+    Math.max(...plain[1]!.map(Math.abs)),
+    peakAbs(c),
+    1e-6,
+    "no pan: every channel gets it whole, as mix does",
+  );
+  // automation: a gain that follows a curve from the events file
+  const ev = {
+    version: 1 as const,
+    duration: 2,
+    fps: 10,
+    events: [],
+    cuts: [],
+    curves: {
+      names: ["zoom"],
+      t0: 0,
+      dt: 0.1,
+      rows: Array.from({ length: 20 }, (_, i) => [i / 19]),
+    },
+  };
+  const ramp = buffer(2, { channels: 1 });
+  const room = space(2, { size: 0.3 });
+  play(ramp, [new Float32Array(2 * SR).fill(1)], 0, {
+    gain: curveOf(ev, "zoom"),
+    send: { bus: room.send, amount: 0.25 },
+  });
+  near(ramp[0]![Math.round(0.95 * SR)]!, 0.5, 0.01, "half way up the curve");
+  near(ramp[0]![Math.round(1.9 * SR)]!, 1, 0.001, "at its top");
+  near(room.send[1]![Math.round(0.95 * SR)]!, 0.125, 0.005, "the send: the same, times its amount");
+  let steps = 0;
+  for (let i = 1; i < ramp[0]!.length; i++)
+    if (Math.abs(ramp[0]![i]! - ramp[0]![i - 1]!) > 1e-3) steps++;
+  assert.equal(steps, 0, "automation glides: no steps");
+  const wet = room.wet();
+  assert.ok(wet[0]!.length > room.send[0]!.length, "the room rings past the send");
+  // a pan that moves: left to right over the second
+  const sweep = buffer(1);
+  play(sweep, [new Float32Array(SR).fill(1)], 0, { pan: (t) => 2 * t - 1 });
+  near(sweep[0]![100]!, 1, 0.01, "starts left");
+  near(sweep[1]![SR - 100]!, 1, 0.01, "ends right");
+  near(panFor(0), -1, 1e-12, "the stage's left edge");
+  near(panFor(1440, 1920, 0.5), 0.25, 1e-12, "three quarters across, half spread");
+  assert.throws(() => play(bus, [c], 0, { gain: () => Number.NaN }), /not a number/);
+  // a stereo sound sent into a mono room is refused — and leaves its bus as it was
+  const kept = buffer(1);
+  assert.throws(
+    () => play(kept, [c, c], 0.2, { send: { bus: buffer(1, { channels: 1 }) } }),
+    /send bus of 1/,
+  );
+  assert.equal(peakAbs(kept[0]!), 0, "nothing mixed before the refusal");
+  assert.throws(
+    () => play(buffer(1, { sampleRate: 44100 }), Object.assign([c], { sampleRate: SR }), 0),
+    /Hz/,
+  );
+});
+
+const peakAbs = (x: Float32Array) => x.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
+
+test("varispeed: faster is higher and shorter, as tape is, and nothing folds back", () => {
+  const tone = [sine(1000, 0.5)];
+  const up = varispeed(tone, 2);
+  near(up[0]!.length, 12000, 1, "half as long");
+  near(freqOf(up[0]!.subarray(500, 11500)), 2000, 1, "an octave up");
+  near(rmsOf(up[0]!, 500, 11500), 0.5 / Math.SQRT2, 0.005, "as loud");
+  const down = varispeed(tone, 0.5);
+  near(freqOf(down[0]!.subarray(1000, 47000)), 500, 0.5, "an octave down");
+  near(rmsOf(down[0]!, 1000, 47000), 0.5 / Math.SQRT2, 0.005, "as loud");
+  // 15 kHz twice as fast would be 30 kHz — past Nyquist; it must not come back as 18 kHz
+  const high = varispeed([sine(15000, 0.5)], 2);
+  assert.ok(
+    db(rmsOf(high[0]!, 500, 11500) / (0.5 / Math.SQRT2)) < -40,
+    "what is past Nyquist is filtered out",
+  );
+  // play's semitones are the same thing
+  const bus = buffer(1, { channels: 1 });
+  play(bus, tone, 0, { semitones: 12 });
+  near(freqOf(bus[0]!.subarray(500, 11500)), 2000, 1, "12 semitones up is an octave");
+  assert.throws(() => varispeed(tone, 0), /above 0/);
+});
+
+test("crossfade: equal power or linear, and buses by name", () => {
+  const a = [new Float32Array(SR).fill(1), new Float32Array(SR).fill(1)];
+  const b = [new Float32Array(SR).fill(1), new Float32Array(SR).fill(1)];
+  Object.assign(a, { sampleRate: SR });
+  Object.assign(b, { sampleRate: SR });
+  const p = crossfade(a, b, 0.25, 0.5);
+  assert.equal(p[0]![1000], 1, "a before");
+  near(p[0]![SR / 2]!, Math.SQRT2, 1e-3, "equal power: in the middle each is at −3 dB");
+  assert.equal(p[0]![SR - 1], 1, "b after");
+  const l = crossfade(a, b, 0.25, 0.5, { shape: "linear" });
+  near(l[0]![SR / 2]!, 1, 1e-6, "linear sums to one");
+  const { music, sfx } = buses(2, ["music", "sfx"]);
+  assert.equal(music.length, 2);
+  assert.equal(sfx[0]!.length, 2 * SR);
+});
+
+test("readEvents reads what `film render` writes, and says when a file is not that", async () => {
+  const good = join(dir, "x.events.json");
+  await writeFile(
+    good,
+    JSON.stringify({
+      version: 1,
+      duration: 1,
+      fps: 30,
+      events: [{ t: 0.5, kind: "click" }],
+      cuts: [],
+      curves: { names: [], t0: 0, dt: 1 / 30, rows: [] },
+    }),
+  );
+  assert.equal(readEvents(good).events[0]!.kind, "click");
+  const bad = join(dir, "y.json");
+  await writeFile(bad, JSON.stringify({ hello: 1 }));
+  assert.throws(() => readEvents(bad), /not an events file/);
+  assert.throws(() => readEvents(join(dir, "none.json")), /none\.json/);
 });

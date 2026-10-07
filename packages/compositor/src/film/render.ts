@@ -15,10 +15,15 @@
 // Pipeline per worker: seek → JPEG screenshot → (MJPEG in Matroska) ffmpeg
 // decoder → raw RGB → shutter average → ffmpeg x264 chunk. The chunks are
 // joined without re-encoding and the soundtrack is muxed on.
+//
+// Beside the film goes <film>.events.json (see FilmEvents): what the page says
+// happens when (window.__film.events), its curves sampled once per frame in
+// the render loop itself (window.__film.curves), and the cuts — for the score,
+// which places its sounds from it.
 
 import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
-import { copyFile, mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { cpus, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { resolveFfmpeg, resolveFfprobe, runTool } from "../ffmpeg";
@@ -98,7 +103,53 @@ export type FilmRenderResult = {
   filmFrames: number;
   wallMs: number;
   warnings: string[];
+  /** the film's events file (<out without its extension>.events.json), when one was written */
+  events?: string;
 };
+
+/** One thing that happens in the film, as the page declares it: in seconds of
+ *  page time, with where on the stage (CSS px) and how hard (0..1) if it says. */
+export type FilmEvent = {
+  t: number;
+  /** what it is: "click", "key", "land", "cut", "mark", or any word of the page's */
+  kind: string;
+  x?: number;
+  y?: number;
+  force?: number;
+  label?: string;
+};
+
+/** <film>.events.json: what the score reads to put its sounds where the
+ *  picture is. Times are page time (s). */
+export type FilmEvents = {
+  version: 1;
+  /** the whole film (s), whatever range was rendered */
+  duration: number;
+  fps: number;
+  /** [from, to) s when only part of the film was rendered */
+  range?: [number, number];
+  /** window.__film.events(), in time order; [] when the page has none */
+  events: FilmEvent[];
+  /** every hard cut: declared ∪ detected, merged when less than half a frame apart */
+  cuts: number[];
+  /** the page's events of kind "cut" */
+  declaredCuts: number[];
+  /** the first frame of a new picture, where the blur probe found one half of a
+   *  frame's shutter changed and the other did not — a jump of the picture, which
+   *  is most often a cut. Found only inside a shutter (half of each frame's
+   *  time), and not at all in a render without blur (a draft) */
+  detectedCuts: number[];
+  /** window.__film.curves(t) once per output frame: rows[i][j] is names[j] at
+   *  t0 + i·dt; null where the page gave no number */
+  curves: { names: string[]; t0: number; dt: number; rows: (number | null)[][] };
+};
+
+/** where a film's events file goes: beside it, `film.mp4` → `film.events.json` */
+export function eventsPathFor(out: string): string {
+  const file = resolve(out);
+  const dot = file.lastIndexOf(".");
+  return `${dot > Math.max(file.lastIndexOf("/"), file.lastIndexOf("\\")) ? file.slice(0, dot) : file}.events.json`;
+}
 
 type Film = {
   width: number;
@@ -202,6 +253,10 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
     const film = describe(opts, info, { pageFile: page.pageFile, width, height, scale, draft });
     const frames = film.f1 - film.f0;
     const workers = Math.max(1, Math.min(opts.workers ?? defaultWorkers(), frames));
+    // what the page says happens, asked once; its curves are asked in the render loop
+    const declared = await pageEvents(first, film.warnings);
+    const hasCurves = await first.evaluate<boolean>(`typeof window.__film?.curves === "function"`);
+    const curveRows: (Record<string, number | null> | null)[] = new Array(frames).fill(null);
 
     // --- probe: how many shutter samples each frame needs, and where --------
     let samples = new Array<number>(frames).fill(1);
@@ -279,6 +334,7 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
                         await browser.screenshot({ format: "jpeg", quality: draft ? 85 : 100 }),
                       );
                     }
+                    if (hasCurves) curveRows[i] = await pageCurves(browser, t, film.warnings);
                     piece++;
                     done++;
                     opts.onProgress?.({ phase: "render", done, total: frames });
@@ -317,6 +373,11 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
         `a video was shown by seeking it, not as its frames: ${v} — under a slow push it can shimmer, and it renders slower`,
       );
     await deliver(ffmpeg, chunks, film, opts.out, tmp);
+    const events = eventsPathFor(opts.out);
+    await writeFile(
+      events,
+      `${JSON.stringify(filmEvents(film, declared, sides, curveRows, film.blur))}\n`,
+    );
     const { width: w, height: h } = outSize(film);
     return {
       out: resolve(opts.out),
@@ -332,11 +393,211 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
       filmFrames: film.total,
       wallMs: Date.now() - t0,
       warnings: film.warnings,
+      events,
     };
   } finally {
     await page.shut();
     await rm(tmp, { recursive: true, force: true });
   }
+}
+
+const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+
+/** window.__film.events(), once, as plain values; [] when the page has none.
+ *  An entry without a time or a kind is left out, and said so. */
+async function pageEvents(b: HtmlBrowser, warnings: string[]): Promise<FilmEvent[]> {
+  let raw: unknown;
+  try {
+    raw = await b.evaluate<unknown>(
+      `(async () => {
+        const f = window.__film?.events;
+        if (f === undefined) return null;
+        if (typeof f !== "function") return { notFunction: true };
+        return JSON.parse(JSON.stringify((await f()) ?? []));
+      })()`,
+    );
+  } catch (e) {
+    // like a curve, the events are information for the score: the film goes on
+    warnings.push(
+      `window.__film.events threw (${(e as Error).message.split("\n")[0]}) — the events file has none`,
+    );
+    return [];
+  }
+  if (raw && typeof raw === "object" && "notFunction" in raw) {
+    warnings.push(
+      "window.__film.events is not a function — it is asked once, as events(); the events file has none",
+    );
+    return [];
+  }
+  return checkEvents(raw, warnings);
+}
+
+/** a page's events, checked and in time order (see FilmEvent) */
+export function checkEvents(raw: unknown, warnings: string[] = []): FilmEvent[] {
+  if (raw == null) return [];
+  if (!Array.isArray(raw)) {
+    warnings.push("window.__film.events() gave no list — the events file has none");
+    return [];
+  }
+  const out: FilmEvent[] = [];
+  let dropped = 0;
+  for (const e of raw as Record<string, unknown>[]) {
+    if (!e || !finite(e.t) || typeof e.kind !== "string" || !e.kind) {
+      dropped++;
+      continue;
+    }
+    const ev: FilmEvent = { t: e.t, kind: e.kind };
+    if (finite(e.x)) ev.x = e.x;
+    if (finite(e.y)) ev.y = e.y;
+    if (finite(e.force)) ev.force = Math.max(0, Math.min(1, e.force));
+    if (typeof e.label === "string") ev.label = e.label;
+    out.push(ev);
+  }
+  if (dropped)
+    warnings.push(
+      `window.__film.events(): ${dropped} event(s) without a time (t, s) or a kind were left out`,
+    );
+  // stable: events at the same time keep the page's order
+  return out
+    .map((e, i) => [e, i] as const)
+    .sort((a, b) => a[0].t - b[0].t || a[1] - b[1])
+    .map(([e]) => e);
+}
+
+/** window.__film.curves(t): every value that is a finite number, the rest null */
+async function pageCurves(
+  b: HtmlBrowser,
+  t: number,
+  warnings: string[],
+): Promise<Record<string, number | null> | null> {
+  try {
+    return await b.evaluate<Record<string, number | null> | null>(
+      `(async () => {
+        const r = await window.__film.curves(${t});
+        if (!r || typeof r !== "object") return null;
+        const o = {};
+        for (const k of Object.keys(r)) { const v = r[k]; o[k] = typeof v === "number" && Number.isFinite(v) ? v : null; }
+        return o;
+      })()`,
+    );
+  } catch (e) {
+    // a curve is information for the score, never a reason to lose the film
+    if (!warnings.some((w) => w.startsWith("window.__film.curves")))
+      warnings.push(
+        `window.__film.curves threw (${(e as Error).message.split("\n")[0]}) — left out where it did`,
+      );
+    return null;
+  }
+}
+
+/** merge times less than `eps` apart into the first of them, in order */
+const mergeTimes = (ts: number[], eps: number): number[] =>
+  [...ts]
+    .sort((a, b) => a - b)
+    .reduce<number[]>((acc, t) => {
+      if (!acc.length || t - acc[acc.length - 1]! >= eps) acc.push(t);
+      return acc;
+    }, []);
+
+const secs6 = (t: number) => Math.round(t * 1e6) / 1e6;
+
+/** the events file of a render of frames [f0, f1): `sides` and `rows` are per
+ *  rendered frame (see FilmEvents.detectedCuts for what a side says) */
+export function filmEvents(
+  film: Pick<Film, "fps" | "f0" | "f1" | "total">,
+  events: FilmEvent[],
+  sides: readonly number[],
+  rows: readonly (Record<string, number | null> | null)[],
+  probed: boolean,
+): FilmEvents {
+  const { fps, f0, f1, total } = film;
+  const detected: number[] = [];
+  if (probed)
+    sides.forEach((side, i) => {
+      // side 1: the first half of the shutter changed, so this frame is the
+      // first of the new picture; side -1: the second half did, so the next is
+      if (side > 0) detected.push(secs6((f0 + i) / fps));
+      else if (side < 0 && f0 + i + 1 < total) detected.push(secs6((f0 + i + 1) / fps));
+    });
+  const declaredCuts = mergeTimes(
+    events.filter((e) => e.kind === "cut").map((e) => e.t),
+    1e-9,
+  );
+  const names: string[] = [];
+  const seen = new Set<string>();
+  for (const r of rows)
+    if (r)
+      for (const k of Object.keys(r))
+        if (!seen.has(k)) {
+          seen.add(k);
+          names.push(k);
+        }
+  return {
+    version: 1,
+    duration: secs6(total / fps),
+    fps,
+    ...(f0 > 0 || f1 < total
+      ? { range: [secs6(f0 / fps), secs6(f1 / fps)] as [number, number] }
+      : {}),
+    events,
+    cuts: mergeTimes([...declaredCuts, ...mergeTimes(detected, 1e-9)], 0.5 / fps),
+    declaredCuts,
+    detectedCuts: mergeTimes(detected, 1e-9),
+    curves: {
+      names,
+      t0: secs6(f0 / fps),
+      dt: 1 / fps,
+      rows: names.length ? rows.map((r) => names.map((k) => r?.[k] ?? null)) : [],
+    },
+  };
+}
+
+/** the events file of a master after `patch` — a render of part of it — went
+ *  into it: the page's events as they are now, the curves and the detected
+ *  cuts of the range in place of the master's own there */
+export function patchEvents(master: FilmEvents, patch: FilmEvents): FilmEvents | null {
+  const frames = Math.round(master.duration * master.fps);
+  if (
+    master.version !== 1 ||
+    master.range ||
+    Math.abs(master.fps - patch.fps) > 1e-6 ||
+    Math.abs(master.duration - patch.duration) > 0.5 / patch.fps ||
+    !patch.range
+  )
+    return null;
+  const [from, to] = patch.range;
+  const a = Math.round(from * patch.fps);
+  const b = Math.round(to * patch.fps);
+  const inRange = (t: number) => t >= from - 1e-9 && t < to - 1e-9;
+  const detectedCuts = mergeTimes(
+    [...master.detectedCuts.filter((t) => !inRange(t)), ...patch.detectedCuts],
+    1e-9,
+  );
+  // the curves: names from both, the master's rows outside the range
+  const names = [...master.curves.names];
+  for (const n of patch.curves.names) if (!names.includes(n)) names.push(n);
+  const col = (c: FilmEvents["curves"], row: (number | null)[] | undefined, n: string) => {
+    const j = c.names.indexOf(n);
+    return j < 0 ? null : (row?.[j] ?? null);
+  };
+  const rows =
+    names.length === 0
+      ? []
+      : Array.from({ length: frames }, (_, i) =>
+          i >= a && i < b
+            ? names.map((n) => col(patch.curves, patch.curves.rows[i - a], n))
+            : names.map((n) => col(master.curves, master.curves.rows[i], n)),
+        );
+  return {
+    version: 1,
+    duration: master.duration,
+    fps: master.fps,
+    events: patch.events,
+    cuts: mergeTimes([...patch.declaredCuts, ...detectedCuts], 0.5 / master.fps),
+    declaredCuts: patch.declaredCuts,
+    detectedCuts,
+    curves: { names, t0: 0, dt: 1 / master.fps, rows },
+  };
 }
 
 export type FilmStillsOptions = {
@@ -456,6 +717,9 @@ export async function patchFilm(
     ]);
     await mkdir(dirname(resolve(opts.out)), { recursive: true });
     await moveFile(out, resolve(opts.out));
+    const warnings = r.warnings.filter((w) => !w.startsWith("no soundtrack"));
+    // the master's events file, with the range's curves and cuts in place of its own
+    const events = await patchedEventsFile(into, r.events, resolve(opts.out), warnings);
     return {
       ...r,
       out: resolve(opts.out),
@@ -463,7 +727,8 @@ export async function patchFilm(
       durationS: master.frames / r.fps,
       startFrame: 0,
       wallMs: Date.now() - t0,
-      warnings: r.warnings.filter((w) => !w.startsWith("no soundtrack")),
+      warnings,
+      events,
     };
   } finally {
     await rm(tmp, { recursive: true, force: true });
@@ -510,6 +775,35 @@ export async function muxFilm(opts: {
   } finally {
     await rm(tmp, { recursive: true, force: true });
   }
+}
+
+/** write the events file of a patched master (see patchEvents); undefined,
+ *  with a warning, when the master has none of its own to patch */
+async function patchedEventsFile(
+  into: string,
+  rangeEvents: string | undefined,
+  out: string,
+  warnings: string[],
+): Promise<string | undefined> {
+  const read = async (file: string | undefined): Promise<FilmEvents | null> => {
+    if (!file || !existsSync(file)) return null;
+    try {
+      return JSON.parse(await readFile(file, "utf8")) as FilmEvents;
+    } catch {
+      return null;
+    }
+  };
+  const [master, patch] = await Promise.all([read(eventsPathFor(into)), read(rangeEvents)]);
+  const merged = master && patch ? patchEvents(master, patch) : null;
+  if (!merged) {
+    warnings.push(
+      `${eventsPathFor(into)} is missing or is not this master's — render the film whole for an events file`,
+    );
+    return undefined;
+  }
+  const file = eventsPathFor(out);
+  await writeFile(file, `${JSON.stringify(merged)}\n`);
+  return file;
 }
 
 /** move a finished file into place — copied when it is on another disk */

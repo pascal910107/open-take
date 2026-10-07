@@ -30,7 +30,10 @@
 //   for (const [name, s] of Object.entries(stems)) console.log(diagnose(name, s));
 //   writeWav("score.wav", normalize(master));       // −16 LUFS, true peak ≤ −1 dBTP
 
-import { writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 /** the sample rate when nothing says otherwise: the film's soundtrack is 48 kHz */
 const RATE = 48000;
@@ -1055,6 +1058,566 @@ function offset(name, x, fs, add) {
         `(${Math.round(dbOf(Math.abs(r.worst)))} dBFS), ${secs(r.a / fs)}–${secs(r.b / fs)} s — ` +
         "a wave not centred on 0 (Math.random() for noise instead of 2·random − 1, a one-sided pulse)",
     });
+}
+
+// ---------------------------------------------------------------- material
+
+// Sound that is not synthesized: a recording, the product's own sounds, a
+// licensed track. `load` decodes any audio file ffmpeg reads; the rest place a
+// piece of it in the film — a slice, aligned on its attack or its peak to a
+// moment, faster or slower, with its level, pan and send following numbers or
+// a curve the picture exported, into a bus or a shared room.
+//
+//   const ev = readEvents("film.events.json");          // `film render` wrote it
+//   const tap = slice(load("taps.wav"), 1.2, 1.5);
+//   for (const e of ev.events.filter((e) => e.kind === "key"))
+//     play(sfx, tap, e.t, { align: "onset", pan: panFor(e.x ?? 960), gain: 0.5 });
+//   const room = space(ev.duration, { size: 0.3 });
+//   play(music, load("track.m4a"), 0, { gain: curveOf(ev, "zoom", (z) => 0.6 + 0.2 * z),
+//     send: { bus: room.send, amount: 0.15 } });
+//   mix(master, room.wet());
+
+/**
+ * A number that stays put, or one that follows film time: `(t) => number`, t
+ * in seconds of the film. Followed at 750 points a second (every 64 samples
+ * at 48 kHz) and smoothed between them.
+ * @typedef {number | ((t: number) => number)} Auto
+ */
+
+/** automation is read every this many samples, and linear between */
+const CTRL = 64;
+
+/** the ffmpeg build `open-take` fetches for this machine, as its release names it */
+const managedKey = () =>
+  process.platform === "win32" && process.arch === "arm64"
+    ? "win32-x64"
+    : `${process.platform}-${process.arch}`;
+
+/** @type {string | null} */
+let ffmpegFound = null;
+
+/**
+ * The ffmpeg `load` decodes with: OPEN_TAKE_FFMPEG when it is set; else one on
+ * PATH; else the one open-take keeps in ~/.open-take/ffmpeg (fetched by any
+ * `open-take` render).
+ * @returns {string}
+ */
+export function findFfmpeg() {
+  ffmpegFound ??= locateFfmpeg();
+  return ffmpegFound;
+}
+
+/** @returns {string} */
+function locateFfmpeg() {
+  const exe = process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg";
+  /** @param {string} bin */
+  const runs = (bin) => spawnSync(bin, ["-version"], { stdio: "ignore" }).status === 0;
+  const named = process.env.OPEN_TAKE_FFMPEG;
+  if (named) {
+    if (!runs(named)) throw new Error(`load: OPEN_TAKE_FFMPEG (${named}) does not run`);
+    return named;
+  }
+  if (runs("ffmpeg")) return "ffmpeg";
+  const home = join(homedir(), ".open-take", "ffmpeg");
+  const releases = existsSync(home) ? readdirSync(home).sort().reverse() : [];
+  for (const r of releases) {
+    const bin = join(home, r, managedKey(), exe);
+    if (existsSync(bin) && runs(bin)) return bin;
+  }
+  throw new Error(
+    "load: no ffmpeg — set OPEN_TAKE_FFMPEG, install one, or run any `open-take` render once (it fetches one)",
+  );
+}
+
+/**
+ * Any audio file ffmpeg reads (wav, mp3, m4a, ogg, flac, the sound of a
+ * video…), decoded to float channels at `sampleRate` (default the film's
+ * 48 kHz). `channels` defaults to the file's: mono stays mono (pan places it),
+ * anything wider comes as stereo.
+ * @param {string} path
+ * @param {{ sampleRate?: number, channels?: number }} [o]
+ * @returns {Channels}
+ */
+export function load(path, { sampleRate = RATE, channels } = {}) {
+  if (!existsSync(path)) throw new Error(`load: there is no file at ${path}`);
+  const ffmpeg = findFfmpeg();
+  let n = channels;
+  if (n == null) {
+    // ffmpeg describes the input, then stops: no output was asked for
+    const info = spawnSync(ffmpeg, ["-hide_banner", "-i", path], { encoding: "utf8" });
+    const stream = /Stream #\S+.*?Audio: ([^\n]*)/.exec(info.stderr ?? "");
+    if (!stream) throw new Error(`load: ${path} has no sound ffmpeg can read`);
+    n = /\bmono\b|\b1 channels\b/.test(stream[1] ?? "") ? 1 : 2;
+  }
+  if (!(n >= 1 && Number.isInteger(n))) throw new Error(`load: ${channels} is not a channel count`);
+  const r = spawnSync(
+    ffmpeg,
+    [
+      "-v",
+      "error",
+      "-i",
+      path,
+      "-map",
+      "0:a:0",
+      "-f",
+      "f32le",
+      "-acodec",
+      "pcm_f32le",
+      "-ar",
+      String(sampleRate),
+      "-ac",
+      String(n),
+      "-",
+    ],
+    { maxBuffer: 2 ** 31 - 1 },
+  );
+  if (r.status !== 0)
+    throw new Error(
+      `load: ffmpeg could not decode ${path}: ${String(r.stderr).trim().slice(-400)}`,
+    );
+  const raw = /** @type {Buffer} */ (r.stdout);
+  const frames = Math.floor(raw.length / 4 / n);
+  const all = new Float32Array(raw.buffer.slice(raw.byteOffset, raw.byteOffset + frames * n * 4));
+  const out = Array.from({ length: n }, () => new Float32Array(frames));
+  for (let i = 0; i < frames; i++)
+    for (let c = 0; c < n; c++) /** @type {Float32Array} */ (out[c])[i] = all[i * n + c] ?? 0;
+  return withRate(out, sampleRate);
+}
+
+/**
+ * <film>.events.json, as `film render` writes it beside the film: the page's
+ * events (t, kind, x, y, force, label), its cuts, and its curves sampled once
+ * a frame — for `curveOf`.
+ * @param {string} path
+ * @returns {FilmEvents}
+ */
+export function readEvents(path) {
+  /** @type {FilmEvents} */
+  let ev;
+  try {
+    ev = JSON.parse(readFileSync(path, "utf8"));
+  } catch (e) {
+    throw new Error(`readEvents: ${path}: ${/** @type {Error} */ (e).message}`);
+  }
+  if (ev?.version !== 1 || !Array.isArray(ev.events) || !ev.curves)
+    throw new Error(`readEvents: ${path} is not an events file \`film render\` writes (version 1)`);
+  return ev;
+}
+
+/**
+ * @typedef {object} FilmEvents  <film>.events.json (times in seconds of the page's timeline)
+ * @property {1} version
+ * @property {number} duration
+ * @property {number} fps
+ * @property {[number, number]} [range] [from, to) when only part of the film was rendered
+ * @property {{ t: number, kind: string, x?: number, y?: number, force?: number, label?: string }[]} events
+ * @property {number[]} cuts
+ * @property {number[]} [declaredCuts]
+ * @property {number[]} [detectedCuts]
+ * @property {{ names: string[], t0: number, dt: number, rows: (number | null)[][] }} curves
+ */
+
+/**
+ * One of the film's curves as a function of film time, for an `Auto`: linear
+ * between frames — and across frames the page gave no number — held past the ends.
+ * `map` turns its value into what you want (a gain, a pan, a send).
+ * @param {FilmEvents} ev
+ * @param {string} name
+ * @param {(v: number) => number} [map]
+ * @returns {(t: number) => number}
+ */
+export function curveOf(ev, name, map = (v) => v) {
+  const j = ev.curves.names.indexOf(name);
+  if (j < 0)
+    throw new Error(
+      `curveOf: the film has no curve "${name}" (it has: ${ev.curves.names.join(", ") || "none"})`,
+    );
+  // the frames the page gave a number for, with the number
+  /** @type {number[]} */
+  const at = [];
+  /** @type {number[]} */
+  const vs = [];
+  ev.curves.rows.forEach((row, i) => {
+    const v = row[j];
+    if (typeof v === "number" && Number.isFinite(v)) {
+      at.push(i);
+      vs.push(v);
+    }
+  });
+  if (!at.length) throw new Error(`curveOf: the curve "${name}" has no numbers`);
+  const { t0, dt } = ev.curves;
+  return (t) => {
+    const f = (t - t0) / dt;
+    if (f <= (at[0] ?? 0)) return map(vs[0] ?? 0);
+    if (f >= (at[at.length - 1] ?? 0)) return map(vs[vs.length - 1] ?? 0);
+    let lo = 0;
+    let hi = at.length - 1;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if ((at[mid] ?? 0) <= f) lo = mid;
+      else hi = mid;
+    }
+    const a = at[lo] ?? 0;
+    const b = at[hi] ?? a + 1;
+    const u = (f - a) / (b - a);
+    return map((vs[lo] ?? 0) * (1 - u) + (vs[hi] ?? 0) * u);
+  };
+}
+
+/**
+ * Where a point on the stage sits left to right, as a pan: −1 at the left
+ * edge, 1 at the right, times `spread` (0.5 keeps it nearer the middle).
+ * @param {number} x stage px
+ * @param {number} [width] the stage's width (px)
+ * @param {number} [spread]
+ */
+export const panFor = (x, width = 1920, spread = 1) =>
+  Math.max(-1, Math.min(1, ((2 * x) / width - 1) * spread));
+
+/**
+ * A copy of [from, to) s of a sound (to: its end).
+ * @param {Channels | Signal} sound
+ * @param {number} from
+ * @param {number} [to]
+ * @returns {Channels}
+ */
+export function slice(sound, from, to) {
+  const sr = rateOf(sound);
+  const src = chans(sound);
+  const n = src[0]?.length ?? 0;
+  const a = Math.max(0, Math.min(n, Math.round(from * sr)));
+  const b = Math.max(a, Math.min(n, Math.round((to ?? n / sr) * sr)));
+  return withRate(
+    src.map((c) => Float32Array.from(c.subarray(a, b))),
+    sr,
+  );
+}
+
+/**
+ * A copy with gentle edges: raised-cosine fades `in` s at the start and `out`
+ * s at the end — a slice cut out of a recording starts and ends mid-wave,
+ * which is a click.
+ * @param {Channels | Signal} sound
+ * @param {{ in?: number, out?: number }} [o]
+ * @returns {Channels}
+ */
+export function fade(sound, { in: fin = 0.003, out = 0.01 } = {}) {
+  const sr = rateOf(sound);
+  const out_ = chans(sound).map((c) => Float32Array.from(c));
+  const n = out_[0]?.length ?? 0;
+  const a = Math.min(n, Math.round(fin * sr));
+  const b = Math.min(n, Math.round(out * sr));
+  for (const c of out_) {
+    for (let i = 0; i < a; i++) c[i] = (c[i] ?? 0) * 0.5 * (1 - Math.cos((Math.PI * i) / a));
+    for (let i = 0; i < b; i++)
+      c[n - 1 - i] = (c[n - 1 - i] ?? 0) * 0.5 * (1 - Math.cos((Math.PI * i) / b));
+  }
+  return withRate(out_, sr);
+}
+
+/** |x| at its largest across channels, sample by sample @param {Signal[]} src */
+function magnitude(src) {
+  const n = src[0]?.length ?? 0;
+  const m = new Float32Array(n);
+  for (const c of src) for (let i = 0; i < n; i++) m[i] = Math.max(m[i] ?? 0, Math.abs(c[i] ?? 0));
+  return m;
+}
+
+/**
+ * When a sound's attack begins (s into it): where its level — the RMS over
+ * `window` s — first reaches `threshold` of its loudest (0.1 is 20 dB down),
+ * traced back to the first sample of that rise above a tenth of it. Line a
+ * recorded key's attack up with the key, not the silence the recording starts
+ * with. null when it is silent.
+ * @param {Channels | Signal} sound
+ * @param {{ threshold?: number, window?: number }} [o]
+ * @returns {number | null}
+ */
+export function onsetOf(sound, { threshold = 0.1, window = 0.002 } = {}) {
+  const sr = rateOf(sound);
+  const m = magnitude(chans(sound));
+  const w = Math.max(1, Math.round(window * sr));
+  const level = new Float32Array(m.length);
+  let sum = 0;
+  let top = 0;
+  for (let i = 0; i < m.length; i++) {
+    sum += (m[i] ?? 0) ** 2 - (i >= w ? (m[i - w] ?? 0) ** 2 : 0);
+    const v = Math.sqrt(Math.max(0, sum) / w);
+    level[i] = v;
+    if (v > top) top = v;
+  }
+  if (top <= 0) return null;
+  // the level reaches the threshold at i, over the w samples up to it; the
+  // attack began at the first of those that is not still silence (a tenth of
+  // the threshold, so the quiet before it does not count)
+  const i = level.findIndex((v) => v >= threshold * top);
+  let j = Math.max(0, i - w + 1);
+  while (j < i && (m[j] ?? 0) < 0.1 * threshold * top) j++;
+  return j / sr;
+}
+
+/**
+ * Where a sound is loudest (s into it): its largest sample. null when silent.
+ * @param {Channels | Signal} sound
+ * @returns {number | null}
+ */
+export function peakOf(sound) {
+  const m = magnitude(chans(sound));
+  let best = 0;
+  let at = -1;
+  for (let i = 0; i < m.length; i++)
+    if ((m[i] ?? 0) > best) {
+      best = m[i] ?? 0;
+      at = i;
+    }
+  return at < 0 ? null : at / rateOf(sound);
+}
+
+/** I0, the modified Bessel function — for the Kaiser window @param {number} x */
+function bessel0(x) {
+  let sum = 1;
+  let term = 1;
+  for (let k = 1; k < 64 && term > sum * 1e-17; k++) {
+    term *= (x / (2 * k)) ** 2;
+    sum += term;
+  }
+  return sum;
+}
+
+/** the Kaiser window (β 8) at |r| = i / KAISER_N, 0..1, looked up and interpolated */
+const KAISER_N = 4096;
+/** @type {Float64Array | null} */
+let kaiserTable = null;
+/** @param {number} r −1..1 */
+function kaiser(r) {
+  if (!kaiserTable) {
+    const t = new Float64Array(KAISER_N + 2);
+    const i0 = bessel0(8);
+    for (let i = 0; i <= KAISER_N; i++)
+      t[i] = bessel0(8 * Math.sqrt(Math.max(0, 1 - (i / KAISER_N) ** 2))) / i0;
+    kaiserTable = t;
+  }
+  const x = Math.abs(r) * KAISER_N;
+  const i = Math.floor(x);
+  const a = kaiserTable[i] ?? 0;
+  return a + ((kaiserTable[i + 1] ?? 0) - a) * (x - i);
+}
+
+/**
+ * A sound played `rate` times as fast: pitch and length change together, as
+ * a tape's do (2 is an octave up and half as long; `2 ** (n / 12)` is n
+ * semitones). Windowed-sinc interpolation (Kaiser, β 8, 16 zero crossings a
+ * side), its cutoff lowered when it speeds up so nothing folds back.
+ * @param {Channels | Signal} sound
+ * @param {number} rate
+ * @returns {Channels}
+ */
+export function varispeed(sound, rate) {
+  if (!(rate > 0) || !Number.isFinite(rate))
+    throw new Error(`varispeed: rate must be a number above 0 (got ${rate})`);
+  const sr = rateOf(sound);
+  const src = chans(sound);
+  if (rate === 1)
+    return withRate(
+      src.map((c) => Float32Array.from(c)),
+      sr,
+    );
+  const n = src[0]?.length ?? 0;
+  const m = Math.floor((n - 1) / rate) + 1;
+  const cut = Math.min(1, 1 / rate); // of Nyquist
+  const zeros = 16;
+  const reach = Math.ceil(zeros / cut);
+  const out = src.map(() => new Float32Array(m));
+  const acc = new Float64Array(src.length);
+  for (let j = 0; j < m; j++) {
+    const pos = j * rate;
+    const base = Math.floor(pos);
+    let wsum = 0;
+    acc.fill(0);
+    for (let k = base - reach + 1; k <= base + reach; k++) {
+      if (k < 0 || k >= n) continue;
+      const u = (pos - k) * cut;
+      const r = u / zeros;
+      if (r <= -1 || r >= 1) continue;
+      const sinc = u === 0 ? 1 : Math.sin(Math.PI * u) / (Math.PI * u);
+      const w = sinc * kaiser(r);
+      wsum += w;
+      for (let c = 0; c < src.length; c++) acc[c] = (acc[c] ?? 0) + w * (src[c]?.[k] ?? 0);
+    }
+    // normalized by the weights: unity at DC, near the edges too
+    for (let c = 0; c < src.length; c++)
+      /** @type {Float32Array} */ (out[c])[j] = wsum ? (acc[c] ?? 0) / wsum : 0;
+  }
+  return withRate(out, sr);
+}
+
+/** an Auto's value at film time t @param {Auto} v @param {number} t */
+const autoAt = (v, t) => (typeof v === "function" ? v(t) : v);
+
+/**
+ * Place a sound in a bus at film time `at`: the point of it named by `align`
+ * — its start, its attack (`onsetOf`), its loudest sample (`peakOf`), or a
+ * time into it (s) — lands on `at`. On the way it can be sped up or slowed
+ * (`rate`, `semitones`: pitch and length together), and its gain, pan and send
+ * can each be a number or follow film time (an `Auto`, e.g. `curveOf`). A pan
+ * places a mono sound between the speakers at equal power (−3 dB each in the
+ * middle) and balances a stereo one; without one, every channel gets the gain,
+ * as `mix` does. `send` puts the same sound, times `amount`, into a shared
+ * room's send bus (`space`) as well. Returns where in the film it sounds (s).
+ * @param {Channels} into
+ * @param {Channels | Signal} sound
+ * @param {number} at
+ * @param {object} [o]
+ * @param {"start" | "onset" | "peak" | number} [o.align]
+ * @param {number} [o.rate]
+ * @param {number} [o.semitones]
+ * @param {Auto} [o.gain] linear (10 ** (dB / 20))
+ * @param {Auto} [o.pan] -1 left to 1 right
+ * @param {{ bus: Channels, amount?: Auto }} [o.send]
+ * @returns {{ start: number, end: number }}
+ */
+export function play(
+  into,
+  sound,
+  at,
+  { align = "start", rate = 1, semitones = 0, gain = 1, pan, send } = {},
+) {
+  if (!Number.isFinite(at)) throw new Error(`play: ${at} is not a time in seconds`);
+  const sr = into.sampleRate ?? RATE;
+  const b = /** @type {{ sampleRate?: number }} */ (sound).sampleRate;
+  if (b && b !== sr) throw new Error(`play: ${b} Hz into ${sr} Hz — load it at ${sr}`);
+  const speed = rate * 2 ** (semitones / 12);
+  const point =
+    typeof align === "number"
+      ? align
+      : align === "onset"
+        ? (onsetOf(sound) ?? 0)
+        : align === "peak"
+          ? (peakOf(sound) ?? 0)
+          : 0;
+  const src = speed === 1 ? chans(sound) : varispeed(sound, speed);
+  const start = at - point / speed;
+  const n = src[0]?.length ?? 0;
+  const s0 = Math.round(start * sr);
+  /** @param {Channels} bus @param {Auto} amount */
+  const into1 = (bus, amount) => {
+    const stereo = pan !== undefined && bus.length === 2;
+    const i0 = Math.max(0, -s0);
+    const i1 = Math.min(n, (bus[0]?.length ?? 0) - s0);
+    for (let blk = i0; blk < i1; blk += CTRL) {
+      const end = Math.min(i1, blk + CTRL);
+      // the automation at both ends of the block, and linear between
+      /** @param {number} i */
+      const gains = (i) => {
+        const t = (s0 + i) / sr;
+        const g = autoAt(gain, t) * autoAt(amount, t);
+        if (!stereo) return [g, g];
+        const p = Math.max(-1, Math.min(1, autoAt(/** @type {Auto} */ (pan), t)));
+        if (src.length === 1) {
+          const th = ((p + 1) * Math.PI) / 4;
+          return [g * Math.cos(th), g * Math.sin(th)];
+        }
+        return [
+          g * (p > 0 ? Math.cos((p * Math.PI) / 2) : 1),
+          g * (p < 0 ? Math.cos((-p * Math.PI) / 2) : 1),
+        ];
+      };
+      const [la, ra] = /** @type {[number, number]} */ (gains(blk));
+      const [lb, rb] = /** @type {[number, number]} */ (gains(end));
+      if (![la, ra, lb, rb].every(Number.isFinite))
+        throw new Error(`play: a gain, pan or send is not a number at ${secs((s0 + blk) / sr)} s`);
+      bus.forEach((dst, c) => {
+        const s = /** @type {Signal} */ (
+          src.length === 1 ? src[0] : src[Math.min(c, src.length - 1)]
+        );
+        const g0 = stereo ? (c === 0 ? la : ra) : la;
+        const g1 = stereo ? (c === 0 ? lb : rb) : lb;
+        const span = end - blk;
+        for (let i = blk; i < end; i++) {
+          const g = g0 + ((g1 - g0) * (i - blk)) / span;
+          dst[s0 + i] = (dst[s0 + i] ?? 0) + (s[i] ?? 0) * g;
+        }
+      });
+    }
+  };
+  if (src.length !== 1 && src.length !== into.length)
+    throw new Error(`play: ${src.length} channels into ${into.length} — give it mono, or as many`);
+  if (send) {
+    if (send.bus.sampleRate && send.bus.sampleRate !== sr)
+      throw new Error(`play: the send bus is ${send.bus.sampleRate} Hz, the bus ${sr} Hz`);
+    if (src.length !== 1 && src.length !== send.bus.length)
+      throw new Error(
+        `play: ${src.length} channels into a send bus of ${send.bus.length} — give it mono, or as many`,
+      );
+  }
+  // checked before anything is mixed, so a refused play leaves the buses as they were
+  into1(into, 1);
+  if (send) into1(send.bus, send.amount ?? 1);
+  return { start, end: start + n / sr };
+}
+
+/**
+ * Buses by name, each `seconds` of silence: mix into them, process each as a
+ * whole (a filter, a duck), then mix them into the master.
+ * @template {string} K
+ * @param {number} seconds
+ * @param {K[]} names
+ * @param {{ channels?: number, sampleRate?: number }} [o]
+ * @returns {Record<K, Channels>}
+ */
+export function buses(seconds, names, o = {}) {
+  return /** @type {Record<K, Channels>} */ (
+    Object.fromEntries(names.map((k) => [k, buffer(seconds, o)]))
+  );
+}
+
+/**
+ * One room the whole film shares: sounds `play` with a `send` go into its send
+ * bus, and `wet()` is that bus through one reverb (see `reverb` for size,
+ * damp, width), to mix into the master at the level you want. Optional: a
+ * film can stay dry, or put a sound in the room alone.
+ * @param {number} seconds
+ * @param {{ sampleRate?: number, size?: number, damp?: number, width?: number, tail?: number }} [o]
+ */
+export function space(seconds, { sampleRate = RATE, ...room } = {}) {
+  const send = buffer(seconds, { sampleRate });
+  return { send, wet: () => reverb(send, sampleRate, room) };
+}
+
+/**
+ * `a` until `at`, then `b`, crossing over `dur` s from `at` on. Both are on
+ * the film's timeline (a sample of each is the same moment). "power" keeps
+ * the level even across sounds that differ; "linear" sums to one, for two
+ * takes of the same sound.
+ * @param {Channels} a
+ * @param {Channels} b
+ * @param {number} at
+ * @param {number} dur
+ * @param {{ shape?: "power" | "linear" }} [o]
+ * @returns {Channels}
+ */
+export function crossfade(a, b, at, dur, { shape = "power" } = {}) {
+  const sr = rateOf(a);
+  if (rateOf(b) !== sr) throw new Error(`crossfade: ${rateOf(b)} Hz and ${sr} Hz`);
+  if (a.length !== b.length) throw new Error(`crossfade: ${a.length} channels and ${b.length}`);
+  if (!(dur >= 0)) throw new Error(`crossfade: dur must be ≥ 0 (got ${dur})`);
+  const n = Math.max(a[0]?.length ?? 0, b[0]?.length ?? 0);
+  const s = Math.round(at * sr);
+  const d = Math.round(dur * sr);
+  const out = a.map((ca, c) => {
+    const cb = /** @type {Signal} */ (b[c]);
+    const o = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const u = d === 0 ? (i < s ? 0 : 1) : Math.max(0, Math.min(1, (i - s) / d));
+      const [ga, gb] =
+        shape === "linear"
+          ? [1 - u, u]
+          : [Math.cos((u * Math.PI) / 2), Math.sin((u * Math.PI) / 2)];
+      o[i] = (ca[i] ?? 0) * ga + (cb[i] ?? 0) * gb;
+    }
+    return o;
+  });
+  return withRate(out, sr);
 }
 
 // ---------------------------------------------------------------- files

@@ -37,11 +37,13 @@ const PAGE = `<!doctype html>
 <body>
 <script type="module">
   // open-take renders this page frame by frame: npx open-take film render .
-  // kit/ is yours: the camera, the cursor, one timeline, the real interface
-  // as material, and (kit/audio.mjs, for a Node script) the sound's plumbing.
+  // kit/ is yours: the camera, the cursor, motion (springs, entrances,
+  // handoffs, contact — functions of t), one timeline, the real interface as
+  // material, and (kit/audio.mjs, for a Node script) the sound's plumbing.
   // Read it; change or drop any of it as the film needs.
   import { camera } from "./kit/camera.js";
   import { cursor } from "./kit/cursor.js";
+  import * as motion from "./kit/motion.js";
   import { timeline } from "./kit/time.js";
   import { screen, stills } from "./kit/media.js";
 

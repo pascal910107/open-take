@@ -24,13 +24,45 @@ each wrote again — and often got wrong:
   moved the centre and the zoom separately and clamped the centre every
   frame: the camera stopped short, then swung back. Defaults are measured (in
   0.73 s, out 1.34 s, what is framed fills 60 %); every move can set its own
-  `dur` and `ease`, and a cut is `cam.cut(box, t)`.
+  `dur` and `ease`, and a cut is `cam.cut(box, t)`. More is there when a
+  film asks for it, each off until it is set: `camera({ lead })` (every move
+  leaves and lands that much earlier; cuts stay put), `keepInside: false` (a
+  view may go past the content), `zoom: "log"` (the width changes at an even
+  pace in log space — long zooms do not rush their last part) — each also per
+  move — and `handheld: { amp, rot, period, seed }` (a seeded hand that never
+  repeats). `cam.shake(at, { amp, rot, dur, freq })` jolts it once;
+  `cam.jitter(t)` is what the hand and the shakes add (`at(t)` leaves them
+  out, so a 3D page adds them itself); `cam.depth(k)` is a layer at its own
+  depth (1 moves with the content, 0 holds still, above 1 passes in front),
+  with its own `transform(t)`, `toView`, `toContent`.
 - `cursor.js` — say where it clicks, types or drags and when; it travels at
   the take cursor's pace (0.35 content widths a second, 0.30–0.85 s a leg,
   landing on the action), timed by what the viewer sees when zoomed in. What
   it looks like is yours.
+- `motion.js` — moves as plain functions of time: give one t and when it
+  starts, read back numbers, put them anywhere (CSS, canvas, WebGL). A closed-
+  form spring (`spring`, `springVel`, `springSettle`, `settle`; `damping` is
+  the ratio ζ, or say `overshoot`, or framer-style `stiffness`/`friction`);
+  entrances and exits whose opacity follows the travel (`rise`/`riseOut`,
+  `pop`/`popOut`, `drop`/`dropOut` with stretch and squash, `maskRise`/
+  `maskOut` out of its own line, `type`/`untype`, and `typeTimes` — each
+  character's time, for its sound); handoffs where one picture becomes the
+  next (`morphRect` with `rectClip`/`inset`, `iris`, `zoomThrough` — one scale
+  about a fixed point, `gather`, `hop`); contact (`press`, `impact`). Every
+  default is an option of the call; any move can be written by hand instead:
+
+  ```js
+  import { rise, morphRect, rectClip } from "./kit/motion.js";
+  const w = rise(t, 2.0);                                  // { x, y, opacity, p }
+  const r = morphRect(t, 4, 4.5, buttonBox, { x: 0, y: 0, w: 1920, h: 1080 });
+  card.style.clipPath = rectClip(r, { width: 1920, height: 1080 });
+  ```
 - `time.js` — named moments and an optional pulse in one module that the
-  page and the score both import.
+  page and the score both import; no tempo unless you give one. What happens
+  in the picture and how fast it moves can be said there too, for the score:
+  `tl.event(at, kind, { x, y, force, label })`, `tl.curve(name, (t) => n)`
+  (`speed(fn)` turns a position — `cam.at` too — into px a second), and
+  `window.__film = { …, ...tl.hooks() }` hands both to the renderer.
 - `media.js` — a saved screen's parts measured where they are now
   (`screen(iframe).box("#search")`), and shot stills played by film time,
   their boxes and cursor read from the shoot's log.
@@ -40,8 +72,15 @@ each wrote again — and often got wrong:
   blow up, a reverb, a sidechain, seeded numbers, a WAV writer; `normalize`
   lands the mix on −16 LUFS with its true peak under −1 dBTP, measured as
   BS.1770 measures it (films that guessed from peaks shipped at −12.2 and
-  −17.8); `diagnose` checks each stem for NaN, clipping, clicks and DC. The
-  music itself is yours: no melodies, instruments or samples.
+  −17.8); `diagnose` checks each stem for NaN, clipping, clicks and DC. For
+  sound that is not synthesized — a recording, the product's own sounds, a
+  track — `load` decodes any file ffmpeg reads, `slice`/`fade`/`varispeed`
+  shape it, and `play(bus, sound, at, { align, rate, semitones, gain, pan,
+  send })` lands its start, its attack (`"onset"`), its peak or any point of
+  it on `at`, with gain, pan and send as numbers or functions of film time;
+  `buses`, `space` (one shared room) and `crossfade` go with it, and
+  `readEvents`/`curveOf`/`panFor` read what the page exported. The music
+  itself is yours: no melodies, instruments or samples.
 
 It is the film's code from then on: read it, change it, drop it for any
 scene. The renderer only ever reads `__film` and `__render`. One flat layer
@@ -84,8 +123,11 @@ npx open-take film render film/index.html --from 12 --to 16 --out part.mp4
 ```
 
 Render the master once, when the film is done; look at drafts and stills
-while you work on it. A change to a few seconds goes into the master you
-have, in place of its own frames — the rest is not drawn again; a change to
+while you work on it. A draft has no blur and half the frames; a few
+seconds whose motion matters — a handoff, a whip, a fast zoom — can be seen
+as the master will show them, alone, with `--from`/`--to` and no `--into`
+(it costs those seconds' share of a master render). A change to a few
+seconds goes into the master you have, in place of its own frames — the rest is not drawn again; a change to
 the sound alone is not a render at all:
 
 ```sh
@@ -105,6 +147,14 @@ sample per 3 px of travel, averaged in linear light — still frames pass
 through untouched. The master is H.264 High, yuv420p, BT.709, 60 fps, with the
 soundtrack as AAC. `<audio>` elements on the page are not recorded — the
 soundtrack is `__film.audio` (or `--audio <file>`).
+
+Every render also writes `<film>.events.json` beside the film: the page's
+events and named moments, each curve sampled once a frame, and the cuts —
+the page's events of kind `"cut"` (`declaredCuts`) and those the blur probe saw
+(`detectedCuts`; a draft or `--no-blur` sees none, and a cut between two
+shutters can be missed). A page without hooks gets empty lists. A
+`--from --to --into` patch updates the master's file in place. The score's
+script reads it, so the sound follows the picture as rendered.
 
 Text that moves slowly — a slow push or drift across an interface — steps a
 pixel at a time, because Chrome places each glyph on a whole pixel. Push a
@@ -134,7 +184,19 @@ You cannot watch the film; these are the next best things:
 npx open-take film still film/index.html --at 3.5,12,12.4 --out stills   # PNGs as the master shows them
 npx open-take film sheet film.mp4                                        # every ~second on one timed sheet
 npx open-take film check film.mp4 --size 1920x1080 --fps 60              # format, hitches, cadence, cuts, black, loudness, clicks
+npx open-take film listen film.mp4                                       # the sound, laid out on the sheet's times
 ```
+
+`film listen` (a film or a WAV) writes `film.listen/`: `listen.png` — the
+spectrum, loudness, onsets with a beat grid, sections, the page's events
+(from `film.events.json`, or `--events`) and curves, cuts and silences, on
+the same ruler as `film sheet` — and `listen.md`/`listen.json`: loudness,
+tempo with its alternatives, sections, bars that repeat an earlier one
+verbatim, silences, which events have no sound within 40 ms (next to how
+often chance would), each cut's offset to the nearest onset. With
+`--stems <dir>` it says which stem rises at each event and how far over the
+rest, and `--clips` writes each stem solo and muted. Every line says whether it
+is measured, estimated or not detected; none is a grade.
 
 `film check` reports measured defects with times — a frame that repeats inside
 motion, motion updating at a lower rate than the film, black frames inside the
@@ -161,7 +223,9 @@ The soundtrack is a WAV you make — `__film.audio`, or `--audio <file>`.
 Compose it however suits the film: a script that synthesizes and mixes it
 (it can follow the same timeline the page draws from), sounds you bring, or
 both. `film check` measures what is hard to judge by ear alone: integrated
-loudness, loudness range, true peak, silences, and clicks.
+loudness, loudness range, true peak, silences, and clicks; `film listen`
+shows where the sound's onsets, beats and sections fall against the page's
+events and cuts.
 
 ## Material from the real product
 

@@ -18,6 +18,12 @@
 // push, a whip, a slow drift are yours to choose. One flat layer, seen through
 // a 2D camera: for 3D, read at(t) and project it yourself.
 //
+// More is there when you ask for it, all of it off until you do: a camera
+// that gets there early (`lead`), a hand holding it (`handheld`), a jolt on
+// an impact (`shake`), layers that move at their own rate (`depth`), a zoom
+// that runs at an even pace over big scale changes (`zoom: "log"`), and a view
+// left free to go past the content (`keepInside: false`).
+//
 //   const cam = camera({ content: { width: 1920, height: 1080 } });
 //   cam.frame(box, { arrive: 12 });          // framed by 12 s
 //   cam.frame(other, { start: 15, dur: 0.3, ease: (p) => p * p });
@@ -35,7 +41,26 @@
  * @property {(p: number) => number} [ease] progress 0..1 over the move; default: settle into the hold
  * @property {number} [fill] the share of the picture a framed box fills (default 0.6)
  * @property {"contain" | "width"} [fit] fit the box whole (default), or its width only — a tall box is then framed from its top
+ * @property {number} [lead] this move leaves and lands this much earlier (s); default: the camera's `lead`
+ * @property {boolean} [keepInside] keep this view inside the content; default: the camera's `keepInside`
+ * @property {"linear" | "log"} [zoom] how this move's width changes; default: the camera's `zoom`
  */
+/**
+ * @typedef {object} Handheld  a hand on the camera: a slow, smooth wander that never repeats
+ * @property {number} [amp] how far it wanders, in picture px (default 3)
+ * @property {number} [rot] how far it tilts, in degrees (default 0)
+ * @property {number} [period] about how long between turns (s, default 2.5)
+ * @property {number} [seed] another seed, another hand (default 1)
+ */
+/**
+ * @typedef {object} Shake  a jolt that dies away
+ * @property {number} [amp] how far it throws the picture at first, in px (default 10)
+ * @property {number} [rot] how far it tilts at first, in degrees (default 0)
+ * @property {number} [dur] how long until it is still (s, default 0.45)
+ * @property {number} [freq] how fast it rattles (about this many turns a second, default 16)
+ * @property {number} [seed] another seed, another jolt (default: one per shake)
+ */
+/** @typedef {{ x: number, y: number, rot: number }} Jitter  what the hand and the shakes add at t: picture px, degrees */
 /**
  * @typedef {object} Move
  * @property {"move" | "cut"} kind
@@ -44,6 +69,8 @@
  * @property {View} to
  * @property {((p: number) => number) | null} ease
  * @property {string} label
+ * @property {true} [free] left free to go past the content
+ * @property {true} [log] its width changes at an even pace in log space
  */
 
 /** what is left of a move at progress u (0 at its start, 0.04 at its end, still
@@ -79,6 +106,29 @@ export const smooth = (p) => {
 /** @param {number} p */
 export const linear = (p) => Math.max(0, Math.min(1, p));
 
+/** a seeded number in -1..1 for each whole i — the same i and seed, the same number */
+/** @param {number} i @param {number} seed */
+const lattice = (i, seed) => {
+  let h = Math.imul(i | 0, 0x27d4eb2d) ^ Math.imul(seed | 0, 0x165667b1);
+  h = Math.imul(h ^ (h >>> 15), 0x85ebca6b);
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+  h ^= h >>> 16;
+  return (h >>> 0) / 0x7fffffff - 1;
+};
+
+/** smooth seeded noise along one axis, about -1..1: zero on every whole x,
+ *  with a seeded slope there, eased between (gradient noise). It starts from
+ *  rest at x = 0, so a jolt never jumps on its first frame. */
+/** @param {number} x @param {number} seed */
+export const noise = (x, seed = 1) => {
+  const i = Math.floor(x);
+  const f = x - i;
+  const u = f * f * f * (f * (f * 6 - 15) + 10);
+  const a = lattice(i, seed) * f;
+  const b = lattice(i + 1, seed) * (f - 1);
+  return 2 * (a + (b - a) * u);
+};
+
 /**
  * @param {object} opts
  * @param {{ width: number, height: number }} opts.content the layer the camera looks at, in CSS px
@@ -86,12 +136,33 @@ export const linear = (p) => Math.max(0, Math.min(1, p));
  * @param {number} [opts.zoomIn] default duration of a move that closes in (s)
  * @param {number} [opts.zoomOut] default duration of a move that pulls out (s)
  * @param {number} [opts.settle] the share of a move left to settle into the hold
+ * @param {number} [opts.lead] every move leaves and lands this much earlier (s, default 0): the camera is there before what it waits for
+ * @param {boolean} [opts.keepInside] keep each view inside the content (default true); false lets the camera look past its edge
+ * @param {"linear" | "log"} [opts.zoom] how a move's width changes: evenly in px (default), or at an even pace in log space, which reads better when the scale changes a lot
+ * @param {Handheld} [opts.handheld] a hand on the camera (default: none)
  */
-export function camera({ content, view = content, zoomIn = 0.73, zoomOut = 1.34, settle = 0.04 }) {
+export function camera({
+  content,
+  view = content,
+  zoomIn = 0.73,
+  zoomOut = 1.34,
+  settle = 0.04,
+  lead = 0,
+  keepInside = true,
+  zoom = "linear",
+  handheld,
+}) {
   const aspect = view.width / view.height;
   const decay = settleDecay(settle);
-  /** @type {{ kind: "move" | "cut", at: number, anchor: "arrive" | "start", target: View, dur?: number, ease?: (p: number) => number, label: string }[]} */
+  if (!Number.isFinite(lead)) throw new Error("camera: lead must be a number of seconds");
+  if (zoom !== "linear" && zoom !== "log")
+    throw new Error(`camera: zoom is "linear" or "log", not ${JSON.stringify(zoom)}`);
+  if (handheld && !((handheld.period ?? 2.5) > 0))
+    throw new Error("camera: handheld period must be above 0 s");
+  /** @type {{ kind: "move" | "cut", at: number, anchor: "arrive" | "start", target: View, dur?: number, ease?: (p: number) => number, label: string, lead: number, free: boolean, log: boolean }[]} */
   const asked = [];
+  /** @type {{ at: number, amp: number, rot: number, dur: number, freq: number, seed: number }[]} */
+  const shakes = [];
   /** @type {Move[] | null} */
   let moves = null;
   /** @type {string[]} */
@@ -154,8 +225,15 @@ export function camera({ content, view = content, zoomIn = 0.73, zoomOut = 1.34,
       throw new Error(`camera: ${label} needs { arrive } or { start }`);
     if (o.arrive != null && o.start != null)
       throw new Error(`camera: ${label} takes { arrive } or { start }, not both`);
+    const moveLead = o.lead ?? lead;
+    if (!Number.isFinite(moveLead))
+      throw new Error(`camera: ${label} at ${at}s: lead must be a number`);
+    const moveZoom = o.zoom ?? zoom;
+    if (moveZoom !== "linear" && moveZoom !== "log")
+      throw new Error(`camera: ${label} at ${at}s: zoom is "linear" or "log"`);
+    const free = !(o.keepInside ?? keepInside);
     const wanted = viewOf(target, o);
-    const kept = inside(wanted);
+    const kept = free ? wanted : inside(wanted);
     const off = Math.hypot(kept.cx - wanted.cx, kept.cy - wanted.cy);
     if (off > 1)
       warnings.push(
@@ -169,6 +247,9 @@ export function camera({ content, view = content, zoomIn = 0.73, zoomOut = 1.34,
       dur: o.dur,
       ease: o.ease,
       label: `${label} at ${at}s`,
+      lead: moveLead,
+      free,
+      log: moveZoom === "log",
     });
     moves = null;
   };
@@ -181,20 +262,27 @@ export function camera({ content, view = content, zoomIn = 0.73, zoomOut = 1.34,
     const out = [];
     let leaving = all(); // the view the camera was last asked for
     for (const a of order) {
+      /** @type {Move} */
+      let m;
       if (a.kind === "cut") {
-        out.push({ kind: "cut", t0: a.at, t1: a.at, to: a.target, ease: null, label: a.label });
+        // a cut is where you put it: a lead moves only the moves
+        m = { kind: "cut", t0: a.at, t1: a.at, to: a.target, ease: null, label: a.label };
       } else {
         const dur = a.dur ?? (a.target.w > leaving.w + 1e-9 ? zoomOut : zoomIn);
-        const t0 = a.anchor === "arrive" ? a.at - dur : a.at;
-        out.push({
+        let t0 = a.anchor === "arrive" ? a.at - dur : a.at;
+        if (a.lead) t0 -= a.lead;
+        m = {
           kind: "move",
           t0,
           t1: t0 + Math.max(dur, 1e-6),
           to: a.target,
           ease: a.ease ?? null,
           label: a.label,
-        });
+        };
+        if (a.log) m.log = true;
       }
+      if (a.free) m.free = true;
+      out.push(m);
       leaving = a.target;
     }
     // at one instant a cut comes first and a move leaves from it; two cuts or
@@ -229,29 +317,58 @@ export function camera({ content, view = content, zoomIn = 0.73, zoomOut = 1.34,
       else {
         const u = (until - m.t0) / (m.t1 - m.t0);
         const left = m.ease ? 1 - m.ease(Math.min(1, u)) : decay(u);
-        from = {
-          cx: m.to.cx + (from.cx - m.to.cx) * left,
-          cy: m.to.cy + (from.cy - m.to.cy) * left,
-          w: Math.max(m.to.w + (from.w - m.to.w) * left, Math.min(from.w, m.to.w) * 0.5),
-        };
+        if (m.log) {
+          // the width at an even pace in log space; the centre keeps the
+          // point that stays put on screen where it is, so everything still
+          // heads for its place in a straight line
+          const r = from.w / m.to.w;
+          const w = m.to.w * r ** left;
+          const k = Math.abs(Math.log(r)) < 1e-9 ? left : (w - m.to.w) / (from.w - m.to.w);
+          from = {
+            cx: m.to.cx + (from.cx - m.to.cx) * k,
+            cy: m.to.cy + (from.cy - m.to.cy) * k,
+            w,
+          };
+        } else
+          from = {
+            cx: m.to.cx + (from.cx - m.to.cx) * left,
+            cy: m.to.cy + (from.cy - m.to.cy) * left,
+            w: Math.max(m.to.w + (from.w - m.to.w) * left, Math.min(from.w, m.to.w) * 0.5),
+          };
       }
       if (!next || t < next.t0) break;
     }
     return { ...from, scale: view.width / from.w };
   };
 
+  /** how far a view passes the content's edge on an axis it fits (0: inside) */
+  /** @param {View} v */
+  const past = (v) => {
+    const h = v.w / aspect;
+    return Math.max(
+      0,
+      v.w <= content.width ? Math.max(v.w / 2 - v.cx, v.cx + v.w / 2 - content.width) : 0,
+      h <= content.height ? Math.max(h / 2 - v.cy, v.cy + h / 2 - content.height) : 0,
+    );
+  };
+
   /** a curve of your own may overshoot: say where the view then leaves the content */
   /** @param {Move[]} ms */
   const overshoot = (ms) => {
+    const anyFree = ms.some((m) => m.free);
     for (const m of ms) {
-      if (m.kind !== "move" || !m.ease) continue;
+      if (m.kind !== "move" || !m.ease || m.free) continue;
+      // a move that leaves from a view left past the edge is past it at first:
+      // that is not the curve's doing, only going further out is
+      const from = anyFree ? past(at(m.t0)) : 0;
       for (let k = 0; k <= 60; k++) {
         const v = at(m.t0 + ((m.t1 - m.t0) * k) / 60);
         const h = v.w / aspect;
-        const out =
-          (v.w <= content.width &&
-            (v.cx - v.w / 2 < -0.5 || v.cx + v.w / 2 > content.width + 0.5)) ||
-          (h <= content.height && (v.cy - h / 2 < -0.5 || v.cy + h / 2 > content.height + 0.5));
+        const out = anyFree
+          ? past(v) > from + 0.5
+          : (v.w <= content.width &&
+              (v.cx - v.w / 2 < -0.5 || v.cx + v.w / 2 > content.width + 0.5)) ||
+            (h <= content.height && (v.cy - h / 2 < -0.5 || v.cy + h / 2 > content.height + 0.5));
         if (out) {
           overshoots.push(
             `${m.label}: its curve overshoots — the view passes the content's edge mid-move`,
@@ -262,14 +379,111 @@ export function camera({ content, view = content, zoomIn = 0.73, zoomOut = 1.34,
     }
   };
 
-  /** @param {number} t */
-  const place = (t) => {
+  /** what the hand and the shakes add at t, in picture px and degrees */
+  /** @param {number} t @returns {Jitter} */
+  const jitter = (t) => {
+    let x = 0;
+    let y = 0;
+    let rot = 0;
+    if (handheld) {
+      const { amp = 3, rot: tilt = 0, period = 2.5, seed = 1 } = handheld;
+      const p = t / period;
+      // two octaves, the second faint: a hand drifts and corrects; each axis
+      // is shifted off the others so they never rest at one instant together
+      /** @param {number} k */
+      const wander = (k) =>
+        (noise(p + 0.37 * k, seed * 7 + k) + 0.35 * noise(p * 2.13 + 17.5, seed * 7 + k + 3)) /
+        1.35;
+      x += amp * wander(0);
+      y += amp * wander(1);
+      rot += tilt * wander(2);
+    }
+    for (const s of shakes) {
+      const tau = t - s.at;
+      if (tau <= 0 || tau >= s.dur) continue;
+      // a rattle that starts from rest and reaches about `amp` on its first
+      // swing, then dies away to nothing at `dur`; each axis swings at its
+      // own seeded rate and drifts off a clean sine, so no two read alike
+      const env = (1 - tau / s.dur) ** 2;
+      const p = tau * s.freq;
+      /** @param {number} k @param {number} rate */
+      const swing = (k, rate) =>
+        Math.sin(
+          2 * Math.PI * p * rate * (1 + 0.12 * lattice(k, s.seed)) +
+            1.2 * noise(p * 0.5, s.seed * 5 + k),
+        );
+      x += s.amp * env * swing(0, 1);
+      y += s.amp * env * (0.6 + 0.3 * lattice(9, s.seed)) * swing(1, 1.31);
+      rot += s.rot * env * swing(2, 0.83);
+    }
+    return { x, y, rot };
+  };
+  const jitters = () => !!handheld || shakes.length > 0;
+
+  /** where the layer goes at t; `k` is its depth factor (1: the content's own plane) */
+  /** @param {number} t @param {number} [k] */
+  const place = (t, k = 1) => {
     const v = at(t);
-    return {
-      s: v.scale,
-      tx: view.width / 2 - v.cx * v.scale,
-      ty: view.height / 2 - v.cy * v.scale,
-    };
+    let p;
+    if (k === 1)
+      p = {
+        s: v.scale,
+        tx: view.width / 2 - v.cx * v.scale,
+        ty: view.height / 2 - v.cy * v.scale,
+        r: 0,
+      };
+    else {
+      // a layer at factor k sees the move k times over from the whole
+      // content: its centre goes k of the way, its scale k of the way in log
+      const r0 = all();
+      const cx = r0.cx + (v.cx - r0.cx) * k;
+      const cy = r0.cy + (v.cy - r0.cy) * k;
+      const s = (view.width / r0.w) * (r0.w / v.w) ** k;
+      p = { s, tx: view.width / 2 - cx * s, ty: view.height / 2 - cy * s, r: 0 };
+    }
+    if (jitters()) {
+      const j = jitter(t);
+      p.tx += j.x * k;
+      p.ty += j.y * k;
+      p.r = j.rot * k;
+    }
+    return p;
+  };
+
+  /** the transform's own point mapping: content → picture, and back */
+  /** @param {{ s: number, tx: number, ty: number, r: number }} p */
+  const css = (p) => {
+    if (!p.r) return `translate(${p.tx}px, ${p.ty}px) scale(${p.s})`;
+    const hx = view.width / 2;
+    const hy = view.height / 2;
+    return `translate(${hx}px, ${hy}px) rotate(${p.r}deg) translate(${p.tx - hx}px, ${p.ty - hy}px) scale(${p.s})`;
+  };
+  /** @param {{ s: number, tx: number, ty: number, r: number }} p @param {number} x @param {number} y */
+  const project = (p, x, y) => {
+    const qx = p.tx + x * p.s;
+    const qy = p.ty + y * p.s;
+    if (!p.r) return [qx, qy];
+    const a = (p.r * Math.PI) / 180;
+    const hx = view.width / 2;
+    const hy = view.height / 2;
+    const c = Math.cos(a);
+    const n = Math.sin(a);
+    return [hx + (qx - hx) * c - (qy - hy) * n, hy + (qx - hx) * n + (qy - hy) * c];
+  };
+  /** @param {{ s: number, tx: number, ty: number, r: number }} p @param {number} x @param {number} y */
+  const unproject = (p, x, y) => {
+    let qx = x;
+    let qy = y;
+    if (p.r) {
+      const a = (-p.r * Math.PI) / 180;
+      const hx = view.width / 2;
+      const hy = view.height / 2;
+      const c = Math.cos(a);
+      const n = Math.sin(a);
+      qx = hx + (x - hx) * c - (y - hy) * n;
+      qy = hy + (x - hx) * n + (y - hy) * c;
+    }
+    return [(qx - p.tx) / p.s, (qy - p.ty) / p.s];
   };
 
   return {
@@ -285,25 +499,44 @@ export function camera({ content, view = content, zoomIn = 0.73, zoomOut = 1.34,
     /** a cut: from `at` on the camera shows `target`, with no move */
     /** @param {Box | View} target @param {number} at @param {When} [o] */
     cut: (target, at, o = {}) => ask("cut", target, { ...o, start: at }, "cut"),
-    /** the view at t ({ cx, cy, w, scale }) — for a camera of your own */
+    /** a jolt from `at` on, dying away over `dur` — an impact, a slam, a beat
+     *  that lands; shakes that overlap add up */
+    /** @param {number} at @param {Shake} [o] */
+    shake: (at, o = {}) => {
+      if (!Number.isFinite(at)) throw new Error("camera: shake needs a time (s)");
+      const { amp = 10, rot = 0, dur = 0.45, freq = 16, seed = shakes.length + 1 } = o;
+      if (!(dur > 0)) throw new Error(`camera: shake at ${at}s: dur must be above 0`);
+      shakes.push({ at, amp, rot, dur, freq, seed });
+    },
+    /** the view at t ({ cx, cy, w, scale }) — for a camera of your own; the
+     *  hand and the shakes are not in it, they are in jitter(t) */
     at,
+    /** what the hand and the shakes add at t ({ x, y, rot }: picture px, degrees about its centre) */
+    jitter,
     /** the CSS transform for the layer at t (give the layer transform-origin 0 0) */
     /** @param {number} t */
-    transform: (t) => {
-      const p = place(t);
-      return `translate(${p.tx}px, ${p.ty}px) scale(${p.s})`;
-    },
+    transform: (t) => css(place(t)),
     /** a point of the content → where it is in the picture at t */
     /** @param {number} x @param {number} y @param {number} t */
-    toView: (x, y, t) => {
-      const p = place(t);
-      return [p.tx + x * p.s, p.ty + y * p.s];
-    },
+    toView: (x, y, t) => project(place(t), x, y),
     /** a point of the picture → the content under it at t */
     /** @param {number} x @param {number} y @param {number} t */
-    toContent: (x, y, t) => {
-      const p = place(t);
-      return [(x - p.tx) / p.s, (y - p.ty) / p.s];
+    toContent: (x, y, t) => unproject(place(t), x, y),
+    /** a layer the size of the content at depth factor k: 1 moves with the
+     *  content, 0 holds still, 0.3 is far behind, 1.5 passes in front — its
+     *  centre goes k of the way of each move and its zoom k of the way (in
+     *  log), the hand and shakes k times as far */
+    /** @param {number} k */
+    depth: (k) => {
+      if (!Number.isFinite(k)) throw new Error("camera: depth needs a factor");
+      return {
+        /** @param {number} t */
+        transform: (t) => css(place(t, k)),
+        /** @param {number} x @param {number} y @param {number} t */
+        toView: (x, y, t) => project(place(t, k), x, y),
+        /** @param {number} x @param {number} y @param {number} t */
+        toContent: (x, y, t) => unproject(place(t, k), x, y),
+      };
     },
     /** the moves as planned (times resolved) */
     moves: () => plan(),

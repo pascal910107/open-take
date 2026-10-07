@@ -677,7 +677,7 @@ canvas, WebGL, any library — with the story, copy, typography, motion and soun
 open-take plays it frame-exactly into a 1080p60 master with measured motion blur and the
 soundtrack you make, hands you the real product's UI as material (`make --states`, and
 `shoot` for stills from a capture script of your own), and
-measures what you cannot see or hear (`film check`). Read
+measures what you cannot see or hear (`film check`, `film listen`). Read
 [film.md](references/film.md) (or `npx open-take skill film`) before starting; nothing in it
 is a template.
 

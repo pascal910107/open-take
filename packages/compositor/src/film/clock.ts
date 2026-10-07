@@ -1429,11 +1429,17 @@ function installFilmClock(opts: FilmClockOptions): void {
   /** how far anything moves while the shutter is open, and which part of the
    *  shutter to expose: side 0 all of it, -1 its first half, 1 its second */
   async function motion(tSec: number, halfSec: number): Promise<{ px: number; side: number }> {
+    // The page's own motion(t, half) says how far its picture moves across
+    // [t-half, t+half] (what a canvas draws, which no element shows); where the
+    // picture cuts is still found here, so a hook never opens the shutter across one.
     const hook = w.__film?.motion;
-    if (typeof hook === "function") {
-      const px = Number(await hook(tSec, halfSec));
-      return { px: Number.isFinite(px) && px > 0 ? px : 0, side: 0 };
-    }
+    const told =
+      typeof hook === "function"
+        ? async (t: number, half: number) => {
+            const px = Number(await hook(t, half));
+            return Number.isFinite(px) && px > 0 ? px : 0;
+          }
+        : null;
     await seek(Math.max(0, tSec - halfSec));
     const a = snapshot();
     await seek(tSec);
@@ -1453,9 +1459,13 @@ function installFilmClock(opts: FilmClockOptions): void {
       (x.px > 1 && y.px < 0.1 * x.px) ||
       (x.churn > 0.25 * screen && y.churn < 0.05 * screen) ||
       (x.cuts > 0 && y.cuts === 0);
-    if (onlyIn(first, second)) return { px: second.px, side: 1 };
-    if (onlyIn(second, first)) return { px: first.px, side: -1 };
-    return { px: moved(a, b).px, side: 0 };
+    // with a hook, it is asked for the half that is exposed
+    const quarter = halfSec / 2;
+    if (onlyIn(first, second))
+      return { px: told ? await told(tSec + quarter, quarter) : second.px, side: 1 };
+    if (onlyIn(second, first))
+      return { px: told ? await told(tSec - quarter, quarter) : first.px, side: -1 };
+    return { px: told ? await told(tSec, halfSec) : moved(a, b).px, side: 0 };
   }
 
   // --- ready -----------------------------------------------------------------

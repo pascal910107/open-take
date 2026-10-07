@@ -33,10 +33,12 @@ import {
   emitGithubOutputs,
   emitStepSummary,
   ensureChrome,
+  filmListen,
   filmPicture,
   filmSheet,
   filmStills,
   formatFilmCheck,
+  formatFilmListen,
   formatIssues,
   formatNotes,
   formatTakeStates,
@@ -113,6 +115,7 @@ const BOOL_FLAGS = new Set([
   "--json",
   "--no-blur",
   "--no-render",
+  "--clips",
 ]);
 
 const argv = process.argv.slice(2);
@@ -267,6 +270,8 @@ Usage:
                    [--size 1920x1080] [--supersample 2]
   open-take film picture <state.html|dir> [--scale 2] [--out picture.png]
   open-take film sheet  <film.mp4> [--out sheet.png] [--every <s> | --at <s>,<s>…]
+  open-take film listen <film.mp4|score.wav> [--events <events.json>] [--stems <dir>] [--out <dir>]
+                   [--every <s>] [--clips]
   open-take film check  <film.mp4> [--size 1920x1080] [--fps 60] [--page <page.html|dir> [--root <dir>]]
                    [--json]
 
@@ -494,7 +499,14 @@ Usage:
           of its own; \`film mux\` puts a new soundtrack under a film without
           rendering it again.
           \`film still\` writes PNG stills at given times; \`film sheet\` a
-          timed contact sheet of any video; \`film check\` measures a finished
+          timed contact sheet of any video; \`film listen\` the film's sound as
+          information: listen.png (spectrum, loudness, onsets and beat grid,
+          sections, each stem's activity, the page's events, cuts and curves,
+          marked with the sheet's times) and listen.md (loudness, tempo,
+          sections, bars repeated verbatim, pauses, which events have no
+          sound within 40 ms, cut-to-onset offsets, with --stems how many dB
+          each event's sound sits over the rest), each line measured,
+          estimated or not detected — never a grade; \`film check\` measures a finished
           film: format, hitches, cadence, cuts, flashes (a few frames unlike
           the frames on both sides), shots that start on near-blank frames,
           black frames, loudness, clicks. With --page (the film's page) it
@@ -1809,7 +1821,7 @@ async function main() {
     const target = positional[1];
     if (!action || !target || positional.length !== 2)
       throw new Error(
-        "film: expected init <dir>, render <page>, still <page> --at <s>, picture <state.html>, sheet <film.mp4>, check <film.mp4> or mux <film.mp4> --audio <file>",
+        "film: expected init <dir>, render <page>, still <page> --at <s>, picture <state.html>, sheet <film.mp4>, listen <film.mp4>, check <film.mp4> or mux <film.mp4> --audio <file>",
       );
     const only = (...allowed: string[]) => {
       for (const f of Object.keys(flags))
@@ -1965,6 +1977,22 @@ async function main() {
       process.stdout.write(`sheet: ${r.out} (${r.times.length} frames)\n`);
       return;
     }
+    if (action === "listen") {
+      only("--events", "--stems", "--out", "--every", "--clips");
+      const r = await filmListen({
+        input: target,
+        out: flag("--out"),
+        events: flag("--events"),
+        stems: flag("--stems"),
+        every: num("--every"),
+        clips: has("--clips"),
+        chromePath: await ensureChrome(),
+      });
+      process.stdout.write(
+        `${formatFilmListen(r.listen)}\n\nlisten: ${r.png ?? "(no picture)"}\n        ${r.md}\n        ${r.json}\n`,
+      );
+      return;
+    }
     if (action === "check") {
       only("--size", "--fps", "--json", "--page", "--root", "--verbose");
       const page = flag("--page");
@@ -1983,7 +2011,7 @@ async function main() {
       if (c.issues.some((i) => i.severity === "error")) process.exitCode = 1;
       return;
     }
-    throw new Error(`film: unknown action ${action} — render, still, sheet or check`);
+    throw new Error(`film: unknown action ${action} — render, still, sheet, listen or check`);
   }
 
   if (cmd === "--version" || cmd === "-v") {
