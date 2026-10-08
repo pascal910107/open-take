@@ -41,6 +41,7 @@ import {
   filmLook,
   filmPicture,
   filmProbe,
+  filmReport,
   filmSheet,
   filmStills,
   formatComponents,
@@ -49,7 +50,9 @@ import {
   formatFilmListen,
   formatFilmLook,
   formatFilmProbe,
+  formatFilmReport,
   formatIssues,
+  formatMaterials,
   formatNotes,
   formatTakeStates,
   healingWithheld,
@@ -57,9 +60,11 @@ import {
   initLaunchProject,
   inspectPage,
   inventoryComponents,
+  inventoryMaterials,
   lintPlan,
   loadCaptureLogSibling,
   makeTake,
+  materialsSummary,
   measureTake,
   muxFilm,
   openPath,
@@ -143,6 +148,8 @@ const BOOL_FLAGS = new Set([
   "--no-picture",
   "--all",
   "--no-components",
+  "--no-materials",
+  "--no-report",
 ]);
 
 const argv = process.argv.slice(2);
@@ -220,6 +227,7 @@ const FLAGS_BY_CMD: Record<string, string[]> = {
   beats: ["--card"],
   states: ["--state", "--json", "--measure"],
   components: ["--state", "--json", "--snippet", "--min-area"],
+  materials: ["--state", "--json"],
   frames: ["--beat", "--tile", "--open", "--verbose"],
   ab: ["--set", "--beat", "--full", "--draft", "--before-after", "--no-open", "--verbose"],
   edit: ["--port", "--no-open"],
@@ -260,6 +268,7 @@ const FLAGS_BY_CMD: Record<string, string[]> = {
     "--no-states",
     "--no-steady",
     "--no-components",
+    "--no-materials",
   ],
 };
 
@@ -293,6 +302,7 @@ Usage:
   open-take beats  <take> [--card]
   open-take states <take> [--state <id>] [--json] [--measure]
   open-take components <shots | take | state | dir> [--state <id>] [--json] [--snippet <ref>] [--min-area <frac>]
+  open-take materials <shots | take | state | dir> [--state <id>] [--json]
   open-take frames <take> [--beat N] [--tile 720]
   open-take ab     <take> --set <knob>=<v1>,<v2>[,<v3>] [--beat N] [--full] [--draft] [--no-open]
   open-take ab     <take> --before-after [--beat N] [--full] [--no-open]
@@ -308,12 +318,12 @@ Usage:
   open-take launch render <launch.json> [--out <movie.mp4>] [--draft] [--verbose]
   open-take skill  [motion | film [<topic> | --all] | cases [<name>] | install [--force]]
   open-take shoot  <script.mjs> [--out shots] [--scale 2] [--size 1920x1080] [--states | --no-states]
-                   [--no-components] [--no-steady]
-  open-take film init   <dir> [--force] [--url <url> [--size 1920x1080] [--profile <name>] [--no-steady]]
+                   [--no-components] [--no-materials] [--no-steady]
+  open-take film init   <dir> [--force] [--url <url> [--size 1920x1080] [--profile <name>] [--no-steady] [--no-materials]]
                    [--from <shots|take>]
   open-take film render <page.html|dir> [--out film.mp4] [--audio <file>|none] [--draft] [--no-blur]
                    [--size 1920x1080] [--fps 60] [--duration <s>] [--from <s>] [--to <s>] [--root <dir>]
-                   [--workers 2] [--supersample 2] [--into <film.mp4>] [--verbose]
+                   [--workers 2] [--supersample 2] [--into <film.mp4>] [--no-report] [--verbose]
   open-take film mux    <film.mp4> --audio <file>|none [--out <film.mp4>]
   open-take film still  <page.html|dir> --at <s>[,<s>…] [--out <dir>] [--no-blur] [--root <dir>]
                    [--size 1920x1080] [--supersample 2] [--verbose]
@@ -426,6 +436,21 @@ Usage:
           saved screen by a URL from the working directory, the folder film
           render serves); --min-area <frac> re-measures with a lower size
           floor (default 0.0005 of the screen).
+  materials  the whole page of each page a shoot kept a saved screen of —
+          top to bottom, not only the first screen: the product's images
+          (an <img>/<picture> with its largest source and pixel size, inline
+          SVG drawings, CSS background images, videos, canvases) with alt
+          text, page position and a saved copy in states/assets/ (the page's
+          own top document, no ad hosts), and the copy it writes (headings,
+          taglines, short paragraphs, text set larger than the body), in
+          page order with where the first screen ends; and the page drawn
+          whole as one small sheet (states/<id>/sheet.jpg). shoot and film
+          init --url read it by default (states/<id>/materials.json, the
+          first screen kept on each page; --no-materials skips it) and print
+          a few lines of it; this verb prints all of it, and reads a screen
+          saved before that from its state.html (one Chrome page). Listed,
+          not ranked: nothing in it says what a film uses. --state <id> one
+          page; --json the files themselves.
   frames  extract a beat-aware contact sheet (<take>/frames.png) from the
           delivered mp4: an intro row, one row per beat (a mid-travel cell +
           4 samples across the beat's camera HOLD, timed off the real camera
@@ -584,7 +609,11 @@ Usage:
           on it. The stills on the way (each, every) keep none unless the
           call says state: true; state: false keeps none; --states keeps one
           with every still, --no-states with none. About 0.3–0.5 s a screen;
-          one that cannot be read never fails the shoot.
+          one that cannot be read never fails the shoot. The first screen
+          kept on each page also reads that whole page — its images, its copy
+          below the first screen too, a sheet of it top to bottom — into
+          states/<id>/materials.json, a few lines of it printed
+          (\`open-take materials <out>\` prints all; --no-materials skips it).
           Before each still (the stills on the way too) the shoot waits until
           what is on screen stops changing — visible text and where it sits,
           finite animations on visible elements — up to 3 s (2 s a step), so
@@ -606,7 +635,11 @@ Usage:
           slow push, and quick to render. --from/--to with --into <film.mp4>
           renders only those seconds and puts them into that master, in place
           of its own; \`film mux\` puts a new soundtrack under a film without
-          rendering it again.
+          rendering it again. When a render is done it prints a few things
+          measured on the film (--no-report leaves them out): where the
+          product's words are most of the text and how big on a phone, jumps
+          not declared as cuts and how far their content moved, pictures
+          shot mid-change, live text moving under a pixel a frame.
           \`film beats\` reads a piece of music (or a film's sound) as a grid
           to cut on and writes <name>.beats.json: tempo, beats, downbeats and
           bars, sections with their energy, drops, onsets — each field
@@ -690,6 +723,9 @@ Usage:
               adds a few hundred ms of take time per state (reported). Each
               state is fidelity-checked against a live screenshot; one that
               fails stays on disk, marked failed — use the recording there.
+  --no-materials   (shoot, film init --url) don't read the whole page's
+              images and copy into states/<id>/materials.json (read: well
+              under a second per page, plus fetching its images).
   --no-components   (make/shoot) don't measure the saved screens' parts or
               write components.json (measured: 1–2 s more per saved screen —
               the probe plus one picture per part; the summary line says how
@@ -1982,7 +2018,7 @@ async function main() {
     if (has("--states") && has("--no-states"))
       throw new Error("shoot: --states or --no-states, not both");
     const profile = flag("--profile");
-    const { log, path, components } = await runShoot({
+    const { log, path, components, materials } = await runShoot({
       script,
       outDir: flag("--out") ?? "shots",
       width: size?.width,
@@ -1993,6 +2029,7 @@ async function main() {
       ...(has("--states") ? { states: true } : {}),
       ...(has("--no-states") ? { states: false } : {}),
       ...(has("--no-components") ? { components: false } : {}),
+      ...(has("--no-materials") ? { materials: false } : {}),
       ...(has("--no-steady") ? { steady: false } : {}),
     });
     const px = (n: number) => Math.round(n * log.scale);
@@ -2007,6 +2044,45 @@ async function main() {
       process.stdout.write(
         `       ${componentsLine(components.file, shown(components.path), shown(dirname(path)))}\n`,
       );
+    for (const line of materialsSummary(materials ?? [], {
+      show: shown,
+      cmd: `${INVOKE} materials ${shown(dirname(path))}`,
+    }))
+      process.stdout.write(`       ${line}\n`);
+    return;
+  }
+
+  if (cmd === "materials") {
+    const arg = positional[0];
+    if (!arg || positional.length !== 1)
+      throw new Error(
+        `materials: expected one <shots dir | take | saved screen | folder of them> — e.g. ${INVOKE} materials shots`,
+      );
+    const path = /\.mp4$/i.test(arg) ? (await resolveTakePaths(arg)).dir : arg;
+    const inv = await inventoryMaterials({
+      path,
+      ...(flag("--state") ? { state: flag("--state") } : {}),
+    });
+    if (inv.read.length)
+      process.stderr.write(
+        `materials: read ${inv.read.join(", ")} from the saved screen${inv.read.length === 1 ? "" : "s"} (state.html — sources are the saved files)\n`,
+      );
+    for (const f of inv.failed) process.stderr.write(`materials: ${f.state} not read — ${f.why}\n`);
+    if (has("--json")) {
+      process.stdout.write(
+        `${JSON.stringify(
+          inv.pages.map((p) => p.file),
+          null,
+          2,
+        )}\n`,
+      );
+      return;
+    }
+    process.stdout.write(
+      inv.pages.length
+        ? `${formatMaterials(inv.pages, { show: shown })}\n`
+        : `materials: none here — ${INVOKE} shoot (or film init --url) reads each page it keeps a saved screen of\n`,
+    );
     return;
   }
 
@@ -2116,16 +2192,18 @@ async function main() {
         "--workers",
         "--supersample",
         "--into",
+        "--no-report",
         "--verbose",
       );
       const audio = flag("--audio");
       const into = flag("--into");
+      const chromePath = await ensureChrome();
       let said = "";
       const result = await (into ? patchFilm : renderFilm)({
         into: into ?? "",
         page: target,
         out: flag("--out") ?? into ?? "film.mp4",
-        chromePath: await ensureChrome(),
+        chromePath,
         root: flag("--root"),
         width: size?.width,
         height: size?.height,
@@ -2157,6 +2235,29 @@ async function main() {
         `rendered: ${result.out}\n${result.width}×${result.height} ${result.fps} fps, ${result.durationS.toFixed(2)}s — ` +
           `${result.frames} frames, ${result.samples} samples (${result.mode} mode), ${(result.wallMs / 1000).toFixed(1)}s\n`,
       );
+      // a few things measured on the film just made, on the path every film
+      // takes; never a reason to lose the render
+      if (!has("--no-report")) {
+        const report = await filmReport({
+          film: result.out,
+          page: target,
+          root: flag("--root"),
+          chromePath,
+          supersample: num("--supersample"),
+          draft: has("--draft"),
+          onConsole,
+        }).catch((e: Error) => {
+          process.stdout.write(
+            `no measured summary: ${e.message.split("\n")[0]} — \`${INVOKE} film probe\` reads the film on its own\n`,
+          );
+          return null;
+        });
+        if (report)
+          for (const line of formatFilmReport(report, {
+            probe: `${INVOKE} film probe ${shown(result.out)} --page ${shown(target)}${has("--root") ? ` --root ${shown(flag("--root")!)}` : ""}`,
+          }))
+            process.stdout.write(`${line}\n`);
+      }
       return;
     }
     if (action === "mux") {
@@ -2173,11 +2274,16 @@ async function main() {
       return;
     }
     if (action === "init") {
-      only("--force", "--url", "--size", "--profile", "--no-steady", "--from");
+      only("--force", "--url", "--size", "--profile", "--no-steady", "--no-materials", "--from");
       const url = flag("--url");
       if (has("--url") && !url) throw new Error("film init: --url <url> is the product's page");
-      if (!url && (has("--size") || has("--profile") || has("--no-steady")))
-        throw new Error("film init: --size, --profile and --no-steady go with --url");
+      if (
+        !url &&
+        (has("--size") || has("--profile") || has("--no-steady") || has("--no-materials"))
+      )
+        throw new Error(
+          "film init: --size, --profile, --no-steady and --no-materials go with --url",
+        );
       if (url) {
         // the product's landing page, before the starter page is written so
         // that it can name what is there; neither step stops the init
@@ -2191,6 +2297,7 @@ async function main() {
           chromePath,
           ...(profile ? { userDataDir: profileDir(profile) } : {}),
           ...(has("--no-steady") ? { steady: false } : {}),
+          ...(has("--no-materials") ? { materials: false } : {}),
         }).catch((e: Error) => {
           process.stdout.write(`no saved screen of ${url}: ${e.message}\n`);
           return null;
@@ -2210,6 +2317,12 @@ async function main() {
           process.stdout.write(
             `${componentsLine(home.components.file, shown(home.components.path), shown(home.dir))}\n`,
           );
+        if (home?.materials)
+          for (const line of materialsSummary([home.materials], {
+            show: shown,
+            cmd: `${INVOKE} materials ${shown(home.dir)}`,
+          }))
+            process.stdout.write(`${line}\n`);
         const look = await filmLook({
           source: home ? home.dir : url,
           out: join(resolve(target), "look"),

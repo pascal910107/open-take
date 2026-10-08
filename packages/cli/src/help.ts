@@ -9,7 +9,7 @@
 
 /** the flags each `film <sub>` accepts — the same lists its `only(…)` call in cli.ts takes */
 export const FILM_FLAGS: Record<string, string[]> = {
-  init: ["--force", "--url", "--size", "--profile", "--no-steady", "--from"],
+  init: ["--force", "--url", "--size", "--profile", "--no-steady", "--no-materials", "--from"],
   render: [
     "--out",
     "--root",
@@ -24,6 +24,7 @@ export const FILM_FLAGS: Record<string, string[]> = {
     "--workers",
     "--supersample",
     "--into",
+    "--no-report",
     "--verbose",
   ],
   mux: ["--audio", "--out"],
@@ -80,13 +81,17 @@ kept and listed; --force replaces it.
   --profile <name>   a signed-in Chrome profile for --url (as for make)
   --no-steady        keep the page at once for --url, not once what is on
                      screen stops changing (as for shoot)
+  --no-materials     don't read the whole page for --url (as for shoot)
   --from <dir>       a shoot's folder or a take the film is made from: its
                      component inventory (components.json — each part's
                      values with where they were read, its relations) is
                      measured where missing and pointed to; nothing is
                      written into <dir> for it and the page to start from
                      is unchanged
-With --url the saved screen's parts are measured too (states/home/components.json).`,
+With --url the saved screen's parts are measured too (states/home/components.json),
+and the whole page is read: its images (saved in states/assets/), its copy
+below the first screen too, and the page as one sheet
+(states/home/materials.json, sheet.jpg; all of it: open-take materials <dir>).`,
   render: `Play the page on film time in headless Chrome and write an H.264 master
 (default film.mp4) with measured motion blur and the page's soundtrack. The
 page is driven by window.__render(t), or its own CSS/WAAPI/rAF/GSAP/video
@@ -105,6 +110,13 @@ it. A <video> on the page is shown from its decoded frames.
   --workers <n>        Chrome pages rendering in parallel (default: chosen
                        for this machine)
   --verbose            pass every page console line through
+  --no-report          don't print what was measured on the film when it
+                       is done (a few seconds: where the product's words are
+                       most of the text and their size on a phone, jumps not
+                       declared as cuts and how far their content moved,
+                       pictures shot while the product's screen was still
+                       changing, live text moving under a pixel a frame —
+                       \`film probe\` reads all of it and more)
 ${SUPERSAMPLE}
 ${ROOT}`,
   mux: `Put a new soundtrack under a rendered film without rendering the picture

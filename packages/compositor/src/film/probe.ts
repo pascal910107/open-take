@@ -197,6 +197,78 @@ export function findSmallSwaps(
   return out;
 }
 
+export type JumpMove = {
+  /** share of the frame's blocks the jump changes */
+  changed: number;
+  /** the changed blocks with texture, and of them those found again nearby
+   *  in the next frame, moved the same way together */
+  textured: number;
+  moved: number;
+  /** where the moved blocks went (median, grey px, to a fraction of one);
+   *  null: nothing that changed was found moved — swapped where it stood */
+  shift: { x: number; y: number } | null;
+};
+
+/** what a one-frame jump into frame `i` did to the content: each textured
+ *  block of the frame before that the jump changed, looked for within
+ *  `radius` grey px in frame `i` (a close match for its own contrast), its
+ *  offset refined to a fraction of a pixel. A card that jumps is found moved
+ *  by how far it went; a word or a picture swapped in place is not found.
+ *  Estimated on the grey copy: one grey px is the film's width / `g.w`. */
+export function jumpMove(g: GreyFrames, i: number, radius = 16): JumpMove {
+  const a = frameAt(g, i - 1);
+  const b = frameAt(g, i);
+  const { bx, by } = blocksOf(g);
+  const d = blockDiff(g, a, b);
+  const st = blockStats(g, a);
+  const N = BLOCK * BLOCK;
+  const sad = (x: number, y: number, nx: number, ny: number) => {
+    if (nx < 0 || ny < 0 || nx + BLOCK > g.w || ny + BLOCK > g.h) return Number.NaN;
+    let s = 0;
+    for (let r = 0; r < BLOCK; r++)
+      for (let c = 0; c < BLOCK; c++)
+        s += Math.abs(a[(y + r) * g.w + x + c]! - b[(ny + r) * g.w + nx + c]!);
+    return s;
+  };
+  // the minimum of a parabola through three costs, as an offset from the middle
+  const vertex = (l: number, m: number, r: number) => {
+    const den = l - 2 * m + r;
+    return Number.isFinite(den) && den > 0 ? Math.max(-0.5, Math.min(0.5, (l - r) / (2 * den))) : 0;
+  };
+  let changed = 0;
+  let textured = 0;
+  const xs: number[] = [];
+  const ys: number[] = [];
+  for (let k = 0; k < bx * by; k++) {
+    if (d[k]! <= 12) continue;
+    changed++;
+    if (st.std[k]! < FLAT_STD) continue;
+    textured++;
+    const x = (k % bx) * BLOCK;
+    const y = Math.floor(k / bx) * BLOCK;
+    const m = searchBlock(g, a, b, x, y, [[0, 0]], radius);
+    if (m.x === x && m.y === y) continue;
+    if (m.best / N > Math.min(14, 0.35 * st.std[k]!)) continue;
+    if (patchStd(g, b, m.x, m.y) < FLAT_STD) continue;
+    xs.push(m.x - x + vertex(sad(x, y, m.x - 1, m.y), m.best, sad(x, y, m.x + 1, m.y)));
+    ys.push(m.y - y + vertex(sad(x, y, m.x, m.y - 1), m.best, sad(x, y, m.x, m.y + 1)));
+  }
+  const n = bx * by;
+  // a move is the changed blocks going one way together: those within 1.5 px
+  // of where most went, a sixth of what changed at least (stray matches
+  // in a swap scatter; a line of text can also match a glyph or two along)
+  const mx = median(xs);
+  const my = median(ys);
+  const together = xs.filter((x, k) => Math.hypot(x - mx, ys[k]! - my) <= 1.5).length;
+  const isMove = together >= 3 && together >= 0.15 * textured;
+  return {
+    changed: changed / n,
+    textured: textured / n,
+    moved: (isMove ? together : 0) / n,
+    shift: isMove ? { x: mx, y: my } : null,
+  };
+}
+
 /** stretches where the picture does not change (every frame's change under
  *  `under`, 0..1) for at least `minS` seconds, as frame ranges [a, b) */
 export function findStills(
@@ -3215,7 +3287,7 @@ function scalePageSample(s: PageTextSample, k: number): PageTextSample {
     ...s,
     own: s.own.map((o) => ({ ...o, px: o.px * k, boxes: o.boxes.map(b) })),
     sizes: s.sizes.map(([px, n]) => [px * k, n] as [number, number]),
-    media: s.media.map((m) => ({ ...m, box: b(m.box) })),
+    media: s.media.map((m) => ({ ...m, box: b(m.box), ...(m.drawn ? { drawn: b(m.drawn) } : {}) })),
     subjects: Object.fromEntries(Object.entries(s.subjects).map(([n, x]) => [n, x ? b(x) : null])),
   };
 }

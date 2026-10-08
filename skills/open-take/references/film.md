@@ -18,13 +18,16 @@ reordered or done another way; nothing checks that it was followed.
    a file it makes, a sound — and what exists about it outside the app (its
    About page, repository, store listing, changelog). A shoot's or a take's
    saved screens come with `components.json`: each part they hold, its
-   values, what an action changed. In earlier films the pace often followed
+   values, what an action changed; the first screen kept on each page with
+   `materials.json`: that whole page's images (saved), its copy below the
+   first screen too, and a sheet of it top to bottom. In earlier films the pace often followed
    the material more than the plan (`skill film material`).
 2. **The main line** — what the film is about, in one sentence.
 3. **A beat sheet**, if you keep one: `tl.segment` in `time.js` — what each
    stretch is meant to do, what moves, what holds, how it hands over to the
    next, what is heard. Free words; nothing grades them.
-4. **A draft** — `film render --draft`, `film still`, `film sheet`.
+4. **A draft** — `film render --draft`, `film still`, `film sheet`. A render
+   ends with a few lines measured on the film (`--no-report` leaves them out).
 5. **Look and listen** — `film probe`, `film listen`, `film check`: what the
    picture and the sound did, beside what the page declared, each line
    measured, estimated or not detected (`skill film checking`).
@@ -54,6 +57,9 @@ Capabilities and where each is described; none of them is a step.
   changed → `components.json` (`shoot` and `make --states` write it;
   `open-take components <dir>`; `film init --from <dir>`); it lists, it does
   not pick — `skill film material`
+- what the whole page holds, top to bottom — its images with alt, largest
+  source and a saved copy, its headings and copy, a sheet of it →
+  `materials.json` (`shoot`, `film init --url`; `open-take materials <dir>`)
 - where a number or a string on screen comes from → a part's values, a live
   URL, or a note that it is demo data: `tl.source`; `readValues(url, { tl })`
   says it for what it reads; `film probe` sets the film's numbers beside

@@ -153,8 +153,25 @@ test("launch help exposes init, recipe compose, cheap check, and editable render
   assert.match(result.out, /launch render <launch\.json>/);
 });
 
-test("film init takes --no-steady with --url only, before touching files or Chrome", async () => {
-  const r = await run(["film", "init", "some-film", "--no-steady"]);
-  assert.equal(r.code, 1);
-  assert.match(r.err, /--no-steady go with --url/);
+test("film init takes --no-steady and --no-materials with --url only, before touching files or Chrome", async () => {
+  for (const f of ["--no-steady", "--no-materials"]) {
+    const r = await run(["film", "init", "some-film", f]);
+    assert.equal(r.code, 1);
+    assert.match(r.err, /--no-steady and --no-materials go with --url/);
+  }
+});
+
+test("materials takes one source, and only its own flags", async () => {
+  const none = await run(["materials"]);
+  assert.equal(none.code, 1);
+  assert.match(
+    none.err,
+    /materials: expected one <shots dir \| take \| saved screen \| folder of them>/,
+  );
+  const bad = await run(["materials", "shots", "--snippet", "x"]);
+  assert.equal(bad.code, 1);
+  assert.match(bad.err, /materials: unknown flag --snippet — allowed: --state --json/);
+  const missing = await run(["materials", "no-such-folder-here"]);
+  assert.equal(missing.code, 1);
+  assert.match(missing.err, /materials: no folder at /);
 });

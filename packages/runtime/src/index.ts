@@ -54,6 +54,7 @@ export {
   filmLook,
   filmPicture,
   filmProbe,
+  filmReport,
   filmSheet,
   filmStills,
   formatComponents,
@@ -62,8 +63,13 @@ export {
   formatFilmListen,
   formatFilmLook,
   formatFilmProbe,
+  formatFilmReport,
   formatIssues,
+  formatMaterials,
   initFilm,
+  type MaterialsFile,
+  type MaterialsPage,
+  materialsSummary,
   muxFilm,
   pageMaterialNote,
   patchFilm,
@@ -145,6 +151,7 @@ export {
 } from "./frames";
 export { checkLaunchFile, composeLaunchFile, initLaunchProject, renderLaunchFile } from "./launch";
 export { lintPlan, type PlanIssue } from "./lint-plan";
+export { inventoryMaterials, type MaterialsInventory } from "./materials";
 export { type NavigateTarget, resolveNavigateUrl } from "./nav";
 export {
   formatNotes,

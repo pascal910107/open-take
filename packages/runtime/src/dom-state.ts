@@ -1432,6 +1432,9 @@ export async function finalizeDomStates(args: {
   /** measure each state's parts in the same page (parts.json + crisp
    *  pictures in states/assets/) — default true; false skips it */
   parts?: boolean;
+  /** run on each state's restored page once it is checked and measured
+   *  (the shoot's full-page sheet); what it throws is a line, not a failure */
+  afterRender?: (cdp: CDP, raw: DomStateRaw) => Promise<void>;
 }): Promise<DomStateItem[]> {
   const warn = (l: string) => console.error(l);
   const assetsDir = join(args.statesDir, "assets");
@@ -1537,6 +1540,11 @@ export async function finalizeDomStates(args: {
             .filter((m) => m.box && !m.blank)
             .map((m) => m.box!);
           fidelity = await measureFidelity(ffmpeg, join(raw.dir, "live.png"), statePng, moving);
+          if (args.afterRender)
+            await args.afterRender(page.cdp, raw).catch(async (e) => {
+              warn(`dom-state ${raw.id}: ${(e as Error).message}`);
+              await dropPage(raw.id, e);
+            });
           if (shot.misses)
             warn(
               `dom-state ${raw.id}: ${shot.misses} element path(s) did not resolve in state.html`,
@@ -1570,7 +1578,7 @@ export async function finalizeDomStates(args: {
 
 /** close a page openFidelityPage opened (never throws, never waits long:
  *  its target may be the one that stopped answering) */
-async function closeFidelityPage(
+export async function closeFidelityPage(
   browser: Browser,
   page: { cdp: CDP; targetId: string },
 ): Promise<void> {
@@ -1581,7 +1589,7 @@ async function closeFidelityPage(
 }
 
 /** a second page target in the same Chrome, emulated at vw×vh @1× */
-async function openFidelityPage(
+export async function openFidelityPage(
   browser: Browser,
   vw: number,
   vh: number,
@@ -1621,7 +1629,7 @@ async function setUpFidelityPage(cdp: CDP, vw: number, vh: number): Promise<void
 }
 
 /** Open a state.html (file://), wait for the restore script's ready flag, screenshot at 1×. */
-async function renderState(
+export async function renderState(
   cdp: CDP,
   stateHtml: string,
   vw: number,

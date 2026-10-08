@@ -53,8 +53,10 @@ export type PageTextSample = {
   grid: string[];
   /** pictures on the page: img, video, canvas, iframe, a background image;
    *  `src` the file it shows (a URL as the page has it; after
-   *  readPageText, a path from the served root when it is served there) */
-  media: { label: string; box: Box; src?: string }[];
+   *  readPageText, a path from the served root when it is served there);
+   *  for an <img>, `drawn`: where its whole image is drawn (object-fit
+   *  and transforms taken in, the clip not), and its own size in px */
+  media: { label: string; box: Box; src?: string; drawn?: Box; natural?: [number, number] }[];
   /** where each named subject (a CSS selector) is drawn; null: an element
    *  matches but is not visible; absent: no element matches */
   subjects: Record<string, Box | null>;
@@ -72,6 +74,8 @@ export type PageTextReading = {
   segments: unknown;
   /** times the page threw at, twice, and was not read */
   failed: { t: number; error: string }[];
+  /** what the page says it is (window.__ot.prepare()) */
+  info: FilmPageInfo;
 };
 
 // --- the page --------------------------------------------------------------------------
@@ -274,7 +278,7 @@ function probeText(subjects: string[]): Omit<PageTextSample, "t"> {
   }
 
   // pictures on the film's own page, as far as they show
-  const media: { label: string; box: Box; src?: string }[] = [];
+  const media: Omit<PageTextSample, "t">["media"] = [];
   for (const el of Array.from(document.body?.querySelectorAll("*") ?? [])) {
     const tag = el.localName;
     let picture = ["img", "video", "canvas", "iframe", "picture", "image"].includes(tag);
@@ -300,10 +304,47 @@ function probeText(subjects: string[]): Omit<PageTextSample, "t"> {
     const c = clipOf(el.parentElement, window, top, frame);
     const v = c && inter(top(r), c);
     if (!v) continue;
+    // an image's own pixels on the frame: its box as laid out, fitted as
+    // object-fit says (centred), then as transformed
+    let drawn: Box | undefined;
+    let natural: [number, number] | undefined;
+    if (tag === "img") {
+      const im = el as HTMLImageElement;
+      const nw = im.naturalWidth;
+      const nh = im.naturalHeight;
+      const lw = im.offsetWidth;
+      const lh = im.offsetHeight;
+      if (nw && nh && lw && lh) {
+        const fit = getComputedStyle(im).objectFit;
+        const contain = Math.min(lw / nw, lh / nh);
+        const [fx, fy] =
+          fit === "contain"
+            ? [contain, contain]
+            : fit === "cover"
+              ? [Math.max(lw / nw, lh / nh), Math.max(lw / nw, lh / nh)]
+              : fit === "none"
+                ? [1, 1]
+                : fit === "scale-down"
+                  ? [Math.min(1, contain), Math.min(1, contain)]
+                  : [lw / nw, lh / nh];
+        const kx = r.width / lw;
+        const ky = r.height / lh;
+        const dw = nw * fx * kx;
+        const dh = nh * fy * ky;
+        drawn = [
+          Math.round((r.left + (r.width - dw) / 2) * 10) / 10,
+          Math.round((r.top + (r.height - dh) / 2) * 10) / 10,
+          Math.round(dw * 10) / 10,
+          Math.round(dh * 10) / 10,
+        ];
+        natural = [nw, nh];
+      }
+    }
     media.push({
       label: describe(el).slice(0, 60),
       box: [Math.round(v.x), Math.round(v.y), Math.round(v.w), Math.round(v.h)],
       ...(src && !src.startsWith("data:") && !src.startsWith("blob:") ? { src } : {}),
+      ...(drawn ? { drawn, natural } : {}),
     });
   }
 
@@ -436,7 +477,7 @@ export async function readPageText(opts: {
         }
         if (error) failed.push({ t, error });
       }
-      return { samples, root, width, height, segments, failed };
+      return { samples, root, width, height, segments, failed, info };
     } finally {
       await browser.close();
     }
@@ -549,7 +590,7 @@ export function ocrHelper(): Promise<string | null> {
 }
 
 /** run the helper over images: one parsed result per image, in order */
-function runOcr(
+export function runOcr(
   bin: string,
   files: readonly string[],
 ): Promise<

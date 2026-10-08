@@ -84,7 +84,13 @@ import { pathToFileURL } from "node:url";
 import {
   type ComponentsFile,
   gatherComponents,
+  type MaterialSheet,
+  type MaterialsPage,
+  type MaterialsProbeResult,
+  pageKey,
   readComponentSource,
+  readMaterials,
+  resolveFfmpeg,
   writeComponents,
 } from "@open-take/compositor";
 import {
@@ -105,6 +111,7 @@ import {
   type DomStateRaw,
   finalizeDomStates,
 } from "./dom-state";
+import { finishPageMaterials, readPageMaterials, takeSheet } from "./materials";
 import { DEFAULT_SETTLE_BUDGET_MS, installActivityProbe, settle } from "./settle";
 import { SCREEN_JS, type Screen, type SteadyOutcome, screenChange, waitSteady } from "./steady";
 
@@ -293,6 +300,11 @@ export type ShootOpts = {
    *  pictures in states/assets/) and gather them into <out>/components.json —
    *  default true; false skips both */
   components?: boolean;
+  /** read the whole page of each page the shoot keeps a saved screen of —
+   *  its images (saved in states/assets/), its copy, and the page as one
+   *  small sheet — into states/<id>/materials.json, the first screen kept on
+   *  each page (compositor film/materials.ts); default true, false skips it */
+  materials?: boolean;
   /** advisories (default: stderr) */
   onNote?: (line: string) => void;
 };
@@ -567,6 +579,8 @@ export async function runShoot(opts: ShootOpts): Promise<{
   path: string;
   /** the component inventory, when the shoot kept saved screens */
   components?: { file: ComponentsFile; path: string };
+  /** each page's material list (paths in <out>/states/), in shooting order */
+  materials?: MaterialsPage[];
 }> {
   const out = resolve(opts.outDir);
   const stage = join(out, ".shoot");
@@ -592,7 +606,10 @@ export async function runShoot(opts: ShootOpts): Promise<{
   let raw: CDP | null = null;
   const stills: ShootStill[] = [];
   const kept: DomStateRaw[] = [];
+  /** each page's material, read live with the first screen kept on it */
+  const scans: PageScan[] = [];
   let items: ShootStateItem[] = [];
+  let materials: MaterialsPage[] = [];
   let viewport = { w: width, h: height };
   try {
     browser = await launchBrowser({
@@ -632,6 +649,7 @@ export async function runShoot(opts: ShootOpts): Promise<{
       states: opts.states,
       steady: opts.steady !== false,
       kept,
+      ...(opts.materials !== false ? { scans } : {}),
     });
     let failed: string | null = null;
     try {
@@ -647,7 +665,9 @@ export async function runShoot(opts: ShootOpts): Promise<{
       viewport,
       note,
       opts.components !== false,
+      scans,
     );
+    materials = await finishMaterials(stage, scans, items, note);
     if (failed != null) {
       const partial: ShootLog = {
         viewport,
@@ -696,7 +716,52 @@ export async function runShoot(opts: ShootOpts): Promise<{
     log,
     path: join(out, "shots.json"),
     ...(inventory ? { components: { file: inventory, path: join(out, "components.json") } } : {}),
+    // where they are now: the screens moved from the stage into <out>
+    ...(materials.length ? { materials: placedMaterials(out, materials) } : {}),
   };
+}
+
+/** A page read live as a saved screen of it was kept, and its sheet once
+ *  the screen is restored. */
+type PageScan = {
+  id: string;
+  url: string;
+  res: Exclude<MaterialsProbeResult, { error: string }>;
+  sheet?: MaterialSheet & { ms: number };
+};
+
+/** Each page's material list, written beside its saved screen; one that
+ *  cannot be is a line. Screens that did not finish are skipped. */
+async function finishMaterials(
+  stage: string,
+  scans: PageScan[],
+  items: ShootStateItem[],
+  note: (line: string) => void,
+): Promise<MaterialsPage[]> {
+  const pages: MaterialsPage[] = [];
+  for (const sc of scans) {
+    if (!items.some((i) => i.id === sc.id)) continue;
+    const page = await finishPageMaterials({
+      res: sc.res,
+      id: sc.id,
+      stateDir: join(stage, "states", sc.id),
+      assetsDir: join(stage, "states", "assets"),
+      ...(sc.sheet ? { sheet: sc.sheet } : {}),
+      note,
+    });
+    if (page) pages.push(page);
+  }
+  return pages;
+}
+
+/** the material lists as they are once the shoot is in place in `out` */
+function placedMaterials(out: string, staged: MaterialsPage[]): MaterialsPage[] {
+  const ids = new Set(staged.map((p) => p.id));
+  return readMaterials({
+    kind: "states",
+    root: out,
+    states: [...ids].map((id) => ({ id, dir: join(out, "states", id) })),
+  }).pages;
 }
 
 const logStates = (items: ShootStateItem[]): Pick<ShootLog, "states"> =>
@@ -713,9 +778,13 @@ async function finishStates(
   viewport: { w: number; h: number },
   note: (line: string) => void,
   parts: boolean,
+  scans: PageScan[] = [],
 ): Promise<ShootStateItem[]> {
   if (!kept.length) return [];
   let done: DomStateItem[];
+  // each page read live is drawn whole from its restored screen
+  let ffmpeg: string | undefined;
+  if (scans.length) ffmpeg = await resolveFfmpeg().catch(() => undefined);
   try {
     done = await finalizeDomStates({
       browser,
@@ -724,6 +793,21 @@ async function finishStates(
       vw: viewport.w,
       vh: viewport.h,
       parts,
+      ...(scans.length
+        ? {
+            afterRender: async (cdp: CDP, raw: DomStateRaw) => {
+              const sc = scans.find((x) => x.id === raw.id);
+              if (!sc) return;
+              const t0 = Date.now();
+              try {
+                const sheet = await takeSheet(cdp, { stateDir: raw.dir, vw: viewport.w, ffmpeg });
+                sc.sheet = { ...sheet, ms: Date.now() - t0 };
+              } catch (e) {
+                throw new Error(`no sheet of the page (${(e as Error).message})`);
+              }
+            },
+          }
+        : {}),
     });
   } catch (e) {
     note(`shoot: the saved screens could not be finished (${(e as Error).message})`);
@@ -958,6 +1042,8 @@ type Ctx = {
   steady: boolean;
   /** the saved screens kept so far, raw (finished once the script is done) */
   kept: DomStateRaw[];
+  /** pages read so far (absent: --no-materials) */
+  scans?: PageScan[];
 };
 
 async function shoot(ctx: Ctx): Promise<Shoot> {
@@ -1090,6 +1176,8 @@ async function shoot(ctx: Ctx): Promise<Shoot> {
       );
   };
 
+  /** pages whose material could not be read (not tried again) */
+  const unread = new Set<string>();
   /** the interface as the still shows it, kept as a saved screen (the same
    *  read-only capture as `make --states`); a page that cannot be read keeps
    *  the still without one */
@@ -1113,7 +1201,19 @@ async function shoot(ctx: Ctx): Promise<Shoot> {
       note(
         `shoot: ${still.file} kept no saved screen (${(e as Error).message}) — the still is fine`,
       );
+      return;
     }
+    // the first screen kept on a page: read the whole page (read-only)
+    const url = pageKey(kept[kept.length - 1]!.probe.url);
+    if (ctx.scans && !ctx.scans.some((sc) => sc.url === url) && !unread.has(url))
+      try {
+        const res = await within(readPageMaterials(cdp), 15_000);
+        if (!res) throw new Error("the page did not answer within 15 s");
+        ctx.scans.push({ id, url, res });
+      } catch (e) {
+        unread.add(url);
+        note(`shoot: the material of ${url} was not read (${(e as Error).message})`);
+      }
   };
 
   /** what is on screen now (steady.ts); null while the page cannot be read */
@@ -1674,6 +1774,8 @@ export type ShootHomeOpts = {
   userDataDir?: string;
   /** measure its parts and write states/<name>/components.json (default true) */
   components?: boolean;
+  /** read the whole page into states/<name>/materials.json (default true) */
+  materials?: boolean;
   /** wait for what is on screen to stop changing first (default true; see
    *  ShootOpts.steady) */
   steady?: boolean;
@@ -1692,6 +1794,8 @@ export async function shootHome(opts: ShootHomeOpts): Promise<{
   fidelity: ShootStateItem["fidelity"];
   /** its component inventory, states/<name>/components.json */
   components?: { file: ComponentsFile; path: string };
+  /** the whole page's material, states/<name>/materials.json */
+  materials?: MaterialsPage;
   /** present when the screen was still changing as it was kept (the
    *  still's `moving`: its shoot log is not kept) */
   moving?: ShootMoving;
@@ -1717,6 +1821,7 @@ export async function shootHome(opts: ShootHomeOpts): Promise<{
       ...(opts.userDataDir ? { userDataDir: opts.userDataDir } : {}),
       ...(opts.onNote ? { onNote: opts.onNote } : {}),
       ...(opts.components === false ? { components: false } : {}),
+      ...(opts.materials === false ? { materials: false } : {}),
       ...(opts.steady === false ? { steady: false } : {}),
     });
     const item = log.states?.items.find((i) => i.id === name);
@@ -1738,12 +1843,17 @@ export async function shootHome(opts: ShootHomeOpts): Promise<{
           `shoot: no components.json for ${name} (${(e as Error).message})`,
         );
       }
+    const materials =
+      opts.materials === false
+        ? undefined
+        : readMaterials({ kind: "state", root: to, states: [{ id: name, dir: to }] }).pages[0];
     return {
       dir: to,
       url: page.url,
       title: page.title,
       fidelity: item.fidelity,
       ...(components ? { components } : {}),
+      ...(materials ? { materials } : {}),
       ...(moving ? { moving } : {}),
     };
   } finally {

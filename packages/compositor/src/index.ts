@@ -116,6 +116,32 @@ export {
   subsetFont,
   textWidth,
 } from "./film/look";
+export {
+  adHost,
+  copyLine,
+  formatMaterials,
+  imageFileSize,
+  imageLine,
+  largestSource,
+  MATERIALS_PROBE_JS,
+  type MaterialCandidate,
+  type MaterialImage,
+  type MaterialKind,
+  type MaterialMeta,
+  type MaterialProbeImage,
+  type MaterialSheet,
+  type MaterialSkipped,
+  type MaterialsFile,
+  type MaterialsPage,
+  type MaterialsProbeResult,
+  type MaterialText,
+  materialsFromProbe,
+  materialsProbeExpression,
+  materialsScope,
+  materialsSummary,
+  pageKey,
+  readMaterials,
+} from "./film/materials";
 export { type FilmPictureOptions, filmPicture } from "./film/picture";
 export {
   type FilmProbe,
@@ -141,6 +167,12 @@ export {
   patchFilm,
   renderFilm,
 } from "./film/render";
+export {
+  type FilmReport,
+  type FilmReportOptions,
+  filmReport,
+  formatFilmReport,
+} from "./film/report";
 export { type FilmSheetOptions, filmSheet } from "./film/sheet";
 export {
   evaluateUiMorph,

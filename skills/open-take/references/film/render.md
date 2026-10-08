@@ -41,6 +41,17 @@ shutters can be missed) — and the page's beat sheet as `segments`
 `--from --to --into` patch updates the master's file in place. The score's
 script reads it, so the sound follows the picture as rendered.
 
+When a render is done it prints a few lines measured on the film it made,
+each saying what it covered (`--no-report` leaves them out; they take a few
+seconds): where the product's own words — its saved screens, and the text
+in its pictures read from their files — are most of the text on screen, and
+how big they are on a phone; the one-frame jumps the page did not declare as
+cuts, and how far their content moved (a card that jumps, a saved screen
+swapped under the camera, a line re-centred as it is typed) or that it
+changed in place; pictures on screen that their shoot took while the
+product's screen was still changing; live text moving under a pixel a
+frame. Facts, not grades; `film probe` reads all of it and more.
+
 Text that moves slowly — a slow push or drift across an interface — steps a
 pixel at a time, because Chrome places each glyph on a whole pixel. Push a
 picture of the screen, not the live screen: shoot it once at twice the

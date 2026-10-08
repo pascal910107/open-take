@@ -228,6 +228,30 @@ with a reason each. `open-take components <dir> --snippet <ref>` prints a
 module that lifts the part you name and moves it on its own values (a
 number counts only from a value a screen before it held).
 
+### The whole page: `materials.json`
+
+`components.json` measures what is on screen at a saved moment; the first
+screen `shoot` (or `film init --url`) keeps on each page also reads that
+whole page, top to bottom, into `states/<id>/materials.json`
+(`--no-materials` skips it), and prints a few lines of it.
+`npx open-take materials <dir>` prints all of it in page order with where
+the first screen ends, and reads a screen saved before this from its
+`state.html`. It lists, in page order, and picks nothing:
+
+- `images[]` — `<img>`/`<picture>`, inline `<svg>` drawings, CSS
+  background images, `<video>`, `<canvas>`: `kind`, `box` (page px, y from
+  the top of the whole page), `alt` / `name`, `src` (the largest source the
+  page offers, `srcW` its width), `natural`, `file` (a saved copy in
+  `states/assets/`, `fileSize`), or `notSaved` with why; `firstScreen`,
+  `in` (nav, header, footer…), `hidden` ("opacity 0" — a reveal not yet
+  run, "outside the page width" — a carousel slide), `selector`;
+- `copy[]` — headings (`level`), paragraphs, list items, quotes, captions,
+  text set larger than the body: `tag`, `text`, `fontPx`, `weight`, `box`,
+  `firstScreen`, `in`, `hidden`;
+- `meta` (description, og:image and its saved copy), `sheet` (the page as
+  one small picture in columns, `columnPx` page px each, from the saved
+  screen), `skipped` (counted with a reason), `scope` (what was read).
+
 ### Where the values come from
 
 ```js

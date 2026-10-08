@@ -1063,7 +1063,7 @@ function ratio(r: string | undefined): number {
 /** a rendered film's picture: size, rate, length in frames, and the record
  *  `film render` keeps in it (where it starts on the page's timeline) —
  *  `made` when there is one */
-async function probeFilm(file: string): Promise<{
+export async function probeFilm(file: string): Promise<{
   width: number;
   height: number;
   fps: number;
