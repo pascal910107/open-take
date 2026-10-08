@@ -1718,6 +1718,64 @@ export function carry(A, B, t, a, b, o = {}) {
 }
 
 /**
+ * Keep one part of the product in place while its saved screens are swapped
+ * in turn: in each screen but the `to`th, the part is moved (CSS translate)
+ * to where it sits in that one. A wizard's card that the product moves down
+ * as it adds a row stays where the eye was; the rest of each screen stays as
+ * the product laid it out. Points taken on a screen (a click's cursor) move
+ * with it: `point(i, p)`. `axis` "y" or "x" keeps only that one; `release()`
+ * puts every screen back.
+ *
+ *   await Promise.all(screens.map((s) => s.ready));
+ *   const card = hold(screens, { text: "從你的生活圈開始", up: 2 });
+ *   kh.click(card.point(1, shotOf("click-2").cursor), t2);
+ *
+ * film render reports the one-frame jumps the page did not declare, and how
+ * far; this is one way to keep a part from jumping, when that is wanted.
+ * @param {any[]} screens saved screens (or their iframes), in the order shown
+ * @param {string | Element | TextKey | (string | Element | TextKey)[]} key the part, in every screen, or one key per screen
+ * @param {{ to?: number, axis?: "x" | "y" | "both" }} [o]
+ */
+export function hold(screens, key, o = {}) {
+  const { to = 0, axis = "both" } = o;
+  const frames = screens.map((s) => /** @type {HTMLIFrameElement} */ (s.frame ?? s));
+  const parts = frames.map((f, i) => {
+    const doc = f.contentDocument;
+    if (!doc) throw new Error(`hold: screen ${i} is not same-origin, or not loaded`);
+    const k = Array.isArray(key) ? key[i] : key;
+    if (k == null) throw new Error(`hold: no key for screen ${i}`);
+    return /** @type {HTMLElement} */ (findIn(doc, k, "hold"));
+  });
+  const home = parts[to];
+  if (!home) throw new Error(`hold: no screen ${to} among ${frames.length}`);
+  const at = home.getBoundingClientRect();
+  const was = parts.map((el) => el.style.translate);
+  const offsets = parts.map((el, i) => {
+    if (i === to) return { dx: 0, dy: 0 };
+    const r = el.getBoundingClientRect();
+    const dx = axis === "y" ? 0 : at.left - r.left;
+    const dy = axis === "x" ? 0 : at.top - r.top;
+    if (Math.abs(dx) > 1e-3 || Math.abs(dy) > 1e-3) el.style.translate = `${dx}px ${dy}px`;
+    return { dx, dy };
+  });
+  return {
+    /** how far each screen's part was moved, its own px */
+    offsets,
+    /** a point on screen i (its own px), moved as its part was
+     * @param {number} i @param {{ x: number, y: number }} p */
+    point(i, p) {
+      const d = offsets[i] ?? { dx: 0, dy: 0 };
+      return { ...p, x: p.x + d.dx, y: p.y + d.dy };
+    },
+    release() {
+      parts.forEach((el, i) => {
+        el.style.translate = was[i] ?? "";
+      });
+    },
+  };
+}
+
+/**
  * Show a saved screen with everything but the chosen parts faded away: an
  * overlay over the screen (in the screen's parent, so a camera on that layer
  * carries it) with holes cut where the parts are. `set(p)` takes it from

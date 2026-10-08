@@ -58,11 +58,13 @@ export const LAUNCH_FLAGS: Record<string, string[]> = {
   render: ["--out", "--draft", "--verbose"],
 };
 
-const SUPERSAMPLE = `--supersample <n> draws each frame at n× the pixels each way and averages
-it down (default 1: the film's own size): text in a slow zoom or drift steps
-less (Chrome places glyphs on whole pixels), for about 1.3–2× the render time
-at 2; 3 smooths further. A slow push on a screen is steadiest as a picture of
-it shot at twice the pixels (\`film picture\`), rendered with --supersample 3.`;
+const SUPERSAMPLE = `--supersample <n> draws every frame at n× the pixels each way and averages
+it down. Without it, a render draws at 3× only the frames where the page's
+text moves under a device pixel a frame (Chrome places glyphs on whole
+pixels, so it steps there), up to the nearest cut or fast move, and prints
+where; --supersample 1 draws every frame at the film's own size. A slow push
+on a screen is steadiest as a picture of it shot at twice the pixels
+(\`film picture\`), rendered with --supersample 3.`;
 
 const ROOT = `--root <dir> is the directory the page is served from (default: the current
 directory when the page is inside it, else the page's own folder), for a page

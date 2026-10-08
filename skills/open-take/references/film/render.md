@@ -52,11 +52,19 @@ changed in place; pictures on screen that their shoot took while the
 product's screen was still changing; live text moving under a pixel a
 frame. Facts, not grades; `film probe` reads all of it and more.
 
-Text that moves slowly — a slow push or drift across an interface — steps a
-pixel at a time, because Chrome places each glyph on a whole pixel. Push a
-picture of the screen, not the live screen: shoot it once at twice the
-pixels, show that picture at the screen's size, and render with
-`--supersample 3`:
+Text that moves slowly on a live page — a slow push or drift across an
+interface, the ease into and out of a move, the settle at its end — steps a
+pixel at a time, because Chrome places each glyph on a whole pixel. A render
+draws those frames at 3× the pixels each way and averages them down, each
+stretch reaching to the nearest cut or fast move so that the change does not
+show, and says where (`drawn at 3× …`). On two stretches of one film (a
+4.8 s push over a live page; a 1 s move and its settle) the whole-pixel steps
+went from 8 and 5 to none, as with every frame at 3×, in 4.3× and 1.3× the
+plain render's time instead of 4.8× and 6.8×. `--supersample <n>` draws
+every frame at n instead; `--supersample 1` draws none finer. A picture of
+the screen moves smoother still, and renders in about the live screen's
+time: shoot it once at twice the pixels, show that picture at the screen's
+size, and render with `--supersample 3`:
 
 ```sh
 npx open-take film picture takes/x.take/states/s3   # → states/s3/picture@2x.png
@@ -70,4 +78,4 @@ the live screen's time without it. The picture's last frame is as sharp as
 the live screen's, a shade lighter. A layer drawn once at its largest and
 only scaled down (`will-change: transform`) steadies large type — 40 px bold
 pushed 1.0–1.2× went from 0.26 px to 0.06 px — but not interface text
-(0.48 px on the push above), and `--supersample` turns it off.
+(0.48 px on the push above), and drawing finer turns it off.

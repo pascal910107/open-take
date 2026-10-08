@@ -81,7 +81,9 @@ export type FilmRenderOptions = {
   /** draw every frame at this many times the pixels each way and scale it down
    *  to the film's size. Chrome puts each glyph on a whole device pixel, so text
    *  in a slow zoom or drift steps instead of gliding; finer pixels make the
-   *  steps finer. 1 (the default) draws at the film's size; ignored in drafts. */
+   *  steps finer. Unset, the frames where the page's text moves under a device
+   *  pixel a frame are drawn at FINE_SUPERSAMPLE and the rest at the film's
+   *  size; a number draws every frame at it (1: none). Ignored in drafts. */
   supersample?: number;
   workers?: number;
   onProgress?: (p: FilmProgress) => void;
@@ -93,6 +95,11 @@ export type FilmRenderResult = {
   mode: FilmPageInfo["mode"];
   /** output pixel size */
   width: number;
+  /** stretches drawn finer than the rest because the page's text moved under
+   *  a device pixel a frame there (film seconds, on the page's timeline), and
+   *  how finely; none when --supersample was given or in a draft */
+  fine: { from: number; to: number }[];
+  fineSupersample: number;
   height: number;
   fps: number;
   frames: number;
@@ -298,7 +305,9 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
   const t0 = Date.now();
   const draft = !!opts.draft;
   const scale = draft ? 0.5 : 1;
-  // every browser that draws frames draws at the same density
+  // every browser draws at the same density, but for the frames drawn finer
+  // where text moves slowly (see fineFrames)
+  const auto = !draft && opts.supersample === undefined;
   const ss = draft ? 1 : supersampleOf(opts.supersample);
   const page = await servePage(opts, scale * ss);
   const tmp = await mkdtemp(join(tmpdir(), "open-take-film-"));
@@ -320,8 +329,9 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
     // --- probe: how many shutter samples each frame needs, and where --------
     let samples = new Array<number>(frames).fill(1);
     let sides = new Array<number>(frames).fill(0);
+    let density = new Array<number>(frames).fill(ss);
     let pool: HtmlBrowser[] = [first];
-    if (film.blur) {
+    if (film.blur || auto) {
       // a clock film keeps its own state, so only a render film probes in parallel
       if (info.mode === "render")
         while (pool.length < workers) {
@@ -329,7 +339,12 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
           await prepare(b);
           pool.push(b);
         }
-      ({ samples, sides } = await probe(pool, film, opts.onProgress));
+      const p = await probe(pool, film, opts.onProgress);
+      if (film.blur) ({ samples, sides } = p);
+      if (auto)
+        density = fineFrames(p.text, p.sides, film.fps, scale * ss).map((f) =>
+          f ? FINE_SUPERSAMPLE : ss,
+        );
     }
 
     // --- render ------------------------------------------------------------------
@@ -341,16 +356,26 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
     // a frame costs its samples plus its own seek and encode — counted, as
     // an estimate, as 0.4 of a screenshot
     const slices = balancedSlices(
-      samples.map((n) => n + 0.4),
+      samples.map((n, i) => (n + 0.4) * (density[i] === ss ? 1 : FINE_COST)),
       workers,
     );
     const ffmpeg = await resolveFfmpeg();
     // each worker renders its slice in pieces of a few seconds, one encoded
     // chunk per piece: when Chrome dies or hangs (memory pressure on a laptop
     // did it), only that piece is rendered again, on a fresh Chrome
+    // and a piece draws at one density
     const pieces = slices.map(([a, b]) => {
       const out: [number, number][] = [];
-      for (let p = a; p < b; p += PIECE_FRAMES) out.push([p, Math.min(b, p + PIECE_FRAMES)]);
+      for (let p = a; p < b; ) {
+        let q = Math.min(b, p + PIECE_FRAMES);
+        for (let i = p + 1; i < q; i++)
+          if (density[i] !== density[p]) {
+            q = i;
+            break;
+          }
+        out.push([p, q]);
+        p = q;
+      }
       return out;
     });
     const chunks: FilmChunk[] = [];
@@ -366,14 +391,20 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
     await Promise.all(
       pieces.map(async (ps, w) => {
         let browser: HtmlBrowser | undefined = pool[w];
+        let drawn = ss;
         try {
           for (let k = 0; k < ps.length; k++) {
             const [a, b] = ps[k]!;
             for (let attempt = 0; ; attempt++) {
               let piece = 0;
               try {
+                if (browser && drawn !== density[a]) {
+                  await page.close(browser);
+                  browser = undefined;
+                }
                 if (!browser) {
-                  browser = await page.open(width, height);
+                  drawn = density[a]!;
+                  browser = await page.open(width, height, scale * drawn);
                   await prepare(browser);
                 }
                 const sink = new ShutterSink(
@@ -438,8 +469,18 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
       `${JSON.stringify(filmEvents(film, declared, sides, curveRows, film.blur, segments, credits, sources))}\n`,
     );
     const { width: w, height: h } = outSize(film);
+    const fine: { from: number; to: number }[] = [];
+    density.forEach((d, i) => {
+      if (d === ss) return;
+      const t = (film.f0 + i) / film.fps;
+      const last = fine.at(-1);
+      if (last && Math.abs(last.to - t) < 1e-6) last.to = t + 1 / film.fps;
+      else fine.push({ from: t, to: t + 1 / film.fps });
+    });
     return {
       out: resolve(opts.out),
+      fine: fine.map((f) => ({ from: secs6(f.from), to: secs6(f.to) })),
+      fineSupersample: FINE_SUPERSAMPLE,
       mode: info.mode,
       // as encoded: an odd side is padded to even
       width: w + (w % 2),
@@ -1282,7 +1323,7 @@ async function servePage(
   const frames = frameStore({ root, server });
   const unframed = new Set<string>();
   const browsers = new Set<HtmlBrowser>();
-  const open = async (width: number, height: number) => {
+  const open = async (width: number, height: number, density = dpr) => {
     let page: HtmlBrowser | null = null;
     const asked: string[] = [];
     const answer = (payload: string) => {
@@ -1308,7 +1349,7 @@ async function servePage(
       url: `${server.url}${urlPath}`,
       width,
       height,
-      deviceScaleFactor: dpr,
+      deviceScaleFactor: density,
       initScript: clock,
       stillAnimations: true,
       onConsole: opts.onConsole,
@@ -1389,7 +1430,7 @@ async function seek(b: HtmlBrowser, t: number, what: string): Promise<void> {
 
 /** what the shutter around t sees: how far anything moves (px), and which
  *  side of it to expose when the picture cuts in the other (see sampleTimes) */
-type Exposure = { px: number; side: number };
+type Exposure = { px: number; side: number; text: number };
 
 async function motionAt(b: HtmlBrowser, t: number, half: number): Promise<Exposure> {
   return b.evaluate<Exposure>(`window.__ot.motion(${t}, ${half})`);
@@ -1474,10 +1515,11 @@ async function probe(
   pool: HtmlBrowser[],
   film: Film,
   onProgress?: (p: FilmProgress) => void,
-): Promise<{ samples: number[]; sides: number[] }> {
+): Promise<{ samples: number[]; sides: number[]; text: number[] }> {
   const frames = film.f1 - film.f0;
   const samples = new Array<number>(frames).fill(1);
   const sides = new Array<number>(frames).fill(0);
+  const text = new Array<number>(frames).fill(0);
   const half = SHUTTER_FRACTION / film.fps / 2;
   let next = 0;
   let done = 0;
@@ -1489,14 +1531,79 @@ async function probe(
         const m = await motionAt(b, (film.f0 + i) / film.fps, half);
         samples[i] = samplesFor(m.px);
         sides[i] = m.side;
+        text[i] = m.text ?? 0;
         done++;
         if (done % 30 === 0 || done === frames)
           onProgress?.({ phase: "probe", done, total: frames });
       }
     }),
   );
-  return { samples, sides };
+  return { samples, sides, text };
 }
+
+/** how finely the frames where text moves slowly are drawn: what Pascal saw
+ *  stop the 「抖」 in a blind check (k01 14.4–21.6 s and 21.6–26.4 s) */
+export const FINE_SUPERSAMPLE = 3;
+/** a frame drawn at FINE_SUPERSAMPLE costs about this many of one at the
+ *  film's size (measured 4.8× and 6.8× on two stretches of k01) */
+const FINE_COST = 5;
+
+/** Which frames to draw finer: those where the page's moving text moves
+ *  under one device pixel a frame (`text`: px a second, as the page's
+ *  motion probe found it; `density`: device px per page px) — the slow push,
+ *  the ease into and out of a move, the long settle at its end, where a
+ *  thousandth of a pixel a frame still ends in a step — joined across gaps
+ *  of up to a quarter second, runs of under six frames left out. Each run
+ *  then reaches back and on to where a change of density does not show:
+ *  a cut (`sides`, as the probe found them), text moving a pixel a frame
+ *  or more, or FINE_REACH seconds. */
+export function fineFrames(
+  text: readonly number[],
+  sides: readonly number[],
+  fps: number,
+  density: number,
+): boolean[] {
+  const n = text.length;
+  const speed = text.map((v) => (v / fps) * density);
+  const slow = speed.map((d) => d >= 0.001 && d < 1);
+  const out = slow.slice();
+  const gap = Math.round(fps / 4);
+  let last = -1;
+  for (let i = 0; i < n; i++)
+    if (slow[i]) {
+      if (last >= 0 && i - last > 1 && i - last <= gap + 1)
+        for (let j = last + 1; j < i; j++) out[j] = true;
+      last = i;
+    }
+  const runs: [number, number][] = [];
+  for (let i = 0; i < n; ) {
+    if (!out[i]) {
+      i++;
+      continue;
+    }
+    let j = i;
+    while (j < n && out[j]) j++;
+    if (j - i >= 6) runs.push([i, j]);
+    i = j;
+  }
+  const reach = Math.round(FINE_REACH * fps);
+  const fine = new Array<boolean>(n).fill(false);
+  for (let [a, b] of runs) {
+    // side 1: frame j is the first of a new picture; -1: the last of one
+    for (let k = 0; k < reach && a > 0 && sides[a]! <= 0 && sides[a - 1]! >= 0; k++) {
+      if (speed[a - 1]! >= 1) break;
+      a--;
+    }
+    for (let k = 0; k < reach && b < n && sides[b - 1]! >= 0 && sides[b]! <= 0; k++) {
+      if (speed[b]! >= 1) break;
+      b++;
+    }
+    for (let i = a; i < b; i++) fine[i] = true;
+  }
+  return fine;
+}
+/** how far a run of finer frames reaches for a place to change density (s) */
+const FINE_REACH = 2;
 
 // --- encoding -------------------------------------------------------------------------
 

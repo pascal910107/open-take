@@ -182,6 +182,11 @@ window.__render = (t) => {
   `arrange(parts, rect, { axis, gap, align })` returns a slot each, side by
   side at one scale; `carry(A, B, t, a, b, { swapAt })` hands one part over
   to another (the same card in two screens) without a cut.
+- `hold(screens, part, { to, axis })` keeps one part in place while saved
+  screens are swapped in turn (a card the product pushes down as it adds a
+  row): in each screen it moves the part to where it sits in the `to`th,
+  the rest of each screen as the product laid it out; `point(i, p)` moves a
+  point taken on screen i (a click's cursor) with it; `release()`.
 - `isolate(screen, parts, { color, opacity, blur })` fades everything but
   those parts; `set(p)`, 0 to 1.
 - `throughCamera(box, cam, t)` is a box under a camera as it shows in the

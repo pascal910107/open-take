@@ -1380,11 +1380,21 @@ function installFilmClock(opts: FilmClockOptions): void {
     /** elements inside the picture that appeared, vanished or changed what
      *  they show: cuts, however small (one sliding in from an edge is motion) */
     cuts: number;
+    /** how far the text that moved at all moved, the median (px): Chrome
+     *  draws glyphs on whole device pixels, so text moving under one a frame
+     *  steps */
+    text: number;
+  };
+  const median = (v: number[]): number => {
+    const s = v.slice().sort((x, y) => x - y);
+    const m = s.length >> 1;
+    return s.length % 2 ? s[m]! : (s[m - 1]! + s[m]!) / 2;
   };
   function moved(a: Snapshot, b: Snapshot): Change {
     let px = 0;
     let churn = 0;
     let cuts = 0;
+    const text: number[] = [];
     const vw = innerWidth;
     const vh = innerHeight;
     const area = (r: DOMRect) =>
@@ -1398,7 +1408,8 @@ function installFilmClock(opts: FilmClockOptions): void {
         if (inside(ra)) cuts++;
         continue;
       }
-      if (a.shows.get(el) !== b.shows.get(el)) cuts++;
+      const shown = a.shows.get(el);
+      if (shown !== b.shows.get(el)) cuts++;
       const d = Math.max(
         Math.abs(ra.left - rb.left),
         Math.abs(ra.top - rb.top),
@@ -1406,6 +1417,7 @@ function installFilmClock(opts: FilmClockOptions): void {
         Math.abs(ra.bottom - rb.bottom),
       );
       if (d > px) px = d;
+      if (shown?.trim() && d > 1e-4) text.push(Math.hypot(ra.left - rb.left, ra.top - rb.top));
     }
     for (const [el, rb] of b.rects)
       if (!a.rects.has(el)) {
@@ -1424,11 +1436,15 @@ function installFilmClock(opts: FilmClockOptions): void {
       if (changed) px = Math.max(px, OPAQUE_PX);
     }
     if (a.video || b.video) px = Math.max(px, OPAQUE_PX);
-    return { px, churn, cuts };
+    return { px, churn, cuts, text: text.length ? median(text) : 0 };
   }
   /** how far anything moves while the shutter is open, and which part of the
-   *  shutter to expose: side 0 all of it, -1 its first half, 1 its second */
-  async function motion(tSec: number, halfSec: number): Promise<{ px: number; side: number }> {
+   *  shutter to expose: side 0 all of it, -1 its first half, 1 its second;
+   *  and how fast the text that moves there moves, px a second */
+  async function motion(
+    tSec: number,
+    halfSec: number,
+  ): Promise<{ px: number; side: number; text: number }> {
     // The page's own motion(t, half) says how far its picture moves across
     // [t-half, t+half] (what a canvas draws, which no element shows); where the
     // picture cuts is still found here, so a hook never opens the shutter across one.
@@ -1462,10 +1478,23 @@ function installFilmClock(opts: FilmClockOptions): void {
     // with a hook, it is asked for the half that is exposed
     const quarter = halfSec / 2;
     if (onlyIn(first, second))
-      return { px: told ? await told(tSec + quarter, quarter) : second.px, side: 1 };
+      return {
+        px: told ? await told(tSec + quarter, quarter) : second.px,
+        side: 1,
+        text: second.text / halfSec,
+      };
     if (onlyIn(second, first))
-      return { px: told ? await told(tSec - quarter, quarter) : first.px, side: -1 };
-    return { px: told ? await told(tSec, halfSec) : moved(a, b).px, side: 0 };
+      return {
+        px: told ? await told(tSec - quarter, quarter) : first.px,
+        side: -1,
+        text: first.text / halfSec,
+      };
+    const whole = moved(a, b);
+    return {
+      px: told ? await told(tSec, halfSec) : whole.px,
+      side: 0,
+      text: whole.text / (2 * halfSec),
+    };
   }
 
   // --- ready -----------------------------------------------------------------

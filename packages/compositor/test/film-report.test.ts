@@ -119,6 +119,8 @@ const REPORT: FilmReport = {
   layout: { width: 1920, height: 1080 },
   density: 1,
   slowFps: 60,
+  fine: [],
+  fineSupersample: 1,
   draft: false,
   productText: {
     how: "measured",
@@ -180,6 +182,16 @@ test("the lines: what was measured, where, how much — and where the full repor
   assert.match(text, /15\.50 s–19\.00 s 0\.19 px a frame, the fastest piece 0\.59/);
   assert.match(text, /--supersample/);
   assert.match(text, /`film picture`/);
+  assert.match(text, /`hold\(\)`/, "the jumps line names the block that keeps a part in place");
+  assert.match(text, /can move in steps/);
+  // the stretch the render drew finer is said so
+  assert.match(
+    formatFilmReport(
+      { ...REPORT, fine: [{ from: 15, to: 19.5 }], fineSupersample: 3 },
+      { probe: "p" },
+    ).join("\n"),
+    /0\.19 px a frame, the fastest piece 0\.59 \(at the median, a step about every 1\.8 frames, drawn at 3×\)/,
+  );
   assert.match(text, /open-take film probe film\.mp4 --page film/);
   assert.match(text, /--no-report/);
   assert.doesNotMatch(text, /page's timeline/);

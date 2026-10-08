@@ -45,7 +45,7 @@ import {
   readPageText,
   runOcr,
 } from "./probe-text";
-import { eventsPathFor, probeFilm } from "./render";
+import { eventsPathFor, FINE_SUPERSAMPLE, probeFilm } from "./render";
 
 export type ReportJump = {
   t: number;
@@ -82,6 +82,10 @@ export type FilmReport = {
    *  page's rate, no --supersample) */
   density: number;
   slowFps: number;
+  /** the stretches the render drew finer because text moved slowly there
+   *  (film clock), and how finely */
+  fine: { from: number; to: number }[];
+  fineSupersample: number;
   draft: boolean;
   /** the product's words on screen: its saved screens' (measured on the
    *  page) and those in its pictures (read from their files, estimated) */
@@ -119,6 +123,10 @@ export type FilmReportOptions = {
   /** the render's --supersample and --draft: how finely it drew text */
   supersample?: number;
   draft?: boolean;
+  /** what the render drew finer (FilmRenderResult.fine, on the page's
+   *  timeline) and how finely */
+  fine?: { from: number; to: number }[];
+  fineSupersample?: number;
   /** seconds between page samples (default 0.5) */
   every?: number;
   onConsole?: (level: string, text: string) => void;
@@ -458,6 +466,11 @@ export async function filmReport(opts: FilmReportOptions): Promise<FilmReport> {
     layout,
     density,
     slowFps,
+    fine: (opts.fine ?? []).map((f) => ({
+      from: round3(f.from - info.from),
+      to: round3(f.to - info.from),
+    })),
+    fineSupersample: opts.fineSupersample ?? 1,
     draft: !!opts.draft,
     productText,
     jumps: { how: "measured", declared: declared.length, list: jumps },
@@ -585,7 +598,9 @@ export function formatFilmReport(r: FilmReport, o: { probe: string }): string[] 
         ...rest,
       ]
         .filter(Boolean)
-        .join("; ")}`,
+        .join(
+          "; ",
+        )}${runs.length ? ". A part the product moved between saved screens can be kept in place with `hold()` (kit/media.js), when that is wanted" : ""}`,
     );
 
   // material taken while changing
@@ -629,11 +644,23 @@ export function formatFilmReport(r: FilmReport, o: { probe: string }): string[] 
     L.push(`  live text moving under a device pixel a frame for a second or more: none${drawn}`);
   else {
     const shown = s.spans.slice(0, 3).map((x) => {
-      const every = 1 / (x.speed * r.density);
-      return `${fmt(x.from)}–${fmt(x.to)} ${x.speed} px a frame, the fastest piece ${x.fastest} (at the median, a step about every ${every < 10 ? every.toFixed(1) : Math.round(every)} frames)`;
+      const covered = r.fine.reduce(
+        (a, f) => a + Math.max(0, Math.min(f.to, x.to) - Math.max(f.from, x.from)),
+        0,
+      );
+      const share = covered / Math.max(1e-6, x.to - x.from);
+      const finer = share >= 0.9 ? r.fineSupersample : 1;
+      const every = 1 / (x.speed * r.density * finer);
+      const how =
+        share >= 0.9
+          ? `, drawn at ${r.fineSupersample}×`
+          : share > 0.05
+            ? `, drawn at ${r.fineSupersample}× for ${Math.round(share * 100)}% of it`
+            : "";
+      return `${fmt(x.from)}–${fmt(x.to)} ${x.speed} px a frame, the fastest piece ${x.fastest} (at the median, a step about every ${every < 10 ? every.toFixed(1) : Math.round(every)} frames${how})`;
     });
     L.push(
-      `  live text moving under a device pixel a frame${drawn}: ${shown.join("; ")}${s.spans.length > 3 ? `; ${s.spans.length - 3} more` : ""}. Chrome draws glyphs on whole device pixels, so such text moves in steps; --supersample 2 or 3 draws finer ones, and \`film picture\` draws a saved screen as one picture that moves smoothly`,
+      `  live text moving under a device pixel a frame${drawn}: ${shown.join("; ")}${s.spans.length > 3 ? `; ${s.spans.length - 3} more` : ""}. Chrome draws glyphs on whole device pixels, so such text can move in steps (measured here: where the text is, not the picture); a render without --supersample draws the frames where text moves this slowly at ${FINE_SUPERSAMPLE}× (--supersample 1 does not), and \`film picture\` draws a saved screen as one picture that moves smoothly`,
     );
   }
 

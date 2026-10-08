@@ -700,8 +700,9 @@ Usage:
           listed as marked, not as a defect.
           --supersample 2 (render, still) draws each frame at twice the pixels
           each way and averages it down: text in a slow zoom or drift steps
-          less (Chrome places glyphs on whole pixels), for about 1.3–2× the
-          render time; 3 smooths further. A slow push on a screen is
+          less (Chrome places glyphs on whole pixels). Without it, a render
+          draws at 3× the frames where the page's text moves under a pixel a
+          frame, and prints where; 1 draws none finer. A slow push on a screen is
           steadiest as a picture of it shot at twice the pixels, rendered
           with --supersample 3 (\`skill film render\`): \`film picture\` draws a saved
           screen that way.
@@ -2235,6 +2236,13 @@ async function main() {
         `rendered: ${result.out}\n${result.width}×${result.height} ${result.fps} fps, ${result.durationS.toFixed(2)}s — ` +
           `${result.frames} frames, ${result.samples} samples (${result.mode} mode), ${(result.wallMs / 1000).toFixed(1)}s\n`,
       );
+      if (result.fine.length) {
+        const secs = result.fine.reduce((x, f) => x + f.to - f.from, 0);
+        process.stdout.write(
+          `drawn at ${result.fineSupersample}× where the page's text moved under a device pixel a frame (it steps there, drawn at the film's size): ` +
+            `${result.fine.map((f) => `${f.from.toFixed(2)}–${f.to.toFixed(2)}s`).join(", ")} — ${secs.toFixed(1)} s of ${result.durationS.toFixed(1)}; --supersample 1 draws every frame at the film's size\n`,
+        );
+      }
       // a few things measured on the film just made, on the path every film
       // takes; never a reason to lose the render
       if (!has("--no-report")) {
@@ -2245,6 +2253,8 @@ async function main() {
           chromePath,
           supersample: num("--supersample"),
           draft: has("--draft"),
+          fine: result.fine,
+          fineSupersample: result.fineSupersample,
           onConsole,
         }).catch((e: Error) => {
           process.stdout.write(

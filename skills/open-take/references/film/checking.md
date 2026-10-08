@@ -106,7 +106,7 @@ move from one frame to the next (a card jumping when a screen changes, a
 push and its speed: `film probe`'s small swaps and the picture's zoom and
 travel), nor how text looks while it moves: on a live page under a slow push
 text can step a pixel at a time, which `film still` at times one frame apart
-shows (`skill film render` on pictures and `--supersample`).
+shows; a render draws such frames finer on its own (`skill film render`).
 
 `film check --page` and `film still` also look through the folder served to
 the page (as `film render` serves it, the page not run): when it holds PNG
