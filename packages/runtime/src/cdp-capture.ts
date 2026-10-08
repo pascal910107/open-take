@@ -1256,6 +1256,7 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
               states,
               vw: inner[0],
               vh: inner[1],
+              parts: opts.components !== false,
             })
           : [];
         stateItems = [...saved, ...movingStates.map((m) => ({ ...m, moving: true as const }))].sort(

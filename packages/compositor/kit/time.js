@@ -55,6 +55,33 @@
 //     url: "https://…", text: "Night Drive by A. Artist (CC BY 4.0)" });
 //   tl.credits()                // [{ what?, by?, licence?, url?, text? }], as given
 //   // or by hand: window.__film = { …, credits: [{ what: "font: Inter", licence: "OFL-1.1" }] }
+//
+// Where a value on screen comes from, if the film shows the product's data —
+// a part of components.json (`ref`, `field`), the live page it shows on
+// (`url`), or a note that it is not the product's: "demo" (made-up records a
+// viewer can tell are made up), "illustrative" (a figure for the idea, not a
+// reading). Nothing checks it or acts on it: `film render` writes the list
+// into the events file as "sources", and `film probe` sets it beside the
+// numbers and strings it reads in the film's own text, as information.
+// `label` is what on screen it covers: the text as shown, or words for it;
+// `text` the strings it covers when the label is words, `selector` the
+// film's elements whose text it covers. kit/media.js `readValues(url, { tl })`
+// declares every value it reads, so a component rebuilt from real values
+// needs no line of its own. `film render` asks for the list once, when the
+// page is ready: declare (and read values) before that, not in __render.
+//
+//   tl.source("NT$3,376", { ref: "calc-end:e149", field: "number" });
+//   tl.source("six listings", { note: "demo", selector: "#market" });
+//   tl.source("World Gym monthly fee", { url: "https://…/brands/world-gym", text: "NT$1,688" });
+//   tl.sources()                // [{ label, ref?, field?, file?, url?, note?, text?, selector? }], as given
+//
+// Scenes, if the film has them: which element shows when. Hidden by
+// visibility, so what is in a hidden scene keeps its layout (a saved screen
+// can still be measured and lifted from) and what was lifted out of it hides
+// with it; each start is a cut on the timeline, for the score and the probe.
+//
+//   const sc = scenes({ calc: [7.2, 16.8], find: [21.6, 31.2] }, { tl });  // ids of elements
+//   sc.show(t);                 // in __render(t): "calc" shown 7.2–16.8 s, hidden otherwise
 
 /**
  * One thing that happens in the film, in seconds; where on the stage (CSS px)
@@ -92,6 +119,35 @@
  * @property {string} [url]
  * @property {string} [text] the attribution line as it should appear, if one must
  */
+
+/**
+ * Where something on screen comes from — at least one of `ref`, `url` or
+ * `note`; for the record only.
+ * @typedef {object} FilmSource
+ * @property {string} label what on screen it covers: the text as shown, or words for it
+ * @property {string} [ref] a part of components.json, "<state>:<element id>"
+ * @property {string} [field] which of the part's values
+ * @property {string} [file] the components.json it was read from, as the page fetched it
+ * @property {string} [url] where the value shows in the live product
+ * @property {string} [note] "demo", "illustrative", or your own words
+ * @property {string[]} [text] the strings on screen it covers (beside the label)
+ * @property {string} [selector] the film's elements whose text it covers (CSS)
+ */
+
+/** a source's known fields as given; null when it names no ref, url or note
+ * @param {string} label @param {Record<string, unknown>} o @returns {FilmSource | null} */
+const sourceOf = (label, o) => {
+  /** @type {FilmSource} */
+  const s = { label };
+  for (const k of /** @type {const} */ (["ref", "field", "file", "url", "note", "selector"])) {
+    const v = o[k];
+    if (v != null && v !== "") s[k] = String(v);
+  }
+  const text = o.text == null ? [] : Array.isArray(o.text) ? o.text : [o.text];
+  const strings = text.filter((x) => x != null && x !== "").map(String);
+  if (strings.length) s.text = strings;
+  return s.ref || s.url || s.note ? s : null;
+};
 
 /** a credit's known fields as strings; "license" is read as "licence"
  * @param {Record<string, unknown>} o @returns {FilmCredit} */
@@ -138,6 +194,10 @@ export function timeline({ at = {}, bpm, offset = 0 } = {}) {
   /** @type {FilmCredit[]} */
   const credited = [];
   const credits = () => credited.map((c) => ({ ...c }));
+  /** @type {FilmSource[]} */
+  const declaredSources = [];
+  const sources = () =>
+    declaredSources.map((x) => (x.text ? { ...x, text: [...x.text] } : { ...x }));
   /** the beat sheet, by `from` (same from: as declared) */
   const segments = () =>
     sheet
@@ -268,8 +328,34 @@ export function timeline({ at = {}, bpm, offset = 0 } = {}) {
     },
     /** every credit, as given */
     credits,
-    /** window.__film's `events`, `curves`, `segments` and `credits`, to spread into it */
-    hooks: () => ({ events, curves: sample, segments, credits }),
+    /**
+     * Say where something on screen comes from: a part of components.json
+     * (`ref`, and which of its values, `field`), the live page it shows on
+     * (`url`), or a `note` — "demo", "illustrative" or your words. `label` is
+     * what on screen it covers (the text as shown, or words for it); `text`
+     * the strings it covers, `selector` the film's elements whose text it
+     * covers. Nothing is checked; returns the source.
+     * @param {string} label
+     * @param {{ ref?: string, field?: string, file?: string, url?: string, note?: "demo" | "illustrative" | string,
+     *   text?: string | string[], selector?: string }} o
+     */
+    source: (label, o) => {
+      if (typeof label !== "string" || !label.trim())
+        throw new Error("timeline: a source needs a label — what on screen it covers");
+      if (!o || typeof o !== "object")
+        throw new Error(`timeline: source "${label}" needs { ref }, { url } or { note }`);
+      const s = sourceOf(label, /** @type {Record<string, unknown>} */ (o));
+      if (!s)
+        throw new Error(
+          `timeline: source "${label}" says nothing of where it comes from — a ref (a part of components.json), a url, or a note ("demo", "illustrative")`,
+        );
+      declaredSources.push(s);
+      return s.text ? { ...s, text: [...s.text] } : { ...s };
+    },
+    /** every source, as given */
+    sources,
+    /** window.__film's `events`, `curves`, `segments`, `credits` and `sources`, to spread into it */
+    hooks: () => ({ events, curves: sample, segments, credits, sources }),
     bpm,
     offset,
   };
@@ -347,5 +433,68 @@ export function speed(fn, h = 1 / 240, { cuts } = {}) {
     let d = 0;
     for (let i = 0; i < a.length; i++) d += ((b[i] ?? 0) - (a[i] ?? 0)) ** 2;
     return Math.sqrt(d) / span;
+  };
+}
+
+/**
+ * Scenes: which element shows when — each a name (an element's id, or a
+ * selector) and when it is on, [from, to) in s, or a list of such spans for
+ * a scene that comes back. `show(t)` sets each one's visibility: hidden off
+ * its spans, inherited on them (so a scene inside a hidden one stays hidden)
+ * — never display, so what is inside keeps its layout. Scenes may overlap.
+ * With `tl`, each start after 0 is declared a "cut" there (labelled with the
+ * scene's name). `el`: how a name finds its element (default by id, or by
+ * selector when it looks like one).
+ * @param {Record<string, [number, number] | [number, number][]>} map
+ * @param {{ tl?: { event: (at: number, kind: string, o?: { label?: string }) => number },
+ *   el?: (name: string) => { style: { visibility: string } } | null }} [o]
+ */
+export function scenes(map, o = {}) {
+  /** @type {{ name: string, spans: [number, number][] }[]} */
+  const list = Object.entries(map).map(([name, v]) => {
+    if (!Array.isArray(v) || !v.length)
+      throw new Error(`scenes: "${name}" needs [from, to] (s), or a list of them`);
+    const spans = /** @type {[number, number][]} */ (
+      Array.isArray(v[0]) ? v : [/** @type {[number, number]} */ (v)]
+    );
+    for (const sp of spans) {
+      const [a, b] = sp;
+      if (!Number.isFinite(a) || !Number.isFinite(b))
+        throw new Error(`scenes: "${name}" is on between two times (got ${JSON.stringify(sp)})`);
+      if (!(b > a)) throw new Error(`scenes: "${name}" ends (${b}) before it starts (${a})`);
+    }
+    return { name, spans: spans.map(([a, b]) => /** @type {[number, number]} */ ([a, b])) };
+  });
+  if (o.tl)
+    for (const sc of list)
+      for (const [a] of sc.spans) if (a > 0) o.tl.event(a, "cut", { label: sc.name });
+  /** @type {Map<string, { style: { visibility: string } }>} */
+  const found = new Map();
+  /** @param {string} name */
+  const elOf = (name) => {
+    const had = found.get(name);
+    if (had) return had;
+    const el = o.el
+      ? o.el(name)
+      : (document.getElementById(name) ??
+        (/^[#.[]|[\s>:]/.test(name) ? document.querySelector(name) : null));
+    if (!el) throw new Error(`scenes: no element for the scene "${name}" (an id, or a selector)`);
+    found.set(name, /** @type {{ style: { visibility: string } }} */ (el));
+    return /** @type {{ style: { visibility: string } }} */ (el);
+  };
+  /** the scenes on at t, by name @param {number} t */
+  const at = (t) =>
+    list.filter((sc) => sc.spans.some(([a, b]) => t >= a && t < b)).map((sc) => sc.name);
+  return {
+    /** every scene and its spans, as given */
+    list: () => list.map((sc) => ({ name: sc.name, spans: sc.spans.map((sp) => [...sp]) })),
+    at,
+    /** show the scenes on at t and hide the rest; returns the names shown @param {number} t */
+    show(t) {
+      const on = at(t);
+      for (const sc of list)
+        elOf(sc.name).style.visibility = on.includes(sc.name) ? "inherit" : "hidden";
+      return on;
+    },
   };
 }

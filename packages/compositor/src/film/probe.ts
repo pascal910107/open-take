@@ -39,7 +39,18 @@ import {
   readFrameText,
   readPageText,
 } from "./probe-text";
-import { FILM_TAG } from "./render";
+import {
+  componentValueIndex,
+  type FilmProvenance,
+  findComponentFiles,
+  formatProvenance,
+  PROVENANCE_PAGE_JS,
+  type ProvenanceSample,
+  pageDirOf,
+  pageSourcesOf,
+  readProvenance,
+} from "./provenance";
+import { checkSources, FILM_TAG, resolveFilmPage } from "./render";
 
 // --- the picture as grey frames --------------------------------------------------------
 
@@ -1749,6 +1760,10 @@ export type FilmProbe = {
     perSecond: ReturnType<typeof textPerSecond>;
     overlaps: TextOverlap[];
   };
+  /** where the numbers in the film's own text come from, as the page
+   *  declares (tl.source) and as the product's parts showed them
+   *  (components.json) — information only */
+  provenance: FilmProvenance;
 };
 
 export type ShotStats = {
@@ -1795,6 +1810,9 @@ export type FilmProbeOptions = {
   text?: boolean;
   /** seconds between text samples (default 0.5) */
   textEvery?: number;
+  /** components.json files to set the film's numbers beside (default: those
+   *  the page's sources name, and those in the page's folder) */
+  components?: readonly string[];
   onConsole?: (level: string, text: string) => void;
 };
 
@@ -1966,6 +1984,7 @@ export async function filmProbe(opts: FilmProbeOptions): Promise<{
       width: record?.width || undefined,
       height: record?.height || undefined,
       fallback: { width: video.width, height: video.height },
+      extra: PROVENANCE_PAGE_JS,
       onConsole: opts.onConsole,
     }).catch((e: Error) => {
       // the rest of the probe does not need the page
@@ -2020,6 +2039,32 @@ export async function filmProbe(opts: FilmProbeOptions): Promise<{
             : null
       : undefined,
     onsets: pcm ? onsets : null,
+  });
+
+  // where the numbers on screen come from: the page's sources as it says
+  // them now (else the events file's), beside components.json's values
+  const provSamples: ProvenanceSample[] | null = pageRead
+    ? pageRead.samples.map((x) => {
+        const e = (x.extra ?? {}) as Partial<ProvenanceSample>;
+        return { t: x.t, items: Array.isArray(e.items) ? e.items : [], sources: e.sources };
+      })
+    : null;
+  const pageSources = provSamples ? pageSourcesOf(provSamples) : null;
+  const sources = pageSources?.sources ?? checkSources(rawObj.sources);
+  const pageDir = opts.page ? pageDirOf(opts.page) : undefined;
+  let served: string | undefined;
+  try {
+    served = opts.page ? resolveFilmPage(opts.page, opts.root).root : undefined;
+  } catch {}
+  const provenance = readProvenance(pageSources?.samples ?? provSamples, {
+    sources,
+    sourcesFrom: pageSources ? "page" : Array.isArray(rawObj.sources) ? "events file" : null,
+    index: componentValueIndex([
+      ...(opts.components ?? []).map((f) => resolve(f)),
+      ...findComponentFiles({ pageDir, root: served, base: resolve(input, ".."), sources }),
+    ]),
+    every: textEvery,
+    ...(pageNote ? { note: pageNote } : !opts.page ? { note: "no page given (--page)" } : {}),
   });
 
   const probe: FilmProbe = {
@@ -2133,6 +2178,7 @@ export async function filmProbe(opts: FilmProbeOptions): Promise<{
       perSecond: textPerSecond(text.samples, duration),
       overlaps: text.overlaps,
     },
+    provenance,
   };
 
   await mkdir(outDir, { recursive: true });
@@ -2446,6 +2492,10 @@ export function formatFilmProbe(p: FilmProbe): string {
   }
   L.push("");
   L.push(...formatText(p));
+  L.push("");
+  L.push(
+    ...formatProvenance(p.provenance, p.text.page.file ? pageDirOf(p.text.page.file) : undefined),
+  );
   L.push("");
   L.push("## Declared subjects");
   if (p.subjects.how === "not measured")

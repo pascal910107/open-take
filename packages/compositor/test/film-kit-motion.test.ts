@@ -9,6 +9,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
+  assemble,
+  count,
   dampingFor,
   drop,
   dropOut,
@@ -23,6 +25,7 @@ import {
   pop,
   popOut,
   press,
+  readNumber,
   rectClip,
   rise,
   riseOut,
@@ -33,8 +36,10 @@ import {
   type,
   typeTimes,
   untype,
+  writeNumber,
   zoomThrough,
 } from "../kit/motion.js";
+import { scenes } from "../kit/time.js";
 import { initFilm } from "../src/film/kit";
 
 const near = (a: number, b: number, tol: number, what: string) =>
@@ -448,4 +453,150 @@ test("film init copies motion.js into the film and the starting page lists it", 
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test("a number as the product writes it is read back, and written the same way", () => {
+  const cases: [string, number, string, string, string, number][] = [
+    // text, value, prefix, suffix, separator, decimals
+    ["NT$4,466", 4466, "NT$", "", ",", 0],
+    ["12.5%", 12.5, "", "%", "", 1],
+    ["1.234,56 €", 1234.56, "", " €", ".", 2],
+    ["500+", 500, "", "+", "", 0],
+    ["4 466 ms", 4466, "", " ms", " ", 0],
+    ["1,234,567", 1234567, "", "", ",", 0],
+    ["4,46", 4.46, "", "", "", 2],
+    ["120 萬", 120, "", " 萬", "", 0],
+    ["−3.2", -3.2, "", "", "", 1],
+  ];
+  for (const [text, value, prefix, suffix, sep, decimals] of cases) {
+    const f = readNumber(text);
+    assert.deepEqual(
+      [f.value, f.prefix, f.suffix, f.sep, f.decimals],
+      [value, prefix, suffix, sep, decimals],
+      text,
+    );
+    assert.equal(writeNumber(f.value, f), text, `${text} written back as it was`);
+  }
+  // one "." with three digits after it is read as a decimal point; say so otherwise
+  assert.equal(readNumber("4.466").value, 4.466);
+  assert.equal(readNumber("4.466", { sep: "." }).value, 4466);
+  assert.throws(() => readNumber("none"), /no number/);
+});
+
+test("count runs from one value to the other in the product's format, landing without overshoot", () => {
+  assert.deepEqual(count(3.9, 4, "NT$4,212", "NT$4,466"), { text: "NT$4,212", value: 4212, p: 0 });
+  assert.equal(count(5, 4, "NT$4,212", "NT$4,466").text, "NT$4,466", "there after its second");
+  let last = -Infinity;
+  for (let t = 3.9; t <= 5.2; t += 1 / 60) {
+    const c = count(t, 4, "NT$4,212", "NT$4,466");
+    assert.ok(c.value >= last, `never runs back (${c.text} at ${t.toFixed(3)})`);
+    assert.ok(c.value <= 4466, "never past its last value");
+    assert.match(c.text, /^NT\$\d,\d{3}$/, "every value in the product's format");
+    last = c.value;
+  }
+  assert.equal(count(4.5, 4, 0, "500+").text.endsWith("+"), true, "from 0, the suffix kept");
+  assert.match(count(4.5, 4, 0, "12.5%").text, /^\d+\.\d%$/, "one decimal all the way");
+  // steps: only so many values along the way
+  const seen = new Set<string>();
+  for (let t = 4; t <= 5; t += 1 / 240) seen.add(count(t, 4, 0, 100, { steps: 4 }).text);
+  assert.deepEqual([...seen], ["0", "25", "50", "75", "100"]);
+  assert.equal(count(4.5, 4, 0, 10, { dur: 0.5 }).text, "10", "dur: its length");
+  assert.throws(() => count(1, 0, 0, 1, { dur: 0 }), /above 0/);
+});
+
+test("assemble runs one move on each part, one after another, and puts it on elements", () => {
+  const v = assemble(5.0, 5, 3) as { opacity: number; y: number }[];
+  assert.equal(v.length, 3);
+  const later = assemble(5.1, 5, 3) as { opacity: number; y: number }[];
+  assert.ok(later[0]!.opacity > later[1]!.opacity && later[1]!.opacity > later[2]!.opacity);
+  assert.equal(later[2]!.y, rise(5.1, 5.12).y, "the third starts two `each` (0.06 s) later");
+  const rev = assemble(5.1, 5, 3, { order: "reverse" }) as { y: number }[];
+  assert.equal(rev[2]!.y, later[0]!.y, "reverse: the last first");
+  const popped = assemble(5.2, 5, 2, { move: pop, each: 0.1, with: { scale: 0.2 } }) as {
+    scale: number;
+  }[];
+  assert.equal(popped[1]!.scale, pop(5.2, 5.1, { scale: 0.2 }).scale, "the move's own options");
+  // given elements, it writes onto them — and gives maskRise their height
+  const el = (display: string) => {
+    const style: Record<string, string> = {};
+    return {
+      nodeType: 1,
+      style,
+      offsetHeight: 30,
+      ownerDocument: { defaultView: { getComputedStyle: () => ({ display }) } },
+    };
+  };
+  const span = el("inline");
+  const div = el("block");
+  assemble(5.05, 5, [span, div]);
+  assert.match(span.style.transform!, /^translate\(0\.000px, [\d.]+px\)$/);
+  assert.equal(span.style.display, "inline-block", "an inline part made able to move");
+  assert.equal(div.style.display, undefined, "a block left as it is");
+  assert.equal(div.style.opacity, "0", "not started yet");
+  const masked = el("block");
+  assemble(5.1, 5, [masked], { move: maskRise });
+  assert.equal(masked.style.clipPath, maskRise(5.1, 5, { height: 30 }).clip);
+  // drop's height is how far it falls, not the element's
+  const dropped = assemble(5.05, 5, [el("block")], { move: drop }) as { y: number }[];
+  assert.equal(dropped[0]!.y, drop(5.05, 5).y, "drop keeps its own fall");
+  // what the product gave the element is kept under the move
+  const own = {
+    nodeType: 1,
+    style: { transform: "translateX(-50%)" } as Record<string, string>,
+    offsetHeight: 30,
+    ownerDocument: {
+      defaultView: {
+        getComputedStyle: () => ({
+          display: "block",
+          transform: "matrix(1, 0, 0, 1, -40, 0)",
+          opacity: "0.6",
+        }),
+      },
+    },
+  };
+  assemble(5.05, 5, [own]);
+  assert.match(own.style.transform!, /^translate\([^)]*\) matrix\(1, 0, 0, 1, -40, 0\)$/);
+  assemble(9, 5, [own]);
+  assert.equal(own.style.transform, "translateX(-50%)", "at rest: the product's transform again");
+  assert.equal(own.style.opacity, "0.6", "its own opacity, not 1");
+});
+
+test("scenes show one element at a time by visibility, and each start is a cut", () => {
+  const els: Record<string, { style: { visibility: string } }> = {
+    calc: { style: { visibility: "" } },
+    find: { style: { visibility: "" } },
+  };
+  const cuts: { t: number; kind: string; label?: string }[] = [];
+  const tl = {
+    event: (t: number, kind: string, o: { label?: string } = {}) => {
+      cuts.push({ t, kind, label: o.label });
+      return t;
+    },
+  };
+  const sc = scenes(
+    {
+      calc: [0, 16.8],
+      find: [
+        [21.6, 31.2],
+        [40, 44],
+      ],
+    },
+    { tl, el: (name) => els[name] ?? null },
+  );
+  assert.deepEqual(
+    cuts,
+    [
+      { t: 21.6, kind: "cut", label: "find" },
+      { t: 40, kind: "cut", label: "find" },
+    ],
+    "a scene starting at 0 is not a cut",
+  );
+  assert.deepEqual(sc.show(3), ["calc"]);
+  assert.deepEqual([els.calc!.style.visibility, els.find!.style.visibility], ["inherit", "hidden"]);
+  assert.deepEqual(sc.show(16.8), [], "[from, to): off at its end");
+  assert.equal(els.calc!.style.visibility, "hidden");
+  assert.deepEqual(sc.show(41), ["find"], "a scene that comes back");
+  assert.deepEqual(sc.at(30), ["find"]);
+  assert.throws(() => scenes({ x: [3, 2] }), /before it starts/);
+  assert.throws(() => scenes({ x: [1, 2] }, { el: () => null }).show(1), /no element/);
 });

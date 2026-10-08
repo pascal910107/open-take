@@ -144,48 +144,191 @@ export async function ensureChrome(explicit?: string): Promise<string> {
 }
 
 // --- minimal CDP client over a page-target websocket -------------------
+
+/** How long a request waits for Chrome's answer before it is given up. Most
+ *  commands answer in milliseconds; a page whose renderer is stuck (or a
+ *  Chrome that went quiet) never answers at all, and without a bound the take
+ *  waits forever with Chrome idle — seen in 2 of 6 multi-screen shoots. */
+export const CDP_TIMEOUT_MS = 30_000;
+/** The budget of the commands that legitimately take long on a big page —
+ *  a full screenshot, an MHTML snapshot, a navigation that has to commit, a
+ *  response body, and any evaluate that awaits the page's own promise. */
+export const CDP_SLOW_TIMEOUT_MS = 120_000;
+const SLOW_METHODS = new Set([
+  "Page.captureScreenshot",
+  "Page.captureSnapshot",
+  "Page.printToPDF",
+  "Page.navigate",
+  "Page.reload",
+  "Network.getResponseBody",
+  "Target.createTarget",
+]);
+
+/** OPEN_TAKE_CDP_TIMEOUT_MS (a very slow machine, a test): the ordinary
+ *  budget; slow commands get 4× it */
+function envBudget(): number | undefined {
+  const v = Number(process.env.OPEN_TAKE_CDP_TIMEOUT_MS);
+  return Number.isFinite(v) && v > 0 ? v : undefined;
+}
+
+/** The default budget of one request: `base` (the connection's own, else
+ *  OPEN_TAKE_CDP_TIMEOUT_MS, else CDP_TIMEOUT_MS) — or, for the slow
+ *  commands and promise-awaiting evaluates, 4× it (CDP_SLOW_TIMEOUT_MS by
+ *  default). */
+export function cdpTimeoutFor(
+  method: string,
+  params: Record<string, unknown>,
+  base?: number,
+): number {
+  const b = base ?? envBudget() ?? CDP_TIMEOUT_MS;
+  const slow =
+    SLOW_METHODS.has(method) ||
+    ((method === "Runtime.evaluate" || method === "Runtime.callFunctionOn") &&
+      params.awaitPromise === true);
+  return slow ? b * (CDP_SLOW_TIMEOUT_MS / CDP_TIMEOUT_MS) : b;
+}
+
+/** A request Chrome did not answer: it timed out, or the connection closed /
+ *  the page crashed while it waited. `reason` tells which. */
+export class CdpError extends Error {
+  constructor(
+    message: string,
+    readonly method: string,
+    readonly reason: "timeout" | "closed" | "crashed",
+  ) {
+    super(message);
+    this.name = "CdpError";
+  }
+}
+
+/** true for a request that got no answer (timeout, closed, crashed) — the
+ *  page behind it may be stuck; a protocol error answer is not one */
+export const isCdpStall = (e: unknown): e is CdpError => e instanceof CdpError;
+
+export type CdpSendOptions = {
+  /** this request's budget in ms; 0 or Infinity waits as long as it takes */
+  timeoutMs?: number;
+};
+
+type Pending = {
+  method: string;
+  resolve: (value: unknown) => void;
+  reject: (error: Error) => void;
+  timer?: ReturnType<typeof setTimeout>;
+};
+
 export class CDP {
   private ws: WebSocket;
   private id = 0;
-  private pending = new Map<
-    number,
-    { resolve: (value: unknown) => void; reject: (error: Error) => void }
-  >();
+  private pending = new Map<number, Pending>();
   private handlers = new Map<string, (params: unknown) => void>();
+  /** why the connection is gone, once it is — later sends fail at once */
+  private closedWhy: string | null = null;
+  private readonly timeoutMs: number | undefined;
 
-  private constructor(ws: WebSocket) {
+  private constructor(ws: WebSocket, timeoutMs?: number) {
     this.ws = ws;
+    this.timeoutMs = timeoutMs;
     ws.addEventListener("message", (ev: MessageEvent) => {
-      const msg = JSON.parse(ev.data as string) as {
+      let msg: {
         id?: number;
         error?: unknown;
         result?: unknown;
         method?: string;
         params?: unknown;
       };
-      if (msg.id != null && this.pending.has(msg.id)) {
-        const { resolve, reject } = this.pending.get(msg.id)!;
+      try {
+        msg = JSON.parse(ev.data as string);
+      } catch {
+        return;
+      }
+      if (msg.id != null) {
+        const p = this.pending.get(msg.id);
+        if (!p) return; // answered after its timeout: nobody waits for it now
         this.pending.delete(msg.id);
-        msg.error ? reject(new Error(JSON.stringify(msg.error))) : resolve(msg.result);
+        clearTimeout(p.timer);
+        if (msg.error) p.reject(new Error(JSON.stringify(msg.error)));
+        else p.resolve(msg.result);
       } else if (msg.method) {
+        // a crashed renderer never answers what was sent to it
+        if (msg.method === "Inspector.targetCrashed")
+          this.failAll("crashed", "the page crashed (its renderer died)");
+        // a detached page answers nothing more: later sends fail at once
+        else if (msg.method === "Inspector.detached")
+          this.gone(
+            `the page detached (${(msg.params as { reason?: string })?.reason ?? "no reason given"})`,
+          );
         this.handlers.get(msg.method)?.(msg.params);
       }
     });
+    ws.addEventListener("close", () => this.gone("the DevTools connection closed"));
+    ws.addEventListener("error", () => this.gone("the DevTools connection failed"));
   }
 
-  static connect(wsUrl: string): Promise<CDP> {
+  /** Open a session on `wsUrl`. `timeoutMs` replaces the per-request default
+   *  base (see cdpTimeoutFor; slow commands get 4× it). */
+  static connect(wsUrl: string, opts: { timeoutMs?: number } = {}): Promise<CDP> {
     return new Promise((resolve, reject) => {
       const ws = new WebSocket(wsUrl);
-      ws.addEventListener("open", () => resolve(new CDP(ws)));
-      ws.addEventListener("error", () => reject(new Error(`CDP connect failed: ${wsUrl}`)));
+      // a socket that neither opens nor fails would be the same endless wait
+      const timer = setTimeout(() => {
+        reject(new Error(`CDP connect failed: ${wsUrl} did not open within 15 s`));
+        try {
+          ws.close();
+        } catch {
+          /* never opened */
+        }
+      }, 15_000);
+      timer.unref?.();
+      ws.addEventListener("open", () => {
+        clearTimeout(timer);
+        resolve(new CDP(ws, opts.timeoutMs));
+      });
+      ws.addEventListener("error", () => {
+        clearTimeout(timer);
+        reject(new Error(`CDP connect failed: ${wsUrl}`));
+      });
     });
   }
 
-  send<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+  /** Send one command. Rejects with a CdpError if no answer arrives within its
+   *  budget (`opts.timeoutMs`, else cdpTimeoutFor), or the connection closes /
+   *  the page crashes first — it never waits forever. */
+  send<T = unknown>(
+    method: string,
+    params: Record<string, unknown> = {},
+    opts: CdpSendOptions = {},
+  ): Promise<T> {
+    if (this.closedWhy != null)
+      return Promise.reject(new CdpError(`CDP ${method}: ${this.closedWhy}`, method, "closed"));
     const id = ++this.id;
+    const budget = opts.timeoutMs ?? cdpTimeoutFor(method, params, this.timeoutMs);
     return new Promise<T>((resolve, reject) => {
-      this.pending.set(id, { resolve: (value) => resolve(value as T), reject });
-      this.ws.send(JSON.stringify({ id, method, params }));
+      const p: Pending = { method, resolve: (value) => resolve(value as T), reject };
+      if (budget > 0 && Number.isFinite(budget)) {
+        p.timer = setTimeout(() => {
+          if (!this.pending.delete(id)) return;
+          reject(
+            new CdpError(
+              `CDP ${method}: no answer within ${Math.round(budget / 100) / 10} s — the page (or Chrome) is not responding`,
+              method,
+              "timeout",
+            ),
+          );
+        }, budget);
+        // a request still waiting must not be what keeps the process alive
+        p.timer.unref?.();
+      }
+      this.pending.set(id, p);
+      try {
+        this.ws.send(JSON.stringify({ id, method, params }));
+      } catch (e) {
+        this.pending.delete(id);
+        clearTimeout(p.timer);
+        reject(
+          new CdpError(`CDP ${method}: could not send (${(e as Error).message})`, method, "closed"),
+        );
+      }
     });
   }
 
@@ -193,11 +336,36 @@ export class CDP {
     this.handlers.set(method, (params) => fn(params as T));
   }
 
+  /** requests still waiting for an answer */
+  get waiting(): number {
+    return this.pending.size;
+  }
+
+  /** whether the connection is gone (closed, failed) */
+  get closed(): boolean {
+    return this.closedWhy != null;
+  }
+
   close(): void {
+    this.gone("the DevTools connection was closed");
     try {
       this.ws.close();
     } catch {
       /* already closed */
+    }
+  }
+
+  private gone(why: string): void {
+    if (this.closedWhy == null) this.closedWhy = why;
+    this.failAll("closed", this.closedWhy);
+  }
+
+  private failAll(reason: "closed" | "crashed", why: string): void {
+    const all = [...this.pending.values()];
+    this.pending.clear();
+    for (const p of all) {
+      clearTimeout(p.timer);
+      p.reject(new CdpError(`CDP ${p.method}: ${why}`, p.method, reason));
     }
   }
 }

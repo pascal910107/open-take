@@ -8,8 +8,43 @@ which can become the next shot's subject). A film can go from one to another
 — the real action, its real result lifted out, the result where it is used —
 as one continuous shot or as cuts on the music.
 
-- The product's own assets: its fonts, colours, logo and illustrations are in
-  its repository — use them rather than lookalikes.
+### One thing of the product's on its own
+
+A button, a number, a card, a tab, a line of its text — shown on its own,
+big enough to read, with something happening to it: pressed, typing itself,
+a number working out, a page switching, rows arriving. Often a control and
+what it changes go together (a tab and the panel it switches). There are
+three ways to draw it, side by side; none is the default, a film can use
+any of them for any moment, and how good it looks is the film's:
+
+- **In place**, on the real screen — the recording, or a saved screen in an
+  iframe: the camera on it (`cam.frame`), the rest faded (`isolate`), what
+  is pressed and what it changes both in frame. The viewer sees the real
+  page do it.
+- **Lifted out** — `lift` makes one part (or several, as one layer) a live
+  copy of its own, sitting where it was: it moves anywhere at any size
+  (`place`, `group`, `arrange`, `carry`), and inside it the product's own
+  elements move (`find`, `parts`, `text` with motion.js's `count` and
+  `assemble`). Below, and in `components.json`.
+- **Rebuilt** as the film's own HTML, CSS, SVG or canvas, laid out at the
+  size it is shown, in the product's fonts and colours (`film look`) — the
+  shape is yours, its values can be the product's own (`readValues`,
+  below).
+
+How to draw it and where its data comes from are two questions. Drawn any
+of the three ways, a number or a string on screen can be one the product
+showed (a part's values in `components.json`), one its live page shows (a
+URL), one it works out from inputs the film states, or data you made up —
+then say so on screen, so a viewer can tell it is a demo. Where the real
+data is empty (no listings yet), the film can show that honestly, or show
+another feature. `tl.source` records which, and `film probe` sets the
+film's numbers beside it (below).
+
+- The product's own assets: a saved screen is a self-contained copy of the
+  page with its fonts, colours and images as the page served them, and
+  `film look` reads its fonts (the files), colours and type sizes into
+  `look.css` (`skill film look`) — use them rather than lookalikes. When
+  you can read the product's repository, its source assets are there too.
 - `npx open-take shoot shoot.mjs --out shots` runs your own capture script in
   open-take's browser and keeps the log: `s.open(url)` (loaded, hydrated,
   settled), `s.still(name)`, `s.click` / `s.type(…, { each: true })` /
@@ -116,15 +151,103 @@ window.__render = (t) => {
   `((b.x − offset.x) / scale, (b.y − offset.y) / scale, b.width / scale,
   b.height / scale)` there — full frame is the stage's size only at scale 1
   (checked on a 2× stage: the plain stage box carries the card twice too big).
-- `lift(screen, part, { around, into, pad, radius, background, css, fit })`
-  lifts one real part — a selector, an index id (`"e126"`), an element or a
-  box — as a layer of its own, sitting exactly where it was, live DOM so it
-  stays sharp at any size. `box`/`rect` are where it sat (what `morphRect`,
-  `hop` and the other handoffs start from); `place(rect, { opacity, fit })`
-  moves it; `restyle(css)` changes only the copy. `around: "clear"` keeps the
-  part alone, see-through around it.
+- `lift(screen, part, { around, into, box, pad, radius, background, css,
+  fit, parts })` lifts one real part — a selector, an index id (`"e126"`),
+  a ref (`"calc-end:e126"`), `{ text: "會籍手續費", up: 2 }` (found by its
+  visible text, then that many ancestors), an element or a box — or a list
+  of them as one layer, as a layer of its own, sitting exactly where it was,
+  live DOM so it stays sharp at any size. `box`/`rect` are where it sat
+  (what `morphRect`, `hop` and the other handoffs start from), `member(i)`
+  each listed part's; `place(rect, { opacity, fit })` moves it;
+  `restyle(css)` changes only the copy. `around: "clear"` keeps the part
+  alone, see-through around it; `box: "ink"` fits the window to its text,
+  not its full-width block. Inside it, live: `doc`, `find(key)`, `parts()`
+  (its children in order, for `assemble`), `text(s, el?)` (the text it
+  shows — the text holding its digits unless `el` names one);
+  `view(box | null)` un-crops it into its whole screen; `from(cam, t)` is
+  where it shows under a camera. A hidden source: `screen(iframe, src,
+  { hidden: true })` — laid out, not seen. A scene hidden by `display:none`
+  has no layout to lift from; `scenes()` (kit/time.js) hides by visibility,
+  and a lifted part hides with its scene.
+- `group(parts)` moves several lifted parts as one body (`place(rect)`);
+  `arrange(parts, rect, { axis, gap, align })` returns a slot each, side by
+  side at one scale; `carry(A, B, t, a, b, { swapAt })` hands one part over
+  to another (the same card in two screens) without a cut.
 - `isolate(screen, parts, { color, opacity, blur })` fades everything but
   those parts; `set(p)`, 0 to 1.
 - `throughCamera(box, cam, t)` is a box under a camera as it shows in the
   picture — to carry a part out of a moving layer, or into `matchCut`;
   `fitTransform(from, to, fit)` the transform from one box onto another.
+
+### The parts: `components.json`
+
+`shoot` and `make --states` measure each saved screen's parts while they
+check it, and write `components.json` beside the log (`shots/`,
+`<take>.take/`; `--no-components` skips it); `film init --url` writes one
+in `states/home/`. `npx open-take components <dir>` measures screens saved
+before that and prints, per screen, its parts by kind and what the action
+before it changed; `film init --from <dir>` does the same for the film's
+material. It is an index of what there is, in the page's order: nothing in
+it says which part a film uses. Version 2 holds, per part (`components[]`):
+
+- `ref` (`<state>:<element id>` — what `lift`, `open-take states --state`
+  and `readValues` take), `kind` (number, stat, heading, button, input,
+  control, field, badge, media, logo, card, group, text), `label` (≤ 80 characters, for a
+  glance), `box`, `ink`, `inside`, `parts`, `members`, `look`;
+- `values` — what it holds, by field, in full: `text`, `number`, `label`,
+  an input's `value` / `placeholder` / `min` / `max` / `step` / `checked` /
+  `options`, `name`;
+  each `{ text, value?, unit?, source: { state, eid, selector?, shot? } }`;
+- `relations` — `{ kind, to, by }`: `changes` (the action before a screen
+  acted on it and `to` changed or appeared there), `controls` (a tab and its
+  panel, by `aria-controls`), `labels`, `contains`; `by` is `seen` (the log
+  and the screens' diff), `markup` or `layout`;
+- `provenance` — `{ state, url, capturedAt, tMs, local }`; `local`: the
+  page was on this machine, so its data may be a local seed, not the live
+  product's;
+- `facts` — `acted`, `changed` ("was → now"), `restyled` (a tab now
+  selected, a fill changed), `moved`, `appeared`, with its sizes;
+- `fit` (where it would sit fitted to the stage), `phone` (how big its
+  text reads on a phone as part of the whole screen and fitted), `picture`
+  (a crisp PNG of it alone), `lift` (the options that reproduce it), `track`.
+
+Beside them: `states[]`, each with its `action` (what was done before it,
+and in `action.changes` every part that changed or appeared after it, a
+part or not); `tracks[]`, one part followed through the screens with what
+it read at each step (a total rising as a slider moves); and `skipped[]`
+with a reason each. `open-take components <dir> --snippet <ref>` prints a
+module that lifts the part you name and moves it on its own values (a
+number counts only from a value a screen before it held).
+
+### Where the values come from
+
+```js
+import { readValues } from "./kit/media.js";
+const v = await readValues("../shots/components.json", { tl });  // before __film.ready
+v.fields("calc-end:e149");                          // a stat: ["text", "number", "label"]
+price.textContent = v.text("calc-end:e149", "number");          // "NT$3,376"
+const n = v.valueOf("calc-end:e149", "number").value;           // 3376
+v.relations("calc:e12");                            // [{ kind: "changes", to: "calc-end:e149", by: "seen" }]
+tl.source("six listings", { note: "demo", selector: "#market" });
+tl.source("monthly fee", { url: "https://…/brands/world-gym", text: "NT$1,688" });
+```
+
+`readValues(url, { tl })` (or `partValues(json, { tl })`) reads a
+`components.json`: `refs()`, `part(ref)`, `fields`, `values`, `valueOf`,
+`text`, `withField(field)`, `relations`, `provenance`. A field the part did
+not show is an error naming the fields it did — it never makes one up. With
+`tl`, each value read is declared as its own source. `tl.source(label,
+{ ref, field, file, url, note, text, selector })` declares the rest: a part,
+a live URL, or a note ("demo", "illustrative"); `label` is what it covers on
+screen. Declare before the page is ready — `film render` reads the list
+once then, into the events file's `sources`. A count's in-between numbers
+are the film's: declare its ends.
+
+`film probe` adds "Where the values on screen come from": each declared
+source and when it is on screen, then each number in the film's own text
+(not in saved screens or lifted parts — those are the product's page) as
+`declared`, `matches a part` or `no source declared`, text that reads
+exactly as a part's value, and how many in-between numbers it counted. It
+reads the `components.json` files the sources name and those in the page's
+folder. Information, not a gate: a value the screens did not keep can
+still be real — a formula, the product's code, a live page.

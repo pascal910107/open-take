@@ -13,10 +13,23 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { promisify } from "node:util";
 // @ts-expect-error — the kit is plain JS, checked by its own tsconfig
-import { clip, clipEvents, fitTransform, fromLog, seam } from "../kit/media.js";
+import {
+  arrange,
+  carry,
+  clip,
+  clipEvents,
+  fitTransform,
+  fromLog,
+  group,
+  seam,
+} from "../kit/media.js";
+// @ts-expect-error — the kit is plain JS, checked by its own tsconfig
+import { morphRect } from "../kit/motion.js";
 import { resolveFfmpeg } from "../src/ffmpeg";
 import { initFilm } from "../src/film/kit";
 import { filmStills } from "../src/film/render";
+import { launchHtmlBrowser } from "../src/html/cdp";
+import { serveDirectory } from "../src/html/server";
 import { findChrome } from "./fixtures/find-chrome";
 
 const exec = promisify(execFile);
@@ -224,6 +237,95 @@ test("fitTransform puts a box onto a rect: contained, covered or stretched", () 
   assert.equal(fitTransform(from, to, "cover").kx, 320 / 90);
   const fill = fitTransform(from, to, "fill");
   assert.deepEqual([fill.kx, fill.ky], [3, 320 / 90]);
+});
+
+type Placed = {
+  rect: { x: number; y: number; width?: number; height?: number; w?: number; h?: number };
+  p: { opacity?: number; fit?: string };
+};
+/** a stand-in for a lifted part: its box at rest, and what it was last placed on */
+const part = (x: number, y: number, width: number, height: number, r = 0) => {
+  const self = {
+    box: { x, y, width, height },
+    rect: { x, y, w: width, h: height, r },
+    last: null as Placed | null,
+    place(rect: Placed["rect"], p: Placed["p"] = {}) {
+      self.last = { rect, p };
+    },
+  };
+  return self;
+};
+const boxOfRect = (r: Placed["rect"]) => [r.x, r.y, r.width ?? r.w, r.height ?? r.h];
+
+test("group moves several parts as one body: their layout kept, scaled about the box round them", () => {
+  const a = part(100, 100, 100, 50);
+  const b = part(300, 120, 50, 30);
+  const g = group([a, b]);
+  assert.deepEqual(g.box, { x: 100, y: 100, width: 250, height: 50 });
+  const f = g.place({ x: 0, y: 0, w: 500, h: 400 });
+  assert.equal(f.kx, 2, "contained: the group's width fills the rect");
+  // the union lands at (0, 150), 500×100; each part where it falls in it
+  assert.deepEqual(boxOfRect(a.last!.rect), [0, 150, 200, 100]);
+  assert.deepEqual(boxOfRect(b.last!.rect), [400, 190, 100, 60]);
+  assert.equal(a.last!.p.fit, "fill", "each part exactly on its share");
+  g.place({ x: 0, y: 0, w: 500, h: 400 }, { opacity: 0.5 });
+  assert.equal(b.last!.p.opacity, 0.5);
+  assert.throws(() => group([]), /parts/);
+});
+
+test("arrange lays parts out in a row or a column at one scale, centred, a gap apart", () => {
+  const a = part(0, 0, 100, 50, 8);
+  const b = part(0, 0, 50, 100);
+  const row = arrange([a, b], { x: 0, y: 0, w: 400, h: 300 }, { gap: 100 });
+  // (400 − 100) / 150 = 2, 300 / 100 = 3 → 2
+  assert.equal(row[0]!.k, 2);
+  assert.deepEqual([row[0]!.x, row[0]!.y, row[0]!.w, row[0]!.h, row[0]!.r], [0, 100, 200, 100, 16]);
+  assert.deepEqual([row[1]!.x, row[1]!.y, row[1]!.w, row[1]!.h], [300, 50, 100, 200]);
+  const top = arrange([a, b], { x: 0, y: 0, w: 400, h: 300 }, { gap: 100, align: "start" });
+  assert.equal(top[0]!.y, 50, "lined up along the top of the line");
+  const col = arrange(
+    [a, b],
+    { x: 0, y: 0, w: 300, h: 600 },
+    { axis: "column", scale: 1, gap: 10 },
+  );
+  assert.deepEqual([col[0]!.x, col[0]!.y, col[1]!.x, col[1]!.y], [100, 220, 125, 280]);
+  assert.deepEqual(
+    arrange([{ x: 0, y: 0, width: 10, height: 10 }], { x: 0, y: 0, w: 20, h: 20 })[0]!.w,
+    20,
+    "boxes too",
+  );
+});
+
+test("carry hands one part over to another on one moving box, never dipping", () => {
+  const A = part(100, 100, 200, 100, 10);
+  const B = part(600, 300, 400, 200, 20);
+  const r0 = carry(A, B, 0, 1, 2);
+  assert.deepEqual([r0.a, r0.b], [1, 0], "before: A at its rect, B not seen");
+  assert.deepEqual(boxOfRect(A.last!.rect), [100, 100, 200, 100]);
+  for (const t of [1.2, 1.5, 1.75]) {
+    const m = morphRect(t, 1, 2, A.rect, B.rect);
+    const c = carry(A, B, t, 1, 2);
+    for (const k of ["x", "y", "w", "h", "r"] as const)
+      assert.ok(near(c.rect[k], m[k], 1e-9), `the box is morphRect's at ${t} (${k})`);
+    assert.ok(Math.max(c.a, c.b) === 1, `one of them fully there at ${t}`);
+  }
+  assert.deepEqual(
+    [carry(A, B, 1.5, 1, 2).a, carry(A, B, 1.5, 1, 2).b],
+    [1, 0],
+    "before swapAt, A alone",
+  );
+  const mid = carry(A, B, 1.92, 1, 2);
+  assert.ok(mid.b === 1 && mid.a > 0 && mid.a < 1, "past half of the swap: B in, A going");
+  const end = carry(A, B, 2, 1, 2);
+  assert.deepEqual([end.a, end.b], [0, 1]);
+  assert.deepEqual(boxOfRect(B.last!.rect), [600, 300, 400, 200]);
+  const elsewhere = carry(A, B, 3, 1, 2, { to: { x: 0, y: 0, w: 1920, h: 1080 } });
+  assert.deepEqual(
+    boxOfRect(elsewhere.rect),
+    [0, 0, 1920, 1080],
+    "to: somewhere else than B's rect",
+  );
+  assert.throws(() => carry(A, B, 0, 2, 1), /before it starts/);
 });
 
 // --- in the browser ---------------------------------------------------------------
@@ -581,4 +683,194 @@ window.__render = (t) => {
     green > 0.6 * 160 * 90,
     `the card is the whole shot (${green} of ${160 * 90} samples green)`,
   );
+});
+
+test("the kit's fixes, in one page: scenes hide what was lifted, hidden sources, ink boxes, text, lists, views", {
+  skip,
+}, async () => {
+  // a calculator-like state: a full-width line whose text is much narrower,
+  // a row of three stat cells, a green card
+  const s5 = join(dir, "states", "s5");
+  await mkdir(s5, { recursive: true });
+  const cell = (i: number, x: number) =>
+    `<div class="cell" style="left:${x}px"><span>會籍手續費</span><b>NT$1,${i}00</b></div>`;
+  await writeFile(
+    join(s5, "state.html"),
+    `<!doctype html><html><head><meta charset="utf-8"><style>
+html,body{margin:0;width:640px;height:360px;overflow:hidden;background:#f4f1ea;font:14px sans-serif}
+#line{position:absolute;left:40px;top:30px;width:544px;height:30px;margin:0;font:20px sans-serif}
+.row{position:absolute;left:40px;top:120px;width:560px;height:80px}
+.cell{position:absolute;top:0;width:160px;height:80px;background:#fff;border-radius:8px}
+.cell span{position:absolute;left:10px;top:8px}.cell b{position:absolute;left:10px;top:36px;font-size:24px}
+#card{position:absolute;left:380px;top:240px;width:200px;height:90px;background:#1d4d3c}
+#split{position:absolute;left:40px;top:70px;margin:0}
+</style></head><body><p id="line">轉讓省 <b>NT$4,466</b></p><p id="split"><span>NT$</span><b>4,466</b><i> ms</i></p>
+<div class="row">${cell(1, 0)}${cell(2, 200)}${cell(3, 400)}</div><div id="card"></div>
+<script data-ot-restore>document.fonts.ready.then(function(){var c=document.querySelectorAll(".cell");c[0].setAttribute("data-ot-id","e2");c[1].setAttribute("data-ot-id","e3");c[2].setAttribute("data-ot-id","e4");document.documentElement.setAttribute("data-ot-ready","1");});</script>
+</body></html>`,
+  );
+  await writeFile(
+    join(s5, "index.json"),
+    JSON.stringify({ version: 1, id: "s5", viewport: { w: 640, h: 360, dpr: 1 }, elements: [] }),
+  );
+  const film = join(dir, "fixes");
+  await initFilm({ dir: film });
+  const src = "../states/s5/state.html";
+  await writeFile(
+    join(film, "fixes.html"),
+    `<!doctype html><html><head><meta charset="utf-8"><style>
+html,body{margin:0;width:640px;height:360px;overflow:hidden;background:#000}
+.layer{position:absolute;left:0;top:0;width:640px;height:360px}
+iframe{position:absolute;left:0;top:0;width:640px;height:360px;border:0}
+#a iframe{left:20px;top:10px}
+</style></head><body>
+<div class="layer" id="a"><iframe id="fa" src="${src}"></iframe></div>
+<div class="layer" id="b" style="visibility:hidden"><iframe id="fb" src="${src}"></iframe></div>
+<div class="layer" id="c" style="display:none"><iframe id="fc" src="${src}"></iframe></div>
+<div class="layer" id="d"><iframe id="fd"></iframe></div>
+<div class="layer" id="overlay"></div>
+<script type="module">
+import { screen, lift, isolate } from "./kit/media.js";
+import { scenes } from "./kit/time.js";
+const $ = (id) => document.getElementById(id);
+const vis = (el) => getComputedStyle(el).visibility;
+const box = (b) => [b.x, b.y, b.width, b.height].map((v) => Math.round(v * 10) / 10);
+const err = async (p) => { try { await p; return "resolved"; } catch (e) { return String(e.message); } };
+window.result = (async () => {
+  const r = {};
+  const sa = screen($("fa"));
+  const sb = screen($("fb"));
+  const sd = screen($("fd"), "${src}", { hidden: true });
+  // F1: a part lifted inside a hidden scene is hidden with it
+  const inB = lift(sb, "e2", { around: "clear" });
+  const overA = lift(sa, "e3", { around: "clear", into: $("overlay") });
+  // F3: a hidden source, its part shown
+  const fromD = lift(sd, "#card");
+  const ink = lift(sa, "#line", { box: "ink" });
+  const layoutLine = lift(sa, "#line");
+  const cellByText = lift(sa, { text: "會籍手續費", up: 1 });
+  const rowByText = lift(sa, { text: "NT$1,200", up: 2 });
+  const byRef = lift(sa, "s5:e4");
+  const wrongRef = lift(sa, "s9:e4");
+  const list = lift(sa, ["e2", "e3", "e4"], { around: "clear" });
+  // F2: no layout
+  const sc = screen($("fc"));
+  const noLayout = lift(sc, "e2");
+  const noLayoutIso = isolate(sc, ["e2"]);
+  await Promise.all([inB, overA, fromD, ink, layoutLine, cellByText, rowByText, byRef, list].map((l) => l.ready));
+  r.f1 = { hiddenScene: vis(inB.el), shownScene: null, overlayAfterCut: null };
+  $("b").style.visibility = "visible";
+  r.f1.shownScene = vis(inB.el);
+  const sc2 = scenes({ a: [0, 1], b: [1, 2] });
+  sc2.show(1.5);
+  r.f1.overlayAfterCut = vis(overA.el);
+  r.f1.sceneA = vis($("a"));
+  r.f1.liftInA = null;
+  r.overlayBox = box(overA.box);
+  r.f2 = { lift: await err(noLayout.ready), isolate: await err(noLayoutIso.ready) };
+  r.f3 = { frame: vis($("fd")), part: vis(fromD.el), box: box(fromD.box) };
+  const inner = $("fa").contentDocument;
+  const range = inner.createRange();
+  range.selectNodeContents(inner.querySelector("#line"));
+  const rr = range.getBoundingClientRect();
+  r.f4 = { ink: box(ink.source), by: ink.by, layout: box(layoutLine.source), layoutBy: layoutLine.by, range: box({ x: rr.left, y: rr.top, width: rr.width, height: rr.height }) };
+  r.f5 = { cell: box(cellByText.source), row: box(rowByText.source), ref: box(byRef.source), wrongRef: await err(wrongRef.ready) };
+  r.list = { box: box(list.source), count: list.count, member1: box(list.member(1)), parts: list.parts().length, sameDoc: list.parts().every((p) => p.ownerDocument === list.doc) };
+  r.find = ink.find("b").ownerDocument === ink.doc && ink.find("b") !== inner.querySelector("#line b");
+  ink.text("NT$9,999");
+  r.text = { copy: ink.doc.querySelector("#line").textContent, screen: inner.querySelector("#line").textContent };
+  const split = lift(sa, "#split");
+  await split.ready;
+  split.text("NT$12,345 ms");
+  r.split = split.doc.querySelector("#split").textContent;
+  r.from = box(ink.from({ toView: (x, y) => [x * 2, y * 2] }, 0));
+  layoutLine.view(null);
+  r.view = { window: box(layoutLine.window), source: box(layoutLine.source), width: layoutLine.el.style.width, left: layoutLine.el.style.left };
+  layoutLine.view();
+  r.viewBack = layoutLine.el.style.width;
+  ink.place({ x: 0, y: 0, w: ink.box.width * 2, h: ink.box.height * 2 });
+  r.map = box(ink.map(ink.box));
+  // for the picture: only the hidden screen's card, lifted, on black
+  for (const id of ["a", "b"]) $(id).style.visibility = "hidden";
+  return r;
+})();
+</script></body></html>`,
+  );
+  const server = await serveDirectory(dir);
+  const b = await launchHtmlBrowser({
+    chromePath: chrome!,
+    url: `${server.url}/fixes/fixes.html`,
+    width: 640,
+    height: 360,
+  });
+  try {
+    // biome-ignore lint/suspicious/noExplicitAny: the page's own report
+    const r = await b.evaluate<any>("window.result");
+    assert.equal(r.f1.hiddenScene, "hidden", "F1: lifted inside a hidden scene, hidden with it");
+    assert.equal(r.f1.shownScene, "visible", "and shown with it");
+    assert.equal(r.f1.sceneA, "hidden", "scenes() hid scene a");
+    assert.equal(r.f1.overlayAfterCut, "visible", "a part lifted into an overlay survives the cut");
+    assert.deepEqual(r.overlayBox, [20 + 240, 10 + 120, 160, 80], "measured into the overlay");
+    assert.match(
+      r.f2.lift,
+      /no layout \(display:none on it or an ancestor\).*scenes\(\)/,
+      "F2: said why",
+    );
+    assert.match(r.f2.isolate, /^isolate: the screen's iframe has no layout/);
+    assert.deepEqual(
+      [r.f3.frame, r.f3.part],
+      ["hidden", "visible"],
+      "F3: the source hidden, its part shown",
+    );
+    assert.deepEqual(r.f3.box, [380, 240, 200, 90]);
+    assert.equal(r.f4.by, "ink");
+    assert.equal(r.f4.layoutBy, "box");
+    assert.equal(r.f4.layout[2], 544, "the line's box is 544 px");
+    assert.ok(
+      r.f4.ink[2] < 250 && r.f4.ink[2] > 60,
+      `F4: its text is far narrower (${r.f4.ink[2]})`,
+    );
+    assert.ok(Math.abs(r.f4.ink[2] - r.f4.range[2]) < 1, "as wide as the text's own extent");
+    assert.equal(r.f4.ink[0], 40, "starting where the text starts");
+    assert.deepEqual(r.f5.cell, [40, 120, 160, 80], "F5: the cell showing that text");
+    assert.deepEqual(r.f5.row, [40, 120, 560, 80], "two parents out: the row");
+    assert.deepEqual(r.f5.ref, [440, 120, 160, 80], "a ref of this screen");
+    assert.match(r.f5.wrongRef, /saved screen "s9", and this screen is "s5"/);
+    assert.deepEqual(r.list.box, [40, 120, 560, 80], "a list: one window over all of them");
+    assert.equal(r.list.count, 3);
+    assert.deepEqual(r.list.member1, [20 + 240, 10 + 120, 160, 80], "where each one sits");
+    assert.deepEqual([r.list.parts, r.list.sameDoc], [3, true], "its parts, in the copy");
+    assert.ok(r.find, "find() is in the copy, not the screen");
+    assert.equal(r.text.copy, "轉讓省 NT$9,999", "text(): the digits' text set, the rest kept");
+    assert.equal(r.text.screen, "轉讓省 NT$4,466", "the screen untouched");
+    assert.equal(
+      r.split,
+      "NT$12,345 ms",
+      "text(): a prefix and suffix in elements of their own are not doubled",
+    );
+    const want = r.f4.ink.map((v: number, i: number) => (i < 2 ? (v + (i ? 10 : 20)) * 2 : v * 2));
+    for (let i = 0; i < 4; i++)
+      assert.ok(
+        Math.abs(r.from[i] - want[i]) <= 0.2,
+        `F6: through the camera (${r.from} vs ${want})`,
+      );
+    assert.deepEqual(r.view.window, [0, 0, 640, 360], "view(null): the whole screen");
+    assert.deepEqual(r.view.source, [40, 30, 544, 30], "its source stays where it sat");
+    assert.deepEqual([r.view.width, r.view.left], ["640px", "20px"]);
+    assert.equal(r.viewBack, "544px", "view(): its own box again");
+    for (const i of [2, 3])
+      assert.ok(
+        Math.abs(r.map[i] - r.f4.ink[i] * 2) <= 0.2,
+        `map(): through the last place (${r.map})`,
+      );
+    // the picture: the hidden screen not drawn, the part lifted from it drawn
+    const png = join(dir, "fixes.png");
+    await writeFile(png, await b.screenshot());
+    const p = await rgb(png, 640, 360);
+    assert.ok(close(px(p, 640, 480, 285), GREEN), "the card lifted from the hidden screen shows");
+    assert.ok(close(px(p, 640, 300, 300), [0, 0, 0], 4), "the hidden screen itself does not");
+  } finally {
+    await b.close();
+    await server.close();
+  }
 });

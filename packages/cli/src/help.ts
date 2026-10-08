@@ -9,7 +9,7 @@
 
 /** the flags each `film <sub>` accepts — the same lists its `only(…)` call in cli.ts takes */
 export const FILM_FLAGS: Record<string, string[]> = {
-  init: ["--force", "--url", "--size", "--profile"],
+  init: ["--force", "--url", "--size", "--profile", "--from"],
   render: [
     "--out",
     "--root",
@@ -77,7 +77,14 @@ kept and listed; --force replaces it.
                      keep it as a saved screen (states/home/ in <dir>), and
                      read its look into <dir>/look/; neither stops the init
   --size WxH         the page's CSS px for --url (default 1920x1080)
-  --profile <name>   a signed-in Chrome profile for --url (as for make)`,
+  --profile <name>   a signed-in Chrome profile for --url (as for make)
+  --from <dir>       a shoot's folder or a take the film is made from: its
+                     component inventory (components.json — each part's
+                     values with where they were read, its relations) is
+                     measured where missing and pointed to; nothing is
+                     written into <dir> for it and the page to start from
+                     is unchanged
+With --url the saved screen's parts are measured too (states/home/components.json).`,
   render: `Play the page on film time in headless Chrome and write an H.264 master
 (default film.mp4) with measured motion blur and the page's soundtrack. The
 page is driven by window.__render(t), or its own CSS/WAAPI/rAF/GSAP/video

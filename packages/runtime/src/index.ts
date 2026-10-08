@@ -21,11 +21,15 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
   type CaptureLog,
+  type ComponentsFile,
   type CompositionIssue,
+  gatherComponents,
   type PlanOpts,
   planComposition,
+  readComponentSource,
   renderTake,
   type TakeComposition,
+  writeComponents,
 } from "@open-take/compositor";
 import { type CaptureOpts, captureTake } from "./capture";
 import { ensureChrome } from "./cdp";
@@ -39,8 +43,11 @@ export {
   type AuditRow,
   auditCursor,
   type CaptureLog,
+  type ComponentsFile,
   type CompositionIssue,
   checkFilm,
+  componentsLine,
+  exampleSource,
   filmBeats,
   filmGallery,
   filmListen,
@@ -49,6 +56,7 @@ export {
   filmProbe,
   filmSheet,
   filmStills,
+  formatComponents,
   formatFilmBeats,
   formatFilmCheck,
   formatFilmListen,
@@ -99,6 +107,7 @@ export {
   startApp,
   waitForHttp,
 } from "./ci";
+export { type InventoryOpts, type InventoryResult, inventoryComponents } from "./components";
 export {
   asDefects,
   buildDefectReport,
@@ -112,6 +121,7 @@ export {
   settleDefects,
   skippedDefects,
 } from "./defect-report";
+export { measureParts, measureStateDirs } from "./dom-state";
 export { type EditServerOpts, startEditServer } from "./edit-server";
 export {
   type AnnotateOpts,
@@ -275,6 +285,9 @@ export type MakeTakeResult = {
    *  by the time the run ends — surface these in the end-of-run summary the
    *  same way `skipped` is, or they get scrolled past and ship. */
   warnings: CompositionIssue[];
+  /** the saved states' component inventory (<name>.take/components.json),
+   *  when the take kept states */
+  components?: { file: ComponentsFile; path: string };
 };
 
 /** `<video>.mp4` → `<video>.json` — the capture log sits beside its video
@@ -369,6 +382,20 @@ async function makeTakeIn(
   // check needs in the refine loop (the composition is editable; the log is not).
   await writeFile(captureLogPath, JSON.stringify(log, null, 2));
 
+  // The parts each saved state holds (measured in the fidelity page), with
+  // what the log adds — <name>.take/components.json. No browser; one that
+  // cannot be gathered never fails the take. An earlier make's goes either way.
+  const componentsPath = join(take.dir, "components.json");
+  await rm(componentsPath, { force: true });
+  let components: MakeTakeResult["components"];
+  if (log.states?.items.length && opts.capture?.components !== false)
+    try {
+      const file = gatherComponents(readComponentSource(take.dir));
+      components = { file, path: writeComponents(file, take.dir) };
+    } catch (e) {
+      console.error(`make: no components.json (${(e as Error).message})`);
+    }
+
   // One knob: the render grid follows the capture fps (default 60) unless the
   // caller pinned an explicit render fps. (A 30fps
   // render of a 60fps capture would discard half the frames; matching them is
@@ -397,6 +424,7 @@ async function makeTakeIn(
       settleWaits: log.settleWaits ?? [],
       ...(log.paintedFrac != null ? { paintedFrac: log.paintedFrac } : {}),
       warnings: [],
+      ...(components ? { components } : {}),
     };
   }
   const { mp4Path, compositionPath, warnings } = await renderTake({
@@ -427,6 +455,7 @@ async function makeTakeIn(
     settleWaits: log.settleWaits ?? [],
     ...(log.paintedFrac != null ? { paintedFrac: log.paintedFrac } : {}),
     warnings,
+    ...(components ? { components } : {}),
   };
 }
 

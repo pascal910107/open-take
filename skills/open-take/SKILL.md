@@ -678,7 +678,8 @@ open-take plays it frame-exactly into a 1080p60 master with measured motion blur
 soundtrack you make, hands you the real product's UI as material (`make --states`, and
 `shoot` for stills from a capture script of your own, each keeping its saved screen;
 `film init --url` for the product's page) — the recording, the saved screens
-and the real results on one clock, with real parts liftable as layers — reads the product's
+and the real results on one clock, each saved screen's parts listed with their values
+(`components.json`) to show in place, lift as layers or rebuild — reads the product's
 own look (`film look`) and the music's grid (`film beats`), and measures what you cannot see
 or hear (`film probe`, `film listen`, `film check`; `film gallery` draws what each kit block
 does). Every report line is measured, estimated or not detected — information, not a grade.

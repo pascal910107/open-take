@@ -17,6 +17,7 @@ import { basename, join, resolve } from "node:path";
 import {
   type CaptureEvent,
   type CaptureLog,
+  cardsOf,
   contentOf,
   diffStates,
   elementLabel,
@@ -176,7 +177,6 @@ const area = (b: Box): number => Math.max(0, b[2]) * Math.max(0, b[3]);
 const contains = (b: Box, x: number, y: number): boolean =>
   x >= b[0] && x <= b[0] + b[2] && y >= b[1] && y <= b[1] + b[3];
 const near = (u: number, v: number): boolean => Math.abs(u - v) <= 2;
-const sameBox = (a: Box, b: Box): boolean => a.every((v, i) => near(v, b[i]!));
 const overlap = (a: Box, b: Box): number => {
   const w = Math.min(a[0] + a[2], b[0] + b[2]) - Math.max(a[0], b[0]);
   const h = Math.min(a[1] + a[3], b[1] + b[3]) - Math.max(a[1], b[1]);
@@ -220,29 +220,6 @@ function indexed(index: StateIndex): Indexed {
     children.set(parent.id, list);
   });
   return { index, byId, byPath, children, order, cards: cardsOf(index, byPath) };
-}
-
-/** The elements a film could lift out on their own: at least two labelled
- *  things inside, 0.3–20% of the page, and — of a chain of wrappers that
- *  share one box — the outermost. */
-function cardsOf(index: StateIndex, byPath: Map<string, StateElement>): Set<string> {
-  const page = index.viewport.w * index.viewport.h;
-  const qualifies = new Set<string>();
-  for (const e of index.elements) {
-    const frac = area(e.box) / page;
-    if (frac < 0.003 || frac > 0.2) continue;
-    let labelled = 0;
-    for (const d of subtree(index, e.id)) if (d.id !== e.id && labelOf(d)) labelled++;
-    if (labelled >= 2) qualifies.add(e.id);
-  }
-  const cards = new Set<string>();
-  for (const e of index.elements) {
-    if (!qualifies.has(e.id)) continue;
-    const parent = byPath.get(parentKey(e));
-    if (parent && parent !== e && qualifies.has(parent.id) && sameBox(parent.box, e.box)) continue;
-    cards.add(e.id);
-  }
-  return cards;
 }
 
 /** The element under a point: the smallest interactive one, else the

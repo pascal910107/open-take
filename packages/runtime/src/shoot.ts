@@ -65,6 +65,12 @@ import { mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from "node:f
 import { basename, dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
+  type ComponentsFile,
+  gatherComponents,
+  readComponentSource,
+  writeComponents,
+} from "@open-take/compositor";
+import {
   BOX_CANDIDATES,
   CLICK_CANDIDATES,
   CLICK_FALLBACK_CANDIDATES,
@@ -228,6 +234,10 @@ export type ShootOpts = {
    *  still; false, none; unset (default), every still but the ones on the
    *  way (a keystroke's with `each`, a drag step's with `every`) */
   states?: boolean;
+  /** measure the parts of each saved screen (states/<id>/parts.json, crisp
+   *  pictures in states/assets/) and gather them into <out>/components.json —
+   *  default true; false skips both */
+  components?: boolean;
   /** advisories (default: stderr) */
   onNote?: (line: string) => void;
 };
@@ -484,7 +494,12 @@ const FRAME_JS =
 /** Run a shoot script against a fresh Chrome and write its stills and
  *  shots.json into `outDir`. A script that throws rejects with its own
  *  message (and where in the script it came from). */
-export async function runShoot(opts: ShootOpts): Promise<{ log: ShootLog; path: string }> {
+export async function runShoot(opts: ShootOpts): Promise<{
+  log: ShootLog;
+  path: string;
+  /** the component inventory, when the shoot kept saved screens */
+  components?: { file: ComponentsFile; path: string };
+}> {
   const out = resolve(opts.outDir);
   const stage = join(out, ".shoot");
   const note = opts.onNote ?? ((line: string) => process.stderr.write(`${line}\n`));
@@ -555,7 +570,15 @@ export async function runShoot(opts: ShootOpts): Promise<{ log: ShootLog; path: 
     } catch (e) {
       failed = scriptFailure(e, file);
     }
-    items = await finishStates(browser, stage, kept, stills, viewport, note);
+    items = await finishStates(
+      browser,
+      stage,
+      kept,
+      stills,
+      viewport,
+      note,
+      opts.components !== false,
+    );
     if (failed != null) {
       const partial: ShootLog = { viewport, scale, stills, ...logStates(items), error: failed };
       await writeFile(join(stage, "shots.json"), `${JSON.stringify(partial, null, 2)}\n`);
@@ -571,11 +594,27 @@ export async function runShoot(opts: ShootOpts): Promise<{ log: ShootLog; path: 
   // the script finished: this shoot replaces the last one
   const log: ShootLog = { viewport, scale, stills, ...logStates(items) };
   await writeFile(join(stage, "shots.json"), `${JSON.stringify(log, null, 2)}\n`);
+  // the parts each saved screen holds, gathered with what the log adds (no
+  // browser); one that cannot be gathered never fails the shoot
+  let inventory: ComponentsFile | null = null;
+  if (items.length && opts.components !== false)
+    try {
+      inventory = gatherComponents(readComponentSource(stage));
+      writeComponents(inventory, stage);
+    } catch (e) {
+      inventory = null;
+      note(`shoot: no components.json (${(e as Error).message})`);
+    }
   await replaceShoot(out, stage, [
     ...stills.map((st) => st.file),
     ...items.map((it) => `states/${it.id}`),
+    ...(inventory ? ["components.json"] : []),
   ]);
-  return { log, path: join(out, "shots.json") };
+  return {
+    log,
+    path: join(out, "shots.json"),
+    ...(inventory ? { components: { file: inventory, path: join(out, "components.json") } } : {}),
+  };
 }
 
 const logStates = (items: ShootStateItem[]): Pick<ShootLog, "states"> =>
@@ -591,6 +630,7 @@ async function finishStates(
   stills: ShootStill[],
   viewport: { w: number; h: number },
   note: (line: string) => void,
+  parts: boolean,
 ): Promise<ShootStateItem[]> {
   if (!kept.length) return [];
   let done: DomStateItem[];
@@ -601,6 +641,7 @@ async function finishStates(
       states: kept,
       vw: viewport.w,
       vh: viewport.h,
+      parts,
     });
   } catch (e) {
     note(`shoot: the saved screens could not be finished (${(e as Error).message})`);
@@ -762,7 +803,9 @@ async function moveAside(
         typeof id === "string" && /^[^/\\.][^/\\]*$/.test(id) && id !== "assets",
     )
     .map((id) => `states/${id}`);
-  for (const name of [...names, ...screens, "shots.json"]) {
+  // its inventory goes with it: a shoot that keeps none must not leave the
+  // last one's components.json naming screens that are gone
+  for (const name of [...names, ...screens, "components.json", "shots.json"]) {
     if (!existsSync(join(out, name))) continue;
     await move(join(out, name), join(aside, name));
     moved.push(name);
@@ -1396,6 +1439,8 @@ export type ShootHomeOpts = {
   scale?: number;
   chromePath?: string;
   userDataDir?: string;
+  /** measure its parts and write states/<name>/components.json (default true) */
+  components?: boolean;
   onNote?: (line: string) => void;
 };
 
@@ -1409,6 +1454,8 @@ export async function shootHome(opts: ShootHomeOpts): Promise<{
   url: string;
   title: string;
   fidelity: ShootStateItem["fidelity"];
+  /** its component inventory, states/<name>/components.json */
+  components?: { file: ComponentsFile; path: string };
 }> {
   const dir = resolve(opts.dir);
   const name = opts.name ?? "home";
@@ -1430,6 +1477,7 @@ export async function shootHome(opts: ShootHomeOpts): Promise<{
       ...(opts.chromePath ? { chromePath: opts.chromePath } : {}),
       ...(opts.userDataDir ? { userDataDir: opts.userDataDir } : {}),
       ...(opts.onNote ? { onNote: opts.onNote } : {}),
+      ...(opts.components === false ? { components: false } : {}),
     });
     const item = log.states?.items.find((i) => i.id === name);
     if (!item) throw new Error(`shoot: ${opts.url} gave no saved screen`);
@@ -1438,7 +1486,24 @@ export async function shootHome(opts: ShootHomeOpts): Promise<{
     const to = join(states, name);
     if (existsSync(to)) await rename(to, join(work, "previous"));
     await rename(join(work, "states", name), to);
-    return { dir: to, url: page.url, title: page.title, fidelity: item.fidelity };
+    // its parts, gathered where the screen now is (picture paths are relative to it)
+    let components: { file: ComponentsFile; path: string } | undefined;
+    if (opts.components !== false && existsSync(join(to, "parts.json")))
+      try {
+        const file = gatherComponents(readComponentSource(to));
+        components = { file, path: writeComponents(file, to) };
+      } catch (e) {
+        (opts.onNote ?? ((l: string) => process.stderr.write(`${l}\n`)))(
+          `shoot: no components.json for ${name} (${(e as Error).message})`,
+        );
+      }
+    return {
+      dir: to,
+      url: page.url,
+      title: page.title,
+      fidelity: item.fidelity,
+      ...(components ? { components } : {}),
+    };
   } finally {
     await rm(work, { recursive: true, force: true });
   }

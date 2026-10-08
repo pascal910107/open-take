@@ -11,7 +11,7 @@
 // composition.json and drives these verbs. See skills/open-take/SKILL.md.
 import { existsSync, statSync } from "node:fs";
 import { stat as fsStat, readFile, unlink, writeFile } from "node:fs/promises";
-import { basename, dirname, extname, join, resolve } from "node:path";
+import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   asDefects,
@@ -25,6 +25,7 @@ import {
   checkLaunchFile,
   checkTake,
   ciAllowedOrigins,
+  componentsLine,
   ciTake,
   composeLaunchFile,
   type Defect,
@@ -33,6 +34,7 @@ import {
   emitGithubOutputs,
   emitStepSummary,
   ensureChrome,
+  exampleSource,
   filmBeats,
   filmGallery,
   filmListen,
@@ -45,6 +47,7 @@ import {
   formatFilmCheck,
   formatFilmListen,
   formatFilmLook,
+  formatComponents,
   formatFilmProbe,
   formatIssues,
   formatNotes,
@@ -53,6 +56,7 @@ import {
   initFilm,
   initLaunchProject,
   inspectPage,
+  inventoryComponents,
   lintPlan,
   loadCaptureLogSibling,
   makeTake,
@@ -136,6 +140,7 @@ const BOOL_FLAGS = new Set([
   "--no-text",
   "--no-picture",
   "--all",
+  "--no-components",
 ]);
 
 const argv = process.argv.slice(2);
@@ -194,6 +199,7 @@ const FLAGS_BY_CMD: Record<string, string[]> = {
     "--states",
     "--no-product-audio",
     "--no-render",
+    "--no-components",
   ],
   render: [
     "--review",
@@ -211,6 +217,7 @@ const FLAGS_BY_CMD: Record<string, string[]> = {
   check: ["--no-strict", "--verbose"],
   beats: ["--card"],
   states: ["--state", "--json", "--measure"],
+  components: ["--state", "--json", "--snippet", "--min-area"],
   frames: ["--beat", "--tile", "--open", "--verbose"],
   ab: ["--set", "--beat", "--full", "--draft", "--before-after", "--no-open", "--verbose"],
   edit: ["--port", "--no-open"],
@@ -241,7 +248,16 @@ const FLAGS_BY_CMD: Record<string, string[]> = {
   init: ["--force"],
   skill: ["--force", "--all"],
   launch: ["--video", "--out", "--draft", "--verbose"],
-  shoot: ["--out", "--scale", "--size", "--profile", "--headed", "--states", "--no-states"],
+  shoot: [
+    "--out",
+    "--scale",
+    "--size",
+    "--profile",
+    "--headed",
+    "--states",
+    "--no-states",
+    "--no-components",
+  ],
 };
 
 function rejectUnknownFlags(cmd: string): void {
@@ -268,10 +284,12 @@ const USAGE = `open-take — agent-native demo recorder
 Usage:
   open-take inspect <url> [--viewport 1920x1080]
   open-take make   --plan <plan.json> --out <out.mp4> [--fps 60] [--draft] [--no-open] [--states] [--no-product-audio] [--no-render]
+                   [--no-components]
   open-take render <take> [--review] [--draft] [--open] [--reveal] [--no-open] [--no-strict]
   open-take check  <take> [--no-strict]
   open-take beats  <take> [--card]
   open-take states <take> [--state <id>] [--json] [--measure]
+  open-take components <shots | take | state | dir> [--state <id>] [--json] [--snippet <ref>] [--min-area <frac>]
   open-take frames <take> [--beat N] [--tile 720]
   open-take ab     <take> --set <knob>=<v1>,<v2>[,<v3>] [--beat N] [--full] [--draft] [--no-open]
   open-take ab     <take> --before-after [--beat N] [--full] [--no-open]
@@ -287,7 +305,8 @@ Usage:
   open-take launch render <launch.json> [--out <movie.mp4>] [--draft] [--verbose]
   open-take skill  [motion | film [<topic> | --all] | cases [<name>] | install [--force]]
   open-take shoot  <script.mjs> [--out shots] [--scale 2] [--size 1920x1080] [--states | --no-states]
-  open-take film init   <dir> [--force] [--url <url> [--size 1920x1080] [--profile <name>]]
+                   [--no-components]
+  open-take film init   <dir> [--force] [--url <url> [--size 1920x1080] [--profile <name>]] [--from <shots|take>]
   open-take film render <page.html|dir> [--out film.mp4] [--audio <file>|none] [--draft] [--no-blur]
                    [--size 1920x1080] [--fps 60] [--duration <s>] [--from <s>] [--to <s>] [--root <dir>]
                    [--workers 2] [--supersample 2] [--into <film.mp4>] [--verbose]
@@ -374,6 +393,35 @@ Usage:
           recording into capture.json: when each action's result showed (not
           just when it was clicked) and how each state lines up with the
           recording (for takes made before \`make\` recorded these).
+  components  the parts of a shoot's or a take's saved screens that stand on
+          their own — a number the product worked out, a stat, a heading, a
+          button, a field, a card, a row of like items — as the component
+          probe measured them in each restored page, gathered into
+          components.json beside the log: kind, text, box and the text's own
+          extent, colours, a crisp picture (3×, see-through around the part,
+          in states/assets/), the lift() options that reproduce it, where it
+          would sit fitted to the stage and how big its text reads on a phone
+          there and as part of the whole screen; what the action before each
+          screen acted on, changed (was → now) or made appear; the same part
+          followed through the screens (tracks); every candidate left out,
+          with its reason. Each part's values in full, field by field (its
+          text, the number in it with its unit, an input's value apart from
+          its placeholder, an icon-only button's name), each with where it
+          was read (screen, element, selector, the shoot's still); its
+          relations (what an action on it changed — seen in the log and the
+          screens' diff; what its markup says it controls or labels; what
+          holds what); the page it was on (URL, local host or not, when
+          saved). Measurements, labelled as such — nothing in it says which
+          part a film uses, and none is singled out. shoot and make --states
+          write it by default (--no-components skips it); this verb measures
+          screens saved before that (one Chrome page) and prints, per
+          screen, how many parts of each kind and what changed since the
+          screen before. --state <id> one screen; --json the file itself;
+          --snippet <ref> a module that lifts the part you name with the kit
+          and moves it from where it sat to its fit, on its own values (its
+          saved screen by a URL from the working directory, the folder film
+          render serves); --min-area <frac> re-measures with a lower size
+          floor (default 0.0005 of the screen).
   frames  extract a beat-aware contact sheet (<take>/frames.png) from the
           delivered mp4: an intro row, one row per beat (a mid-travel cell +
           4 samples across the beat's camera HOLD, timed off the real camera
@@ -630,6 +678,10 @@ Usage:
               adds a few hundred ms of take time per state (reported). Each
               state is fidelity-checked against a live screenshot; one that
               fails stays on disk, marked failed — use the recording there.
+  --no-components   (make/shoot) don't measure the saved screens' parts or
+              write components.json (measured: 1–2 s more per saved screen —
+              the probe plus one picture per part; the summary line says how
+              long it took).
   --no-product-audio   (make) don't record the app's own sound. By default
               everything the page sends to its speakers is recorded onto the
               capture timeline as <name>.take/product-audio.wav, and the audio
@@ -666,6 +718,12 @@ Usage:
   --verbose   show per-event diagnostics (frame-diff lines, renderer console
               passthrough). Hidden by default so real warnings stay visible.
 `;
+
+/** a path as typed from here: relative to the working directory when inside it */
+const shown = (p: string): string => {
+  const r = relative(process.cwd(), p);
+  return !r ? "." : r.startsWith("..") ? p : r;
+};
 
 const fmtDuration = (s: number): string => (s >= 120 ? `${Math.round(s / 60)}m` : `${s}s`);
 
@@ -1234,6 +1292,7 @@ async function main() {
     const headed = has("--headed");
     const states = has("--states");
     const productAudio = !has("--no-product-audio");
+    const components = !has("--no-components");
     // a re-make (re-shoot) is a new generation: keep the old master as prev so
     // --before-after compares against the take the user just reacted to — and
     // keep the old COMPOSITION too: a re-make re-plans from the new capture, so
@@ -1264,7 +1323,7 @@ async function main() {
           );
           if (!has("--no-open")) openPath(p);
         },
-        ...(fps || captureScale || profile || headed || states || !productAudio
+        ...(fps || captureScale || profile || headed || states || !productAudio || !components
           ? {
               capture: {
                 ...(fps ? { fps } : {}),
@@ -1273,6 +1332,7 @@ async function main() {
                 ...(headed ? { headless: false } : {}),
                 ...(states ? { states: true } : {}),
                 ...(productAudio ? {} : { productAudio: false }),
+                ...(components ? {} : { components: false }),
               },
             }
           : {}),
@@ -1360,6 +1420,10 @@ async function main() {
           `  ${INVOKE} render ${mp4Path} --review   (draft copy with beat badges, auto-opens)\n` +
           `  ${INVOKE} beats  ${mp4Path}            (the numbered beat sheet)\n` +
           `  ${INVOKE} ab     ${mp4Path} --set zoom=light,tight --beat 2   (taste A/B)\n`,
+      );
+    if (made.components)
+      process.stdout.write(
+        `${componentsLine(made.components.file, shown(made.components.path), shown(takeDir))}\n`,
       );
     printWarnings(warnings);
     // Post-shoot gates: line the delivered video up against the engine's own
@@ -1906,7 +1970,7 @@ async function main() {
     if (has("--states") && has("--no-states"))
       throw new Error("shoot: --states or --no-states, not both");
     const profile = flag("--profile");
-    const { log, path } = await runShoot({
+    const { log, path, components } = await runShoot({
       script,
       outDir: flag("--out") ?? "shots",
       width: size?.width,
@@ -1916,6 +1980,7 @@ async function main() {
       ...(has("--headed") ? { headless: false } : {}),
       ...(has("--states") ? { states: true } : {}),
       ...(has("--no-states") ? { states: false } : {}),
+      ...(has("--no-components") ? { components: false } : {}),
     });
     const px = (n: number) => Math.round(n * log.scale);
     process.stdout.write(
@@ -1923,6 +1988,59 @@ async function main() {
         `${px(log.viewport.w)}×${px(log.viewport.h)} each\n`,
     );
     if (log.stills.length) process.stdout.write(`       ${shootStatesLine(log)}\n`);
+    if (components)
+      process.stdout.write(
+        `       ${componentsLine(components.file, shown(components.path), shown(dirname(path)))}\n`,
+      );
+    return;
+  }
+
+  if (cmd === "components") {
+    const arg = positional[0];
+    if (!arg || positional.length !== 1)
+      throw new Error(
+        `components: expected one <shots dir | take | saved screen | folder of them> — e.g. ${INVOKE} components shots`,
+      );
+    const minFlag = flag("--min-area");
+    const minArea = minFlag == null ? undefined : Number(minFlag);
+    if (minArea != null && !(minArea >= 0 && minArea < 1))
+      throw new Error(`components: --min-area is a fraction of the screen, 0–1 (got ${minFlag})`);
+    // a take's master names its working dir; anything else is read as given
+    const path = /\.mp4$/i.test(arg) ? (await resolveTakePaths(arg)).dir : arg;
+    const inv = await inventoryComponents({
+      path,
+      ...(flag("--state") ? { state: flag("--state") } : {}),
+      ...(minArea != null ? { minArea } : {}),
+    });
+    if (inv.measured.length)
+      process.stderr.write(
+        `components: measured ${inv.measured.length} saved screen${inv.measured.length === 1 ? "" : "s"} in ${(inv.measureMs / 1000).toFixed(1)} s (one Chrome page)\n`,
+      );
+    for (const f of inv.failed)
+      process.stderr.write(`components: ${f.state} not measured — ${f.why}\n`);
+    const snippet = flag("--snippet");
+    if (snippet) {
+      // a URL from the folder film render serves when it runs here (the
+      // working directory), the same from any page under it
+      process.stdout.write(
+        exampleSource(inv.file, snippet, {
+          root: inv.source.root,
+          servedFrom: process.cwd(),
+        }),
+      );
+      return;
+    }
+    if (has("--json")) {
+      process.stdout.write(`${JSON.stringify(inv.file, null, 2)}\n`);
+      return;
+    }
+    process.stdout.write(
+      `${formatComponents(inv.file, {
+        path: shown(inv.path ?? join(inv.source.root, "components.json")),
+        dir: shown(inv.source.root),
+        ...(flag("--state") ? { state: flag("--state") } : {}),
+      })}\n`,
+    );
     return;
   }
 
@@ -2040,7 +2158,7 @@ async function main() {
       return;
     }
     if (action === "init") {
-      only("--force", "--url", "--size", "--profile");
+      only("--force", "--url", "--size", "--profile", "--from");
       const url = flag("--url");
       if (has("--url") && !url) throw new Error("film init: --url <url> is the product's page");
       if (!url && (has("--size") || has("--profile")))
@@ -2066,6 +2184,10 @@ async function main() {
             `saved screen: ${join(home.dir, "state.html")} — ${home.title || home.url}` +
               `${home.fidelity.ok ? "" : " (it did not re-render as the page showed; `film picture` shows how it renders)"}\n`,
           );
+        if (home?.components)
+          process.stdout.write(
+            `${componentsLine(home.components.file, shown(home.components.path), shown(home.dir))}\n`,
+          );
         const look = await filmLook({
           source: home ? home.dir : url,
           out: join(resolve(target), "look"),
@@ -2077,6 +2199,22 @@ async function main() {
           return null;
         });
         if (look) process.stdout.write(`look: ${look.json}\n`);
+      }
+      // --from: the inventory of a shoot or a take the film is made from —
+      // measured where it is missing and pointed to here; nothing is written
+      // into the film's folder and the page stays the wiring-only starter
+      const from = flag("--from");
+      if (from) {
+        const inv = await inventoryComponents({
+          path: /\.mp4$/i.test(from) ? (await resolveTakePaths(from)).dir : from,
+        }).catch((e: Error) => {
+          process.stdout.write(`no components from ${from}: ${e.message}\n`);
+          return null;
+        });
+        if (inv?.path)
+          process.stdout.write(
+            `${componentsLine(inv.file, shown(inv.path), shown(inv.source.root))}\n`,
+          );
       }
       const r = await initFilm({ dir: target, force: has("--force") });
       for (const f of r.written) process.stdout.write(`wrote ${f}\n`);

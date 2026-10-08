@@ -56,6 +56,8 @@ export type PageTextSample = {
   /** where each named subject (a CSS selector) is drawn; null: an element
    *  matches but is not visible; absent: no element matches */
   subjects: Record<string, Box | null>;
+  /** what `extra` gave at this time, when it was asked */
+  extra?: unknown;
 };
 
 export type PageTextReading = {
@@ -344,6 +346,9 @@ export async function readPageText(opts: {
   fallback: { width: number; height: number };
   /** CSS selectors to locate at each time */
   subjects?: readonly string[];
+  /** an expression asked of the page at each time too (awaited), kept on the
+   *  sample as `extra` — another reading on the same seek */
+  extra?: string;
   onConsole?: (level: string, text: string) => void;
 }): Promise<PageTextReading> {
   const { root, urlPath } = resolveFilmPage(opts.page, opts.root);
@@ -404,7 +409,8 @@ export async function readPageText(opts: {
           try {
             await browser.evaluate(`window.__ot.seek(${opts.from + t})`);
             const r = await browser.evaluate<Omit<PageTextSample, "t">>(source);
-            samples.push({ t, ...r });
+            const extra = opts.extra ? await browser.evaluate<unknown>(opts.extra) : undefined;
+            samples.push({ t, ...r, ...(opts.extra ? { extra } : {}) });
             error = "";
             break;
           } catch (e) {

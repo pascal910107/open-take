@@ -1,0 +1,1132 @@
+{
+  "version": 1,
+  "state": "home",
+  "viewport": {
+    "w": 1920,
+    "h": 1080
+  },
+  "scroll": {
+    "x": 0,
+    "y": 0
+  },
+  "medianTextPx": 14,
+  "parts": [
+    {
+      "el": "e22",
+      "kind": "button",
+      "label": "登入",
+      "text": "登入",
+      "selector": "body.flex > header.sticky > div.container-page > div.ml-auto > a.inline-flex",
+      "box": [
+        1506,
+        18,
+        62,
+        44
+      ],
+      "look": {
+        "fontPx": 14,
+        "weight": 700,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": "#ffffff",
+        "backdrop": "#ffffff",
+        "radius": 12,
+        "shadow": false,
+        "border": true
+      },
+      "facts": {
+        "areaShare": 0.00132,
+        "fontRatio": 1,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": false,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "ink": [
+        1523,
+        30,
+        28,
+        18
+      ],
+      "picture": "../assets/89cdd5d28b128c6fa9e0290e617b6a8b8ae4f943.png",
+      "clip": [
+        1498,
+        10,
+        78,
+        60
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e30",
+      "kind": "heading",
+      "label": "找到你的 下一間健身房。",
+      "text": "找到你的 下一間健身房。",
+      "selector": "#home-heading",
+      "box": [
+        392,
+        180,
+        694,
+        127
+      ],
+      "look": {
+        "fontPx": 52,
+        "weight": 800,
+        "family": "Noto Sans TC",
+        "fg": "#ffffff",
+        "fill": null,
+        "backdrop": "#10382e",
+        "radius": 0,
+        "shadow": false,
+        "border": false
+      },
+      "facts": {
+        "areaShare": 0.0425,
+        "fontRatio": 3.71,
+        "contrast": 12.9,
+        "fillContrast": 1,
+        "numeric": false,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "ink",
+        "pad": 8
+      },
+      "ink": [
+        392,
+        173,
+        344,
+        140
+      ],
+      "picture": "../assets/ab0d67891d44d970bd9e481f563229b36d1ac4d6.png",
+      "clip": [
+        384,
+        165,
+        360,
+        156
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e47",
+      "kind": "card",
+      "label": "從你的生活圈開始 找一份適合的會籍 說地區與預算，先看二手，再看報價。 1 地區 2 預算 3 條件 想在哪裡練？ 生活圈跨縣市就都選起來，最多 3 個。 台…",
+      "text": "從你的生活圈開始 找一份適合的會籍 說地區與預算，先看二手，再看報價。 1 地區 2 預算 3 條件 想在哪裡練？ 生活圈跨縣市就都選起來，最多 3 個。 台北市 新北市 桃園市 台中市 台南市 高雄市 其他縣市 基隆市 新竹市 新竹縣 苗栗縣 彰化縣 南投縣 雲林縣 嘉義市 嘉義縣 屏東縣 宜蘭縣 花蓮縣 台東縣 澎湖縣 金門縣 連江縣 下一步 不用登入，也不會有人打給你",
+      "selector": "#find-membership",
+      "box": [
+        1118,
+        198,
+        410,
+        563
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 400,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": "#ffffff",
+        "backdrop": "#10382e",
+        "radius": 20,
+        "shadow": true,
+        "border": false
+      },
+      "facts": {
+        "areaShare": 0.11132,
+        "fontRatio": 1.14,
+        "contrast": 13.1,
+        "fillContrast": 12.91,
+        "numeric": false,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "parts": [
+        "e48",
+        "e53",
+        "e54"
+      ],
+      "sub": "result",
+      "picture": "../assets/5022390107b6f7d6e9121bccf53c3bc0e7e0026c.png",
+      "clip": [
+        1110,
+        190,
+        426,
+        579
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e51",
+      "kind": "heading",
+      "label": "找一份適合的會籍",
+      "text": "找一份適合的會籍",
+      "selector": "#demand-heading",
+      "box": [
+        1142,
+        248,
+        178,
+        37
+      ],
+      "look": {
+        "fontPx": 23,
+        "weight": 700,
+        "family": "Noto Sans TC",
+        "fg": "#20352d",
+        "fill": null,
+        "backdrop": "#ffffff",
+        "radius": 0,
+        "shadow": false,
+        "border": false
+      },
+      "facts": {
+        "areaShare": 0.00318,
+        "fontRatio": 1.64,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": false,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "ink",
+        "pad": 8
+      },
+      "ink": [
+        1142,
+        248,
+        179,
+        35
+      ],
+      "inside": "e47",
+      "picture": "../assets/bb62885468a5b9ad123f3e9b44d3fb6c205c022e.png",
+      "clip": [
+        1134,
+        240,
+        195,
+        51
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e56",
+      "kind": "card",
+      "label": "1 地區 2 預算 3 條件",
+      "text": "1 地區 2 預算 3 條件",
+      "selector": "#find-membership > div.rounded-card:nth-of-type(2) > form.flex > ol.flex",
+      "box": [
+        1142,
+        359,
+        362,
+        41
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 400,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": null,
+        "backdrop": "#ffffff",
+        "radius": 0,
+        "shadow": false,
+        "border": true
+      },
+      "facts": {
+        "areaShare": 0.00716,
+        "fontRatio": 1.14,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": true,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "fields": {
+        "name": "步驟"
+      },
+      "parts": [
+        "e57",
+        "e62",
+        "e67"
+      ],
+      "inside": "e47",
+      "sub": "result",
+      "picture": "../assets/4bfa65cc0cb5e22858cfd44b47ed6b98813bd416.png",
+      "clip": [
+        1134,
+        351,
+        378,
+        57
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e58",
+      "kind": "stat",
+      "label": "1 地區",
+      "text": "1 地區",
+      "selector": "#find-membership > div.rounded-card:nth-of-type(2) > form.flex > ol.flex > li.flex:nth-of-type(1) > span.flex:nth-of-type(1)",
+      "box": [
+        1142,
+        359,
+        56,
+        24
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 400,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": null,
+        "backdrop": "#ffffff",
+        "radius": 0,
+        "shadow": false,
+        "border": false
+      },
+      "facts": {
+        "areaShare": 0.00065,
+        "fontRatio": 1.14,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": true,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "ink",
+        "pad": 8
+      },
+      "ink": [
+        1150,
+        362,
+        48,
+        17
+      ],
+      "parts": [
+        "e59",
+        "e60"
+      ],
+      "inside": "e56",
+      "picture": "../assets/0c2bd5ac3e001fae9d799e26cc1ff0bec61515f8.png",
+      "clip": [
+        1142,
+        354,
+        64,
+        33
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e63",
+      "kind": "stat",
+      "label": "2 預算",
+      "text": "2 預算",
+      "selector": "#find-membership > div.rounded-card:nth-of-type(2) > form.flex > ol.flex > li.flex:nth-of-type(2) > span.flex:nth-of-type(1)",
+      "box": [
+        1238,
+        359,
+        56,
+        24
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 400,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": null,
+        "backdrop": "#ffffff",
+        "radius": 0,
+        "shadow": false,
+        "border": false
+      },
+      "facts": {
+        "areaShare": 0.00065,
+        "fontRatio": 1.14,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": true,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "ink",
+        "pad": 8
+      },
+      "ink": [
+        1246,
+        362,
+        48,
+        17
+      ],
+      "parts": [
+        "e64",
+        "e65"
+      ],
+      "inside": "e56",
+      "picture": "../assets/44f3d4b723b22120b8f63b450f5d58d938ce2057.png",
+      "clip": [
+        1238,
+        354,
+        64,
+        33
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e68",
+      "kind": "stat",
+      "label": "3 條件",
+      "text": "3 條件",
+      "selector": "#find-membership > div.rounded-card:nth-of-type(2) > form.flex > ol.flex > li.flex:nth-of-type(3) > span.flex",
+      "box": [
+        1334,
+        359,
+        56,
+        24
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 400,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": null,
+        "backdrop": "#ffffff",
+        "radius": 0,
+        "shadow": false,
+        "border": false
+      },
+      "facts": {
+        "areaShare": 0.00065,
+        "fontRatio": 1.14,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": true,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "ink",
+        "pad": 8
+      },
+      "ink": [
+        1342,
+        362,
+        48,
+        17
+      ],
+      "parts": [
+        "e69",
+        "e70"
+      ],
+      "inside": "e56",
+      "picture": "../assets/aa6bcd928843af591614dabcf1fad131924fbfe2.png",
+      "clip": [
+        1334,
+        354,
+        64,
+        33
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e73",
+      "kind": "heading",
+      "label": "想在哪裡練？",
+      "text": "想在哪裡練？",
+      "selector": "#q-area",
+      "box": [
+        1142,
+        420,
+        362,
+        23
+      ],
+      "look": {
+        "fontPx": 17,
+        "weight": 700,
+        "family": "Noto Sans TC",
+        "fg": "#20352d",
+        "fill": null,
+        "backdrop": "#ffffff",
+        "radius": 0,
+        "shadow": false,
+        "border": false
+      },
+      "facts": {
+        "areaShare": 0.00402,
+        "fontRatio": 1.21,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": false,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "ink",
+        "pad": 8
+      },
+      "ink": [
+        1142,
+        418,
+        102,
+        26
+      ],
+      "inside": "e47",
+      "picture": "../assets/e19fa9c44a164e846afe64dbaf58ba078c60d70c.png",
+      "clip": [
+        1134,
+        410,
+        118,
+        42
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e75",
+      "kind": "group",
+      "label": "台北市 新北市 桃園市 台中市 台南市 高雄市",
+      "text": "台北市 新北市 桃園市 台中市 台南市 高雄市",
+      "selector": "#find-membership > div.rounded-card:nth-of-type(2) > form.flex > section.step-in > div.grid:nth-of-type(2)",
+      "box": [
+        1142,
+        483,
+        362,
+        96
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 400,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": null,
+        "backdrop": "#ffffff",
+        "radius": 0,
+        "shadow": false,
+        "border": false
+      },
+      "facts": {
+        "areaShare": 0.01676,
+        "fontRatio": 1.14,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": false,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "fields": {
+        "name": "六都"
+      },
+      "members": [
+        "e76",
+        "e77",
+        "e78",
+        "e79",
+        "e80",
+        "e81"
+      ],
+      "axis": "grid",
+      "parts": [
+        "e76",
+        "e77",
+        "e78",
+        "e79",
+        "e80",
+        "e81"
+      ],
+      "inside": "e47",
+      "picture": "../assets/fdb99dc9ca1c53985dda03b5da1f96bf97989779.png",
+      "clip": [
+        1134,
+        475,
+        378,
+        112
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e76",
+      "kind": "button",
+      "label": "台北市",
+      "text": "台北市",
+      "selector": "#find-membership > div.rounded-card:nth-of-type(2) > form.flex > section.step-in > div.grid:nth-of-type(2) > button.inline-flex:nth-of-type(1)",
+      "box": [
+        1142,
+        483,
+        115,
+        44
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 600,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": "#ffffff",
+        "backdrop": "#ffffff",
+        "radius": 33554400,
+        "shadow": false,
+        "border": true
+      },
+      "facts": {
+        "areaShare": 0.00244,
+        "fontRatio": 1.14,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": false,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "ink": [
+        1175,
+        495,
+        49,
+        20
+      ],
+      "inside": "e75",
+      "picture": "../assets/0875809ee34ed4caf4e72c737d34363b701fb6ae.png",
+      "clip": [
+        1134,
+        475,
+        131,
+        60
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e77",
+      "kind": "button",
+      "label": "新北市",
+      "text": "新北市",
+      "selector": "#find-membership > div.rounded-card:nth-of-type(2) > form.flex > section.step-in > div.grid:nth-of-type(2) > button.inline-flex:nth-of-type(2)",
+      "box": [
+        1265,
+        483,
+        115,
+        44
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 600,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": "#ffffff",
+        "backdrop": "#ffffff",
+        "radius": 33554400,
+        "shadow": false,
+        "border": true
+      },
+      "facts": {
+        "areaShare": 0.00244,
+        "fontRatio": 1.14,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": false,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "ink": [
+        1298,
+        495,
+        49,
+        20
+      ],
+      "inside": "e75",
+      "picture": "../assets/9827ee9301c26237dd9e6af85551f1c3fa59a32e.png",
+      "clip": [
+        1257,
+        475,
+        131,
+        60
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e78",
+      "kind": "button",
+      "label": "桃園市",
+      "text": "桃園市",
+      "selector": "#find-membership > div.rounded-card:nth-of-type(2) > form.flex > section.step-in > div.grid:nth-of-type(2) > button.inline-flex:nth-of-type(3)",
+      "box": [
+        1389,
+        483,
+        115,
+        44
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 600,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": "#ffffff",
+        "backdrop": "#ffffff",
+        "radius": 33554400,
+        "shadow": false,
+        "border": true
+      },
+      "facts": {
+        "areaShare": 0.00244,
+        "fontRatio": 1.14,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": false,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "ink": [
+        1422,
+        495,
+        49,
+        20
+      ],
+      "inside": "e75",
+      "picture": "../assets/4818954356fe0534ebc7ebfcdbe555e4e0361d35.png",
+      "clip": [
+        1381,
+        475,
+        131,
+        60
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e79",
+      "kind": "button",
+      "label": "台中市",
+      "text": "台中市",
+      "selector": "#find-membership > div.rounded-card:nth-of-type(2) > form.flex > section.step-in > div.grid:nth-of-type(2) > button.inline-flex:nth-of-type(4)",
+      "box": [
+        1142,
+        535,
+        115,
+        44
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 600,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": "#ffffff",
+        "backdrop": "#ffffff",
+        "radius": 33554400,
+        "shadow": false,
+        "border": true
+      },
+      "facts": {
+        "areaShare": 0.00244,
+        "fontRatio": 1.14,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": false,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "ink": [
+        1175,
+        547,
+        49,
+        20
+      ],
+      "inside": "e75",
+      "picture": "../assets/9f947534791c5ac36ec4d112c3e30970ad697e56.png",
+      "clip": [
+        1134,
+        527,
+        131,
+        60
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e80",
+      "kind": "button",
+      "label": "台南市",
+      "text": "台南市",
+      "selector": "#find-membership > div.rounded-card:nth-of-type(2) > form.flex > section.step-in > div.grid:nth-of-type(2) > button.inline-flex:nth-of-type(5)",
+      "box": [
+        1265,
+        535,
+        115,
+        44
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 600,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": "#ffffff",
+        "backdrop": "#ffffff",
+        "radius": 33554400,
+        "shadow": false,
+        "border": true
+      },
+      "facts": {
+        "areaShare": 0.00244,
+        "fontRatio": 1.14,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": false,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "ink": [
+        1298,
+        547,
+        49,
+        20
+      ],
+      "inside": "e75",
+      "picture": "../assets/38516c2342831a6c3b53c740578715cdd20295a9.png",
+      "clip": [
+        1257,
+        527,
+        131,
+        60
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e81",
+      "kind": "button",
+      "label": "高雄市",
+      "text": "高雄市",
+      "selector": "#find-membership > div.rounded-card:nth-of-type(2) > form.flex > section.step-in > div.grid:nth-of-type(2) > button.inline-flex:nth-of-type(6)",
+      "box": [
+        1389,
+        535,
+        115,
+        44
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 600,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": "#ffffff",
+        "backdrop": "#ffffff",
+        "radius": 33554400,
+        "shadow": false,
+        "border": true
+      },
+      "facts": {
+        "areaShare": 0.00244,
+        "fontRatio": 1.14,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": false,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "ink": [
+        1422,
+        547,
+        49,
+        20
+      ],
+      "inside": "e75",
+      "picture": "../assets/68c167e2e30c649efe3990395fd71be193fea466.png",
+      "clip": [
+        1381,
+        527,
+        131,
+        60
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e83",
+      "kind": "input",
+      "label": "其他縣市",
+      "text": "其他縣市",
+      "selector": "#find-membership > div.rounded-card:nth-of-type(2) > form.flex > section.step-in > div.relative:nth-of-type(3) > select.h-12",
+      "box": [
+        1142,
+        595,
+        362,
+        48
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 500,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": "#ffffff",
+        "backdrop": "#ffffff",
+        "radius": 12,
+        "shadow": false,
+        "border": true
+      },
+      "facts": {
+        "areaShare": 0.00838,
+        "fontRatio": 1.14,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": false,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "fields": {
+        "value": "其他縣市",
+        "options": [
+          "其他縣市",
+          "基隆市",
+          "新竹市",
+          "新竹縣",
+          "苗栗縣",
+          "彰化縣",
+          "南投縣",
+          "雲林縣",
+          "嘉義市",
+          "嘉義縣",
+          "屏東縣",
+          "宜蘭縣",
+          "花蓮縣",
+          "台東縣",
+          "澎湖縣",
+          "金門縣",
+          "連江縣"
+        ]
+      },
+      "inside": "e47",
+      "picture": "../assets/d64c64552247d862252cd0ccc5a23adbc14fb45f.png",
+      "clip": [
+        1134,
+        587,
+        378,
+        64
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e87",
+      "kind": "button",
+      "label": "下一步",
+      "text": "下一步",
+      "selector": "#find-membership > div.rounded-card:nth-of-type(2) > form.flex > div.flex > div.flex > button.inline-flex",
+      "box": [
+        1142,
+        663,
+        362,
+        48
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 700,
+        "family": "Barlow",
+        "fg": "#ffffff",
+        "fill": "#00805f",
+        "backdrop": "#ffffff",
+        "radius": 12,
+        "shadow": true,
+        "border": false
+      },
+      "facts": {
+        "areaShare": 0.00838,
+        "fontRatio": 1.14,
+        "contrast": 4.9,
+        "fillContrast": 4.94,
+        "numeric": false,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "ink": [
+        1299,
+        677,
+        48,
+        20
+      ],
+      "inside": "e47",
+      "primary": true,
+      "picture": "../assets/fb48c0dcabc35ed27d0a622f7976efc6fde41021.png",
+      "clip": [
+        1134,
+        655,
+        378,
+        64
+      ],
+      "clipScale": 3
+    }
+  ],
+  "skipped": [
+    {
+      "el": "e2",
+      "kind": "card",
+      "why": "spans the screen's width (a bar)",
+      "label": "FindGym 找健身房 二手市場 刊登 行情 品牌規則 業務專區 登入",
+      "box": [
+        0,
+        0,
+        1920,
+        81
+      ]
+    },
+    {
+      "el": "e59",
+      "kind": "number",
+      "why": "smaller than 0.05% of the screen",
+      "label": "1",
+      "box": [
+        1142,
+        359,
+        24,
+        24
+      ]
+    },
+    {
+      "el": "e64",
+      "kind": "number",
+      "why": "smaller than 0.05% of the screen",
+      "label": "2",
+      "box": [
+        1238,
+        359,
+        24,
+        24
+      ]
+    },
+    {
+      "el": "e69",
+      "kind": "number",
+      "why": "smaller than 0.05% of the screen",
+      "label": "3",
+      "box": [
+        1334,
+        359,
+        24,
+        24
+      ]
+    },
+    {
+      "el": "e6",
+      "kind": "logo",
+      "why": "smaller than 0.05% of the screen",
+      "label": "",
+      "box": [
+        352,
+        26,
+        28,
+        28
+      ]
+    },
+    {
+      "el": "e8",
+      "kind": "group",
+      "why": "inside nav / footer",
+      "label": "找健身房 二手市場 刊登 行情 品牌規則 業務專區",
+      "box": [
+        953,
+        18,
+        492,
+        44
+      ]
+    },
+    {
+      "el": "e42",
+      "kind": "media",
+      "why": "aria-hidden (decoration)",
+      "label": "",
+      "box": [
+        384,
+        398,
+        710,
+        420
+      ]
+    },
+    {
+      "el": "e89",
+      "kind": "card",
+      "why": "inside nav / footer",
+      "label": "你的訓練，你的選擇。 找二手會籍 轉讓我的會籍 看看市場行情",
+      "box": [
+        352,
+        854,
+        1216,
+        93
+      ]
+    },
+    {
+      "el": "e92",
+      "kind": "group",
+      "why": "inside nav / footer",
+      "label": "找二手會籍 轉讓我的會籍 看看市場行情",
+      "box": [
+        1172,
+        878,
+        392,
+        44
+      ]
+    },
+    {
+      "el": "e94",
+      "kind": "logo",
+      "why": "smaller than 0.05% of the screen",
+      "label": "",
+      "box": [
+        1256,
+        892,
+        16,
+        16
+      ]
+    },
+    {
+      "el": "e102",
+      "kind": "media",
+      "why": "less than half of it on screen",
+      "label": "",
+      "box": [
+        374,
+        1049,
+        515,
+        308
+      ]
+    }
+  ],
+  "ms": {
+    "measure": 10,
+    "pictures": 717
+  }
+}

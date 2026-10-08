@@ -16,9 +16,10 @@ reordered or done another way; nothing checks that it was followed.
 1. **What the product has.** What can be recorded (`make`), saved as a
    screen (`make --states`), what it really puts out — a number it works out,
    a file it makes, a sound — and what exists about it outside the app (its
-   About page, repository, store listing, changelog). In earlier films the
-   pace often followed the material more than the plan
-   (`skill film material`).
+   About page, repository, store listing, changelog). A shoot's or a take's
+   saved screens come with `components.json`: each part they hold, its
+   values, what an action changed. In earlier films the pace often followed
+   the material more than the plan (`skill film material`).
 2. **The main line** — what the film is about, in one sentence.
 3. **A beat sheet**, if you keep one: `tl.segment` in `time.js` — what each
    stretch is meant to do, what moves, what holds, how it hands over to the
@@ -37,9 +38,23 @@ reordered or done another way; nothing checks that it was followed.
 
 Capabilities and where each is described; none of them is a step.
 
-- a screen with more text than a viewer reads → one real part as a layer of
-  its own (`lift`), the rest faded (`isolate`), the camera on one box
-  (`cam.frame`) — `skill film material`
+- one thing of the product's on its own — a button, a number, a card, a tab,
+  a line of its text — big enough to read, with something happening to it →
+  three ways, none of them the default: **in place** on the real screen,
+  with what acts on it and what it changes (a tab and its panel), the camera
+  on it (`cam.frame`), the rest faded (`isolate`); **lifted out** as a layer
+  of its own, live (`lift`, `group`, `arrange`, `carry`, and inside it
+  `count`, `assemble`); **rebuilt** as the film's own HTML at film size, in
+  the product's fonts and colours (`film look`) with its real values
+  (`readValues`) — `skill film material`
+- what parts each saved screen holds, their values in full, what an action
+  changed → `components.json` (`shoot` and `make --states` write it;
+  `open-take components <dir>`; `film init --from <dir>`); it lists, it does
+  not pick — `skill film material`
+- where a number or a string on screen comes from → a part's values, a live
+  URL, or a note that it is demo data: `tl.source`; `readValues(url, { tl })`
+  says it for what it reads; `film probe` sets the film's numbers beside
+  them — `skill film material`
 - the interface itself, sharp at any size, its parts separable → a saved
   screen: `make --states` (`<take>.take/states/<id>/state.html`; `open-take
   states` outlines a take's), a `shoot` still (each `s.still()` and the still
@@ -75,12 +90,15 @@ Capabilities and where each is described; none of them is a step.
 ```sh
 npx open-take film init film/     # kit/ and a page to start from
 npx open-take film init film/ --url https://the.product/   # also its page as a saved screen and its look
+npx open-take film init film/ --from shots                  # also a shoot's or a take's components.json
 ```
 
 With `--url` (and `--size`, `--profile` for a signed-in page) `film init`
 first keeps the product's page as a saved screen in `states/home/` and reads
 its look into `look/` (`film look`); the page it starts from names both in a
-comment. Either one failing is a line, and the init goes on. Every verb
+comment. Either one failing is a line, and the init goes on. With `--from`
+it measures that shoot's or take's `components.json` where it is missing
+and prints where it is; the page it starts from stays the same. Every verb
 answers `--help` (`open-take film probe --help`, `open-take help shoot`) with
 its usage and the flags it takes.
 
@@ -119,7 +137,9 @@ only `time.js` and lists the rest; its length is a placeholder.
   `maskOut` out of its own line, `type`/`untype`, and `typeTimes` — each
   character's time, for its sound); handoffs where one picture becomes the
   next (`morphRect` with `rectClip`/`inset`, `iris`, `zoomThrough` — one scale
-  about a fixed point, `gather`, `hop`); contact (`press`, `impact`). Every
+  about a fixed point, `gather`, `hop`); contact (`press`, `impact`); a
+  number running in the product's own format (`count`, `readNumber`,
+  `writeNumber`); parts arriving one after another (`assemble`). Every
   default is an option of the call; any move can be written by hand instead:
 
   ```js
@@ -136,7 +156,9 @@ only `time.js` and lists the rest; its length is a placeholder.
   `{ cuts: tl.events }` — or `cam.moves` for the camera's own `cam.cut`s —
   each shot is measured on its own, so a hard cut is not read as a jump of
   thousands of px a second), and
-  `window.__film = { …, ...tl.hooks() }` hands both to the renderer. A beat
+  `window.__film = { …, ...tl.hooks() }` hands both to the renderer.
+  `scenes({ calc: [7.2, 16.8] }, { tl })` shows each scene in its span by
+  visibility (so what is in it keeps its layout) and declares its cuts. A beat
   sheet can live there too: `tl.segment(from, to, { label, hold, handoff,
   subject, sound })` (moments' names or seconds; `handoff` is how it hands
   over at `to` — `"carry"`, `"cut"`, `"matchcut"`, `"sound"` or your own
@@ -146,13 +168,17 @@ only `time.js` and lists the rest; its length is a placeholder.
   someone else made can be kept there as well: `tl.credit({ what, by,
   licence, url, text })` (or a plain `window.__film.credits` list) goes into
   the events file as `credits` — a record for whoever publishes the film,
-  nothing checks it.
+  nothing checks it. Where a value on screen comes from, the same way:
+  `tl.source(label, { ref, field, url, note, text, selector })` → `sources`
+  (`skill film material`).
 - `media.js` — a saved screen's parts measured where they are now
   (`screen(iframe).box("#search")`), shot stills played by film time, their
   boxes and cursor read from the shoot's log; a take's recording mapped onto
   film time with its actions and the moments their results showed, the seam
-  where a saved screen can stand in for the recording, and one real part
-  lifted out of a saved screen as a layer of its own
+  where a saved screen can stand in for the recording, one real part
+  lifted out of a saved screen as a layer of its own and moved as one body
+  with others (`group`, `arrange`, `carry`), and the parts' real values
+  read from `components.json` (`readValues`, `partValues`)
   (`skill film material`).
 - `cut.js` — cutting on the music (`skill film cutting`): the
   music's grid, a match cut's framing, cuts declared for the score. Nothing
@@ -188,8 +214,10 @@ per camera; for 3D, read `cam.at(t)` and project it yourself.
 Each prints on its own; `skill film --all` prints the whole guide in this
 order. The files are under `film/` beside this one.
 
-- `skill film material` — material from the real product: saved screens,
-  recordings, `shoot`, `kit/media.js` (`lift`, `isolate`, `seam`, `clipEvents`)
+- `skill film material` — material from the real product: one part shown
+  three ways, saved screens, recordings, `shoot`, `components.json`,
+  `kit/media.js` (`lift`, `isolate`, `seam`, `clipEvents`, `readValues`),
+  where values come from (`tl.source`)
 - `skill film page` — the page: `__film`, `__render`, clocks, size
 - `skill film cutting` — cutting on the music: `film beats`, `kit/cut.js`, bar edits
 - `skill film look` — the product's look: `film look`, `kit/look.js`

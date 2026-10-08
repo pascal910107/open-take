@@ -41,6 +41,44 @@ export {
   readPageMaterial,
 } from "./film/check";
 export {
+  COMPONENT_ORDER,
+  type ComponentAction,
+  type ComponentEntry,
+  type ComponentProvenance,
+  type ComponentRelation,
+  type ComponentSource,
+  type ComponentSourceKind,
+  type ComponentSourceState,
+  type ComponentState,
+  type ComponentsFile,
+  type ComponentTrack,
+  type ComponentValue,
+  componentCounts,
+  componentsLine,
+  exampleSource,
+  FILM_STAGE,
+  fitOf,
+  formatComponents,
+  gatherComponents,
+  phoneOf,
+  readComponentSource,
+  readNumber,
+  writeComponents,
+} from "./film/components";
+export {
+  CLIP_CLEAR_CSS,
+  COMPONENT_PROBE_JS,
+  type ComponentProbeInput,
+  type ComponentProbeResult,
+  componentProbeExpression,
+  type PartCandidate,
+  type PartFields,
+  type PartKind,
+  type PartSkipped,
+  type PartsFile,
+  pictureClip,
+} from "./film/components-probe";
+export {
   type FilmGalleryOptions,
   type FilmGalleryResult,
   filmGallery,
@@ -87,10 +125,16 @@ export {
   type SheetSegment,
 } from "./film/probe";
 export {
+  type FilmProvenance,
+  numberTokens,
+  type ProvenanceValue,
+} from "./film/provenance";
+export {
   type FilmProgress,
   type FilmRenderOptions,
   type FilmRenderResult,
   type FilmSegment,
+  type FilmSource,
   type FilmStillsOptions,
   filmStills,
   muxFilm,
@@ -152,7 +196,7 @@ export {
   type StateChange,
   subtree,
 } from "./state-diff";
-export { readStateIndex, type StateElement, type StateIndex } from "./state-index";
+export { cardsOf, readStateIndex, type StateElement, type StateIndex } from "./state-index";
 export * from "./types";
 export {
   type CompositionIssue,

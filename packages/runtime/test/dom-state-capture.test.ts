@@ -71,8 +71,8 @@ test("captureTakeCDP: states on → s0..sN with index.json, events stamped; stat
       const d = join(onDir, "states", item.id);
       assert.deepEqual(
         readdirSync(d).sort(),
-        ["index.json", "live.png", "state.html"],
-        `${item.id} holds exactly the contract files`,
+        ["index.json", "live.png", "parts.json", "state.html"],
+        `${item.id} holds exactly the contract files (+ the component probe's parts.json)`,
       );
       const index = JSON.parse(readFileSync(join(d, "index.json"), "utf8")) as StateIndex;
       assert.equal(index.id, item.id);

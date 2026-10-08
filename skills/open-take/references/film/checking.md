@@ -35,7 +35,10 @@ most of the frame's text, or their median size reads under 8 px on the
 phone (`PHONE_SMALL_PX`; a sample with fewer than 20 of the product's
 characters gives no size), beside what acts on part of a screen — `lift`,
 `isolate`, `cam.frame` (`skill film material`); `probe.json` keeps each
-sample's `productMedian`.
+sample's `productMedian`. Its provenance section ("Where the values on
+screen come from") sets each number in the film's own text beside the
+sources the page declared (`tl.source`) and the parts' values in
+`components.json` — `skill film material`.
 `--page`/`--root` say where the page is when it is not beside the film;
 `--no-text` skips that lane. No line is a score or a target.
 

@@ -145,6 +145,27 @@ export type FilmCredit = {
   text?: string;
 };
 
+/** Where something on screen comes from (kit/time.js `source`, or
+ *  window.__film.sources): a part of components.json, the live page it shows
+ *  on, or a note ("demo", "illustrative") — the page's own word, for the
+ *  record; `film probe` sets it beside the film's text, nothing checks it. */
+export type FilmSource = {
+  /** what on screen it covers: the text as shown, or words for it */
+  label: string;
+  /** a part of components.json, "<state>:<element id>" */
+  ref?: string;
+  /** which of the part's values */
+  field?: string;
+  /** the components.json it was read from, as the page fetched it */
+  file?: string;
+  url?: string;
+  note?: string;
+  /** the strings on screen it covers, beside the label */
+  text?: string[];
+  /** the film's elements whose text it covers (CSS) */
+  selector?: string;
+};
+
 /** <film>.events.json: what the score reads to put its sounds where the
  *  picture is. Times are page time (s). */
 export type FilmEvents = {
@@ -173,6 +194,9 @@ export type FilmEvents = {
   /** window.__film.credits (a list, or a function that gives one), as the page
    *  gave it; [] when it has none. Information only */
   credits: FilmCredit[];
+  /** window.__film.sources (a list, or a function that gives one), as the
+   *  page gave it; [] when it has none. Information only */
+  sources: FilmSource[];
 };
 
 /** where a film's events file goes: beside it, `film.mp4` → `film.events.json` */
@@ -288,6 +312,7 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
     const declared = await pageEvents(first, film.warnings);
     const segments = await pageSegments(first, film.warnings);
     const credits = await pageCredits(first, film.warnings);
+    const sources = await pageSources(first, film.warnings);
     const hasCurves = await first.evaluate<boolean>(`typeof window.__film?.curves === "function"`);
     const curveRows: (Record<string, number | null> | null)[] = new Array(frames).fill(null);
 
@@ -409,7 +434,7 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
     const events = eventsPathFor(opts.out);
     await writeFile(
       events,
-      `${JSON.stringify(filmEvents(film, declared, sides, curveRows, film.blur, segments, credits))}\n`,
+      `${JSON.stringify(filmEvents(film, declared, sides, curveRows, film.blur, segments, credits, sources))}\n`,
     );
     const { width: w, height: h } = outSize(film);
     return {
@@ -606,6 +631,63 @@ export function checkCredits(raw: unknown, warnings: string[] = []): FilmCredit[
   return out;
 }
 
+/** window.__film.sources — a list, or a function that gives one — once, as
+ *  plain values; [] when the page has none */
+async function pageSources(b: HtmlBrowser, warnings: string[]): Promise<FilmSource[]> {
+  let raw: unknown;
+  try {
+    raw = await b.evaluate<unknown>(
+      `(async () => {
+        let s = window.__film?.sources;
+        if (s === undefined) return null;
+        if (typeof s === "function") s = await s();
+        return JSON.parse(JSON.stringify(s ?? []));
+      })()`,
+    );
+  } catch (e) {
+    warnings.push(
+      `window.__film.sources threw (${(e as Error).message.split("\n")[0]}) — the events file has none`,
+    );
+    return [];
+  }
+  return checkSources(raw, warnings);
+}
+
+/** a page's sources as given, each kept to its known fields; one without a
+ *  label, or that names no ref, url or note, is left out and said so */
+export function checkSources(raw: unknown, warnings: string[] = []): FilmSource[] {
+  if (raw == null) return [];
+  if (!Array.isArray(raw)) {
+    warnings.push("window.__film.sources is not a list — the events file has none");
+    return [];
+  }
+  const out: FilmSource[] = [];
+  let dropped = 0;
+  for (const e of raw as Record<string, unknown>[]) {
+    const label = e && typeof e === "object" ? e.label : undefined;
+    if (typeof label !== "string" || !label.trim()) {
+      dropped++;
+      continue;
+    }
+    const s: FilmSource = { label };
+    for (const k of ["ref", "field", "file", "url", "note", "selector"] as const) {
+      const v = e[k];
+      if ((typeof v === "string" && v) || finite(v)) s[k] = String(v);
+    }
+    const text = (Array.isArray(e.text) ? e.text : e.text != null ? [e.text] : [])
+      .filter((v) => (typeof v === "string" && v) || finite(v))
+      .map(String);
+    if (text.length) s.text = text;
+    if (s.ref || s.url || s.note) out.push(s);
+    else dropped++;
+  }
+  if (dropped)
+    warnings.push(
+      `window.__film.sources: ${dropped} source(s) without a label and a ref, url or note were left out`,
+    );
+  return out;
+}
+
 /** window.__film.curves(t): every value that is a finite number, the rest null */
 async function pageCurves(
   b: HtmlBrowser,
@@ -653,6 +735,7 @@ export function filmEvents(
   probed: boolean,
   segments: FilmSegment[] = [],
   credits: FilmCredit[] = [],
+  sources: FilmSource[] = [],
 ): FilmEvents {
   const { fps, f0, f1, total } = film;
   const detected: number[] = [];
@@ -695,6 +778,7 @@ export function filmEvents(
     },
     segments,
     credits,
+    sources,
   };
 }
 
@@ -747,6 +831,8 @@ export function patchEvents(master: FilmEvents, patch: FilmEvents): FilmEvents |
     segments: patch.segments ?? master.segments ?? [],
     // the credits as the page says them now
     credits: patch.credits ?? master.credits ?? [],
+    // where its values come from, as the page says it now
+    sources: patch.sources ?? master.sources ?? [],
   };
 }
 

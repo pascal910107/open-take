@@ -13,7 +13,10 @@
 //   - handoffs, where one picture becomes the next: a box growing into
 //     another, a circle opening from a point, a zoom through a rect, items
 //     gathering into one place;
-//   - contact: a button that sinks and comes back, a hit that kicks.
+//   - contact: a button that sinks and comes back, a hit that kicks;
+//   - numbers and parts: a number counting in the product's own format, a
+//     part's pieces arriving one after another (assemble, which also writes
+//     its numbers onto elements when it is given elements — from t alone).
 //
 // Every default below says where it comes from; none of them is a style.
 // Change any of them per call, or write the move yourself.
@@ -718,4 +721,232 @@ export function impact(t, at, opts = {}) {
   const k = tau <= 0 ? 0 : (Math.exp(-zeta * w0 * tau) * Math.sin(wd * tau)) / peak;
   const rad = (angle * Math.PI) / 180;
   return { x: amount * k * Math.cos(rad), y: amount * k * Math.sin(rad), scale: 1 + scale * k, k };
+}
+
+// --- numbers and parts ------------------------------------------------------
+
+/**
+ * @typedef {object} NumberFormat how a number is written: what comes before
+ *   and after it, the mark between thousands ("" for none) and before the
+ *   decimals, how many decimals
+ * @property {string} prefix e.g. "NT$"
+ * @property {string} suffix e.g. "%", "+", " 萬"
+ * @property {string} sep e.g. ",", ".", " ", ""
+ * @property {string} point e.g. ".", ","
+ * @property {number} decimals
+ * @property {string} [minus] the sign a negative number is written with ("-", "−")
+ */
+
+/**
+ * A number as written, read back: "NT$4,466" → 4466 with prefix "NT$" and
+ * separator ","; "12.5%" → 12.5, one decimal, suffix "%"; "1.234,56 €" →
+ * 1234.56. One mark that occurs once with three digits after it is a
+ * thousands separator if it is "," (or a space or an apostrophe), a decimal
+ * point if it is "." — say `sep` / `point` when the product writes it the
+ * other way. A plain number has no prefix, suffix or separator.
+ * @param {string | number} s
+ * @param {Partial<NumberFormat>} [o] what to take as given instead of reading it
+ * @returns {{ value: number } & NumberFormat}
+ */
+export function readNumber(s, o = {}) {
+  if (typeof s === "number") {
+    if (!Number.isFinite(s)) throw new Error(`count: ${s} is not a number`);
+    const dec = String(s).split(".")[1]?.length ?? 0;
+    return {
+      value: s,
+      prefix: o.prefix ?? "",
+      suffix: o.suffix ?? "",
+      sep: o.sep ?? "",
+      point: o.point ?? ".",
+      decimals: o.decimals ?? dec,
+      minus: o.minus ?? "-",
+    };
+  }
+  const m = /^(.*?)([-−]?)(\d(?:[\d.,'’   ]*\d)?)(.*)$/su.exec(String(s));
+  if (!m) throw new Error(`count: "${s}" has no number in it`);
+  const [, before = "", minus = "", body = "", after = ""] = m;
+  const marks = [...new Set(body.replace(/\d/g, ""))];
+  let sep = "";
+  let point = ".";
+  if (o.sep != null || o.point != null) {
+    sep = o.sep ?? "";
+    point = o.point ?? (sep === "." ? "," : ".");
+  } else if (marks.length >= 2) {
+    // the last mark is the decimal point, the other the thousands
+    point = /** @type {string} */ (body.replace(/\d/g, "").slice(-1));
+    sep = /** @type {string} */ (marks.find((c) => c !== point));
+  } else if (marks.length === 1) {
+    const c = /** @type {string} */ (marks[0]);
+    const groups = body.split(c);
+    const last = groups[groups.length - 1] ?? "";
+    if (groups.length > 2 || (c !== "." && c !== ",")) sep = c;
+    else if (c === ".") point = c;
+    else if (last.length === 3) sep = c;
+    else point = c;
+  }
+  const esc = (/** @type {string} */ c) => c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const plain = (sep ? body.replace(new RegExp(esc(sep), "g"), "") : body).replace(point, ".");
+  const value = Number(plain) * (minus ? -1 : 1);
+  if (!Number.isFinite(value)) throw new Error(`count: "${s}" does not read as a number`);
+  const dec = plain.includes(".") ? (plain.split(".")[1]?.length ?? 0) : 0;
+  return {
+    value,
+    prefix: o.prefix ?? before,
+    suffix: o.suffix ?? after,
+    sep,
+    point,
+    decimals: o.decimals ?? dec,
+    minus: o.minus ?? (minus || "-"),
+  };
+}
+
+/**
+ * A number written the way `f` writes them.
+ * @param {number} v
+ * @param {NumberFormat} f
+ */
+export function writeNumber(v, f) {
+  const fixed = Math.abs(v).toFixed(Math.max(0, Math.min(20, f.decimals)));
+  const [int = "0", frac] = fixed.split(".");
+  const grouped = f.sep ? int.replace(/\B(?=(\d{3})+(?!\d))/g, f.sep) : int;
+  const neg = v < 0 && Number(fixed) !== 0 ? (f.minus ?? "-") : "";
+  return `${f.prefix}${neg}${grouped}${frac != null ? f.point + frac : ""}${f.suffix}`;
+}
+
+// A count runs 1 s by default: at 60 fps that is 60 frames of numbers
+// changing — enough for the eye to see a run, not a flicker — and it lands
+// on a critically damped spring, so it slows into its last value and never
+// shows a digit past it.
+const COUNT_DUR = 1;
+
+/**
+ * A number running from one value to another, written the product's way:
+ * the format is read from `to` ("NT$4,466": prefix "NT$", "," between
+ * thousands, no decimals) — or from `from` for what `to` does not show —
+ * and every value along the way is written in it. `from` may be a number
+ * (0) or a string as the product wrote it. `steps`: how many values it
+ * shows along the way (an odometer feel); `ease`: the run's shape (default:
+ * lands without overshoot); `dur` s long (default 1).
+ *
+ *   part.text(count(t, 4, "NT$4,212", "NT$4,466").text);
+ * @param {number} t
+ * @param {number} start
+ * @param {string | number} from
+ * @param {string | number} to
+ * @param {{ dur?: number, ease?: (p: number) => number, steps?: number } & Partial<NumberFormat>} [opts]
+ * @returns {{ text: string, value: number, p: number }}
+ */
+export function count(t, start, from, to, opts = {}) {
+  const { dur = COUNT_DUR, ease = settle, steps, ...given } = opts;
+  if (!(dur > 0)) throw new Error(`count: dur must be above 0 (${dur})`);
+  const b = readNumber(to, given);
+  const a = readNumber(from, typeof from === "number" ? { ...b, ...given } : given);
+  /** @type {NumberFormat} */
+  const f = {
+    prefix: b.prefix || a.prefix,
+    suffix: b.suffix || a.suffix,
+    sep: b.sep || a.sep,
+    point: b.point,
+    decimals: given.decimals ?? Math.max(b.decimals, typeof from === "number" ? 0 : a.decimals),
+    minus: b.minus,
+  };
+  let p = clamp01(ease(clamp01((t - start) / dur)));
+  if (steps != null && steps > 0) p = Math.floor(p * steps + 1e-9) / steps;
+  const k = 10 ** f.decimals;
+  const value = Math.round((a.value + (b.value - a.value) * p) * k) / k;
+  return { text: writeNumber(value, f), value, p };
+}
+
+// Parts arrive 0.06 s apart by default: ≈ 4 frames at 60 fps, so each one is
+// seen to come on its own (gather's 0.04 reads as one ripple), while five of
+// them are all moving within a third of a second — one gesture, not a queue.
+const EACH = 0.06;
+
+/** @param {unknown} x @returns {x is HTMLElement} */
+const isEl = (x) =>
+  !!x &&
+  typeof x === "object" &&
+  /** @type {{ nodeType?: unknown }} */ (x).nodeType === 1 &&
+  "style" in /** @type {object} */ (x);
+
+/**
+ * Parts arriving one after another — a list's rows, a card's stat pills, a
+ * page's sections: `move` (default rise) run on each, `each` s after the one
+ * before, in `order` ("index", or "reverse"). `with`: the move's own options.
+ * Returns the move's values, one a part; given elements (a lifted part's
+ * `parts()`), it also puts them on each: translate (x, y), scale (scale or
+ * sx / sy), opacity and clip — an inline element is made inline-block so it
+ * can move — and gives a move that needs one (maskRise, maskOut) the
+ * element's height. What the product gave the element is kept: its own
+ * transform stays under the move's, its own opacity is multiplied by the
+ * move's, and at rest the transform is the product's again.
+ *
+ *   assemble(t, 5, card.parts(), { each: 0.08, move: pop });
+ *   const v = assemble(t, 5, 4);                       // four sets of numbers, for a canvas
+ * @param {number} t
+ * @param {number} start
+ * @param {number | ArrayLike<unknown>} items how many, or the elements
+ * @param {{ each?: number, move?: (t: number, start: number, o?: any) => Record<string, unknown>,
+ *   with?: Record<string, unknown>, order?: "index" | "reverse" }} [opts]
+ */
+export function assemble(t, start, items, opts = {}) {
+  const { each = EACH, with: w = {}, order = "index" } = opts;
+  /** @type {(t: number, start: number, o?: any) => Record<string, unknown>} */
+  const move = opts.move ?? rise;
+  const list = typeof items === "number" ? Array.from({ length: items }) : Array.from(items);
+  const n = list.length;
+  return list.map((item, i) => {
+    const k = order === "reverse" ? n - 1 - i : i;
+    const el = isEl(item) ? item : null;
+    // only the masks take the element's height: drop's `height` is how far it falls
+    const own =
+      el && w.height == null && (move === maskRise || move === maskOut)
+        ? { height: el.offsetHeight }
+        : {};
+    const v = move(t, start + k * each, { ...own, ...w });
+    if (el) putOn(el, v);
+    return v;
+  });
+}
+
+/** what the product gave an element before assemble first moved it: its
+ *  own transform and opacity (computed), and its inline transform
+ * @type {WeakMap<object, { transform: string, opacity: number, inline: string }>} */
+const ownStyle = new WeakMap();
+
+/** a move's numbers onto an element's style, over what the product gave it
+ * @param {HTMLElement} el @param {Record<string, unknown>} v */
+function putOn(el, v) {
+  const num = (/** @type {unknown} */ x) =>
+    typeof x === "number" && Number.isFinite(x) ? x : null;
+  const view = el.ownerDocument?.defaultView;
+  let base = ownStyle.get(el);
+  if (!base) {
+    const cs = view?.getComputedStyle(el);
+    const tf = cs?.transform;
+    const op = Number(cs?.opacity);
+    base = {
+      transform: tf && tf !== "none" ? tf : "",
+      opacity: Number.isFinite(op) ? op : 1,
+      inline: el.style.transform ?? "",
+    };
+    ownStyle.set(el, base);
+    if (cs?.display === "inline") el.style.display = "inline-block";
+  }
+  const x = num(v.x) ?? 0;
+  const y = num(v.y) ?? 0;
+  const s = num(v.scale);
+  const sx = num(v.sx) ?? s ?? 1;
+  const sy = num(v.sy) ?? s ?? 1;
+  const parts = [];
+  // what rounds to nothing is nothing (a spring's last ten-thousandth of a px)
+  if (Math.abs(x) >= 5e-4 || Math.abs(y) >= 5e-4)
+    parts.push(`translate(${x.toFixed(3)}px, ${y.toFixed(3)}px)`);
+  if (Math.abs(sx - 1) >= 5e-6 || Math.abs(sy - 1) >= 5e-6)
+    parts.push(`scale(${sx.toFixed(5)}, ${sy.toFixed(5)})`);
+  // the move about the element's own place, the product's transform under it
+  el.style.transform = parts.length ? [...parts, base.transform].join(" ").trim() : base.inline;
+  const o = num(v.opacity);
+  if (o != null) el.style.opacity = String(clamp01(o) * base.opacity);
+  if (typeof v.clip === "string") el.style.clipPath = v.clip;
 }

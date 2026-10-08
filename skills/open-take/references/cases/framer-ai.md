@@ -35,8 +35,8 @@ over 2 s; no cut at all in the first 11 s. Five-second counts:
 | 0–11 | what changed: "for close to a decade… it doesn't just work, it writes, it designs, it builds" | words appear one or two at a time on a soft gradient, size changing with emphasis ("work", "a decade" large) | the gradient | **no cuts**; words replace words in place | voice-over and track; each word on the voice |
 | 11–20.6 | you start with one button and one sentence | the real editor, small → a big "Start with AI" button; a prompt box types "…photographer from Amsterdam"; Start clicked | the gradient behind | cuts at 11.1, 12.2, 14.3, 18.6, 19.5 | — |
 | 20.6–27.6 | it builds a site from that | a generated page assembles itself section by section (headline grows word by word, list rows add one at a time); then a burst through other generated pages | — | **five cuts 0.1 s apart at 21.5–21.9**; ten more 24.2–26.2 | the track's busiest stretch |
-| 27.6–38.3 | it is generated, then human-curated; you choose the fonts | "Ge → Gene → Genera → Generated" grows letter by letter; "Human curated"; tilted 3D cards of one page re-rendered on each real Shuffle click | — | cuts ~0.25 s apart at 31.9–33.0, then 33.8–37.1 | — |
-| 38.3–49.3 | find font combinations, see every breakpoint; "You are the art director" | a title card whose words flick into a display face; desktop / tablet / phone previews | the title cards | **nine cuts ~0.2 s apart at 42.9–44.8** | — |
+| 27.6–38.3 | it is generated, then human-curated; you choose the look | "Ge → Gene → Genera → Generated" grows letter by letter; "Human curated"; at 31–33 the Shuffle control over a tilted page, clicked, the whole page red → purple; at 35–37 one section (500+ / 25) recoloured three times, the cursor beside it; at 38 the title "or just a single section" | — | cuts ~0.25 s apart at 31.9–33.0, then 33.8–37.1 | — |
+| 38.3–49.3 | find font combinations, see every breakpoint; "You are the art director" | a title card whose words flick into a display face; desktop / tablet / phone previews; at 47–49 a paragraph grows longer in place | the title cards | **nine cuts ~0.2 s apart at 42.9–44.8** | — |
 | 49.3–64.4 | your personal copywriter | a paragraph rewrites itself in place, longer, shorter; a joke prompt "Take over the world. Oops, I mean, Rewrite this"; the CEO types "Make the web more creative" (name on screen) | long holds on single text blocks | sparse: 52.4, 58.1, 60.0 — a breath | voice-over carries it |
 | 64.4–76.5 | look at everything it made | a montage of generated sites, each a full-bleed hero (JAZZ AMSTERDAM, JORN, MIA, CINEMA, PLOUGHPOWER, IMPACT…) | — | **regular, about every 0.95 s** | steady pulse |
 | 76.5–85.5 | sign-off | "your", "A" as huge single words → the logo on black | black | cuts 78.4, 78.9, 80.5, 80.9 | out |
@@ -66,6 +66,20 @@ The section shape in cut density: none → bursts → a quieter, text-led stretc
 - What changes between sections is how often the picture switches against a
   track that stays dense — not the music's loudness, and not pauses (6 % of
   the time quiet).
+
+## The product's parts on their own (checked on frames)
+
+| Time | The part | What happens to it |
+|---|---|---|
+| 13 | the "Start with AI" button, alone and large | the cursor presses it |
+| 16 | the prompt box | it types itself |
+| 21 | a generated page | grey placeholder blocks turn into content one item at a time |
+| 31–33 | the Shuffle control, over a tilted page | clicked; the whole page changes from red to purple — the control and what it changes in one frame |
+| 35–37 | one section (500+ / 25) | recoloured three times, the cursor beside it |
+| 47–49 | a paragraph | grows longer in place |
+
+No object is carried from scene to scene: the subject changes every few
+seconds, and each part is the one the sentence of the moment is about.
 
 ## Techniques worth seeing (descriptions only — no code exists for this film)
 

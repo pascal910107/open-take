@@ -544,6 +544,10 @@ export type CaptureOpts = {
    *  state (reported). Lands in `states/` beside the capture video, and on
    *  the log as `states` + per-event `state`/`target`. Default false. */
   states?: boolean;
+  /** with `states`: measure each saved state's parts in the fidelity page
+   *  (states/<id>/parts.json + crisp pictures) — `make` then gathers them
+   *  into <name>.take/components.json. Default true; false skips both. */
+  components?: boolean;
   /** PRODUCT AUDIO: record what the page sends to its speakers (every
    *  AudioContext and playing media element) onto the capture timeline, and
    *  list the audio files it fetched — `product-audio.wav`,

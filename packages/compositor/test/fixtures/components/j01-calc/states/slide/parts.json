@@ -1,0 +1,2953 @@
+{
+  "version": 1,
+  "state": "slide",
+  "viewport": {
+    "w": 1920,
+    "h": 1300
+  },
+  "scroll": {
+    "x": 0,
+    "y": 0
+  },
+  "medianTextPx": 14,
+  "parts": [
+    {
+      "el": "e22",
+      "kind": "button",
+      "label": "登入",
+      "text": "登入",
+      "selector": "body.flex > header.sticky > div.container-page > div.ml-auto > a.inline-flex",
+      "box": [
+        1506,
+        18,
+        62,
+        44
+      ],
+      "look": {
+        "fontPx": 14,
+        "weight": 700,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": "#ffffff",
+        "backdrop": "#ffffff",
+        "radius": 12,
+        "shadow": false,
+        "border": true
+      },
+      "facts": {
+        "areaShare": 0.00109,
+        "fontRatio": 1,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": false,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "ink": [
+        1523,
+        30,
+        28,
+        18
+      ],
+      "picture": "../assets/89cdd5d28b128c6fa9e0290e617b6a8b8ae4f943.png",
+      "clip": [
+        1498,
+        10,
+        78,
+        60
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e25",
+      "kind": "card",
+      "label": "費用試算 比較解約與轉讓費用 解約手續費依合約約定採下列三種方式之一：不收取、定額 NT$600，或未到期費用最高 20% （加計應補足金額合計上限 NT$6…",
+      "text": "費用試算 比較解約與轉讓費用 解約手續費依合約約定採下列三種方式之一：不收取、定額 NT$600，或未到期費用最高 20% （加計應補足金額合計上限 NT$6,000）。轉讓手續費以契約有約定者為限，法定上限 NT$300，也可能不收取。",
+      "selector": "#main > div.container-page > header.mb-8",
+      "box": [
+        352,
+        113,
+        1216,
+        199
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 400,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": null,
+        "backdrop": "#ffffff",
+        "radius": 0,
+        "shadow": false,
+        "border": true
+      },
+      "facts": {
+        "areaShare": 0.09695,
+        "fontRatio": 1.14,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": false,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "parts": [
+        "e26"
+      ],
+      "picture": "../assets/1cf2e897a237f5be18e4ae85db00f9e0952456a7.png",
+      "clip": [
+        344,
+        105,
+        1232,
+        215
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e28",
+      "kind": "heading",
+      "label": "比較解約與轉讓費用",
+      "text": "比較解約與轉讓費用",
+      "selector": "#main > div.container-page > header.mb-8 > div.min-w-0 > h1.font-tc",
+      "box": [
+        352,
+        163,
+        768,
+        55
+      ],
+      "look": {
+        "fontPx": 40,
+        "weight": 700,
+        "family": "Noto Sans TC",
+        "fg": "#20352d",
+        "fill": null,
+        "backdrop": "#ffffff",
+        "radius": 0,
+        "shadow": false,
+        "border": false
+      },
+      "facts": {
+        "areaShare": 0.01692,
+        "fontRatio": 2.86,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": false,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "ink",
+        "pad": 8
+      },
+      "ink": [
+        352,
+        160,
+        351,
+        59
+      ],
+      "inside": "e25",
+      "picture": "../assets/e9bb4e10e22a14d92101be7dea5abf700ef373a1.png",
+      "clip": [
+        344,
+        152,
+        367,
+        75
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e33",
+      "kind": "card",
+      "label": "您的合約 健身房品牌 決定兩件事：轉讓手續費用官方查證到的實收金額還是法定上限；以及這家官方公告的轉讓限制（受理事由、承接資格、轉讓次數、辦理地點、教練課程包…",
+      "text": "您的合約 健身房品牌 決定兩件事：轉讓手續費用官方查證到的實收金額還是法定上限；以及這家官方公告的轉讓限制（受理事由、承接資格、轉讓次數、辦理地點、教練課程包）。不選也可以試算，但結論不會計入任何品牌限制 選填 決定手續費與轉讓限制 不確定／未列出 World Gym 健身工廠 成吉思汗健身俱樂部 Curves Anytime Fitness 未選品牌：下面的結論只用法定上限估算，沒有計入任何品牌自訂的轉讓限制（受理事由、承接資格、轉讓次數、辦理地點）。選擇品牌就會列出該品牌官方公告的限制。 月平均價格 法定的月平均價格＝契約總金額 ÷ 契約月數（含所贈與之會籍期間）。例如買 24 個月送 3 個月，計算時應以 27 個月為分母，因此月平均價格可能低於每月扣款金額 * 總價 ÷ 總月數（含贈送月） NT$ ／月 NT$888 NT$1,088 NT$1,288 NT$1,588 合約總月數 請計入贈送的會籍期間：買 24 個月送 3 個月應填 27，買 12 個月送 2 個月應填 14。月數填寫錯誤將影響月繳型方案的應補足金額。可填 0.5 的倍數（例如買 12 個月送 15 天填 12.5） 含贈送月，可填 0.5 的倍數 個月 12 14 24 27 36 解約手續費 定型化契約第十點提供三種約定方式：不收取／定額 NT$600／未到期比例最高 20%。請依您的合約所勾選項目填寫 看合約勾哪一格 不收 定額 NT$600 最高 20% 未選品牌：上面三格是法規允許業者採用的三種約定方式，不表示您的合約真的有三個格子。選擇品牌可看這家的合約實際印了幾格。 您的繳費方式 月繳者解約時，業者得收取「月平均價格 × 已使用月數」；不足部分由消費者補足，溢繳部分由業者退還。手續費加計應補足金額，合計上限為 NT$6,000 預繳全額 月繳 未選品牌：預繳與月繳算出來的金額差很多（月繳會多出「應補足金額」，預繳才會有可退餘額）。選擇品牌可看這家官方公告的收費方式。 還剩幾個月 18.5個月 0 24 貼補承接人 二手會籍通常沒有溢價；剩餘期間較短時，賣方可考慮提供貼補以促成交易 選填 NT$ NT$0 NT$500 NT$1,000 NT$2,000 轉讓手續費 法定上限為會籍 NT$300、教練課 NT$600，且「以契約有約定者為限」——沒有約定就不得收取。法規未規定由哪一方負擔，雙方可自行協議 誰付、實際收多少 我付 承接人付 各付一半 NT$ 教練課一起轉 轉讓手續費最高再加 NT$600（各家可能更低或不收）；教練課的解約費用另依教練契約結算，本頁未計入",
+      "selector": "#main > div.container-page > div.grid > section.rounded-card",
+      "box": [
+        352,
+        344,
+        538,
+        1298
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 400,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": "#ffffff",
+        "backdrop": "#ffffff",
+        "radius": 20,
+        "shadow": true,
+        "border": true
+      },
+      "facts": {
+        "areaShare": 0.27978,
+        "fontRatio": 1.14,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": false,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "fields": {
+        "name": "您的合約"
+      },
+      "labelledBy": [
+        "e34"
+      ],
+      "parts": [
+        "e34",
+        "e35"
+      ],
+      "sub": "result",
+      "picture": "../assets/7bca317e127cf3fe1aeb2dc32d7d96217c18de37.png",
+      "clip": [
+        344,
+        336,
+        554,
+        964
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e34",
+      "kind": "heading",
+      "label": "您的合約",
+      "text": "您的合約",
+      "selector": "#_R_9bsnnb_-form",
+      "box": [
+        377,
+        369,
+        488,
+        23
+      ],
+      "look": {
+        "fontPx": 17,
+        "weight": 700,
+        "family": "Noto Sans TC",
+        "fg": "#20352d",
+        "fill": null,
+        "backdrop": "#ffffff",
+        "radius": 0,
+        "shadow": false,
+        "border": false
+      },
+      "facts": {
+        "areaShare": 0.0045,
+        "fontRatio": 1.21,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": false,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "ink",
+        "pad": 8
+      },
+      "ink": [
+        377,
+        367,
+        68,
+        26
+      ],
+      "inside": "e33",
+      "picture": "../assets/f2a3b42291392f6995e73ac6f4a8370612658bd1.png",
+      "clip": [
+        369,
+        359,
+        84,
+        42
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e35",
+      "kind": "group",
+      "label": "健身房品牌 決定兩件事：轉讓手續費用官方查證到的實收金額還是法定上限；以及這家官方公告的轉讓限制（受理事由、承接資格、轉讓次數、辦理地點、教練課程包）。不選也…",
+      "text": "健身房品牌 決定兩件事：轉讓手續費用官方查證到的實收金額還是法定上限；以及這家官方公告的轉讓限制（受理事由、承接資格、轉讓次數、辦理地點、教練課程包）。不選也可以試算，但結論不會計入任何品牌限制 選填 決定手續費與轉讓限制 不確定／未列出 World Gym 健身工廠 成吉思汗健身俱樂部 Curves Anytime Fitness 未選品牌：下面的結論只用法定上限估算，沒有計入任何品牌自訂的轉讓限制（受理事由、承接資格、轉讓次數、辦理地點）。選擇品牌就會列出該品牌官方公告的限制。 月平均價格 法定的月平均價格＝契約總金額 ÷ 契約月數（含所贈與之會籍期間）。例如買 24 個月送 3 個月，計算時應以 27 個月為分母，因此月平均價格可能低於每月扣款金額 * 總價 ÷ 總月數（含贈送月） NT$ ／月 NT$888 NT$1,088 NT$1,288 NT$1,588 合約總月數 請計入贈送的會籍期間：買 24 個月送 3 個月應填 27，買 12 個月送 2 個月應填 14。月數填寫錯誤將影響月繳型方案的應補足金額。可填 0.5 的倍數（例如買 12 個月送 15 天填 12.5） 含贈送月，可填 0.5 的倍數 個月 12 14 24 27 36 解約手續費 定型化契約第十點提供三種約定方式：不收取／定額 NT$600／未到期比例最高 20%。請依您的合約所勾選項目填寫 看合約勾哪一格 不收 定額 NT$600 最高 20% 未選品牌：上面三格是法規允許業者採用的三種約定方式，不表示您的合約真的有三個格子。選擇品牌可看這家的合約實際印了幾格。 您的繳費方式 月繳者解約時，業者得收取「月平均價格 × 已使用月數」；不足部分由消費者補足，溢繳部分由業者退還。手續費加計應補足金額，合計上限為 NT$6,000 預繳全額 月繳 未選品牌：預繳與月繳算出來的金額差很多（月繳會多出「應補足金額」，預繳才會有可退餘額）。選擇品牌可看這家官方公告的收費方式。 還剩幾個月 18.5個月 0 24 貼補承接人 二手會籍通常沒有溢價；剩餘期間較短時，賣方可考慮提供貼補以促成交易 選填 NT$ NT$0 NT$500 NT$1,000 NT$2,000 轉讓手續費 法定上限為會籍 NT$300、教練課 NT$600，且「以契約有約定者為限」——沒有約定就不得收取。法規未規定由哪一方負擔，雙方可自行協議 誰付、實際收多少 我付 承接人付 各付一半 NT$ 教練課一起轉 轉讓手續費最高再加 NT$600（各家可能更低或不收）；教練課的解約費用另依教練契約結算，本頁未計入",
+      "selector": "#main > div.container-page > div.grid > section.rounded-card > form.mt-4",
+      "box": [
+        377,
+        408,
+        488,
+        1209
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 400,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": null,
+        "backdrop": "#ffffff",
+        "radius": 0,
+        "shadow": false,
+        "border": false
+      },
+      "facts": {
+        "areaShare": 0.23638,
+        "fontRatio": 1.14,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": false,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "members": [
+        "e36",
+        "e50",
+        "e70",
+        "e88",
+        "e106",
+        "e131"
+      ],
+      "axis": "column",
+      "parts": [
+        "e36",
+        "e50",
+        "e70",
+        "e88",
+        "e106",
+        "e131"
+      ],
+      "inside": "e33",
+      "picture": "../assets/2abdc5071f9d4b67d08cd7a50769f758105cc920.png",
+      "clip": [
+        369,
+        400,
+        504,
+        900
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e45",
+      "kind": "field",
+      "label": "不確定／未列出 World Gym 健身工廠 成吉思汗健身俱樂部 Curves Anytime Fitness 未選品牌：下面的結論只用法定上限估算，沒有計入…",
+      "text": "不確定／未列出 World Gym 健身工廠 成吉思汗健身俱樂部 Curves Anytime Fitness 未選品牌：下面的結論只用法定上限估算，沒有計入任何品牌自訂的轉讓限制（受理事由、承接資格、轉讓次數、辦理地點）。選擇品牌就會列出該品牌官方公告的限制。",
+      "selector": "#main > div.container-page > div.grid > section.rounded-card > form.mt-4 > div.min-w-0:nth-of-type(1) > div.grid:nth-of-type(2)",
+      "box": [
+        377,
+        434,
+        488,
+        91
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 400,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": null,
+        "backdrop": "#ffffff",
+        "radius": 0,
+        "shadow": false,
+        "border": false
+      },
+      "facts": {
+        "areaShare": 0.01779,
+        "fontRatio": 1.14,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": false,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "input": "e47",
+      "parts": [
+        "e46",
+        "e49"
+      ],
+      "inside": "e35",
+      "picture": "../assets/2872b53e2f9416869989079c155075107e7b2a9f.png",
+      "clip": [
+        369,
+        426,
+        504,
+        107
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e47",
+      "kind": "input",
+      "label": "不確定／未列出",
+      "text": "不確定／未列出",
+      "selector": "#_R_9bsnnb_-brand",
+      "box": [
+        377,
+        434,
+        488,
+        48
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 500,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": "#ffffff",
+        "backdrop": "#ffffff",
+        "radius": 12,
+        "shadow": false,
+        "border": true
+      },
+      "facts": {
+        "areaShare": 0.00938,
+        "fontRatio": 1.14,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": false,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "fields": {
+        "value": "不確定／未列出",
+        "options": [
+          "不確定／未列出",
+          "World Gym",
+          "健身工廠",
+          "成吉思汗健身俱樂部",
+          "Curves",
+          "Anytime Fitness"
+        ]
+      },
+      "field": "e45",
+      "inside": "e45",
+      "picture": "../assets/b1c5e6e33fb525b15e13f4bd1b636dd3f6b2b5f4.png",
+      "clip": [
+        369,
+        426,
+        504,
+        64
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e61",
+      "kind": "field",
+      "label": "NT$ ／月",
+      "text": "NT$ ／月",
+      "selector": "#main > div.container-page > div.grid > section.rounded-card > form.mt-4 > div.min-w-0:nth-of-type(2) > div.grid:nth-of-type(2) > div.grid:nth-of-type(1) > div.flex",
+      "box": [
+        377,
+        572,
+        488,
+        48
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 400,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": "#ffffff",
+        "backdrop": "#ffffff",
+        "radius": 12,
+        "shadow": false,
+        "border": true
+      },
+      "facts": {
+        "areaShare": 0.00938,
+        "fontRatio": 1.14,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": false,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "input": "e63",
+      "parts": [
+        "e62",
+        "e63",
+        "e64"
+      ],
+      "inside": "e35",
+      "picture": "../assets/d0c083299bd43955a51e740085eaf34b89327570.png",
+      "clip": [
+        369,
+        564,
+        504,
+        64
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e63",
+      "kind": "input",
+      "label": "1,288",
+      "text": "1,288",
+      "selector": "#_R_9bsnnb_-fee",
+      "box": [
+        420,
+        573,
+        401,
+        46
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 500,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": null,
+        "backdrop": "#ffffff",
+        "radius": 0,
+        "shadow": false,
+        "border": false
+      },
+      "facts": {
+        "areaShare": 0.00739,
+        "fontRatio": 1.14,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": true,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "fields": {
+        "value": "1,288"
+      },
+      "field": "e61",
+      "inside": "e61",
+      "picture": "../assets/2fd92b6165ca7b1dd7fed0430bfbd37d08c18671.png",
+      "clip": [
+        412,
+        565,
+        417,
+        62
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e65",
+      "kind": "group",
+      "label": "NT$888 NT$1,088 NT$1,288 NT$1,588",
+      "text": "NT$888 NT$1,088 NT$1,288 NT$1,588",
+      "selector": "#main > div.container-page > div.grid > section.rounded-card > form.mt-4 > div.min-w-0:nth-of-type(2) > div.grid:nth-of-type(2) > div.flex:nth-of-type(2)",
+      "box": [
+        377,
+        628,
+        488,
+        44
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 400,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": null,
+        "backdrop": "#ffffff",
+        "radius": 0,
+        "shadow": false,
+        "border": false
+      },
+      "facts": {
+        "areaShare": 0.0086,
+        "fontRatio": 1.14,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": false,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "fields": {
+        "name": "常見月平均價格"
+      },
+      "members": [
+        "e66",
+        "e67",
+        "e68",
+        "e69"
+      ],
+      "axis": "row",
+      "parts": [
+        "e66",
+        "e67",
+        "e68",
+        "e69"
+      ],
+      "inside": "e35",
+      "picture": "../assets/5c0daf06becfc59c64e0aa688559707834ced77a.png",
+      "clip": [
+        369,
+        620,
+        504,
+        60
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e66",
+      "kind": "button",
+      "label": "NT$888",
+      "text": "NT$888",
+      "selector": "#main > div.container-page > div.grid > section.rounded-card > form.mt-4 > div.min-w-0:nth-of-type(2) > div.grid:nth-of-type(2) > div.flex:nth-of-type(2) > button.inline-flex:nth-of-type(1)",
+      "box": [
+        377,
+        628,
+        89,
+        44
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 600,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": "#ffffff",
+        "backdrop": "#ffffff",
+        "radius": 33554400,
+        "shadow": false,
+        "border": true
+      },
+      "facts": {
+        "areaShare": 0.00157,
+        "fontRatio": 1.14,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": true,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "ink": [
+        394,
+        639,
+        55,
+        20
+      ],
+      "inside": "e65",
+      "picture": "../assets/d55aaa4c42c7491b59d5ea7b8ff5badca79ea1d8.png",
+      "clip": [
+        369,
+        620,
+        105,
+        60
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e67",
+      "kind": "button",
+      "label": "NT$1,088",
+      "text": "NT$1,088",
+      "selector": "#main > div.container-page > div.grid > section.rounded-card > form.mt-4 > div.min-w-0:nth-of-type(2) > div.grid:nth-of-type(2) > div.flex:nth-of-type(2) > button.inline-flex:nth-of-type(2)",
+      "box": [
+        474,
+        628,
+        102,
+        44
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 600,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": "#ffffff",
+        "backdrop": "#ffffff",
+        "radius": 33554400,
+        "shadow": false,
+        "border": true
+      },
+      "facts": {
+        "areaShare": 0.0018,
+        "fontRatio": 1.14,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": true,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "ink": [
+        490,
+        639,
+        69,
+        20
+      ],
+      "inside": "e65",
+      "picture": "../assets/e708f0e97d075967ec8372f61847706a46cf2596.png",
+      "clip": [
+        466,
+        620,
+        118,
+        60
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e68",
+      "kind": "button",
+      "label": "NT$1,288",
+      "text": "NT$1,288",
+      "selector": "#main > div.container-page > div.grid > section.rounded-card > form.mt-4 > div.min-w-0:nth-of-type(2) > div.grid:nth-of-type(2) > div.flex:nth-of-type(2) > button.inline-flex:nth-of-type(3)",
+      "box": [
+        584,
+        628,
+        102,
+        44
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 600,
+        "family": "Barlow",
+        "fg": "#ffffff",
+        "fill": "#20352d",
+        "backdrop": "#ffffff",
+        "radius": 33554400,
+        "shadow": false,
+        "border": true
+      },
+      "facts": {
+        "areaShare": 0.0018,
+        "fontRatio": 1.14,
+        "contrast": 13.1,
+        "fillContrast": 13.06,
+        "numeric": true,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "state": {
+        "pressed": "true"
+      },
+      "ink": [
+        600,
+        639,
+        69,
+        20
+      ],
+      "inside": "e65",
+      "primary": true,
+      "picture": "../assets/7602d8b2f42631ef9e08e664889516c0446a8829.png",
+      "clip": [
+        576,
+        620,
+        118,
+        60
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e69",
+      "kind": "button",
+      "label": "NT$1,588",
+      "text": "NT$1,588",
+      "selector": "#main > div.container-page > div.grid > section.rounded-card > form.mt-4 > div.min-w-0:nth-of-type(2) > div.grid:nth-of-type(2) > div.flex:nth-of-type(2) > button.inline-flex:nth-of-type(4)",
+      "box": [
+        693,
+        628,
+        102,
+        44
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 600,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": "#ffffff",
+        "backdrop": "#ffffff",
+        "radius": 33554400,
+        "shadow": false,
+        "border": true
+      },
+      "facts": {
+        "areaShare": 0.0018,
+        "fontRatio": 1.14,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": true,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "ink": [
+        710,
+        639,
+        69,
+        20
+      ],
+      "inside": "e65",
+      "picture": "../assets/56566722b1a2f8297a48ee09907eca26d550197d.png",
+      "clip": [
+        685,
+        620,
+        118,
+        60
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e79",
+      "kind": "card",
+      "label": "個月",
+      "text": "個月",
+      "selector": "#main > div.container-page > div.grid > section.rounded-card > form.mt-4 > div.min-w-0:nth-of-type(3) > div.grid:nth-of-type(2) > div.flex:nth-of-type(1)",
+      "box": [
+        377,
+        718,
+        488,
+        48
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 400,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": "#ffffff",
+        "backdrop": "#ffffff",
+        "radius": 12,
+        "shadow": false,
+        "border": true
+      },
+      "facts": {
+        "areaShare": 0.00938,
+        "fontRatio": 1.14,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": false,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "parts": [
+        "e80",
+        "e81"
+      ],
+      "inside": "e35",
+      "sub": "form",
+      "picture": "../assets/af54dbe19e31dbea985a6b7e2411939442c4b3e5.png",
+      "clip": [
+        369,
+        710,
+        504,
+        64
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e80",
+      "kind": "input",
+      "label": "24",
+      "text": "24",
+      "selector": "#_R_9bsnnb_-total",
+      "box": [
+        378,
+        719,
+        442,
+        46
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 500,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": null,
+        "backdrop": "#ffffff",
+        "radius": 0,
+        "shadow": false,
+        "border": false
+      },
+      "facts": {
+        "areaShare": 0.00815,
+        "fontRatio": 1.14,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": true,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "fields": {
+        "value": "24"
+      },
+      "field": "e79",
+      "inside": "e79",
+      "picture": "../assets/16b33dcbcebd8e9ba418dc1dd51379b7cdbaad60.png",
+      "clip": [
+        370,
+        711,
+        458,
+        62
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e82",
+      "kind": "group",
+      "label": "12 14 24 27 36",
+      "text": "12 14 24 27 36",
+      "selector": "#main > div.container-page > div.grid > section.rounded-card > form.mt-4 > div.min-w-0:nth-of-type(3) > div.grid:nth-of-type(2) > div.flex:nth-of-type(2)",
+      "box": [
+        377,
+        774,
+        488,
+        44
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 400,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": null,
+        "backdrop": "#ffffff",
+        "radius": 0,
+        "shadow": false,
+        "border": false
+      },
+      "facts": {
+        "areaShare": 0.0086,
+        "fontRatio": 1.14,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": true,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "fields": {
+        "name": "常見合約總月數"
+      },
+      "members": [
+        "e83",
+        "e84",
+        "e85",
+        "e86",
+        "e87"
+      ],
+      "axis": "row",
+      "parts": [
+        "e83",
+        "e84",
+        "e85",
+        "e86",
+        "e87"
+      ],
+      "inside": "e35",
+      "picture": "../assets/703811e4402656a89b94014346ed703fca05e1d6.png",
+      "clip": [
+        369,
+        766,
+        504,
+        60
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e83",
+      "kind": "button",
+      "label": "12",
+      "text": "12",
+      "selector": "#main > div.container-page > div.grid > section.rounded-card > form.mt-4 > div.min-w-0:nth-of-type(3) > div.grid:nth-of-type(2) > div.flex:nth-of-type(2) > button.inline-flex:nth-of-type(1)",
+      "box": [
+        377,
+        774,
+        51,
+        44
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 600,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": "#ffffff",
+        "backdrop": "#ffffff",
+        "radius": 33554400,
+        "shadow": false,
+        "border": true
+      },
+      "facts": {
+        "areaShare": 0.0009,
+        "fontRatio": 1.14,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": true,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "ink": [
+        394,
+        786,
+        18,
+        20
+      ],
+      "inside": "e82",
+      "picture": "../assets/a5f0bf9af0ee8020439d83a3b779b981372f7887.png",
+      "clip": [
+        369,
+        766,
+        67,
+        60
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e84",
+      "kind": "button",
+      "label": "14",
+      "text": "14",
+      "selector": "#main > div.container-page > div.grid > section.rounded-card > form.mt-4 > div.min-w-0:nth-of-type(3) > div.grid:nth-of-type(2) > div.flex:nth-of-type(2) > button.inline-flex:nth-of-type(2)",
+      "box": [
+        436,
+        774,
+        51,
+        44
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 600,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": "#ffffff",
+        "backdrop": "#ffffff",
+        "radius": 33554400,
+        "shadow": false,
+        "border": true
+      },
+      "facts": {
+        "areaShare": 0.0009,
+        "fontRatio": 1.14,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": true,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "ink": [
+        453,
+        786,
+        18,
+        20
+      ],
+      "inside": "e82",
+      "picture": "../assets/95f1523afa19e3ef5127c5ab9945c22c8f033f26.png",
+      "clip": [
+        428,
+        766,
+        67,
+        60
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e85",
+      "kind": "button",
+      "label": "24",
+      "text": "24",
+      "selector": "#main > div.container-page > div.grid > section.rounded-card > form.mt-4 > div.min-w-0:nth-of-type(3) > div.grid:nth-of-type(2) > div.flex:nth-of-type(2) > button.inline-flex:nth-of-type(3)",
+      "box": [
+        495,
+        774,
+        51,
+        44
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 600,
+        "family": "Barlow",
+        "fg": "#ffffff",
+        "fill": "#20352d",
+        "backdrop": "#ffffff",
+        "radius": 33554400,
+        "shadow": false,
+        "border": true
+      },
+      "facts": {
+        "areaShare": 0.0009,
+        "fontRatio": 1.14,
+        "contrast": 13.1,
+        "fillContrast": 13.06,
+        "numeric": true,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "state": {
+        "pressed": "true"
+      },
+      "ink": [
+        512,
+        786,
+        18,
+        20
+      ],
+      "inside": "e82",
+      "picture": "../assets/f4a9ac25960025cc6a28720d72f874a3e7bd430f.png",
+      "clip": [
+        487,
+        766,
+        67,
+        60
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e86",
+      "kind": "button",
+      "label": "27",
+      "text": "27",
+      "selector": "#main > div.container-page > div.grid > section.rounded-card > form.mt-4 > div.min-w-0:nth-of-type(3) > div.grid:nth-of-type(2) > div.flex:nth-of-type(2) > button.inline-flex:nth-of-type(4)",
+      "box": [
+        555,
+        774,
+        51,
+        44
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 600,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": "#ffffff",
+        "backdrop": "#ffffff",
+        "radius": 33554400,
+        "shadow": false,
+        "border": true
+      },
+      "facts": {
+        "areaShare": 0.0009,
+        "fontRatio": 1.14,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": true,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "ink": [
+        571,
+        786,
+        18,
+        20
+      ],
+      "inside": "e82",
+      "picture": "../assets/eabe1e3dafd127131159a222258dd6c55b5ece71.png",
+      "clip": [
+        547,
+        766,
+        67,
+        60
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e87",
+      "kind": "button",
+      "label": "36",
+      "text": "36",
+      "selector": "#main > div.container-page > div.grid > section.rounded-card > form.mt-4 > div.min-w-0:nth-of-type(3) > div.grid:nth-of-type(2) > div.flex:nth-of-type(2) > button.inline-flex:nth-of-type(5)",
+      "box": [
+        614,
+        774,
+        51,
+        44
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 600,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": "#ffffff",
+        "backdrop": "#ffffff",
+        "radius": 33554400,
+        "shadow": false,
+        "border": true
+      },
+      "facts": {
+        "areaShare": 0.0009,
+        "fontRatio": 1.14,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": true,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "ink": [
+        630,
+        786,
+        19,
+        20
+      ],
+      "inside": "e82",
+      "picture": "../assets/d21b53ef4b54b22b4074f8a2e3fd00ffea60a275.png",
+      "clip": [
+        606,
+        766,
+        67,
+        60
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e97",
+      "kind": "card",
+      "label": "不收 定額 NT$600 最高 20%",
+      "text": "不收 定額 NT$600 最高 20%",
+      "selector": "#main > div.container-page > div.grid > section.rounded-card > form.mt-4 > div.min-w-0:nth-of-type(4) > div.grid:nth-of-type(2) > div.grid",
+      "box": [
+        377,
+        864,
+        488,
+        48
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 400,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": "#f4f7f4",
+        "backdrop": "#ffffff",
+        "radius": 33554400,
+        "shadow": false,
+        "border": false
+      },
+      "facts": {
+        "areaShare": 0.00938,
+        "fontRatio": 1.14,
+        "contrast": 12.1,
+        "fillContrast": 1.08,
+        "numeric": true,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "fields": {
+        "name": "解約手續費怎麼算"
+      },
+      "parts": [
+        "e98",
+        "e100",
+        "e102"
+      ],
+      "inside": "e35",
+      "picture": "../assets/7110e666a252f488f09f42c65f522d9e251ef6dc.png",
+      "clip": [
+        369,
+        856,
+        504,
+        64
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e98",
+      "kind": "button",
+      "label": "不收",
+      "text": "不收",
+      "selector": "#main > div.container-page > div.grid > section.rounded-card > form.mt-4 > div.min-w-0:nth-of-type(4) > div.grid:nth-of-type(2) > div.grid > button.num:nth-of-type(1)",
+      "box": [
+        381,
+        868,
+        157,
+        40
+      ],
+      "look": {
+        "fontPx": 14,
+        "weight": 700,
+        "family": "Barlow",
+        "fg": "#647169",
+        "fill": null,
+        "backdrop": "#f4f7f4",
+        "radius": 33554400,
+        "shadow": false,
+        "border": false
+      },
+      "facts": {
+        "areaShare": 0.00252,
+        "fontRatio": 1,
+        "contrast": 4.7,
+        "fillContrast": 1,
+        "numeric": false,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "ink",
+        "pad": 8
+      },
+      "ink": [
+        445,
+        879,
+        29,
+        18
+      ],
+      "inside": "e97",
+      "picture": "../assets/7bfb19e3898050c426d69aaa9a6078bdc6f1d12d.png",
+      "clip": [
+        437,
+        871,
+        45,
+        34
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e100",
+      "kind": "button",
+      "label": "定額 NT$600",
+      "text": "定額 NT$600",
+      "selector": "#main > div.container-page > div.grid > section.rounded-card > form.mt-4 > div.min-w-0:nth-of-type(4) > div.grid:nth-of-type(2) > div.grid > button.num:nth-of-type(2)",
+      "box": [
+        542,
+        868,
+        157,
+        40
+      ],
+      "look": {
+        "fontPx": 14,
+        "weight": 700,
+        "family": "Barlow",
+        "fg": "#647169",
+        "fill": null,
+        "backdrop": "#f4f7f4",
+        "radius": 33554400,
+        "shadow": false,
+        "border": false
+      },
+      "facts": {
+        "areaShare": 0.00252,
+        "fontRatio": 1,
+        "contrast": 4.7,
+        "fillContrast": 1,
+        "numeric": true,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "ink",
+        "pad": 8
+      },
+      "ink": [
+        581,
+        879,
+        80,
+        18
+      ],
+      "inside": "e97",
+      "picture": "../assets/a6e20b22e374a98ff40b4a8cf25fd33c1476de9b.png",
+      "clip": [
+        573,
+        871,
+        96,
+        34
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e102",
+      "kind": "button",
+      "label": "最高 20%",
+      "text": "最高 20%",
+      "selector": "#main > div.container-page > div.grid > section.rounded-card > form.mt-4 > div.min-w-0:nth-of-type(4) > div.grid:nth-of-type(2) > div.grid > button.num:nth-of-type(3)",
+      "box": [
+        704,
+        868,
+        157,
+        40
+      ],
+      "look": {
+        "fontPx": 14,
+        "weight": 700,
+        "family": "Barlow",
+        "fg": "#ffffff",
+        "fill": null,
+        "backdrop": "#f4f7f4",
+        "radius": 33554400,
+        "shadow": false,
+        "border": false
+      },
+      "facts": {
+        "areaShare": 0.00252,
+        "fontRatio": 1,
+        "contrast": 1.1,
+        "fillContrast": 1,
+        "numeric": true,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "ink",
+        "pad": 8
+      },
+      "state": {
+        "pressed": "true"
+      },
+      "ink": [
+        753,
+        879,
+        59,
+        18
+      ],
+      "inside": "e97",
+      "picture": "../assets/4114ffa1716daa704e660257f0e89f7d331da138.png",
+      "clip": [
+        745,
+        871,
+        75,
+        34
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e114",
+      "kind": "card",
+      "label": "預繳全額 月繳",
+      "text": "預繳全額 月繳",
+      "selector": "#main > div.container-page > div.grid > section.rounded-card > form.mt-4 > div.min-w-0:nth-of-type(5) > div.grid:nth-of-type(2) > div.grid",
+      "box": [
+        377,
+        1002,
+        488,
+        48
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 400,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": "#f4f7f4",
+        "backdrop": "#ffffff",
+        "radius": 33554400,
+        "shadow": false,
+        "border": false
+      },
+      "facts": {
+        "areaShare": 0.00938,
+        "fontRatio": 1.14,
+        "contrast": 12.1,
+        "fillContrast": 1.08,
+        "numeric": false,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "fields": {
+        "name": "繳費方式"
+      },
+      "parts": [
+        "e115",
+        "e118"
+      ],
+      "inside": "e35",
+      "picture": "../assets/9b88d0349197a426d4c0f0f686d70d2b331b1aa1.png",
+      "clip": [
+        369,
+        994,
+        504,
+        64
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e115",
+      "kind": "button",
+      "label": "預繳全額",
+      "text": "預繳全額",
+      "selector": "#main > div.container-page > div.grid > section.rounded-card > form.mt-4 > div.min-w-0:nth-of-type(5) > div.grid:nth-of-type(2) > div.grid > button.num:nth-of-type(1)",
+      "box": [
+        381,
+        1006,
+        238,
+        40
+      ],
+      "look": {
+        "fontPx": 14,
+        "weight": 700,
+        "family": "Barlow",
+        "fg": "#ffffff",
+        "fill": null,
+        "backdrop": "#f4f7f4",
+        "radius": 33554400,
+        "shadow": false,
+        "border": false
+      },
+      "facts": {
+        "areaShare": 0.00381,
+        "fontRatio": 1,
+        "contrast": 1.1,
+        "fillContrast": 1,
+        "numeric": false,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "ink",
+        "pad": 8
+      },
+      "state": {
+        "pressed": "true"
+      },
+      "ink": [
+        472,
+        1016,
+        57,
+        18
+      ],
+      "inside": "e114",
+      "picture": "../assets/996482326a0b6f82cfb76257f1376e5fd82f399c.png",
+      "clip": [
+        464,
+        1008,
+        73,
+        34
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e118",
+      "kind": "button",
+      "label": "月繳",
+      "text": "月繳",
+      "selector": "#main > div.container-page > div.grid > section.rounded-card > form.mt-4 > div.min-w-0:nth-of-type(5) > div.grid:nth-of-type(2) > div.grid > button.num:nth-of-type(2)",
+      "box": [
+        623,
+        1006,
+        238,
+        40
+      ],
+      "look": {
+        "fontPx": 14,
+        "weight": 700,
+        "family": "Barlow",
+        "fg": "#647169",
+        "fill": null,
+        "backdrop": "#f4f7f4",
+        "radius": 33554400,
+        "shadow": false,
+        "border": false
+      },
+      "facts": {
+        "areaShare": 0.00381,
+        "fontRatio": 1,
+        "contrast": 4.7,
+        "fillContrast": 1,
+        "numeric": false,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "ink",
+        "pad": 8
+      },
+      "ink": [
+        728,
+        1016,
+        29,
+        18
+      ],
+      "inside": "e114",
+      "picture": "../assets/71a6493a01003a4a0c07383260a77ba29f9444e9.png",
+      "clip": [
+        720,
+        1008,
+        45,
+        34
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e121",
+      "kind": "field",
+      "label": "還剩幾個月 18.5個月 0 24",
+      "text": "還剩幾個月 18.5個月 0 24",
+      "selector": "#main > div.container-page > div.grid > section.rounded-card > form.mt-4 > div:nth-of-type(6)",
+      "box": [
+        377,
+        1113,
+        488,
+        99
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 400,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": null,
+        "backdrop": "#ffffff",
+        "radius": 0,
+        "shadow": false,
+        "border": false
+      },
+      "facts": {
+        "areaShare": 0.01936,
+        "fontRatio": 1.14,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": true,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "input": "e127",
+      "parts": [
+        "e122",
+        "e127",
+        "e128"
+      ],
+      "inside": "e35",
+      "picture": "../assets/3210840f3bc5269e80f2ed1493ee97d470d08b97.png",
+      "clip": [
+        369,
+        1105,
+        504,
+        115
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e122",
+      "kind": "stat",
+      "label": "還剩幾個月 18.5個月",
+      "text": "還剩幾個月 18.5個月",
+      "selector": "#main > div.container-page > div.grid > section.rounded-card > form.mt-4 > div:nth-of-type(6) > div.flex:nth-of-type(1)",
+      "box": [
+        377,
+        1113,
+        488,
+        25
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 400,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": null,
+        "backdrop": "#ffffff",
+        "radius": 0,
+        "shadow": false,
+        "border": false
+      },
+      "facts": {
+        "areaShare": 0.00489,
+        "fontRatio": 1.14,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": false,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "ink",
+        "pad": 8
+      },
+      "ink": [
+        399,
+        1107,
+        467,
+        34
+      ],
+      "parts": [
+        "e123",
+        "e125"
+      ],
+      "inside": "e121",
+      "picture": "../assets/6bdc5837ef7e563752df800431808d699a6788ee.png",
+      "clip": [
+        391,
+        1099,
+        483,
+        50
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e125",
+      "kind": "number",
+      "label": "18.5個月",
+      "text": "18.5個月",
+      "selector": "#main > div.container-page > div.grid > section.rounded-card > form.mt-4 > div:nth-of-type(6) > div.flex:nth-of-type(1) > span.num-display",
+      "box": [
+        788,
+        1113,
+        77,
+        25
+      ],
+      "look": {
+        "fontPx": 24,
+        "weight": 700,
+        "family": "Manrope",
+        "fg": "#20352d",
+        "fill": null,
+        "backdrop": "#ffffff",
+        "radius": 0,
+        "shadow": false,
+        "border": false
+      },
+      "facts": {
+        "areaShare": 0.00077,
+        "fontRatio": 1.71,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": true,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "ink",
+        "pad": 8
+      },
+      "ink": [
+        788,
+        1107,
+        78,
+        34
+      ],
+      "inside": "e122",
+      "picture": "../assets/3078ea2effa8942c8debbced821dbeaceee639ec.png",
+      "clip": [
+        780,
+        1099,
+        94,
+        50
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e127",
+      "kind": "input",
+      "label": "18.5",
+      "text": "18.5",
+      "selector": "#_R_9bsnnb_-left",
+      "box": [
+        377,
+        1143,
+        488,
+        44
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 400,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": null,
+        "backdrop": "#ffffff",
+        "radius": 8,
+        "shadow": false,
+        "border": false
+      },
+      "facts": {
+        "areaShare": 0.0086,
+        "fontRatio": 1.14,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": true,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "fields": {
+        "value": "18.5",
+        "min": "0",
+        "max": "24",
+        "step": "0.5"
+      },
+      "field": "e121",
+      "inside": "e121",
+      "picture": "../assets/1ea3fed099120af7a8a59e23aec4e63b5e240086.png",
+      "clip": [
+        369,
+        1135,
+        504,
+        60
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e141",
+      "kind": "field",
+      "label": "NT$",
+      "text": "NT$",
+      "selector": "#main > div.container-page > div.grid > section.rounded-card > form.mt-4 > div.min-w-0:nth-of-type(7) > div.grid:nth-of-type(2) > div.grid:nth-of-type(1) > div.flex",
+      "box": [
+        377,
+        1258,
+        488,
+        48
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 400,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": "#ffffff",
+        "backdrop": "#ffffff",
+        "radius": 12,
+        "shadow": false,
+        "border": true
+      },
+      "facts": {
+        "areaShare": 0.00938,
+        "fontRatio": 1.14,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": false,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "input": "e143",
+      "parts": [
+        "e142",
+        "e143"
+      ],
+      "inside": "e35",
+      "picture": "../assets/6b3d6f1255fbcc323df606f7b34ff8d1f2247ae9.png",
+      "clip": [
+        369,
+        1250,
+        504,
+        50
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e143",
+      "kind": "input",
+      "label": "0",
+      "text": "0",
+      "selector": "#_R_9bsnnb_-subsidy",
+      "box": [
+        420,
+        1259,
+        445,
+        46
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 500,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": null,
+        "backdrop": "#ffffff",
+        "radius": 0,
+        "shadow": false,
+        "border": false
+      },
+      "facts": {
+        "areaShare": 0.0082,
+        "fontRatio": 1.14,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": true,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "fields": {
+        "value": "0"
+      },
+      "field": "e141",
+      "inside": "e141",
+      "picture": "../assets/fabefe11603bb0bcdbfc79207a4d68f2c6087af1.png",
+      "clip": [
+        412,
+        1251,
+        461,
+        49
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e145",
+      "kind": "card",
+      "label": "解約與轉讓費用比較 轉讓省 NT$4,466 解約 NT$4,766 最高 未到期 × 20% VS 轉讓 NT$300 手續費上限 NT$300 解約後業者…",
+      "text": "解約與轉讓費用比較 轉讓省 NT$4,466 解約 NT$4,766 最高 未到期 × 20% VS 轉讓 NT$300 手續費上限 NT$300 解約後業者應退還您 NT$19,062（不含入會費及其他費用，終止後 15 個工作日內） 轉讓省 NT$4,466 轉讓須找到承接人、取得業者同意並依品牌規定辦理；解約則自通知送達時生效，業者應於 15 個工作日內退款 轉讓價金須達 NT$19,362 以上，成本才會低於解約；上述比較尚未計入您收取的價金 這是法規天花板（不得超過 NT$300），不是這家的收費表：法條寫「以契約有約定者為限」，沒約定就不能收。",
+      "selector": "#main > div.container-page > div.grid > div.space-y-4:nth-of-type(1) > section.rounded-card:nth-of-type(1)",
+      "box": [
+        922,
+        344,
+        646,
+        420
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 400,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": "#123e35",
+        "backdrop": "#ffffff",
+        "radius": 20,
+        "shadow": false,
+        "border": false
+      },
+      "facts": {
+        "areaShare": 0.1087,
+        "fontRatio": 1.14,
+        "contrast": 1.1,
+        "fillContrast": 11.89,
+        "numeric": false,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "fields": {
+        "name": "解約與轉讓費用比較"
+      },
+      "labelledBy": [
+        "e146"
+      ],
+      "parts": [
+        "e146",
+        "e147",
+        "e148",
+        "e166",
+        "e167"
+      ],
+      "sub": "result",
+      "picture": "../assets/7380a02eda3edc0cb14d05dd1e934a9cf3de5970.png",
+      "clip": [
+        914,
+        336,
+        662,
+        436
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e149",
+      "kind": "stat",
+      "label": "解約 NT$4,766 最高 未到期 × 20%",
+      "text": "解約 NT$4,766 最高 未到期 × 20%",
+      "selector": "#main > div.container-page > div.grid > div.space-y-4:nth-of-type(1) > section.rounded-card:nth-of-type(1) > div.grid:nth-of-type(1) > div.text-center:nth-of-type(1)",
+      "box": [
+        947,
+        369,
+        266,
+        95
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 400,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": null,
+        "backdrop": "#123e35",
+        "radius": 0,
+        "shadow": false,
+        "border": false
+      },
+      "facts": {
+        "areaShare": 0.01012,
+        "fontRatio": 1.14,
+        "contrast": 1.1,
+        "fillContrast": 1,
+        "numeric": true,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "ink",
+        "pad": 8
+      },
+      "ink": [
+        988,
+        370,
+        184,
+        93
+      ],
+      "parts": [
+        "e150",
+        "e152",
+        "e153"
+      ],
+      "inside": "e145",
+      "picture": "../assets/badeecda895960ee14c51b4ee7a315352f7f42c0.png",
+      "clip": [
+        980,
+        362,
+        200,
+        109
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e152",
+      "kind": "number",
+      "label": "NT$4,766",
+      "text": "NT$4,766",
+      "selector": "#main > div.container-page > div.grid > div.space-y-4:nth-of-type(1) > section.rounded-card:nth-of-type(1) > div.grid:nth-of-type(1) > div.text-center:nth-of-type(1) > span.num-display",
+      "box": [
+        947,
+        399,
+        266,
+        40
+      ],
+      "look": {
+        "fontPx": 40,
+        "weight": 700,
+        "family": "Manrope",
+        "fg": "#ff9163",
+        "fill": null,
+        "backdrop": "#123e35",
+        "radius": 0,
+        "shadow": false,
+        "border": false
+      },
+      "facts": {
+        "areaShare": 0.00426,
+        "fontRatio": 2.86,
+        "contrast": 5.4,
+        "fillContrast": 1,
+        "numeric": true,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "ink",
+        "pad": 8
+      },
+      "ink": [
+        988,
+        390,
+        184,
+        56
+      ],
+      "inside": "e149",
+      "picture": "../assets/7cd0f04a8fca7c007d15258393e6cba02a4b934e.png",
+      "clip": [
+        980,
+        382,
+        200,
+        72
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e155",
+      "kind": "badge",
+      "label": "VS",
+      "text": "VS",
+      "selector": "#main > div.container-page > div.grid > div.space-y-4:nth-of-type(1) > section.rounded-card:nth-of-type(1) > div.grid:nth-of-type(1) > div.mt-1:nth-of-type(2) > span.num-display",
+      "box": [
+        1221,
+        373,
+        48,
+        48
+      ],
+      "look": {
+        "fontPx": 13,
+        "weight": 800,
+        "family": "Manrope",
+        "fg": "#ffffff",
+        "fill": null,
+        "backdrop": "#123e35",
+        "radius": 33554400,
+        "shadow": false,
+        "border": true
+      },
+      "facts": {
+        "areaShare": 0.00092,
+        "fontRatio": 0.93,
+        "contrast": 11.9,
+        "fillContrast": 1,
+        "numeric": false,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "ink": [
+        1235,
+        387,
+        20,
+        19
+      ],
+      "inside": "e145",
+      "picture": "../assets/c91994c6b1c7f3f53c0b0055bfd65599c2804af7.png",
+      "clip": [
+        1213,
+        365,
+        64,
+        64
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e156",
+      "kind": "stat",
+      "label": "轉讓 NT$300 手續費上限 NT$300",
+      "text": "轉讓 NT$300 手續費上限 NT$300",
+      "selector": "#main > div.container-page > div.grid > div.space-y-4:nth-of-type(1) > section.rounded-card:nth-of-type(1) > div.grid:nth-of-type(1) > div.text-center:nth-of-type(3)",
+      "box": [
+        1277,
+        369,
+        266,
+        95
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 400,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": null,
+        "backdrop": "#123e35",
+        "radius": 0,
+        "shadow": false,
+        "border": false
+      },
+      "facts": {
+        "areaShare": 0.01012,
+        "fontRatio": 1.14,
+        "contrast": 1.1,
+        "fillContrast": 1,
+        "numeric": true,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "ink",
+        "pad": 8
+      },
+      "ink": [
+        1336,
+        370,
+        148,
+        93
+      ],
+      "parts": [
+        "e157",
+        "e159",
+        "e160"
+      ],
+      "inside": "e145",
+      "picture": "../assets/8127408b8d52c49e1a69e0c782e08e3c5ea50390.png",
+      "clip": [
+        1328,
+        362,
+        164,
+        109
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e159",
+      "kind": "number",
+      "label": "NT$300",
+      "text": "NT$300",
+      "selector": "#main > div.container-page > div.grid > div.space-y-4:nth-of-type(1) > section.rounded-card:nth-of-type(1) > div.grid:nth-of-type(1) > div.text-center:nth-of-type(3) > span.num-display",
+      "box": [
+        1277,
+        399,
+        266,
+        40
+      ],
+      "look": {
+        "fontPx": 40,
+        "weight": 700,
+        "family": "Manrope",
+        "fg": "#8ce3bc",
+        "fill": null,
+        "backdrop": "#123e35",
+        "radius": 0,
+        "shadow": false,
+        "border": false
+      },
+      "facts": {
+        "areaShare": 0.00426,
+        "fontRatio": 2.86,
+        "contrast": 7.8,
+        "fillContrast": 1,
+        "numeric": true,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "ink",
+        "pad": 8
+      },
+      "ink": [
+        1336,
+        390,
+        148,
+        56
+      ],
+      "inside": "e156",
+      "picture": "../assets/7a9003744da204c01457c17fbdb227b3a586b989.png",
+      "clip": [
+        1328,
+        382,
+        164,
+        72
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e160",
+      "kind": "number",
+      "label": "手續費上限 NT$300",
+      "text": "手續費上限 NT$300",
+      "selector": "#main > div.container-page > div.grid > div.space-y-4:nth-of-type(1) > section.rounded-card:nth-of-type(1) > div.grid:nth-of-type(1) > div.text-center:nth-of-type(3) > p.num:nth-of-type(2)",
+      "box": [
+        1277,
+        447,
+        266,
+        18
+      ],
+      "look": {
+        "fontPx": 13,
+        "weight": 600,
+        "family": "Barlow",
+        "fg": "#ffffffb2",
+        "fill": null,
+        "backdrop": "#123e35",
+        "radius": 0,
+        "shadow": false,
+        "border": false
+      },
+      "facts": {
+        "areaShare": 0.00192,
+        "fontRatio": 0.93,
+        "contrast": 6.7,
+        "fillContrast": 1,
+        "numeric": true,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "ink",
+        "pad": 8
+      },
+      "ink": [
+        1353,
+        446,
+        114,
+        17
+      ],
+      "inside": "e156",
+      "picture": "../assets/311b7a9efaa93881171691b4ed69a90beb39bb5f.png",
+      "clip": [
+        1345,
+        438,
+        130,
+        33
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e167",
+      "kind": "card",
+      "label": "轉讓省 NT$4,466 轉讓須找到承接人、取得業者同意並依品牌規定辦理；解約則自通知送達時生效，業者應於 15 個工作日內退款 轉讓價金須達 NT$19,3…",
+      "text": "轉讓省 NT$4,466 轉讓須找到承接人、取得業者同意並依品牌規定辦理；解約則自通知送達時生效，業者應於 15 個工作日內退款 轉讓價金須達 NT$19,362 以上，成本才會低於解約；上述比較尚未計入您收取的價金 這是法規天花板（不得超過 NT$300），不是這家的收費表：法條寫「以契約有約定者為限」，沒約定就不能收。",
+      "selector": "#main > div.container-page > div.grid > div.space-y-4:nth-of-type(1) > section.rounded-card:nth-of-type(1) > div.mt-5:nth-of-type(3)",
+      "box": [
+        947,
+        582,
+        596,
+        157
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 400,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": null,
+        "backdrop": "#123e35",
+        "radius": 0,
+        "shadow": false,
+        "border": true
+      },
+      "facts": {
+        "areaShare": 0.03749,
+        "fontRatio": 1.14,
+        "contrast": 1.1,
+        "fillContrast": 1,
+        "numeric": false,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "parts": [
+        "e168",
+        "e169"
+      ],
+      "inside": "e145",
+      "sub": "result",
+      "picture": "../assets/c167ef7017e1791436ceb91b51c770c31e7eeed8.png",
+      "clip": [
+        939,
+        574,
+        612,
+        173
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e170",
+      "kind": "stat",
+      "label": "轉讓省 NT$4,466",
+      "text": "轉讓省 NT$4,466",
+      "selector": "#main > div.container-page > div.grid > div.space-y-4:nth-of-type(1) > section.rounded-card:nth-of-type(1) > div.mt-5:nth-of-type(3) > div.min-w-0 > p.font-tc:nth-of-type(1)",
+      "box": [
+        999,
+        599,
+        544,
+        31
+      ],
+      "look": {
+        "fontPx": 17,
+        "weight": 700,
+        "family": "Noto Sans TC",
+        "fg": "#ffffff",
+        "fill": null,
+        "backdrop": "#123e35",
+        "radius": 0,
+        "shadow": false,
+        "border": false
+      },
+      "facts": {
+        "areaShare": 0.00676,
+        "fontRatio": 1.21,
+        "contrast": 11.9,
+        "fillContrast": 1,
+        "numeric": true,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "ink",
+        "pad": 8
+      },
+      "ink": [
+        999,
+        594,
+        184,
+        39
+      ],
+      "parts": [
+        "e171"
+      ],
+      "inside": "e167",
+      "picture": "../assets/c57a2c6ab1ee2edde2a71feeef5812ca5d31a936.png",
+      "clip": [
+        991,
+        586,
+        200,
+        55
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e171",
+      "kind": "number",
+      "label": "NT$4,466",
+      "text": "NT$4,466",
+      "selector": "#main > div.container-page > div.grid > div.space-y-4:nth-of-type(1) > section.rounded-card:nth-of-type(1) > div.mt-5:nth-of-type(3) > div.min-w-0 > p.font-tc:nth-of-type(1) > span.num-display",
+      "box": [
+        1054,
+        594,
+        128,
+        38
+      ],
+      "look": {
+        "fontPx": 28,
+        "weight": 700,
+        "family": "Manrope",
+        "fg": "#8ce3bc",
+        "fill": null,
+        "backdrop": "#123e35",
+        "radius": 0,
+        "shadow": false,
+        "border": false
+      },
+      "facts": {
+        "areaShare": 0.00195,
+        "fontRatio": 2,
+        "contrast": 7.8,
+        "fillContrast": 1,
+        "numeric": true,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "ink",
+        "pad": 8
+      },
+      "ink": [
+        1054,
+        594,
+        129,
+        39
+      ],
+      "inside": "e170",
+      "picture": "../assets/0eb7fc9eece5d8d36f5b84c42e87a760e8f74881.png",
+      "clip": [
+        1046,
+        586,
+        145,
+        55
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e176",
+      "kind": "button",
+      "label": "刊登轉讓",
+      "text": "刊登轉讓",
+      "selector": "#main > div.container-page > div.grid > div.space-y-4:nth-of-type(1) > div.hidden > a.inline-flex:nth-of-type(1)",
+      "box": [
+        922,
+        780,
+        140,
+        52
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 700,
+        "family": "Barlow",
+        "fg": "#ffffff",
+        "fill": "#00805f",
+        "backdrop": "#ffffff",
+        "radius": 12,
+        "shadow": true,
+        "border": false
+      },
+      "facts": {
+        "areaShare": 0.00292,
+        "fontRatio": 1.14,
+        "contrast": 4.9,
+        "fillContrast": 4.94,
+        "numeric": false,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "ink": [
+        974,
+        796,
+        65,
+        20
+      ],
+      "picture": "../assets/ace8abf340775df9ca8d3accdf3c090022ba0d80.png",
+      "clip": [
+        914,
+        772,
+        156,
+        68
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e178",
+      "kind": "button",
+      "label": "查看其他刊登價格",
+      "text": "查看其他刊登價格",
+      "selector": "#main > div.container-page > div.grid > div.space-y-4:nth-of-type(1) > div.hidden > a.inline-flex:nth-of-type(2)",
+      "box": [
+        1070,
+        780,
+        178,
+        52
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 700,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": "#ffffff",
+        "backdrop": "#ffffff",
+        "radius": 12,
+        "shadow": false,
+        "border": true
+      },
+      "facts": {
+        "areaShare": 0.00371,
+        "fontRatio": 1.14,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": false,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "ink": [
+        1095,
+        796,
+        129,
+        20
+      ],
+      "picture": "../assets/3112c2a771329fe77f1e88ecbfc2ff9cea6f7670.png",
+      "clip": [
+        1062,
+        772,
+        194,
+        68
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e179",
+      "kind": "card",
+      "label": "符合下列情形者，無須支付解約手續費 第四點第二項 約定使用期間屆滿後才終止（到期後仍被續扣款的最常見情形） 第九點 業者搬遷，或場地面積／器材／指導員減少兩成…",
+      "text": "符合下列情形者，無須支付解約手續費 第四點第二項 約定使用期間屆滿後才終止（到期後仍被續扣款的最常見情形） 第九點 業者搬遷，或場地面積／器材／指導員減少兩成以上，且您在知悉後三十日內終止；經您同意搬遷者不適用 第十一點 天災、戰亂、法令變更等不可抗力 第十三點 可歸責於業者的事由致不能繼續履約 第十八點 業者未能證明已於約定使用期間屆滿前一個月通知您，致您繼續使用 第八點第二項 暫停會籍六個月後，經醫師開立診斷證明六個月內不能運動 契約未明訂收取手續費的，業者不得向消費者收取（教育部體育署官方 Q&A） 查看各品牌合約規定",
+      "selector": "#main > div.container-page > div.grid > div.space-y-4:nth-of-type(1) > section.rounded-card:nth-of-type(2)",
+      "box": [
+        922,
+        848,
+        646,
+        294
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 400,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": "#eaf0eb",
+        "backdrop": "#ffffff",
+        "radius": 20,
+        "shadow": false,
+        "border": false
+      },
+      "facts": {
+        "areaShare": 0.07609,
+        "fontRatio": 1.14,
+        "contrast": 11.3,
+        "fillContrast": 1.16,
+        "numeric": false,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "fields": {
+        "name": "符合下列情形者，無須支付解約手續費"
+      },
+      "labelledBy": [
+        "e180"
+      ],
+      "parts": [
+        "e180",
+        "e182",
+        "e201",
+        "e202"
+      ],
+      "picture": "../assets/ad1563ba1b66b9a6fd504e07cbc91561ef57542f.png",
+      "clip": [
+        914,
+        840,
+        662,
+        310
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e182",
+      "kind": "group",
+      "label": "第四點第二項 約定使用期間屆滿後才終止（到期後仍被續扣款的最常見情形） 第九點 業者搬遷，或場地面積／器材／指導員減少兩成以上，且您在知悉後三十日內終止；經您…",
+      "text": "第四點第二項 約定使用期間屆滿後才終止（到期後仍被續扣款的最常見情形） 第九點 業者搬遷，或場地面積／器材／指導員減少兩成以上，且您在知悉後三十日內終止；經您同意搬遷者不適用 第十一點 天災、戰亂、法令變更等不可抗力 第十三點 可歸責於業者的事由致不能繼續履約 第十八點 業者未能證明已於約定使用期間屆滿前一個月通知您，致您繼續使用 第八點第二項 暫停會籍六個月後，經醫師開立診斷證明六個月內不能運動",
+      "selector": "#main > div.container-page > div.grid > div.space-y-4:nth-of-type(1) > section.rounded-card:nth-of-type(2) > ul.mt-2",
+      "box": [
+        935,
+        895,
+        620,
+        153
+      ],
+      "look": {
+        "fontPx": 13,
+        "weight": 400,
+        "family": "Barlow",
+        "fg": "#647169",
+        "fill": null,
+        "backdrop": "#eaf0eb",
+        "radius": 0,
+        "shadow": false,
+        "border": false
+      },
+      "facts": {
+        "areaShare": 0.038,
+        "fontRatio": 0.93,
+        "contrast": 4.4,
+        "fillContrast": 1,
+        "numeric": false,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "members": [
+        "e183",
+        "e189",
+        "e192",
+        "e195",
+        "e198"
+      ],
+      "axis": "column",
+      "parts": [
+        "e183",
+        "e189",
+        "e192",
+        "e195",
+        "e198"
+      ],
+      "inside": "e179",
+      "picture": "../assets/eedffc0a2f76cb261a8d914338c5b448ed6d764e.png",
+      "clip": [
+        927,
+        887,
+        636,
+        169
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e202",
+      "kind": "button",
+      "label": "查看各品牌合約規定",
+      "text": "查看各品牌合約規定",
+      "selector": "#main > div.container-page > div.grid > div.space-y-4:nth-of-type(1) > section.rounded-card:nth-of-type(2) > a.inline-flex",
+      "box": [
+        935,
+        1085,
+        160,
+        44
+      ],
+      "look": {
+        "fontPx": 14,
+        "weight": 700,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": "#ffffff",
+        "backdrop": "#eaf0eb",
+        "radius": 12,
+        "shadow": false,
+        "border": true
+      },
+      "facts": {
+        "areaShare": 0.00282,
+        "fontRatio": 1,
+        "contrast": 13.1,
+        "fillContrast": 1.16,
+        "numeric": false,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "ink": [
+        952,
+        1098,
+        127,
+        18
+      ],
+      "inside": "e179",
+      "picture": "../assets/5bc3fcd2d736b1df2d7566a68601a936e3aaf47a.png",
+      "clip": [
+        927,
+        1077,
+        176,
+        60
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e203",
+      "kind": "card",
+      "label": "試算明細 展開",
+      "text": "試算明細 展開",
+      "selector": "#main > div.container-page > div.grid > div.space-y-4:nth-of-type(1) > details.group",
+      "box": [
+        922,
+        1158,
+        646,
+        46
+      ],
+      "look": {
+        "fontPx": 16,
+        "weight": 400,
+        "family": "Barlow",
+        "fg": "#20352d",
+        "fill": "#ffffff",
+        "backdrop": "#ffffff",
+        "radius": 20,
+        "shadow": true,
+        "border": true
+      },
+      "facts": {
+        "areaShare": 0.01191,
+        "fontRatio": 1.14,
+        "contrast": 13.1,
+        "fillContrast": 1,
+        "numeric": false,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "box",
+        "pad": 8
+      },
+      "state": {
+        "open": "false"
+      },
+      "parts": [
+        "e205",
+        "e206"
+      ],
+      "picture": "../assets/ada469cd9ab117601b4a048de48447bf58b28967.png",
+      "clip": [
+        914,
+        1150,
+        662,
+        62
+      ],
+      "clipScale": 3
+    },
+    {
+      "el": "e209",
+      "kind": "heading",
+      "label": "這條算式有兩種讀法，本頁印的是金額較高的那一種",
+      "text": "這條算式有兩種讀法，本頁印的是金額較高的那一種",
+      "selector": "#_R_9bsnnb_-disclosure",
+      "box": [
+        935,
+        1235,
+        344,
+        20
+      ],
+      "look": {
+        "fontPx": 14,
+        "weight": 700,
+        "family": "Noto Sans TC",
+        "fg": "#20352d",
+        "fill": null,
+        "backdrop": "#f4f7f4",
+        "radius": 0,
+        "shadow": false,
+        "border": false
+      },
+      "facts": {
+        "areaShare": 0.00276,
+        "fontRatio": 1,
+        "contrast": 12.1,
+        "fillContrast": 1,
+        "numeric": false,
+        "inFirstScreen": true
+      },
+      "lift": {
+        "around": "clear",
+        "box": "ink",
+        "pad": 8
+      },
+      "ink": [
+        957,
+        1234,
+        323,
+        21
+      ],
+      "picture": "../assets/97e4510a7de33a956ce792569ff817b78349e5e6.png",
+      "clip": [
+        949,
+        1226,
+        339,
+        37
+      ],
+      "clipScale": 3
+    }
+  ],
+  "skipped": [
+    {
+      "el": "e147",
+      "kind": "number",
+      "why": "a number at body size and weight (16 px, 400)",
+      "label": "轉讓省 NT$4,466",
+      "box": [
+        946,
+        368,
+        1,
+        1
+      ]
+    },
+    {
+      "el": "e2",
+      "kind": "card",
+      "why": "spans the screen's width (a bar)",
+      "label": "FindGym 找健身房 二手市場 刊登 行情 品牌規則 業務專區 登入",
+      "box": [
+        0,
+        0,
+        1920,
+        81
+      ]
+    },
+    {
+      "el": "e129",
+      "kind": "number",
+      "why": "smaller than 0.05% of the screen",
+      "label": "0",
+      "box": [
+        377,
+        1194,
+        7,
+        18
+      ]
+    },
+    {
+      "el": "e130",
+      "kind": "number",
+      "why": "smaller than 0.05% of the screen",
+      "label": "24",
+      "box": [
+        851,
+        1194,
+        14,
+        18
+      ]
+    },
+    {
+      "el": "e6",
+      "kind": "logo",
+      "why": "smaller than 0.05% of the screen",
+      "label": "",
+      "box": [
+        352,
+        26,
+        28,
+        28
+      ]
+    },
+    {
+      "el": "e8",
+      "kind": "group",
+      "why": "inside nav / footer",
+      "label": "找健身房 二手市場 刊登 行情 品牌規則 業務專區",
+      "box": [
+        953,
+        18,
+        492,
+        44
+      ]
+    },
+    {
+      "el": "e146",
+      "kind": "heading",
+      "why": "smaller than 0.05% of the screen",
+      "label": "解約與轉讓費用比較",
+      "box": [
+        946,
+        368,
+        1,
+        1
+      ]
+    },
+    {
+      "el": "e208",
+      "kind": "card",
+      "why": "less than half of it on screen",
+      "label": "這條算式有兩種讀法，本頁印的是金額較高的那一種 第十點「月平均價格乘以⋯⋯未到期時間比例（含所贈與之會籍期間）之百分之○（不得逾百分之二十）」這一句， 兩種讀…",
+      "box": [
+        922,
+        1221,
+        646,
+        226
+      ]
+    }
+  ],
+  "ms": {
+    "measure": 8,
+    "pictures": 2441
+  }
+}

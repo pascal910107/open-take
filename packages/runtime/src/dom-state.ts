@@ -37,15 +37,21 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { extname, join } from "node:path";
+import { extname, join, relative, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   type CaptureLog,
+  CLIP_CLEAR_CSS,
+  type ComponentProbeResult,
+  componentProbeExpression,
+  type PartsFile,
+  pictureClip,
+  readStateIndex,
   resolveFfmpeg,
   type StateElement,
   type StateIndex,
 } from "@open-take/compositor";
-import { type Browser, CDP } from "./cdp";
+import { type Browser, CDP, isCdpStall } from "./cdp";
 import { runBuffer } from "./tool";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -1423,6 +1429,9 @@ export async function finalizeDomStates(args: {
   states: DomStateRaw[];
   vw: number;
   vh: number;
+  /** measure each state's parts in the same page (parts.json + crisp
+   *  pictures in states/assets/) — default true; false skips it */
+  parts?: boolean;
 }): Promise<DomStateItem[]> {
   const warn = (l: string) => console.error(l);
   const assetsDir = join(args.statesDir, "assets");
@@ -1474,19 +1483,54 @@ export async function finalizeDomStates(args: {
     await rm(join(raw.dir, "probe.json"), { force: true });
   }
   if (converted.length) {
-    let page: { cdp: CDP; targetId: string } | null = null;
-    try {
-      page = await openFidelityPage(args.browser, args.vw, args.vh);
-    } catch (e) {
-      warn(`dom-state: could not open a page for the fidelity check (${(e as Error).message})`);
-    }
+    // (cast, not annotated: openPage/dropPage assign it, and TS would
+    // otherwise narrow it to null for the loop below)
+    let page = null as { cdp: CDP; targetId: string } | null;
+    // A state whose page stops answering (a request timed out, the renderer
+    // crashed) leaves that page unusable: it is closed and the next state gets
+    // a fresh one. A page that cannot be opened at all — or two states in a
+    // row whose pages stall (Chrome itself, not one page, is stuck: each more
+    // would wait out its own budgets) — ends the checks; the remaining states
+    // keep `ok: false` and the take goes on.
+    let noPage = false;
+    let stallsInARow = 0;
+    const openPage = async () => {
+      if (page || noPage || !ffmpeg) return;
+      try {
+        page = await openFidelityPage(args.browser, args.vw, args.vh);
+      } catch (e) {
+        noPage = true;
+        warn(`dom-state: could not open a page for the fidelity check (${(e as Error).message})`);
+      }
+    };
+    const dropPage = async (id: string, e: unknown) => {
+      if (!page || !isCdpStall(e)) return;
+      warn(`dom-state ${id}: the check's page stopped answering — the next state gets a new one`);
+      await closeFidelityPage(args.browser, page);
+      page = null;
+      if (++stallsInARow >= 2) {
+        noPage = true;
+        warn(
+          "dom-state: two checks in a row stopped answering — the remaining states are not checked",
+        );
+      }
+    };
     for (const { raw, index } of converted) {
+      const stallsBefore = stallsInARow;
       let fidelity: StateFidelity = { psnr: 0, diffFrac: 1, ok: false };
+      await openPage();
       if (page && ffmpeg) {
         const statePng = join(raw.dir, "render.png");
         try {
           const shot = await renderState(page.cdp, join(raw.dir, "state.html"), args.vw, args.vh);
           await writeFile(statePng, shot.png);
+          // the restored page is open and laid out: measure its parts here,
+          // after the fidelity screenshot so nothing it does reaches that
+          if (args.parts !== false)
+            await measureParts(page.cdp, { dir: raw.dir, index, assetsDir }).catch(async (e) => {
+              warn(`dom-state ${raw.id}: parts not measured (${(e as Error).message})`);
+              await dropPage(raw.id, e);
+            });
           // what moves on its own was frozen a moment apart from the
           // reference; the rest of the page decides whether the state is true
           const moving = [...raw.probe.canvases, ...raw.probe.videos]
@@ -1499,19 +1543,16 @@ export async function finalizeDomStates(args: {
             );
         } catch (e) {
           warn(`dom-state ${raw.id}: fidelity check failed (${(e as Error).message})`);
+          await dropPage(raw.id, e);
         } finally {
           await rm(statePng, { force: true });
         }
       }
+      if (page && stallsInARow === stallsBefore) stallsInARow = 0;
       index.fidelity = fidelity;
       await writeFile(join(raw.dir, "index.json"), JSON.stringify(index, null, 2));
     }
-    if (page) {
-      page.cdp.close();
-      await args.browser.cdp
-        .send("Target.closeTarget", { targetId: page.targetId })
-        .catch(() => {});
-    }
+    if (page) await closeFidelityPage(args.browser, page);
   }
   for (const raw of args.states) {
     const index = converted.find((c) => c.raw === raw)?.index;
@@ -1527,6 +1568,18 @@ export async function finalizeDomStates(args: {
   return items;
 }
 
+/** close a page openFidelityPage opened (never throws, never waits long:
+ *  its target may be the one that stopped answering) */
+async function closeFidelityPage(
+  browser: Browser,
+  page: { cdp: CDP; targetId: string },
+): Promise<void> {
+  page.cdp.close();
+  await browser.cdp
+    .send("Target.closeTarget", { targetId: page.targetId }, { timeoutMs: 5000 })
+    .catch(() => {});
+}
+
 /** a second page target in the same Chrome, emulated at vw×vh @1× */
 async function openFidelityPage(
   browser: Browser,
@@ -1536,7 +1589,20 @@ async function openFidelityPage(
   const { targetId } = await browser.cdp.send<{ targetId: string }>("Target.createTarget", {
     url: "about:blank",
   });
-  const cdp = await CDP.connect(`ws://127.0.0.1:${browser.port}/devtools/page/${targetId}`);
+  let cdp: CDP | undefined;
+  try {
+    cdp = await CDP.connect(`ws://127.0.0.1:${browser.port}/devtools/page/${targetId}`);
+    await setUpFidelityPage(cdp, vw, vh);
+  } catch (e) {
+    // a page that could not be set up is not left open behind the error
+    cdp?.close();
+    await browser.cdp.send("Target.closeTarget", { targetId }, { timeoutMs: 5000 }).catch(() => {});
+    throw e;
+  }
+  return { cdp, targetId };
+}
+
+async function setUpFidelityPage(cdp: CDP, vw: number, vh: number): Promise<void> {
   await cdp.send("Page.enable");
   await cdp.send("Runtime.enable");
   await cdp.send("Emulation.setDeviceMetricsOverride", {
@@ -1552,7 +1618,6 @@ async function openFidelityPage(
   await cdp.send("Network.setBlockedURLs", {
     urls: ["http://*", "https://*", "ws://*", "wss://*"],
   });
-  return { cdp, targetId };
 }
 
 /** Open a state.html (file://), wait for the restore script's ready flag, screenshot at 1×. */
@@ -1567,10 +1632,14 @@ async function renderState(
     cdp.on("Page.loadEventFired", () => res());
     timer = setTimeout(res, 15000);
   });
-  await cdp.send("Page.navigate", { url: pathToFileURL(stateHtml).href });
-  await loaded;
-  // a pending 15 s timer would hold the process open after the last state
-  clearTimeout(timer);
+  try {
+    await cdp.send("Page.navigate", { url: pathToFileURL(stateHtml).href });
+    await loaded;
+  } finally {
+    // a pending 15 s timer would hold the process open after the last state
+    // (also when the navigation itself failed or timed out)
+    clearTimeout(timer);
+  }
   const deadline = Date.now() + 10000;
   let misses = 0;
   for (;;) {
@@ -1598,6 +1667,190 @@ async function renderState(
     clip: { x: at.x, y: at.y, width: vw, height: vh, scale: 1 },
   });
   return { png: Buffer.from(shot.data, "base64"), misses };
+}
+
+// --- parts: the component probe, in the restored page --------------------------
+
+/** Most pictures taken per state (each is one clipped screenshot, ~40–80 ms). */
+const PARTS_MAX_PICTURES = 60;
+
+/**
+ * Measure the parts of the saved state open in `cdp` (state.html, ready —
+ * renderState has run) with the compositor's component probe, take a crisp
+ * picture of each kept part (its ink or box ± pad, 3×, the rest of the page
+ * hidden and see-through — what lift(…, { around: "clear" }) shows), and
+ * write `<dir>/parts.json`. Pictures are content-named files in `assetsDir`
+ * (shared with the state's other files), referenced relative to `dir`. The
+ * page's look is put back afterwards (the background override persists
+ * across navigations in this target).
+ */
+export async function measureParts(
+  cdp: CDP,
+  opts: {
+    dir: string;
+    index: StateIndex;
+    assetsDir: string;
+    pictures?: boolean;
+    minArea?: number;
+  },
+): Promise<PartsFile> {
+  const r = await cdp.send<{ result?: { value?: string }; exceptionDetails?: { text?: string } }>(
+    "Runtime.evaluate",
+    {
+      expression: componentProbeExpression(
+        opts.index,
+        opts.minArea != null ? { minArea: opts.minArea } : {},
+      ),
+      returnByValue: true,
+    },
+  );
+  const raw = r.result?.value;
+  if (typeof raw !== "string")
+    throw new Error(`the component probe returned nothing (${r.exceptionDetails?.text ?? "?"})`);
+  const res = JSON.parse(raw) as ComponentProbeResult;
+  if ("error" in res) throw new Error(`the component probe failed: ${res.error}`);
+  const file: PartsFile = {
+    version: 1,
+    state: opts.index.id,
+    viewport: res.viewport,
+    scroll: res.scroll,
+    medianTextPx: res.medianTextPx,
+    parts: res.parts,
+    skipped: res.skipped,
+    ms: { measure: res.ms },
+  };
+  if (opts.pictures !== false && file.parts.length) {
+    const t0 = Date.now();
+    mkdirSync(opts.assetsDir, { recursive: true });
+    const evaluate = (expression: string) =>
+      cdp.send("Runtime.evaluate", { expression, returnByValue: true });
+    await cdp.send("Emulation.setDefaultBackgroundColorOverride", {
+      color: { r: 0, g: 0, b: 0, a: 0 },
+    });
+    // a page that stops answering ends the pictures (each would wait out its
+    // own timeout) and skips the clean-up: the caller drops that page
+    let stalled = false;
+    try {
+      await evaluate(
+        `(() => { const st = document.createElement("style"); st.setAttribute("data-ot-clip-css", ""); st.textContent = ${JSON.stringify(CLIP_CLEAR_CSS)}; document.head.appendChild(st); })()`,
+      );
+      const at = await cdp
+        .send<{ cssVisualViewport?: { pageX?: number; pageY?: number } }>("Page.getLayoutMetrics")
+        .then((m) => ({ x: m.cssVisualViewport?.pageX ?? 0, y: m.cssVisualViewport?.pageY ?? 0 }))
+        .catch(() => ({ x: 0, y: 0 }));
+      let taken = 0;
+      for (const part of file.parts) {
+        const win = pictureClip(part, file.viewport);
+        if (!win) {
+          part.noPicture = "nothing of it inside the screen";
+          continue;
+        }
+        if (taken >= PARTS_MAX_PICTURES) {
+          part.noPicture = `not taken: ${PARTS_MAX_PICTURES} pictures already taken in this state`;
+          continue;
+        }
+        const sel = JSON.stringify(`[data-ot-id="${part.el}"]`);
+        await evaluate(`document.querySelector(${sel})?.setAttribute("data-ot-clip", "")`);
+        try {
+          const [x, y, w, h] = win.clip;
+          const shot = await cdp.send<{ data: string }>("Page.captureScreenshot", {
+            format: "png",
+            clip: { x: x + at.x, y: y + at.y, width: w, height: h, scale: win.scale },
+          });
+          const png = Buffer.from(shot.data, "base64");
+          const name = `${createHash("sha1").update(png).digest("hex")}.png`;
+          const path = join(opts.assetsDir, name);
+          if (!existsSync(path)) writeFileSync(path, png);
+          part.picture = relative(opts.dir, path).split(sep).join("/");
+          part.clip = win.clip;
+          part.clipScale = win.scale;
+          taken++;
+        } catch (e) {
+          if (isCdpStall(e)) {
+            stalled = true;
+            throw e;
+          }
+          part.noPicture = `the screenshot failed (${(e as Error).message})`;
+        } finally {
+          if (!stalled)
+            await evaluate(`document.querySelector(${sel})?.removeAttribute("data-ot-clip")`);
+        }
+      }
+    } catch (e) {
+      if (isCdpStall(e)) stalled = true;
+      throw e;
+    } finally {
+      if (!stalled) {
+        await evaluate('document.querySelector("style[data-ot-clip-css]")?.remove()').catch(
+          () => {},
+        );
+        await cdp.send("Emulation.setDefaultBackgroundColorOverride", {}).catch(() => {});
+      }
+    }
+    file.ms.pictures = Date.now() - t0;
+  }
+  await writeFile(join(opts.dir, "parts.json"), `${JSON.stringify(file, null, 2)}\n`);
+  return file;
+}
+
+/**
+ * Measure the parts of saved states that already exist (each a folder with
+ * state.html + index.json) — for states saved before parts.json, which
+ * `open-take components` meets. One page in `browser`, emulated at each
+ * state's own viewport @1×, network blocked, as the fidelity check opens
+ * them. A state that cannot be measured is a line in `failed`.
+ */
+export async function measureStateDirs(args: {
+  browser: Browser;
+  dirs: string[];
+  pictures?: boolean;
+  minArea?: number;
+}): Promise<{
+  measured: { dir: string; parts: PartsFile }[];
+  failed: { dir: string; why: string }[];
+}> {
+  const measured: { dir: string; parts: PartsFile }[] = [];
+  const failed: { dir: string; why: string }[] = [];
+  let page: { cdp: CDP; targetId: string } | null = null;
+  try {
+    for (const dir of args.dirs) {
+      const index = readStateIndex(dir);
+      if (typeof index === "string") {
+        failed.push({ dir, why: index });
+        continue;
+      }
+      const { w, h } = index.viewport;
+      try {
+        if (!page) page = await openFidelityPage(args.browser, w, h);
+        else
+          await page.cdp.send("Emulation.setDeviceMetricsOverride", {
+            width: w,
+            height: h,
+            deviceScaleFactor: 1,
+            mobile: false,
+          });
+        await renderState(page.cdp, join(dir, "state.html"), w, h);
+        const parts = await measureParts(page.cdp, {
+          dir,
+          index,
+          assetsDir: join(dir, "..", "assets"),
+          ...(args.pictures != null ? { pictures: args.pictures } : {}),
+          ...(args.minArea != null ? { minArea: args.minArea } : {}),
+        });
+        measured.push({ dir, parts });
+      } catch (e) {
+        failed.push({ dir, why: (e as Error).message });
+        // a page that stopped answering is replaced for the next state
+        if (page && isCdpStall(e)) {
+          await closeFidelityPage(args.browser, page);
+          page = null;
+        }
+      }
+    }
+  } finally {
+    if (page) await closeFidelityPage(args.browser, page);
+  }
+  return { measured, failed };
 }
 
 /** One stderr line: what the states cost the take and how they scored. */
