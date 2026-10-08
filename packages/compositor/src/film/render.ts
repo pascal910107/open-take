@@ -14,7 +14,8 @@
 //
 // Pipeline per worker: seek → JPEG screenshot → (MJPEG in Matroska) ffmpeg
 // decoder → raw RGB → shutter average → ffmpeg x264 chunk. The chunks are
-// joined without re-encoding and the soundtrack is muxed on.
+// joined without re-encoding, each placed at its first frame's own time (not
+// where its container says the one before ends), and the soundtrack is muxed on.
 //
 // Beside the film goes <film>.events.json (see FilmEvents): what the page says
 // happens when (window.__film.events), its curves sampled once per frame in
@@ -352,11 +353,11 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
       for (let p = a; p < b; p += PIECE_FRAMES) out.push([p, Math.min(b, p + PIECE_FRAMES)]);
       return out;
     });
-    const chunks: string[] = [];
+    const chunks: FilmChunk[] = [];
     const chunkOf = pieces.map((ps) =>
-      ps.map(() => {
+      ps.map(([a, b]) => {
         const file = join(tmp, `chunk-${String(chunks.length).padStart(4, "0")}.mp4`);
-        chunks.push(file);
+        chunks.push({ file, frames: b - a });
         return file;
       }),
     );
@@ -909,10 +910,12 @@ export async function patchFilm(
       graph += `[0:v]trim=start_frame=${b},setpts=PTS-STARTPTS[after];`;
       parts.push("[after]");
     }
-    // named as a master is named, whatever the master said: one `film render`
-    // made before named BT.709's curve (or, on ffmpeg 8, none) for the same
-    // sRGB values, and a patched master must not name two
-    graph += `${parts.join("")}concat=n=${parts.length}:v=1:a=0,format=yuv420p,${SRGB_TAGS}[v]`;
+    // frame n at n/fps exactly, as a render puts it — also when the master
+    // had one a few ticks off (see framesOffIn); and named as a master is
+    // named, whatever the master said: one `film render` made before named
+    // BT.709's curve (or, on ffmpeg 8, none) for the same sRGB values, and a
+    // patched master must not name two
+    graph += `${parts.join("")}concat=n=${parts.length}:v=1:a=0,setpts=N/(${r.fps}*TB),format=yuv420p,${SRGB_TAGS}[v]`;
     const record = { ...(await probeFilm(range)).record, from: 0 };
     const out = join(tmp, "patched.mp4");
     // the same encoding as a master (see encodeArgs)
@@ -1049,6 +1052,14 @@ async function moveFile(from: string, to: string): Promise<void> {
   }
 }
 
+/** an ffprobe rational ("60/1", "1/15360") as a number; 0 when there is none */
+function ratio(r: string | undefined): number {
+  const [n, d] = String(r ?? "0/1")
+    .split("/")
+    .map(Number);
+  return d && Number.isFinite(n) ? n! / d : 0;
+}
+
 /** a rendered film's picture: size, rate, length in frames, and the record
  *  `film render` keeps in it (where it starts on the page's timeline) —
  *  `made` when there is one */
@@ -1069,7 +1080,7 @@ async function probeFilm(file: string): Promise<{
       "-select_streams",
       "v:0",
       "-show_entries",
-      "stream=width,height,avg_frame_rate,nb_frames,duration:format_tags",
+      "stream=width,height,avg_frame_rate,r_frame_rate,nb_frames,duration:format_tags",
       "-of",
       "json",
       file,
@@ -1079,6 +1090,7 @@ async function probeFilm(file: string): Promise<{
       width?: number;
       height?: number;
       avg_frame_rate?: string;
+      r_frame_rate?: string;
       nb_frames?: string;
       duration?: string;
     }[];
@@ -1086,10 +1098,12 @@ async function probeFilm(file: string): Promise<{
   };
   const v = p.streams?.[0];
   if (!v?.width || !v.height) throw new Error(`film: ${file} has no picture`);
-  const [n, d] = String(v.avg_frame_rate ?? "0/1")
-    .split("/")
-    .map(Number);
-  const fps = d ? n! / d : 0;
+  // the rate the stream names, when its average differs only as a frame a
+  // few ticks off makes it (see framesOffIn: 30.005 for a 2 s film); the
+  // average when the stream names none, or one far from it
+  const avg = ratio(v.avg_frame_rate);
+  const named = ratio(v.r_frame_rate);
+  const fps = named > 0 && Math.abs(named - avg) <= avg * 1e-3 ? named : avg;
   const frames = Number(v.nb_frames) || Math.round(Number(v.duration ?? 0) * fps);
   let record: Partial<FilmRecord> = {};
   try {
@@ -1109,30 +1123,40 @@ async function probeFilm(file: string): Promise<{
 }
 
 /** why the film's picture is not as `film render` encodes it — its first
- *  frame at 0 s, each one frame's length after the one before (a file of
- *  varying rate is not, whatever its average); null when it is */
+ *  frame at 0 s, frame n at n/fps after it (a file of varying rate is not,
+ *  whatever its average); null when it is */
 async function framesOff(file: string): Promise<string | null> {
-  const pts = (
+  const p = JSON.parse(
     await runTool(await resolveFfprobe(), [
       "-v",
       "error",
       "-select_streams",
       "v:0",
       "-show_entries",
-      "packet=pts",
+      "stream=time_base,r_frame_rate:packet=pts",
       "-of",
-      "csv=p=0",
+      "json",
       file,
-    ])
-  )
-    .split("\n")
-    .map((l) => Number.parseInt(l, 10))
-    .filter((t) => Number.isFinite(t))
-    .sort((a, b) => a - b);
+    ]),
+  ) as { streams?: { time_base?: string; r_frame_rate?: string }[]; packets?: { pts?: number }[] };
+  const tb = ratio(p.streams?.[0]?.time_base);
+  const fps = ratio(p.streams?.[0]?.r_frame_rate);
+  const pts = (p.packets ?? []).map((k) => Number(k.pts));
+  return framesOffIn(pts, tb > 0 && fps > 0 ? 1 / (tb * fps) : 0);
+}
+
+/** framesOff on the picture's timestamps, `tick` of them a frame (0 when the
+ *  file names no rate: then its first step). Frame n counts as at n/fps when
+ *  it is less than half a frame from there — the frames are swapped by
+ *  number, and a master made before the chunks were placed exactly carries
+ *  one a few ticks early — and a frame missing, doubled or moved by half a
+ *  frame or more is not. */
+export function framesOffIn(timestamps: readonly number[], tick: number): string | null {
+  const pts = timestamps.filter((t) => Number.isFinite(t)).sort((a, b) => a - b);
   if (!pts.length) return "it has no picture";
   if (pts[0] !== 0) return "its picture does not start at 0 s";
-  const step = (pts[1] ?? 1) - pts[0];
-  return step > 0 && pts.every((t, i) => t === i * step)
+  const step = tick > 0 ? tick : (pts[1] ?? 1) - pts[0];
+  return step > 0 && pts.every((t, i) => Math.abs(t - i * step) < step / 2)
     ? null
     : "its frames are not evenly spaced";
 }
@@ -1514,15 +1538,37 @@ function encodeArgs(film: Film, out: string, draft: boolean): string[] {
   ];
 }
 
+/** an encoded piece of the film and how many frames it holds */
+export type FilmChunk = { file: string; frames: number };
+
+/** The concat list that joins the chunks: each with its length named, from
+ *  the frames before it, so chunk k starts at exactly its first frame's time.
+ *  Left to itself the concat demuxer starts a chunk where the one before says
+ *  it ends — and an MP4 can say a few ticks short (its edit list is in ms: 89
+ *  frames at 60 fps end at 1.483 s, not 1.48333), which put one frame of a
+ *  whole render 5 ticks early. The lengths are whole µs (what the demuxer
+ *  keeps), rounded from the running total, so their sum never drifts. */
+export function chunkList(chunks: readonly FilmChunk[], fps: number): string {
+  const us = (n: number) => Math.round((n * 1e6) / fps);
+  let before = 0;
+  return chunks
+    .map((c) => {
+      const len = us(before + c.frames) - us(before);
+      before += c.frames;
+      return `file '${c.file.replace(/'/g, "'\\''")}'\nduration ${(len / 1e6).toFixed(6)}`;
+    })
+    .join("\n");
+}
+
 async function deliver(
   ffmpeg: string,
-  chunks: string[],
+  chunks: readonly FilmChunk[],
   film: Film,
   out: string,
   tmp: string,
 ): Promise<void> {
   const list = join(tmp, "chunks.txt");
-  await writeFile(list, chunks.map((c) => `file '${c.replace(/'/g, "'\\''")}'`).join("\n"));
+  await writeFile(list, chunkList(chunks, film.fps));
   await mkdir(dirname(resolve(out)), { recursive: true });
   const durationS = (film.f1 - film.f0) / film.fps;
   const args = ["-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", list];

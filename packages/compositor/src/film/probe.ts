@@ -30,6 +30,7 @@ import {
   pickOnsets,
   spectrum,
 } from "./listen";
+import { formatMovingMaterial, type MovingMaterial, readMovingMaterial } from "./moving";
 import {
   type Box,
   type FrameText,
@@ -1764,6 +1765,9 @@ export type FilmProbe = {
    *  declares (tl.source) and as the product's parts showed them
    *  (components.json) — information only */
   provenance: FilmProvenance;
+  /** the product's stills and saved screens on screen that their shoot
+   *  took while the screen was still changing (shots.json `moving`) */
+  moving: MovingMaterial;
 };
 
 export type ShotStats = {
@@ -2067,6 +2071,11 @@ export async function filmProbe(opts: FilmProbeOptions): Promise<{
     ...(pageNote ? { note: pageNote } : !opts.page ? { note: "no page given (--page)" } : {}),
   });
 
+  // the product's material on screen that was shot on its way (shots.json)
+  const movingMaterial = readMovingMaterial(pageRead?.samples ?? null, pageRead?.root ?? null, {
+    ...(pageNote ? { note: pageNote } : !opts.page ? { note: "no page given (--page)" } : {}),
+  });
+
   const probe: FilmProbe = {
     input,
     duration: round3(duration),
@@ -2179,6 +2188,7 @@ export async function filmProbe(opts: FilmProbeOptions): Promise<{
       overlaps: text.overlaps,
     },
     provenance,
+    moving: movingMaterial,
   };
 
   await mkdir(outDir, { recursive: true });
@@ -2496,6 +2506,8 @@ export function formatFilmProbe(p: FilmProbe): string {
   L.push(
     ...formatProvenance(p.provenance, p.text.page.file ? pageDirOf(p.text.page.file) : undefined),
   );
+  L.push("");
+  L.push(...formatMovingMaterial(p.moving));
   L.push("");
   L.push("## Declared subjects");
   if (p.subjects.how === "not measured")

@@ -152,3 +152,9 @@ test("launch help exposes init, recipe compose, cheap check, and editable render
   assert.match(result.out, /launch check <launch\.json>/);
   assert.match(result.out, /launch render <launch\.json>/);
 });
+
+test("film init takes --no-steady with --url only, before touching files or Chrome", async () => {
+  const r = await run(["film", "init", "some-film", "--no-steady"]);
+  assert.equal(r.code, 1);
+  assert.match(r.err, /--no-steady go with --url/);
+});

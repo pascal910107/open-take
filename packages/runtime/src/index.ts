@@ -185,15 +185,18 @@ export {
   type ShootActOpts,
   type ShootBox,
   type ShootLog,
+  type ShootMoving,
   type ShootOpenOpts,
   type ShootOpts,
   type ShootScript,
   type ShootSettle,
   type ShootStateItem,
+  type ShootSteady,
   type ShootStill,
   type ShootTarget,
   shootHome,
   shootStatesLine,
+  shootSteadyLine,
 } from "./shoot";
 export {
   describeTake,

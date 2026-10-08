@@ -9,7 +9,7 @@ import { posix } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { loadSkillBundle } from "../src/init";
-import { FILM_TOPICS, caseNames, skillPrint } from "../src/skill-print";
+import { caseNames, FILM_TOPICS, skillPrint } from "../src/skill-print";
 
 const DIR = fileURLToPath(new URL("../../../skills/open-take", import.meta.url));
 const LIMIT = 24 * 1024;
@@ -27,6 +27,16 @@ test("skill film prints a core under 24 KB that names every topic and its files"
   for (const topic of FILM_TOPICS) assert.ok(core.includes(`skill film ${topic}`), topic);
   assert.ok(core.includes("skill cases"));
   assert.ok(core.includes("skill film --all"));
+});
+
+// Exp11: the core's only handoff example was one morphRect to full frame, and
+// one session wrote it at every scene change; the examples show several.
+test("the core's code examples show handoffs of different kinds, not one", async () => {
+  const core = await print(["film"]);
+  const code = [...core.matchAll(/```js\n([\s\S]*?)```/g)].map((m) => m[1]).join("\n");
+  const kinds = ["morphRect(", "carry(", "cam.cut(", "lift("].filter((k) => code.includes(k));
+  assert.equal(kinds.length, 4, `handoffs in the core's examples: ${kinds.join(", ")}`);
+  assert.ok(core.includes("a screen with more text than a viewer reads"));
 });
 
 test("each film topic prints on its own, under 24 KB, with its path", async () => {

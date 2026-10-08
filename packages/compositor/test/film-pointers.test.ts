@@ -8,7 +8,13 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { formatFilmCheck, pageMaterialNote, readPageMaterial } from "../src/film/check";
+import {
+  type FilmCheck,
+  filmCheckScope,
+  formatFilmCheck,
+  pageMaterialNote,
+  readPageMaterial,
+} from "../src/film/check";
 import { gridOnPage } from "../src/film/listen";
 import { PHONE_SMALL_PX, productTextSpans, type TextSample, textTimeline } from "../src/film/probe";
 import type { PageTextSample } from "../src/film/probe-text";
@@ -204,6 +210,13 @@ test("check: PNG stills from a shoot and no saved screen get one information lin
     });
     assert.equal(report.split("\n").filter((l) => l.startsWith("material: ")).length, 1);
 
+    // it says what it measured and what it does not, and an empty list as no more than that
+    assert.doesNotMatch(report, /no issues/);
+    assert.match(report, /^measured: the format\n/m);
+    assert.match(report, /^not measured: the text's layout .*--page/m);
+    assert.match(report, /film probe/);
+    assert.match(report, /^found: nothing in what was measured$/m);
+
     // a saved screen anywhere served, or a still that names one: no line
     await mkdir(join(dir, "shots", "calc", "states", "calc"), { recursive: true });
     await writeFile(join(dir, "shots", "calc", "states", "calc", "state.html"), "");
@@ -216,4 +229,50 @@ test("check: PNG stills from a shoot and no saved screen get one information lin
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test("check: the report says what it measured, from what it read", () => {
+  const base: FilmCheck = {
+    file: "f.mp4",
+    durationS: 2,
+    video: {
+      codec: "h264",
+      profile: null,
+      width: 1920,
+      height: 1080,
+      fps: 60,
+      pixFmt: "yuv420p",
+      frames: 120,
+    },
+    audio: { codec: "aac", sampleRate: 48_000, channels: 2, lufs: -16, lra: 4, truePeak: -2 },
+    stalls: [],
+    cadence: [],
+    cuts: [],
+    flashes: [],
+    blanks: [],
+    black: [],
+    silences: [],
+    clicks: [],
+    marks: [],
+    page: { file: "film/index.html", width: 1920, height: 1080, every: 0.25 },
+    layout: [],
+    unreadText: [],
+    smallestText: null,
+    issues: [],
+  };
+  const s = filmCheckScope(base);
+  assert.match(s.measured, /cuts/);
+  assert.match(s.measured, /clicks/);
+  assert.match(s.measured, /read every 0\.25s/);
+  assert.doesNotMatch(s.notMeasured, /--page/, "the page was read");
+  assert.match(s.notMeasured, /film probe/);
+  assert.match(s.notMeasured, /while it moves/);
+  // no sound, no page: neither is claimed
+  const bare = filmCheckScope({ ...base, audio: null, page: null });
+  assert.doesNotMatch(bare.measured, /clicks|smallest text/);
+  assert.match(bare.notMeasured, /^the text's layout/);
+  // findings listed: no "nothing found" line
+  const report = formatFilmCheck({ ...base, issues: [{ severity: "warn", message: "x" }] });
+  assert.doesNotMatch(report, /^found: nothing/m);
+  assert.match(report, /^not measured: /m);
 });

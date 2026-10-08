@@ -23,6 +23,7 @@
 //
 //   { viewport: { w, h },        the page's size, CSS px
 //     scale,                     image px per CSS px: a still is w·scale × h·scale
+//     steady,                    the steady wait's default (--no-steady: false)
 //     stills: [{
 //       file,                    "NNN-<name>.png", beside shots.json, in shooting order
 //       name,                    as given; a keystroke's or drag step's still is "<name>-<i>"
@@ -34,8 +35,12 @@
 //       action?,                 "click" | "type" | "drag" | "move" | "press": what took it
 //       down?: true,             the mouse button is held (a drag's steps)
 //       state?,                  its saved screen's id: states/<state>/state.html
+//       steadyMs?,               ms it waited for the screen to stop changing
+//                                (present when the screen changed meanwhile)
+//       moving?: { texts: [{ x, y, before, after }], moved?, animations },
+//                                what was still changing as it was taken
 //     }],
-//     states?: { dir, items: [{ id, still, t, fidelity }] },
+//     states?: { dir, items: [{ id, still, t, fidelity, moving? }] },
 //                                the saved screens kept with stills, and how each
 //                                re-rendered against its moment (fidelity.ok)
 //     error? }                   only in a failed shoot's log
@@ -55,6 +60,18 @@
 // the id being the still's name; the kit's screen() shows it, and lift() and
 // isolate() work on it. A screen that cannot be read never fails the shoot:
 // the still is kept without one, and a line says why.
+//
+// Material that is still animating: a product counts its own values up, slides
+// panels in, fades lists — a still taken a few frames after the input shows a
+// number on its way. So before a still, the shoot waits until what is on
+// screen holds still (steady.ts: the visible text and where it is drawn, and
+// finite animations on visible elements), up to a budget, and then reads the
+// screen once more right after the screenshot. A still taken while it was
+// changing says so in its `moving` (the texts that read differently, before
+// and after); one the shoot waited for says how long in `steadyMs`. Nothing
+// is dropped and nothing fails. `steady: false` on a call (or `settle:
+// false`, "take it now"), or the shoot's `steady: false` / --no-steady, takes
+// stills without that wait, as before; `moving` is still recorded.
 //
 // A shoot replaces the previous one in <out> only when its script finishes. A
 // script that throws leaves the last good shoot as it was, and what it did
@@ -89,6 +106,7 @@ import {
   finalizeDomStates,
 } from "./dom-state";
 import { DEFAULT_SETTLE_BUDGET_MS, installActivityProbe, settle } from "./settle";
+import { SCREEN_JS, type Screen, type SteadyOutcome, screenChange, waitSteady } from "./steady";
 
 // --- the contract -------------------------------------------------------------
 
@@ -110,6 +128,22 @@ export type ShootStill = {
   down?: true;
   /** its saved screen: `states/<state>/state.html` beside shots.json */
   state?: string;
+  /** ms spent waiting for what is on screen to stop changing before it was
+   *  taken (present when it changed during the wait) */
+  steadyMs?: number;
+  /** present when what is on screen was still changing as it was taken: the
+   *  texts that read differently just before and just after the screenshot
+   *  (page CSS px; at most MOVING_TEXTS, `more` counts the rest), whether
+   *  text moved or the page scrolled, and the finite animations running on
+   *  visible elements. `after` is the next moment, not necessarily where the
+   *  value comes to rest. */
+  moving?: ShootMoving;
+};
+export type ShootMoving = {
+  texts: { x: number; y: number; before: string; after: string }[];
+  more?: number;
+  moved?: true;
+  animations: number;
 };
 /** a saved screen kept with a still, and how it re-rendered against it */
 export type ShootStateItem = {
@@ -118,10 +152,16 @@ export type ShootStateItem = {
   still: string;
   t: number;
   fidelity: NonNullable<DomStateItem["fidelity"]>;
+  /** its still was taken while the screen was still changing (the still's `moving`) */
+  moving?: true;
 };
 export type ShootLog = {
   viewport: { w: number; h: number };
   scale: number;
+  /** the shoot's steady default (false: --no-steady). Its presence says the
+   *  log records `moving`: a log without it is from before, and says nothing
+   *  either way */
+  steady?: boolean;
   stills: ShootStill[];
   /** present when any still kept a saved screen */
   states?: { dir: "states"; items: ShootStateItem[] };
@@ -131,11 +171,18 @@ export type ShootLog = {
 /** true: wait for the page to go quiet (activity probe, settle.ts) up to the
  *  default budget; a number: up to that many ms; false: not at all. */
 export type ShootSettle = boolean | number;
+/** true: before a still, wait until what is on screen stops changing
+ *  (steady.ts) up to the default budget — STEADY_MS for the still an action
+ *  ends on or s.still(), STEADY_STEP_MS for each still on the way; a number:
+ *  up to that many ms for each; false: take it as it is. */
+export type ShootSteady = boolean | number;
 export type ShootActOpts = {
   /** the still's name (default: the action's) */
   name?: string;
-  /** default true */
+  /** default true; false also skips the steady wait unless `steady` is given */
   settle?: ShootSettle;
+  /** default: the shoot's `steady` (true) — see ShootSteady */
+  steady?: ShootSteady;
   /** take a still once the action is done (default true) */
   still?: boolean;
   /** keep a saved screen with every still this call takes, or with none
@@ -162,22 +209,27 @@ export type Shoot = {
     url: string,
     opts?: ShootOpenOpts,
   ): Promise<{ url: string; title: string; errors: string[] }>;
-  /** one PNG and its log entry, now (settle: false by default); with the
-   *  interface itself kept as a saved screen in states/<name>/ unless
-   *  `state: false` (or the shoot's `states: false`) */
-  still(name?: string, opts?: { settle?: ShootSettle; state?: boolean }): Promise<ShootStill>;
+  /** one PNG and its log entry, once what is on screen holds still (no
+   *  activity settle by default; `settle: false` or `steady: false` takes
+   *  it at once); with the interface itself kept as a saved screen in
+   *  states/<name>/ unless `state: false` (or the shoot's `states: false`) */
+  still(
+    name?: string,
+    opts?: { settle?: ShootSettle; steady?: ShootSteady; state?: boolean },
+  ): Promise<ShootStill>;
   /** move the mouse onto the target and click it, for real */
   click(target: ShootTarget, opts?: ShootActOpts): Promise<ShootStill | null>;
   /** click into the field unless it has the caret, then type key by key
-   *  (`each`: a still after every key); a null target types into whatever
-   *  has focus */
+   *  (`each`: a still after every key, each once the screen holds still —
+   *  `steady`); a null target types into whatever has focus */
   type(
     target: ShootTarget | null,
     text: string,
     opts?: ShootActOpts & { each?: boolean; clear?: boolean },
   ): Promise<ShootStill | null>;
   /** press on the target, move in a straight line, release (`every`: a
-   *  still every that many px on the way, button held) */
+   *  still every that many px on the way, button held, each once the screen
+   *  holds still — `steady`) */
   drag(
     target: ShootTarget,
     to: { dx?: number; dy?: number } | { to: ShootTarget },
@@ -234,6 +286,9 @@ export type ShootOpts = {
    *  still; false, none; unset (default), every still but the ones on the
    *  way (a keystroke's with `each`, a drag step's with `every`) */
   states?: boolean;
+  /** the steady wait for the stills whose call does not say (default true;
+   *  false: every still is taken as it comes, as before — see ShootSteady) */
+  steady?: boolean;
   /** measure the parts of each saved screen (states/<id>/parts.json, crisp
    *  pictures in states/assets/) and gather them into <out>/components.json —
    *  default true; false skips both */
@@ -266,6 +321,19 @@ const NAV_WAIT_MS = 15_000;
  *  60 per second: canvases draw and sliders follow only a moving pointer */
 const DRAG_STEP_PX = 10;
 const DRAG_STEP_MS = 16;
+/** how long the still an action ends on (or s.still) may wait for the screen
+ *  to stop changing: a product's count-up commonly runs 1–2 s */
+const STEADY_MS = 3000;
+/** the same, per still on the way (a keystroke's, a drag step's) */
+const STEADY_STEP_MS = 2000;
+/** steps in a row whose wait ran out before the rest of the call stops
+ *  waiting: the page keeps changing while the button is held or the keys go
+ *  on, and every step would pay the whole budget for nothing */
+const STEADY_GIVE_UP = 3;
+/** a call whose steps waited this long in all says so */
+const STEADY_TELL_MS = 5000;
+/** the changed texts a still's `moving` lists */
+const MOVING_TEXTS = 8;
 
 /** what a page listens to when it can be driven */
 const INPUT_EVENTS = new Set([
@@ -562,6 +630,7 @@ export async function runShoot(opts: ShootOpts): Promise<{
       stills,
       note,
       states: opts.states,
+      steady: opts.steady !== false,
       kept,
     });
     let failed: string | null = null;
@@ -580,7 +649,14 @@ export async function runShoot(opts: ShootOpts): Promise<{
       opts.components !== false,
     );
     if (failed != null) {
-      const partial: ShootLog = { viewport, scale, stills, ...logStates(items), error: failed };
+      const partial: ShootLog = {
+        viewport,
+        scale,
+        steady: opts.steady !== false,
+        stills,
+        ...logStates(items),
+        error: failed,
+      };
       await writeFile(join(stage, "shots.json"), `${JSON.stringify(partial, null, 2)}\n`);
       if (stills.length)
         note(`shoot: the ${stills.length} still(s) taken before it stopped are in ${stage}`);
@@ -592,7 +668,13 @@ export async function runShoot(opts: ShootOpts): Promise<{
   }
 
   // the script finished: this shoot replaces the last one
-  const log: ShootLog = { viewport, scale, stills, ...logStates(items) };
+  const log: ShootLog = {
+    viewport,
+    scale,
+    steady: opts.steady !== false,
+    stills,
+    ...logStates(items),
+  };
   await writeFile(join(stage, "shots.json"), `${JSON.stringify(log, null, 2)}\n`);
   // the parts each saved screen holds, gathered with what the log adds (no
   // browser); one that cannot be gathered never fails the shoot
@@ -658,6 +740,7 @@ async function finishStates(
       still: still?.file ?? "",
       t: still?.t ?? Math.round(d.tMs) / 1000,
       fidelity: d.fidelity ?? { psnr: 0, diffFrac: 1, ok: false },
+      ...(still?.moving ? { moving: true as const } : {}),
     };
   });
   const bad = items.filter((i) => !i.fidelity.ok).map((i) => i.id);
@@ -686,6 +769,28 @@ export function shootStatesLine(log: ShootLog): string {
     return `kept ${n} still${n === 1 ? "" : "s"}; no saved screens — { state: true } on a still (or --states) also keeps the interface itself, for screen() / lift() / isolate() in kit/media.js (skill film material)`;
   const ok = kept.filter((i) => i.fidelity.ok).length;
   return `saved screens: ${kept.length} of ${n} still${n === 1 ? "" : "s"} in ${log.states!.dir}/ (${ok} re-render as shot) — screen() / lift() / isolate() in kit/media.js take states/<id>/state.html (skill film material); --no-states or { state: false } keeps none`;
+}
+
+/** One line on the stills taken while what was on screen was still changing
+ *  and the ones the shoot waited for; null when there were none. */
+export function shootSteadyLine(log: ShootLog): string | null {
+  const moving = log.stills.filter((s) => s.moving);
+  const waited = log.stills.filter((s) => (s.steadyMs ?? 0) > 0);
+  if (!moving.length && !waited.length) return null;
+  const n = log.stills.length;
+  const names = moving.slice(0, 6).map((s) => s.name);
+  const changed = moving.flatMap((s) => s.moving!.texts).slice(0, 3);
+  const ms = waited.reduce((a, s) => a + s.steadyMs!, 0);
+  return [
+    moving.length
+      ? `${moving.length} of ${n} still${n === 1 ? "" : "s"} taken while the screen was still changing (moving in shots.json): ${names.join(", ")}${moving.length > names.length ? ", …" : ""}${changed.length ? ` — e.g. ${changed.map((c) => `${JSON.stringify(c.before)} → ${JSON.stringify(c.after)}`).join(", ")}` : ""}`
+      : `no still taken while the screen was changing`,
+    waited.length
+      ? `${waited.length} waited for it to stop, ${secs(ms)} in all (steadyMs); steady: false / --no-steady takes stills without waiting`
+      : null,
+  ]
+    .filter(Boolean)
+    .join("; ");
 }
 
 /** Put the shoot staged in `stage` (its stills and saved screens, `names` —
@@ -849,6 +954,8 @@ type Ctx = {
   /** saved screens for the stills whose call does not say (unset: all but
    *  the stills on the way) */
   states: boolean | undefined;
+  /** the steady wait for the stills whose call does not say */
+  steady: boolean;
   /** the saved screens kept so far, raw (finished once the script is done) */
   kept: DomStateRaw[];
 };
@@ -1009,6 +1116,31 @@ async function shoot(ctx: Ctx): Promise<Shoot> {
     }
   };
 
+  /** what is on screen now (steady.ts); null while the page cannot be read */
+  const readScreen = async (): Promise<Screen | null> => {
+    try {
+      return JSON.parse(await evaluate<string>(SCREEN_JS, "s.still")) as Screen;
+    } catch {
+      return null;
+    }
+  };
+
+  /** how long a call's stills may wait for the screen to hold still (0: not at all) */
+  const steadyBudget = (
+    what: string,
+    o: { settle?: ShootSettle; steady?: ShootSteady },
+    step: boolean,
+  ): number => {
+    const v = o.steady ?? (o.settle === false || o.settle === 0 ? false : ctx.steady);
+    if (typeof v === "number" && !(v >= 0 && Number.isFinite(v)))
+      throw new Error(`${what}: steady is true, false or ms to wait at most (got ${v})`);
+    if (v === false || v === 0) return 0;
+    return typeof v === "number" ? v : step ? STEADY_STEP_MS : STEADY_MS;
+  };
+
+  /** the last capture's wait for a steady screen (null: it did not wait) */
+  let lastSteady: SteadyOutcome | null = null;
+
   /** one PNG and its log entry */
   const capture = async (
     name: string,
@@ -1016,11 +1148,14 @@ async function shoot(ctx: Ctx): Promise<Shoot> {
     state?: boolean,
     /** a still on the way: a keystroke's (each) or a drag step's (every) */
     onTheWay = false,
+    /** ms it may wait for what is on screen to stop changing first (0: none) */
+    steadyMs = 0,
   ): Promise<ShootStill> => {
     await within(
       evaluate(FRAME_JS, "s.still").catch(() => {}),
       500,
     );
+    lastSteady = steadyMs > 0 ? await waitSteady(readScreen, steadyMs) : null;
     const t = Math.round(Date.now() - t0) / 1000;
     let geo: {
       sx: number;
@@ -1036,12 +1171,17 @@ async function shoot(ctx: Ctx): Promise<Shoot> {
         await sleep(100);
       }
     }
+    // the screen just before and just after the picture: a difference, or a
+    // finite animation running, says the still caught it on its way
+    const before = await readScreen();
     const shot = await within(
       cdp.send<{ data: string }>("Page.captureScreenshot", { format: "png" }),
       60_000,
     );
     if (!shot)
       throw new Error(`s.still(${JSON.stringify(name)}): the page did not paint within 60 s`);
+    const afterShot = await readScreen();
+    const change = before && afterShot ? screenChange(before, afterShot) : null;
     const file = stillFile(stills.length, name);
     await writeFile(join(ctx.stage, file), Buffer.from(shot.data, "base64"));
     const g = geo!;
@@ -1057,19 +1197,102 @@ async function shoot(ctx: Ctx): Promise<Shoot> {
       boxes,
       ...(action ? { action } : {}),
       ...(down ? { down: true as const } : {}),
+      // only a wait that saw the screen change: one already steady costs the
+      // reading's minimum and is not worth a field
+      ...(lastSteady?.changed ? { steadyMs: Math.round(lastSteady.waitedMs) } : {}),
+      ...(change && (change.texts.length || change.moved || change.animations)
+        ? {
+            moving: {
+              texts: change.texts.slice(0, MOVING_TEXTS).map((c) => ({
+                x: r2(c.x),
+                y: r2(c.y),
+                before: c.before,
+                after: c.after,
+              })),
+              ...(change.texts.length > MOVING_TEXTS
+                ? { more: change.texts.length - MOVING_TEXTS }
+                : {}),
+              ...(change.moved ? { moved: true as const } : {}),
+              animations: change.animations,
+            },
+          }
+        : {}),
     };
     stills.push(still);
     if (state ?? ctx.states ?? !onTheWay) await keepState(still);
     return still;
   };
 
+  /** a still the shoot waited for and that still caught the screen changing */
+  const tellUnsteady = (still: ShootStill) => {
+    if (lastSteady && !lastSteady.steady && still.moving)
+      once(
+        "steady",
+        `shoot: ${still.file}: what is on screen was still changing after ${secs(lastSteady.waitedMs)} (a clock, a ticker, a long animation?) — it is marked moving in shots.json; steady: <ms> waits longer, steady: false (--no-steady) takes stills without waiting`,
+      );
+    return still;
+  };
+
+  /** The stills on the way (each, every) wait for a steady screen one by one.
+   *  That is the default because a step still is shown as what the product
+   *  says at that point of the drag or the typing: a count-up restarting
+   *  from 0 on every change gives, without the wait, a run of stills whose
+   *  numbers jump back and forth (2,576 → 993 → 2,705 → 1,305) — values the
+   *  product never rests on, in a flipbook the viewer reads as the result.
+   *  The input itself is not disturbed: the button stays held, the field
+   *  keeps its caret, and the next step goes on from where this one is. The
+   *  cost is time between steps (the log's `t` spreads out); steady: false
+   *  keeps the old timing — every step as it comes, its in-between values
+   *  included as material — and `moving` marks the steps taken changing
+   *  either way. A page that keeps changing while held (a hold-to-fill,
+   *  a live preview) would pay the whole budget at every step, so after
+   *  STEADY_GIVE_UP waits in a row run out, the rest of the call's steps are
+   *  taken as they come, and a line says so. */
+  const stepper = (what: string, o: ShootActOpts) => {
+    let wait = steadyBudget(what, o, true);
+    const first = wait;
+    let outInARow = 0;
+    let spent = 0;
+    let waited = 0;
+    let gaveUp = false;
+    return {
+      get wait() {
+        return wait;
+      },
+      took() {
+        const r = lastSteady;
+        if (!r) return;
+        waited++;
+        spent += r.waitedMs;
+        if (r.steady) outInARow = 0;
+        else if (++outInARow >= STEADY_GIVE_UP && !gaveUp) {
+          gaveUp = true;
+          wait = 0;
+        }
+      },
+      done() {
+        if (gaveUp)
+          note(
+            `${what}: the screen was still changing after ${STEADY_GIVE_UP} steps in a row (${secs(first)} each) — the rest of its steps were taken as they came (marked moving in shots.json where they were changing); steady: <ms> sets the wait, steady: false takes every step at once`,
+          );
+        else if (spent >= STEADY_TELL_MS)
+          note(
+            `${what}: its ${waited} steps waited ${secs(spent)} in all for the screen to stop changing (steadyMs in shots.json); a larger step, or steady: false, takes them sooner`,
+          );
+      },
+    };
+  };
+
   const after = async (
+    what: string,
     o: ShootActOpts,
     action: ShootAction,
     name: string,
   ): Promise<ShootStill | null> => {
+    const wait = steadyBudget(what, o, false);
     await settleFor(o.settle, true, true);
-    return o.still === false ? null : capture(name, action, o.state);
+    if (o.still === false) return null;
+    return tellUnsteady(await capture(name, action, o.state, false, wait));
   };
 
   /** wait for the target to appear (and, `reach`, to be hittable and enabled) */
@@ -1265,8 +1488,9 @@ async function shoot(ctx: Ctx): Promise<Shoot> {
     },
 
     async still(name = "still", o = {}) {
+      const wait = steadyBudget(`s.still(${JSON.stringify(name)})`, o, false);
       await settleFor(o.settle, false, false);
-      return capture(name, undefined, o.state);
+      return tellUnsteady(await capture(name, undefined, o.state, false, wait));
     },
 
     async click(target, o = {}) {
@@ -1277,7 +1501,7 @@ async function shoot(ctx: Ctx): Promise<Shoot> {
           `${what}: a native <select> does not open in headless Chrome — set it with s.evaluate (el.value = …, then dispatch a "change" event)`,
         );
       await click(p.x, p.y);
-      return after(o, "click", o.name ?? "click");
+      return after(what, o, "click", o.name ?? "click");
     },
 
     async type(target, text, o = {}) {
@@ -1312,12 +1536,16 @@ async function shoot(ctx: Ctx): Promise<Shoot> {
       }
       if (o.clear) await evaluate(selectAllInFocusedJs(), what);
       const name = o.name ?? "type";
+      const steps = stepper(what, o);
       let i = 0;
       for (const ch of text.replace(/\r\n?/g, "\n")) {
         await key(ch);
-        if (o.each) await capture(`${name}-${++i}`, "type", o.state, true);
+        if (!o.each) continue;
+        await capture(`${name}-${++i}`, "type", o.state, true, steps.wait);
+        steps.took();
       }
-      return after(o, "type", name);
+      steps.done();
+      return after(what, o, "type", name);
     },
 
     async drag(target, dest, o = {}) {
@@ -1341,6 +1569,7 @@ async function shoot(ctx: Ctx): Promise<Shoot> {
       const step = every ?? DRAG_STEP_PX;
       const n = Math.max(1, Math.ceil(dist / step - 1e-9));
       const name = o.name ?? "drag";
+      const steps = stepper(what, o);
       await mouse("mouseMoved", from.x, from.y);
       await mouse("mousePressed", from.x, from.y);
       for (let i = 1; i <= n; i++) {
@@ -1352,24 +1581,28 @@ async function shoot(ctx: Ctx): Promise<Shoot> {
           r2(from.y + (to.y - from.y) * u),
           0,
         );
-        if (every != null) await capture(`${name}-${i}`, "drag", o.state, true);
-        else await sleep(DRAG_STEP_MS);
+        if (every != null) {
+          await capture(`${name}-${i}`, "drag", o.state, true, steps.wait);
+          steps.took();
+        } else await sleep(DRAG_STEP_MS);
       }
+      steps.done();
       await mouse("mouseReleased", to.x, to.y);
-      return after(o, "drag", name);
+      return after(what, o, "drag", name);
     },
 
     async move(target, o = {}) {
-      const p = await point(`s.move(${show(target)})`, target, "box", o);
+      const what = `s.move(${show(target)})`;
+      const p = await point(what, target, "box", o);
       await mouse("mouseMoved", p.x, p.y);
-      return after(o, "move", o.name ?? "move");
+      return after(what, o, "move", o.name ?? "move");
     },
 
     async press(keys, o = {}) {
       if (typeof keys !== "string" || !keys.trim())
         throw new Error(`s.press: name a key, e.g. "Enter" or "Meta+k"`);
       await pressChord(cdp, keys);
-      return after(o, "press", o.name ?? "press");
+      return after(`s.press(${JSON.stringify(keys)})`, o, "press", o.name ?? "press");
     },
 
     async track(targets) {
@@ -1441,6 +1674,9 @@ export type ShootHomeOpts = {
   userDataDir?: string;
   /** measure its parts and write states/<name>/components.json (default true) */
   components?: boolean;
+  /** wait for what is on screen to stop changing first (default true; see
+   *  ShootOpts.steady) */
+  steady?: boolean;
   onNote?: (line: string) => void;
 };
 
@@ -1456,6 +1692,9 @@ export async function shootHome(opts: ShootHomeOpts): Promise<{
   fidelity: ShootStateItem["fidelity"];
   /** its component inventory, states/<name>/components.json */
   components?: { file: ComponentsFile; path: string };
+  /** present when the screen was still changing as it was kept (the
+   *  still's `moving`: its shoot log is not kept) */
+  moving?: ShootMoving;
 }> {
   const dir = resolve(opts.dir);
   const name = opts.name ?? "home";
@@ -1478,8 +1717,10 @@ export async function shootHome(opts: ShootHomeOpts): Promise<{
       ...(opts.userDataDir ? { userDataDir: opts.userDataDir } : {}),
       ...(opts.onNote ? { onNote: opts.onNote } : {}),
       ...(opts.components === false ? { components: false } : {}),
+      ...(opts.steady === false ? { steady: false } : {}),
     });
     const item = log.states?.items.find((i) => i.id === name);
+    const moving = log.stills.find((s) => s.state === name)?.moving;
     if (!item) throw new Error(`shoot: ${opts.url} gave no saved screen`);
     const states = join(dir, "states");
     await mergeAssets(join(work, "states", "assets"), join(states, "assets"));
@@ -1503,6 +1744,7 @@ export async function shootHome(opts: ShootHomeOpts): Promise<{
       title: page.title,
       fidelity: item.fidelity,
       ...(components ? { components } : {}),
+      ...(moving ? { moving } : {}),
     };
   } finally {
     await rm(work, { recursive: true, force: true });

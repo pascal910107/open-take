@@ -51,8 +51,10 @@ export type PageTextSample = {
   productShare: number;
   /** the grid of cells the product's text covers, row by row, "1" covered */
   grid: string[];
-  /** pictures on the page: img, video, canvas, iframe, a background image */
-  media: { label: string; box: Box }[];
+  /** pictures on the page: img, video, canvas, iframe, a background image;
+   *  `src` the file it shows (a URL as the page has it; after
+   *  readPageText, a path from the served root when it is served there) */
+  media: { label: string; box: Box; src?: string }[];
   /** where each named subject (a CSS selector) is drawn; null: an element
    *  matches but is not visible; absent: no element matches */
   subjects: Record<string, Box | null>;
@@ -62,6 +64,8 @@ export type PageTextSample = {
 
 export type PageTextReading = {
   samples: PageTextSample[];
+  /** the folder the page was served from: the media's `src` paths are in it */
+  root: string;
   width: number;
   height: number;
   /** window.__film.segments() as the page has it now (unchecked) */
@@ -270,13 +274,24 @@ function probeText(subjects: string[]): Omit<PageTextSample, "t"> {
   }
 
   // pictures on the film's own page, as far as they show
-  const media: { label: string; box: Box }[] = [];
+  const media: { label: string; box: Box; src?: string }[] = [];
   for (const el of Array.from(document.body?.querySelectorAll("*") ?? [])) {
     const tag = el.localName;
     let picture = ["img", "video", "canvas", "iframe", "picture", "image"].includes(tag);
+    let src = "";
     if (!picture) {
       const bg = getComputedStyle(el).backgroundImage;
       picture = !!bg && bg !== "none" && /url\(/.test(bg);
+      if (picture) src = /url\(["']?([^"')]+)["']?\)/.exec(bg)?.[1] ?? "";
+    } else if (tag === "img" || tag === "video") {
+      const m = el as HTMLImageElement;
+      src = m.currentSrc || m.src || "";
+    } else if (tag === "iframe") src = (el as HTMLIFrameElement).src || "";
+    else if (tag === "image") {
+      const href = (el as SVGImageElement).href?.baseVal ?? "";
+      try {
+        src = href ? new URL(href, document.baseURI).href : "";
+      } catch {}
     }
     if (!picture) continue;
     if (opacityOf(el, window) < MIN_O) continue;
@@ -288,6 +303,7 @@ function probeText(subjects: string[]): Omit<PageTextSample, "t"> {
     media.push({
       label: describe(el).slice(0, 60),
       box: [Math.round(v.x), Math.round(v.y), Math.round(v.w), Math.round(v.h)],
+      ...(src && !src.startsWith("data:") && !src.startsWith("blob:") ? { src } : {}),
     });
   }
 
@@ -409,6 +425,7 @@ export async function readPageText(opts: {
           try {
             await browser.evaluate(`window.__ot.seek(${opts.from + t})`);
             const r = await browser.evaluate<Omit<PageTextSample, "t">>(source);
+            for (const m of r.media) if (m.src) m.src = servedPath(m.src, server.url);
             const extra = opts.extra ? await browser.evaluate<unknown>(opts.extra) : undefined;
             samples.push({ t, ...r, ...(opts.extra ? { extra } : {}) });
             error = "";
@@ -419,12 +436,25 @@ export async function readPageText(opts: {
         }
         if (error) failed.push({ t, error });
       }
-      return { samples, width, height, segments, failed };
+      return { samples, root, width, height, segments, failed };
     } finally {
       await browser.close();
     }
   } finally {
     await server.close();
+  }
+}
+
+/** a URL the page showed, as a path from the served root ("/shots/001-a.png")
+ *  when the server serves it, else as it was */
+export function servedPath(src: string, base: string): string {
+  const b = base.replace(/\/+$/, "");
+  if (!src.startsWith(`${b}/`)) return src;
+  const path = src.slice(b.length).split(/[?#]/)[0]!;
+  try {
+    return decodeURIComponent(path);
+  } catch {
+    return path;
   }
 }
 

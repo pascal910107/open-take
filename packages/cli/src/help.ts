@@ -9,7 +9,7 @@
 
 /** the flags each `film <sub>` accepts — the same lists its `only(…)` call in cli.ts takes */
 export const FILM_FLAGS: Record<string, string[]> = {
-  init: ["--force", "--url", "--size", "--profile", "--from"],
+  init: ["--force", "--url", "--size", "--profile", "--no-steady", "--from"],
   render: [
     "--out",
     "--root",
@@ -78,6 +78,8 @@ kept and listed; --force replaces it.
                      read its look into <dir>/look/; neither stops the init
   --size WxH         the page's CSS px for --url (default 1920x1080)
   --profile <name>   a signed-in Chrome profile for --url (as for make)
+  --no-steady        keep the page at once for --url, not once what is on
+                     screen stops changing (as for shoot)
   --from <dir>       a shoot's folder or a take the film is made from: its
                      component inventory (components.json — each part's
                      values with where they were read, its relations) is

@@ -25,8 +25,8 @@ import {
   checkLaunchFile,
   checkTake,
   ciAllowedOrigins,
-  componentsLine,
   ciTake,
+  componentsLine,
   composeLaunchFile,
   type Defect,
   type DefectReport,
@@ -43,11 +43,11 @@ import {
   filmProbe,
   filmSheet,
   filmStills,
+  formatComponents,
   formatFilmBeats,
   formatFilmCheck,
   formatFilmListen,
   formatFilmLook,
-  formatComponents,
   formatFilmProbe,
   formatIssues,
   formatNotes,
@@ -60,12 +60,13 @@ import {
   lintPlan,
   loadCaptureLogSibling,
   makeTake,
+  measureTake,
   muxFilm,
-  pageMaterialNote,
   openPath,
   outlineState,
   type PostShootPass,
   PrecheckRefusal,
+  pageMaterialNote,
   patchFilm,
   profileDir,
   readNotes,
@@ -90,8 +91,8 @@ import {
   settleDefects,
   shootHome,
   shootStatesLine,
+  shootSteadyLine,
   skippedDefects,
-  measureTake,
   stagePrev,
   type TakeComposition,
   type TakePaths,
@@ -99,8 +100,8 @@ import {
   toDraft,
   waitForNotes,
 } from "@open-take/runtime";
-import { autoSyncBundledAgentSkill, loadSkillBundle, syncAgentSkill } from "./init";
 import { asksForHelp, helpText } from "./help";
+import { autoSyncBundledAgentSkill, loadSkillBundle, syncAgentSkill } from "./init";
 import { FILM_TOPICS, skillPrint } from "./skill-print";
 
 // how to invoke this CLI, for printed follow-up commands: the bin name when
@@ -131,6 +132,7 @@ const BOOL_FLAGS = new Set([
   "--no-teaser",
   "--states",
   "--no-states",
+  "--no-steady",
   "--no-product-audio",
   "--json",
   "--no-blur",
@@ -256,6 +258,7 @@ const FLAGS_BY_CMD: Record<string, string[]> = {
     "--headed",
     "--states",
     "--no-states",
+    "--no-steady",
     "--no-components",
   ],
 };
@@ -305,8 +308,9 @@ Usage:
   open-take launch render <launch.json> [--out <movie.mp4>] [--draft] [--verbose]
   open-take skill  [motion | film [<topic> | --all] | cases [<name>] | install [--force]]
   open-take shoot  <script.mjs> [--out shots] [--scale 2] [--size 1920x1080] [--states | --no-states]
-                   [--no-components]
-  open-take film init   <dir> [--force] [--url <url> [--size 1920x1080] [--profile <name>]] [--from <shots|take>]
+                   [--no-components] [--no-steady]
+  open-take film init   <dir> [--force] [--url <url> [--size 1920x1080] [--profile <name>] [--no-steady]]
+                   [--from <shots|take>]
   open-take film render <page.html|dir> [--out film.mp4] [--audio <file>|none] [--draft] [--no-blur]
                    [--size 1920x1080] [--fps 60] [--duration <s>] [--from <s>] [--to <s>] [--root <dir>]
                    [--workers 2] [--supersample 2] [--into <film.mp4>] [--verbose]
@@ -581,6 +585,14 @@ Usage:
           call says state: true; state: false keeps none; --states keeps one
           with every still, --no-states with none. About 0.3–0.5 s a screen;
           one that cannot be read never fails the shoot.
+          Before each still (the stills on the way too) the shoot waits until
+          what is on screen stops changing — visible text and where it sits,
+          finite animations on visible elements — up to 3 s (2 s a step), so
+          a product's count-up is shot at its value, not on its way; a still
+          taken while it changed anyway carries \`moving\` in shots.json (the
+          texts before/after), one it waited for \`steadyMs\`. steady: false
+          on a call (or settle: false) or --no-steady takes stills at once,
+          as before.
   film    a film you write yourself as a web page — open-take only performs
           it. \`film init\` copies the film kit into a folder (kit/: a camera
           with the take camera's motion, a cursor, one timeline for picture
@@ -1981,6 +1993,7 @@ async function main() {
       ...(has("--states") ? { states: true } : {}),
       ...(has("--no-states") ? { states: false } : {}),
       ...(has("--no-components") ? { components: false } : {}),
+      ...(has("--no-steady") ? { steady: false } : {}),
     });
     const px = (n: number) => Math.round(n * log.scale);
     process.stdout.write(
@@ -1988,6 +2001,8 @@ async function main() {
         `${px(log.viewport.w)}×${px(log.viewport.h)} each\n`,
     );
     if (log.stills.length) process.stdout.write(`       ${shootStatesLine(log)}\n`);
+    const steadyLine = shootSteadyLine(log);
+    if (steadyLine) process.stdout.write(`       ${steadyLine}\n`);
     if (components)
       process.stdout.write(
         `       ${componentsLine(components.file, shown(components.path), shown(dirname(path)))}\n`,
@@ -2158,11 +2173,11 @@ async function main() {
       return;
     }
     if (action === "init") {
-      only("--force", "--url", "--size", "--profile", "--from");
+      only("--force", "--url", "--size", "--profile", "--no-steady", "--from");
       const url = flag("--url");
       if (has("--url") && !url) throw new Error("film init: --url <url> is the product's page");
-      if (!url && (has("--size") || has("--profile")))
-        throw new Error("film init: --size and --profile go with --url");
+      if (!url && (has("--size") || has("--profile") || has("--no-steady")))
+        throw new Error("film init: --size, --profile and --no-steady go with --url");
       if (url) {
         // the product's landing page, before the starter page is written so
         // that it can name what is there; neither step stops the init
@@ -2175,6 +2190,7 @@ async function main() {
           height: size?.height,
           chromePath,
           ...(profile ? { userDataDir: profileDir(profile) } : {}),
+          ...(has("--no-steady") ? { steady: false } : {}),
         }).catch((e: Error) => {
           process.stdout.write(`no saved screen of ${url}: ${e.message}\n`);
           return null;
@@ -2184,6 +2200,12 @@ async function main() {
             `saved screen: ${join(home.dir, "state.html")} — ${home.title || home.url}` +
               `${home.fidelity.ok ? "" : " (it did not re-render as the page showed; `film picture` shows how it renders)"}\n`,
           );
+        if (home?.moving) {
+          const c = home.moving.texts.slice(0, 3);
+          process.stdout.write(
+            `  kept while the screen was still changing${c.length ? ` — ${c.map((x) => `${JSON.stringify(x.before)} → ${JSON.stringify(x.after)}`).join(", ")}` : ""}${home.moving.animations ? ` (${home.moving.animations} animation(s) running)` : ""}; --no-steady keeps it without waiting\n`,
+          );
+        }
         if (home?.components)
           process.stdout.write(
             `${componentsLine(home.components.file, shown(home.components.path), shown(home.dir))}\n`,

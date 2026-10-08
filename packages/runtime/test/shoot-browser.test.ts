@@ -64,6 +64,39 @@ const NEXT = `<!doctype html><html><body><h1>Next page</h1></body></html>`;
 const TALL = `<!doctype html><html><body style="margin:0;height:3000px;background:#fff">
 <div style="position:absolute;left:0;top:0;width:400px;height:200px;background:#f00;color:#f00">top</div>
 <div style="position:absolute;left:0;top:1000px;width:400px;height:200px;background:#00f;color:#00f">down</div></body></html>`;
+// a total that counts up from 0 over 1.5 s every time it changes, as a
+// product's own animated figure does: on the button, to 2,705; on the slider,
+// to its value × 113 — longer than the activity settle's budget (1.2 s)
+const COUNT = `<!doctype html><html><head><style>
+body{margin:0;font:16px Arial,sans-serif}
+#total{position:absolute;left:100px;top:40px;margin:0;font-size:40px}
+#calc{position:absolute;left:100px;top:120px;width:120px;height:40px}
+#months{position:absolute;left:100px;top:200px;width:480px;height:20px;margin:0}
+</style></head><body>
+<p id="total">0</p><button id="calc">Calculate</button>
+<input id="months" type="range" min="0" max="24" value="0">
+<script>
+const el = document.getElementById("total");
+let raf = 0;
+function countTo(v) {
+  cancelAnimationFrame(raf);
+  const t0 = performance.now();
+  const step = (now) => {
+    const p = Math.min(1, (now - t0) / 1500);
+    el.textContent = Math.round(v * p).toLocaleString("en-US");
+    if (p < 1) raf = requestAnimationFrame(step);
+  };
+  raf = requestAnimationFrame(step);
+}
+document.getElementById("calc").addEventListener("click", () => countTo(2705));
+document.getElementById("months").addEventListener("input", (e) => countTo(Number(e.target.value) * 113));
+</script></body></html>`;
+// a counter that never holds still (a ticker), beside a field to type into
+const TICK = `<!doctype html><html><head><title>tick</title></head><body style="margin:0;font:16px Arial,sans-serif">
+<p id="n" style="position:absolute;left:100px;top:40px;margin:0">0</p>
+<input id="q" style="position:absolute;left:100px;top:120px;width:300px;height:30px">
+<script>let i = 0; setInterval(() => { document.getElementById("n").textContent = String(++i); }, 30);</script>
+</body></html>`;
 const BLANK = `<!doctype html><html><body><div id="root"></div><script>/* the app never mounts */</script></body></html>`;
 // a button disabled by its fieldset (its own .disabled stays false), enabled later
 const FIELDSET = `<!doctype html><html><body><fieldset id="fs" disabled><button id="b2">Go</button></fieldset><p id="n">0</p>
@@ -79,6 +112,8 @@ async function serve(): Promise<{ server: Server; url: string }> {
     "/blank": BLANK,
     "/fieldset": FIELDSET,
     "/tall": TALL,
+    "/count": COUNT,
+    "/tick": TICK,
   };
   const server = createServer((req, res) => {
     const html = pages[req.url ?? "/"];
@@ -736,5 +771,145 @@ test("shoot: a page's landing screen saved on its own (film init --url)", {
   } finally {
     server.close();
     await rm(dir, { recursive: true, force: true });
+  }
+});
+
+/** the total a saved screen holds */
+function totalIn(out: string, state: string | undefined): number {
+  assert.ok(state, "the still kept a saved screen");
+  const html = readFileSync(join(out, "states", state, "state.html"), "utf8");
+  const m = /id="total"[^>]*>([^<]*)</.exec(html);
+  assert.ok(m, `${state} holds the total`);
+  return Number(m[1]!.replace(/,/g, ""));
+}
+
+test("shoot: a product's count-up is shot where it rests — after the action and at every drag step — and marked when it is not", {
+  skip,
+  timeout: 180000,
+}, async () => {
+  const { server, url } = await serve();
+  const out = await mkdtemp(join(tmpdir(), "open-take-shoot-"));
+  try {
+    const { log } = await runShoot({
+      ...base(out),
+      script: async (s) => {
+        await s.open(`${url}count`, { ready: "#calc" });
+        await s.click("#calc", { name: "calc" });
+        await s.drag("#months", { dx: 150 }, { every: 50, name: "m", state: true });
+      },
+    });
+    assert.equal(log.steady, true, "the log says it records moving");
+    const at = (name: string) => log.stills.find((st) => st.name === name)!;
+    // the click: the total counted all the way, and the still says it waited
+    assert.equal(totalIn(out, at("calc").state), 2705);
+    assert.equal(at("calc").moving, undefined, "not taken on its way");
+    assert.ok((at("calc").steadyMs ?? 0) >= 100, `it waited (${at("calc").steadyMs} ms)`);
+    // the drag: each step's still holds the value the slider gives, rising
+    // with it — not a count-up's in-between number
+    const steps = ["m-1", "m-2", "m-3"].map((n) => at(n));
+    const totals = steps.map((st) => totalIn(out, st.state));
+    totals.forEach((v, i) => {
+      assert.equal(v % 113, 0, `step ${i + 1} rests on a slider value (${v})`);
+      assert.equal(steps[i]!.moving, undefined, `step ${i + 1} not marked moving`);
+      if (i) assert.ok(v > totals[i - 1]!, `the totals rise with the drag (${totals.join(", ")})`);
+    });
+    assert.ok(totals[0]! > 0);
+
+    // steady off: the old timing — the stills come as they come, and the ones
+    // caught counting say so, with what was changing
+    const off = await runShoot({
+      ...base(join(out, "off")),
+      steady: false,
+      script: async (s) => {
+        await s.open(`${url}count`, { ready: "#calc" });
+        await s.drag("#months", { dx: 150 }, { every: 50, name: "m" });
+        await s.click("#calc", { name: "calc", settle: false });
+      },
+    });
+    assert.equal(off.log.steady, false);
+    for (const st of off.log.stills)
+      assert.equal(st.steadyMs, undefined, `${st.name} did not wait`);
+    const moving = off.log.stills.filter((st) => st.moving);
+    assert.ok(
+      moving.some((st) => st.name.startsWith("m-")),
+      `drag steps caught counting are marked (${off.log.stills.map((st) => `${st.name}:${!!st.moving}`).join(" ")})`,
+    );
+    const calc = off.log.stills.find((st) => st.name === "calc")!;
+    assert.ok(calc.moving, "the click's still, taken at once, is marked");
+    const c = calc.moving!.texts[0]!;
+    assert.ok(c, "with the text that changed");
+    assert.notEqual(c.before, c.after);
+    assert.ok(/^[\d,]+$/.test(c.before) && /^[\d,]+$/.test(c.after), `${c.before} → ${c.after}`);
+    assert.equal(c.x, 100, "where the text is, page px");
+    // the screen kept with it says so too
+    const item = off.log.states?.items.find((i) => i.still === calc.file);
+    assert.equal(item?.moving, true);
+    // one call can ask for the wait the shoot turned off
+    const one = await runShoot({
+      ...base(join(out, "one")),
+      steady: false,
+      script: async (s) => {
+        await s.open(`${url}count`, { ready: "#calc" });
+        await s.click("#calc", { name: "calc", steady: true });
+      },
+    });
+    assert.equal(totalIn(join(out, "one"), one.log.stills[0]!.state), 2705);
+  } finally {
+    server.close();
+    await rm(out, { recursive: true, force: true });
+  }
+});
+
+test("shoot: a screen that never holds still — the steps stop waiting after a few, the call says so, and a landing screen says it was kept changing", {
+  skip,
+  timeout: 120000,
+}, async () => {
+  const { server, url } = await serve();
+  const out = await mkdtemp(join(tmpdir(), "open-take-shoot-"));
+  try {
+    const notes: string[] = [];
+    const { log } = await runShoot({
+      ...base(out),
+      onNote: (l) => notes.push(l),
+      script: async (s) => {
+        await s.open(`${url}tick`, { ready: "#q" });
+        await s.type("#q", "abcde", { each: true, name: "k", steady: 300, state: false });
+      },
+    });
+    const keys = log.stills.filter((st) => st.name.startsWith("k-"));
+    assert.equal(keys.length, 5);
+    // the first three ran out their 300 ms; the rest were taken as they came
+    for (const st of keys.slice(0, 3))
+      assert.ok((st.steadyMs ?? 0) >= 280, `${st.name} waited (${st.steadyMs} ms)`);
+    for (const st of keys.slice(3)) assert.equal(st.steadyMs, undefined, `${st.name} did not wait`);
+    assert.ok(
+      keys.every((st) => st.moving),
+      "every step is marked moving",
+    );
+    assert.ok(
+      notes.some((l) => /the rest of its steps were taken as they came/.test(l)),
+      notes.join("\n"),
+    );
+    assert.ok(
+      notes.some((l) => /still changing after/.test(l)),
+      "the last still says so too",
+    );
+
+    // a landing screen kept while it changed says so; steady: false keeps it at once
+    const dir = join(out, "home");
+    const home = await shootHome({
+      url: `${url}tick`,
+      dir,
+      chromePath: chrome!,
+      width: VW,
+      height: VH,
+      onNote: () => {},
+      steady: false,
+    });
+    assert.ok(home.moving, "kept while the counter ran");
+    assert.ok(home.moving.texts.some((c) => /^\d+$/.test(c.before) && c.before !== c.after));
+  } finally {
+    server.close();
+    await rm(out, { recursive: true, force: true });
   }
 });

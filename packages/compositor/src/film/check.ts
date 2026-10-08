@@ -16,7 +16,10 @@
 // A film may flash on purpose: what the page marks as intended
 // (window.__film.marks, carried in the film by `film render`) is listed as
 // marked, not as a defect.
-// Nothing here judges taste; every finding is a time to go and look at.
+// Nothing here judges taste; every finding is a time to go and look at. The
+// report ends by saying what it measured and what it does not (motion between
+// frames, how text looks while it moves), so an empty list reads as no more
+// than that.
 
 import { spawn } from "node:child_process";
 import { readdir, readFile } from "node:fs/promises";
@@ -78,8 +81,12 @@ export type FilmCheck = {
   /** the shoot logs and saved screens in the folder served to the page —
    *  information; null without the page */
   material?: PageMaterial | null;
+  /** what this check measured and what it does not: plain lines, no grade */
+  scope?: FilmCheckScope;
   issues: FilmCheckIssue[];
 };
+
+export type FilmCheckScope = { measured: string; notMeasured: string };
 
 export type FilmCheckExpect = { width?: number; height?: number; fps?: number };
 
@@ -237,7 +244,29 @@ export async function checkFilm(
     .map((m) => ({ at: ms(m.at - from), until: ms(m.until - from), what: m.what }))
     .filter((m) => m.until >= -MARK_SLACK && m.at <= durationS + MARK_SLACK);
   result.issues = judgeFilm(result, expect);
+  result.scope = filmCheckScope(result);
   return result;
+}
+
+/** what a check covered, from what it read: the streams it had and whether
+ *  the page was played — so an empty list of findings is not read as more
+ *  than it is. Motion between frames is `film probe`'s; how text looks while
+ *  it moves no tool here reads. */
+export function filmCheckScope(c: FilmCheck): FilmCheckScope {
+  const parts = ["the format"];
+  if (c.video)
+    parts.push(
+      "frames repeating inside motion, a lower-rate cadence, cuts, black, flash and blank frames",
+    );
+  if (c.audio) parts.push("loudness, silences and clicks");
+  if (c.page)
+    parts.push(
+      `text over text, into painted elements and off the frame's edge, and the smallest text (the page read every ${c.page.every}s)`,
+    );
+  return {
+    measured: parts.join("; "),
+    notMeasured: `${c.page ? "" : "the text's layout (it reads the page with --page); "}how far things move from one frame to the next (a part of the picture jumping, a push and its speed) — \`film probe\` reads one-frame jumps and the picture's zoom and travel; how text looks while it moves (on a live page under a slow push it can step a pixel at a time) — \`film still\` at times one frame apart shows it`,
+  };
 }
 
 const ms = (s: number) => Math.round(s * 1000) / 1000;
@@ -893,7 +922,10 @@ export function formatFilmCheck(c: FilmCheck): string {
   }
   const note = c.material ? pageMaterialNote(c.material) : null;
   if (note) lines.push(`material: ${note}`);
-  if (!c.issues.length) lines.push("no issues found");
+  const scope = c.scope ?? filmCheckScope(c);
+  lines.push(`measured: ${scope.measured}`);
+  lines.push(`not measured: ${scope.notMeasured}`);
+  if (!c.issues.length) lines.push("found: nothing in what was measured");
   for (const i of c.issues)
     lines.push(`${i.severity === "info" ? "note" : i.severity}: ${i.message}`);
   return lines.join("\n");

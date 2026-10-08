@@ -38,6 +38,9 @@ reordered or done another way; nothing checks that it was followed.
 
 Capabilities and where each is described; none of them is a step.
 
+- a screen with more text than a viewer reads → one real part on its own:
+  as a layer (`lift`), with the rest faded (`isolate`), or the camera on one
+  box (`cam.frame`) — the three ways just below — `skill film material`
 - one thing of the product's on its own — a button, a number, a card, a tab,
   a line of its text — big enough to read, with something happening to it →
   three ways, none of them the default: **in place** on the real screen,
@@ -140,13 +143,25 @@ only `time.js` and lists the rest; its length is a placeholder.
   about a fixed point, `gather`, `hop`); contact (`press`, `impact`); a
   number running in the product's own format (`count`, `readNumber`,
   `writeNumber`); parts arriving one after another (`assemble`). Every
-  default is an option of the call; any move can be written by hand instead:
+  default is an option of the call; any move can be written by hand instead.
+  A handoff is whatever two scenes share, so it differs from one to the
+  next; a few, none of them the default (`film gallery` draws the others —
+  `iris`, `zoomThrough`, `gather`, `hop`, `matchCut` — on your material):
 
   ```js
-  import { rise, morphRect, rectClip } from "./kit/motion.js";
-  const w = rise(t, 2.0);                                  // { x, y, opacity, p }
-  const r = morphRect(t, 4, 4.5, buttonBox, { x: 0, y: 0, w: 1920, h: 1080 });
-  card.style.clipPath = rectClip(r, { width: 1920, height: 1080 });
+  import { rise, morphRect, rectClip, count } from "./kit/motion.js";
+  const w = rise(t, 2.0);                          // { x, y, opacity, p }
+  // a control grows into the page it opens
+  const r = morphRect(t, 4, 4.5, buttonBox, pageBox);
+  page.style.clipPath = rectClip(r, { width: 1920, height: 1080 });
+  // a value carried on: one lifted part, from its place here to its place there
+  carry(totalHere, totalThere, t, 6, 6.5);         // media.js; both in one layer
+  totalThere.text(count(t, 6.2, "4,212", "4,466").text);
+  // a plain cut, on the beat
+  cam.cut(nextBox, g.beat(16));                    // g = grid(…), cut.js
+  // a part leaves its page
+  const card = lift(screen(iframe), "#card", { into: stage });
+  card.place(cardRect(t));
   ```
 - `time.js` — named moments and an optional pulse in one module that the
   page and the score both import; no tempo unless you give one. What happens

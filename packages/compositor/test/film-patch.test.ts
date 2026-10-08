@@ -9,8 +9,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { promisify } from "node:util";
-import { resolveFfmpeg, resolveFfprobe } from "../src/ffmpeg";
-import { muxFilm, patchFilm, renderFilm } from "../src/film/render";
+import { resolveFfmpeg, resolveFfprobe, SRGB_TAG_ARGS, SRGB_TAGS } from "../src/ffmpeg";
+import { chunkList, framesOffIn, muxFilm, patchFilm, renderFilm } from "../src/film/render";
 import { findChrome } from "./fixtures/find-chrome";
 
 const exec = promisify(execFile);
@@ -317,4 +317,207 @@ test("a master whose frames are not evenly spaced, moved off 0, or that `film re
       (e: Error) => /not a whole master of this film/.test(e.message) && why.test(e.message),
       into,
     );
+});
+
+/** the picture's timestamps, in presentation order */
+async function ptsOf(file: string): Promise<number[]> {
+  const { stdout } = await exec(await resolveFfprobe(), [
+    "-v",
+    "error",
+    "-select_streams",
+    "v:0",
+    "-show_entries",
+    "packet=pts",
+    "-of",
+    "csv=p=0",
+    file,
+  ]);
+  return stdout
+    .split("\n")
+    .filter(Boolean)
+    .map(Number)
+    .sort((a, b) => a - b);
+}
+
+/** `n` grey frames at `fps`, 1/15360 ticks, named as a master names its
+ *  colours; with `short`, the container says the last frame ends that many
+ *  ticks early, as an MP4 whose edit list is in ms can (no B-frames, so no
+ *  edit list of its own) */
+async function greyChunk(file: string, n: number, fps: number, short = 0): Promise<void> {
+  await exec(await resolveFfmpeg(), [
+    "-v",
+    "error",
+    "-f",
+    "lavfi",
+    "-i",
+    `color=c=gray:s=64x64:r=${fps}`,
+    "-frames:v",
+    String(n),
+    "-vf",
+    `format=yuv420p,${SRGB_TAGS}`,
+    ...SRGB_TAG_ARGS,
+    "-c:v",
+    "libx264",
+    "-bf",
+    "0",
+    "-pix_fmt",
+    "yuv420p",
+    "-bsf:v",
+    `setts=time_base=1/15360:prescale=1:duration=if(eq(N\\,${n - 1})\\,DURATION-${short}\\,DURATION)`,
+    "-video_track_timescale",
+    "15360",
+    "-y",
+    file,
+  ]);
+}
+
+test("the concat list names each chunk's length from the frames before it, so the lengths never drift", () => {
+  const list = chunkList(
+    [
+      { file: "/t/a.mp4", frames: 180 },
+      { file: "/t/b's.mp4", frames: 89 },
+      { file: "/t/c.mp4", frames: 89 },
+    ],
+    60,
+  );
+  assert.equal(
+    list,
+    [
+      "file '/t/a.mp4'",
+      "duration 3.000000",
+      "file '/t/b'\\''s.mp4'",
+      "duration 1.483333",
+      "file '/t/c.mp4'",
+      // 358 frames end at 5.966667 s: this one takes the µs the last rounded off
+      "duration 1.483334",
+    ].join("\n"),
+  );
+});
+
+test("frames a few ticks off n/fps are still frame n; one missing, doubled or half a frame off is not", () => {
+  const even = Array.from({ length: 60 }, (_, i) => i * 256);
+  assert.equal(framesOffIn(even, 256), null);
+  // a master joined before chunks were placed exactly: from frame 30 on, 5 ticks early
+  const early = even.map((t, i) => (i >= 30 ? t - 5 : t));
+  assert.equal(framesOffIn(early, 256), null);
+  assert.equal(framesOffIn([...even].reverse(), 256), null, "in decode order too");
+  assert.equal(framesOffIn(early, 0), null, "with no rate named, its first step");
+  const off = /not evenly spaced/;
+  assert.match(framesOffIn([...even.slice(0, 30), ...even.slice(31)], 256) ?? "", off);
+  assert.match(framesOffIn([...even.slice(0, 30), even[29]!, ...even.slice(30)], 256) ?? "", off);
+  assert.match(
+    framesOffIn(
+      even.map((t, i) => (i === 40 ? t + 128 : t)),
+      256,
+    ) ?? "",
+    off,
+  );
+  assert.match(
+    framesOffIn(
+      even.map((t) => t + 256),
+      256,
+    ) ?? "",
+    /does not start at 0 s/,
+  );
+  assert.match(framesOffIn([], 256) ?? "", /no picture/);
+});
+
+test("a chunk whose container ends short does not move the frames after it", async () => {
+  const ffmpeg = await resolveFfmpeg();
+  const a = join(dir, "chunk-a.mp4");
+  const b = join(dir, "chunk-b.mp4");
+  // 89 frames at 60 fps: 1.48333 s, said as 5 ticks less
+  await greyChunk(a, 89, 60, 5);
+  await greyChunk(b, 60, 60);
+  const join2 = async (listText: string) => {
+    const list = join(dir, "chunks.txt");
+    const out = join(dir, "joined.mp4");
+    await writeFile(list, listText);
+    await exec(
+      ffmpeg,
+      ["-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", list].concat([
+        "-map",
+        "0:v",
+        "-c:v",
+        "copy",
+        out,
+      ]),
+    );
+    return ptsOf(out);
+  };
+  // left to itself the demuxer starts chunk b 5 ticks early: the case this guards
+  const bare = await join2(`file '${a}'\nfile '${b}'`);
+  assert.equal(bare[89]! - bare[88]!, 251, "the chunk's container says it ends short");
+  const pts = await join2(
+    chunkList(
+      [
+        { file: a, frames: 89 },
+        { file: b, frames: 60 },
+      ],
+      60,
+    ),
+  );
+  assert.equal(pts.length, 149);
+  assert.deepEqual(
+    pts,
+    pts.map((_, i) => i * 256),
+    "frame n at n/60 s",
+  );
+});
+
+test("a master with frames a few ticks early, as a render joined them before, takes a range and comes out even", {
+  skip,
+}, async () => {
+  const page = join(dir, "early");
+  await colourPage(page, "rgb(0,255,0)");
+  const ffmpeg = await resolveFfmpeg();
+  // 60 frames at 30 fps: the first 29 in a chunk said to end 5 ticks short
+  const a = join(dir, "early-a.mp4");
+  const b = join(dir, "early-b.mp4");
+  await greyChunk(a, 29, 30, 5);
+  await greyChunk(b, 31, 30);
+  const list = join(dir, "early.txt");
+  await writeFile(list, `file '${a}'\nfile '${b}'`);
+  const master = join(dir, "early.mp4");
+  const record = JSON.stringify({ from: 0, width: 64, height: 64, marks: [] });
+  await exec(ffmpeg, [
+    "-v",
+    "error",
+    "-y",
+    "-f",
+    "concat",
+    "-safe",
+    "0",
+    "-i",
+    list,
+    "-c:v",
+    "copy",
+    "-metadata",
+    `open_take_film=${record}`,
+    "-movflags",
+    "+use_metadata_tags",
+    master,
+  ]);
+  const before = await ptsOf(master);
+  assert.equal(before[29]! - before[28]!, 507, "the master carries the early frames");
+  const out = join(dir, "early-patched.mp4");
+  const r = await patchFilm({
+    page,
+    out,
+    into: master,
+    from: 0.5,
+    to: 1,
+    chromePath: chrome!,
+    blur: false,
+  });
+  assert.equal(r.frames, 60);
+  const pts = await ptsOf(out);
+  const step = pts[1]! - pts[0]!;
+  assert.deepEqual(
+    pts,
+    pts.map((_, i) => i * step),
+    "frame n at n/30 s",
+  );
+  near(await frameRgb(out, 20), [0, 255, 0], "the range: rendered");
+  near(await frameRgb(out, 40), [128, 128, 128], "after it: the master's own");
 });

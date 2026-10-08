@@ -61,7 +61,15 @@ film's numbers beside it (below).
   none; `state: true` or `state: false` on a call says it for every still
   that call takes, and `--states` / `--no-states` (or `runShoot({ states })`)
   for the whole shoot. A screen costs about 0.3–0.5 s; one that cannot be
-  read keeps the still without it, with a line saying why. In the page,
+  read keeps the still without it, with a line saying why. Before each
+  still — the stills on the way too — the shoot waits until what is on
+  screen stops changing (visible text and where it sits, finite
+  animations), up to 3 s (2 s a step), so a product's own count-up or slide
+  is shot where it rests; a still taken while it changed anyway carries
+  `moving` (its texts `before` → `after`), one it waited for `steadyMs`.
+  `steady: false` on a call (or `settle: false`), or `--no-steady`, takes
+  stills as they come, in-between values and all; `film probe` lists the
+  pictures on screen whose still was taken changing. In the page,
   `stills(log).state("home")` (by index, name or id) is that screen's URL and
   `screen(iframe, url)` shows it, so `lift` and `isolate` take it as they are:
 
@@ -72,7 +80,8 @@ film's numbers beside it (below).
   ```
 
   `film init --url <url>` keeps one the same way, of the product's page, in
-  the film's `states/home/`.
+  the film's `states/home/` (once the screen holds still; `--no-steady` at
+  once).
   For what the helpers do not cover, `s.cdp` is the page's CDP session,
   `s.wsEndpoint` lets Puppeteer or Playwright connect to the same browser, and
   `s.inject(js)` runs before the page's own scripts. Stills are taken between

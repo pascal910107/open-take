@@ -99,6 +99,15 @@ window.__film = { duration: 42.5, marks: [{ at: 21.4, until: 21.5, what: "white 
 A mark covers what lies inside it, give or take 0.1 s; whatever runs past it
 is still reported. It judges nothing about taste.
 
+Its report ends with what it measured and what it does not (`scope` in
+`--json`), and with nothing listed it says "found: nothing in what was
+measured" — not that the film is fine. It does not measure how far things
+move from one frame to the next (a card jumping when a screen changes, a
+push and its speed: `film probe`'s small swaps and the picture's zoom and
+travel), nor how text looks while it moves: on a live page under a slow push
+text can step a pixel at a time, which `film still` at times one frame apart
+shows (`skill film render` on pictures and `--supersample`).
+
 `film check --page` and `film still` also look through the folder served to
 the page (as `film render` serves it, the page not run): when it holds PNG
 stills from a `shoot` (`shots.json`) and no saved screen, a `material:` line
