@@ -19,10 +19,12 @@
 // Nothing here judges taste; every finding is a time to go and look at.
 
 import { spawn } from "node:child_process";
+import { readdir, readFile } from "node:fs/promises";
+import { join, relative } from "node:path";
 import { resolveFfmpeg, resolveFfprobe, runTool } from "../ffmpeg";
 import { type FilmMark, filmMarks } from "./clock";
 import { type LayoutSpan, readPageLayout } from "./layout";
-import { FILM_TAG, type FilmRecord } from "./render";
+import { FILM_TAG, type FilmRecord, resolveFilmPage } from "./render";
 
 export type FilmCheckIssue = { severity: "error" | "warn" | "info"; message: string };
 
@@ -73,6 +75,9 @@ export type FilmCheck = {
   unreadText: string[] | null;
   /** the smallest text drawn — information, not a verdict; null without the page */
   smallestText: { px: number; at: number; text: string } | null;
+  /** the shoot logs and saved screens in the folder served to the page —
+   *  information; null without the page */
+  material?: PageMaterial | null;
   issues: FilmCheckIssue[];
 };
 
@@ -223,6 +228,7 @@ export async function checkFilm(
     result.layout = read.spans;
     result.unreadText = read.unread;
     result.smallestText = read.smallest;
+    result.material = await readPageMaterial(page.page, page.root).catch(() => null);
     // the page as it is now says what is meant: a mark added since the
     // render counts without rendering again
     marks = filmMarks(read.marks);
@@ -778,6 +784,80 @@ function groupLayout(
   });
 }
 
+// --- the page's material ------------------------------------------------------------
+
+export type PageMaterial = {
+  /** the folder served to the page, where the search started */
+  root: string;
+  /** `open-take shoot` logs (shots.json) under it: path from root, PNG
+   *  stills, and how many of those name a saved screen */
+  logs: { file: string; stills: number; withState: number }[];
+  /** saved screens under it (a `state.html` each) */
+  states: number;
+};
+
+/** folders the material search does not enter */
+const MATERIAL_SKIP = new Set(["node_modules", "kit"]);
+const MATERIAL_DEPTH = 5;
+const MATERIAL_ENTRIES = 20_000;
+
+/** the shoot logs and saved screens in the folder served to the page (as
+ *  `film render` serves it): read off the files, the page not run. */
+export async function readPageMaterial(page: string, root?: string): Promise<PageMaterial> {
+  const base = resolveFilmPage(page, root).root;
+  const out: PageMaterial = { root: base, logs: [], states: 0 };
+  let seen = 0;
+  const walk = async (dir: string, depth: number): Promise<void> => {
+    if (depth > MATERIAL_DEPTH || seen > MATERIAL_ENTRIES) return;
+    const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+    for (const e of entries) {
+      if (++seen > MATERIAL_ENTRIES) return;
+      const at = join(dir, e.name);
+      if (e.isDirectory()) {
+        if (!e.name.startsWith(".") && !MATERIAL_SKIP.has(e.name)) await walk(at, depth + 1);
+      } else if (e.name === "state.html") out.states++;
+      else if (e.name === "shots.json") {
+        try {
+          const log = JSON.parse(await readFile(at, "utf8")) as { stills?: unknown };
+          if (!Array.isArray(log.stills)) continue;
+          const stills = log.stills.filter(
+            (x): x is { file: string; state?: unknown } =>
+              !!x &&
+              typeof x === "object" &&
+              /\.png$/i.test(String((x as { file?: unknown }).file)),
+          );
+          if (stills.length)
+            out.logs.push({
+              file: relative(base, at),
+              stills: stills.length,
+              withState: stills.filter((x) => x.state != null && x.state !== false).length,
+            });
+        } catch {
+          // not a shoot log
+        }
+      }
+    }
+  };
+  await walk(base, 0);
+  out.logs.sort((a, b) => a.file.localeCompare(b.file));
+  return out;
+}
+
+/** one line when the page's folder holds PNG stills from a shoot and no
+ *  saved screen: what else a still can keep. null otherwise. Information. */
+export function pageMaterialNote(m: PageMaterial): string | null {
+  if (!m.logs.length || m.states > 0 || m.logs.some((l) => l.withState > 0)) return null;
+  const stills = m.logs.reduce((a, l) => a + l.stills, 0);
+  const where =
+    m.logs.length === 1
+      ? m.logs[0]!.file
+      : `${m.logs.length} shoot logs (${m.logs
+          .slice(0, 3)
+          .map((l) => l.file)
+          .join(", ")}${m.logs.length > 3 ? ", …" : ""})`;
+  return `${stills} PNG still${stills === 1 ? "" : "s"} from ${where}, and no saved screen in the folder served to the page. A still can also keep the interface itself (\`s.still(name, { state: true })\` in a shoot script, or \`open-take shoot … --states\`): live page parts that \`lift\` / \`isolate\` (kit/media.js) act on and stay sharp at any zoom — \`skill film material\`. Information, not a step.`;
+}
+
 const list = (xs: readonly number[]) =>
   xs.length > 8 ? `${xs.slice(0, 8).join(", ")} … (${xs.length})` : xs.join(", ");
 
@@ -811,6 +891,8 @@ export function formatFilmCheck(c: FilmCheck): string {
         : "text: none on screen",
     );
   }
+  const note = c.material ? pageMaterialNote(c.material) : null;
+  if (note) lines.push(`material: ${note}`);
   if (!c.issues.length) lines.push("no issues found");
   for (const i of c.issues)
     lines.push(`${i.severity === "info" ? "note" : i.severity}: ${i.message}`);

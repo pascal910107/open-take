@@ -1307,6 +1307,22 @@ export function creditLines(raw: unknown): string[] | null {
 
 // --- the text --------------------------------------------------------------------------
 
+/** this grid as the page can have it: kit/cut.js `grid({ bpm, offset })`
+ *  (offset: the time of beat 0), with the period as fitted. A tempo that is
+ *  not steady has beats that follow the onsets, which an even pulse does not.
+ *  Information. */
+export function gridOnPage(
+  t: Pick<Tempo, "periodS" | "bpm" | "beats"> & { steady?: boolean },
+): string {
+  const bpm = t.periodS > 0 ? Math.round((60 / t.periodS) * 1000) / 1000 : t.bpm;
+  const offset = Math.round((t.beats[0] ?? 0) * 1000) / 1000;
+  const what =
+    t.steady === false
+      ? "gives an even pulse at this tempo from the first beat (these beats follow the onsets where the tempo moves; a beats file keeps them)"
+      : "gives this grid (bar, snap, between; its beat 0 is the first beat found, which need not be a bar's first)";
+  return `on the page: \`grid({ bpm: ${bpm}, offset: ${offset} })\` in kit/cut.js ${what}; \`film beats\` writes a music file's grid, downbeats included, as a beats file grid() also takes — information, not a limit`;
+}
+
 export function formatFilmListen(l: FilmListen): string {
   const L: string[] = [];
   const tag = (h: How) => `(${h})`;
@@ -1349,6 +1365,7 @@ export function formatFilmListen(l: FilmListen): string {
     L.push(
       `- beat grid: ${t.beats.length} beats from ${fmtS(t.beats[0] ?? 0)}; ${Math.round(t.gridFit * 100)}% of beats have an onset within 40 ms ${tag("estimated")}`,
     );
+    L.push(`- ${gridOnPage(t)}`);
   } else L.push(`- tempo: no repeating period between 60 and 200 BPM ${tag("not detected")}`);
   const b = l.bars.value;
   if (b) {

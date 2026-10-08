@@ -1357,6 +1357,10 @@ export type TextSample = {
    *  each came from */
   smallest: { px: number; from: "page" | "picture"; text: string } | null;
   median: number | null;
+  /** the median size (by character, film px) of the product's words alone:
+   *  the page's text less the film's own pieces, and text read in pictures;
+   *  null: none of it read */
+  productMedian?: number | null;
 };
 
 export type TextOverlap = {
@@ -1437,18 +1441,31 @@ export function textTimeline(
         ? null
         : (ownChars ?? 0) + (productChars ?? 0) + (pictureChars ?? 0);
     const sorted = sizes.filter((s) => s.px > 0).sort((a, b) => a.px - b.px);
-    const total = sorted.reduce((a, s) => a + s.chars, 0);
-    let median: number | null = null;
-    if (total) {
+    const medianOf = (list: readonly { px: number; chars: number }[]): number | null => {
+      const total = list.reduce((a, s) => a + s.chars, 0);
       let k = 0;
-      for (const s of sorted) {
+      for (const s of list) {
         k += s.chars;
-        if (k >= total / 2) {
-          median = round1(s.px);
-          break;
-        }
+        if (total && k >= total / 2) return round1(s.px);
       }
+      return null;
+    };
+    const median = medianOf(sorted);
+    // the product's words alone: the page's sizes less the film's own pieces
+    // (each taken off the size it was drawn at), and the text in pictures
+    const rest = sorted.map((s) => ({ px: s.px, chars: s.chars, from: s.from }));
+    for (const x of p?.own ?? []) {
+      let left = x.chars;
+      for (const s of rest)
+        if (left > 0 && s.from === "page" && Math.abs(s.px - x.px) < 0.26) {
+          const take = Math.min(left, s.chars);
+          s.chars -= take;
+          left -= take;
+        }
     }
+    const productMedian = medianOf(
+      rest.filter((s) => s.chars > 0 && (s.from === "page" || f?.how === "ocr")),
+    );
     samples.push({
       t,
       own,
@@ -1463,6 +1480,7 @@ export function textTimeline(
         ? { px: round1(sorted[0].px), from: sorted[0].from, text: sorted[0].text }
         : null,
       median,
+      productMedian,
     });
     // the film's own text over pictures, the product's text, text in
     // pictures, the subject of the segment it is in
@@ -1545,6 +1563,71 @@ export function textPerSecond(samples: readonly TextSample[], duration: number, 
       median: meds.length ? round1(median(meds)) : null,
     };
   });
+}
+
+/** under this many px on the phone, a size is named beside the tools that act
+ *  on part of a screen: information, not a limit */
+export const PHONE_SMALL_PX = 8;
+
+/** fewer characters of the product's than this in a sample read as the
+ *  recognizer's stray marks, not words */
+const PRODUCT_WORDS_MIN_CHARS = 20;
+
+export type ProductTextSpan = {
+  from: number;
+  to: number;
+  /** the share of the text on screen that is the product's (saved screens)
+   *  or in pictures, the most in the span */
+  productShare: number;
+  /** the product's words' median size, px on the phone: the smallest
+   *  sample's in the span */
+  phoneMedian: number | null;
+};
+
+/** where the product's own words (its saved screens, text read in pictures)
+ *  are most of the frame's text, or their median size reads under
+ *  PHONE_SMALL_PX on the phone. Samples next to each other run into one
+ *  span. `pictures: false` (pictures read by edges, which cannot tell the
+ *  film's own text from a picture's) counts the saved screens only.
+ *  Information only. */
+export function productTextSpans(
+  samples: readonly TextSample[],
+  phoneScale: number,
+  every: number,
+  o: { pictures?: boolean } = {},
+): ProductTextSpan[] {
+  const pictures = o.pictures ?? true;
+  const spans: ProductTextSpan[] = [];
+  let open: ProductTextSpan | null = null;
+  for (const s of samples) {
+    const words = (s.product ?? 0) + (pictures ? (s.picture ?? 0) : 0);
+    const chars = (s.productChars ?? 0) + (pictures ? (s.pictureChars ?? 0) : 0);
+    const share = s.share > 0.002 ? Math.min(1, words / s.share) : 0;
+    const phone =
+      s.productMedian == null || chars < PRODUCT_WORDS_MIN_CHARS
+        ? null
+        : round1(s.productMedian * phoneScale);
+    const hit = (words > 0 && share >= 0.5) || (phone != null && phone < PHONE_SMALL_PX);
+    if (!hit) {
+      open = null;
+      continue;
+    }
+    if (open && s.t <= open.to + every * 0.5 + 1e-6) {
+      open.to = round3(s.t + every);
+      open.productShare = Math.max(open.productShare, round2(share));
+      if (phone != null)
+        open.phoneMedian = open.phoneMedian == null ? phone : Math.min(open.phoneMedian, phone);
+    } else {
+      open = {
+        from: s.t,
+        to: round3(s.t + every),
+        productShare: round2(share),
+        phoneMedian: phone,
+      };
+      spans.push(open);
+    }
+  }
+  return spans;
 }
 
 // --- the whole probe ---------------------------------------------------------------------
@@ -2533,6 +2616,23 @@ function formatText(p: FilmProbe): string[] {
   if (smallest?.smallest)
     L.push(
       `Smallest text: ${ph(smallest.smallest.px)} px at ${fmtT(smallest.t)} (${smallest.smallest.from === "page" ? "page, measured" : "in a picture, estimated"})${smallest.smallest.text ? ` — ${smallest.smallest.text}` : ""}; median size over the samples ${ph(meds.length ? median(meds) : null)} px.`,
+    );
+  // the product's words are told from the film's own only with the page
+  const parts =
+    T.page.how === "measured"
+      ? productTextSpans(S, T.phoneScale, T.every, { pictures: T.picture.reader === "ocr" })
+      : [];
+  if (parts.length)
+    L.push(
+      `Where the product's own words (saved screens${T.picture.reader === "ocr" ? ", text in pictures" : ""}) are most of the frame's text, or their median size reads under ${PHONE_SMALL_PX} px on the phone: ${parts
+        .slice(0, 12)
+        .map(
+          (s) =>
+            `${fmtT(s.from)}–${fmtT(s.to)} (up to ${pct(s.productShare)} of the text${s.phoneMedian != null ? `; their median down to ${s.phoneMedian} px on the phone` : ""})`,
+        )
+        .join(
+          ", ",
+        )}${parts.length > 12 ? `, … ${parts.length - 12} more` : ""}. What acts on part of a screen: \`lift\` (one part as a layer of its own) and \`isolate\` (the rest faded) in kit/media.js, \`cam.frame\` (the camera on one box) in kit/camera.js — \`skill film material\`. Information, not a target.`,
     );
   const ps = T.perSecond;
   L.push(

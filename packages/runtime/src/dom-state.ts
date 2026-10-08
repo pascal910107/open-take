@@ -1338,6 +1338,14 @@ export async function captureDomState(
   const t0 = Date.now();
   const dir = join(args.statesDir, args.id);
   mkdirSync(dir, { recursive: true });
+  // A screenshot's clip is in DOCUMENT px: on a scrolled page, (0, 0) is the
+  // top of the document, not of what is on screen — the reference must start
+  // where the page is scrolled to (measured: a page scrolled by 643 px gave a
+  // reference of the document's top, blank above the sticky header).
+  const at = await cdp
+    .send<{ cssVisualViewport?: { pageX?: number; pageY?: number } }>("Page.getLayoutMetrics")
+    .then((m) => ({ x: m.cssVisualViewport?.pageX ?? 0, y: m.cssVisualViewport?.pageY ?? 0 }))
+    .catch(() => ({ x: 0, y: 0 }));
   // The probe and the reference screenshot go out together: the probe holds
   // the main thread for a few ms and the screenshot's frame commits right
   // after it, so a running animation is read at (nearly) the phase the
@@ -1353,7 +1361,13 @@ export async function captureDomState(
     cdp
       .send<{ data: string }>("Page.captureScreenshot", {
         format: "png",
-        clip: { x: 0, y: 0, width: args.vw, height: args.vh, scale: 1 / Math.max(1, args.dpr) },
+        clip: {
+          x: at.x,
+          y: at.y,
+          width: args.vw,
+          height: args.vh,
+          scale: 1 / Math.max(1, args.dpr),
+        },
       })
       .then((s) => ({ data: s.data })),
   ]);
@@ -1574,9 +1588,14 @@ async function renderState(
     await sleep(50);
   }
   await sleep(60); // two frames for the paint after the last restore step
+  // the clip is in document px: start where the restored state is scrolled to
+  const at = await cdp
+    .send<{ cssVisualViewport?: { pageX?: number; pageY?: number } }>("Page.getLayoutMetrics")
+    .then((m) => ({ x: m.cssVisualViewport?.pageX ?? 0, y: m.cssVisualViewport?.pageY ?? 0 }))
+    .catch(() => ({ x: 0, y: 0 }));
   const shot = await cdp.send<{ data: string }>("Page.captureScreenshot", {
     format: "png",
-    clip: { x: 0, y: 0, width: vw, height: vh, scale: 1 },
+    clip: { x: at.x, y: at.y, width: vw, height: vh, scale: 1 },
   });
   return { png: Buffer.from(shot.data, "base64"), misses };
 }

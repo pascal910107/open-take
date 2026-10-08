@@ -15,8 +15,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { promisify } from "node:util";
+import { resolveFfmpeg } from "@open-take/compositor";
 import { resolveChrome } from "../src/cdp";
-import { replaceShoot, runShoot, type ShootLog, type ShootOpts } from "../src/shoot";
+import { replaceShoot, runShoot, type ShootLog, type ShootOpts, shootHome } from "../src/shoot";
 
 const exec = promisify(execFile);
 
@@ -59,6 +60,10 @@ const LATE = `<!doctype html><html><body><main><h1 id="title">Late</h1><a href="
 <script>setTimeout(() => { window.__hydrated = true; document.getElementById("title").addEventListener("click", () => {}); }, 2300);</script>
 </body></html>`;
 const NEXT = `<!doctype html><html><body><h1>Next page</h1></body></html>`;
+// a tall page: red at its top, blue a screen further down
+const TALL = `<!doctype html><html><body style="margin:0;height:3000px;background:#fff">
+<div style="position:absolute;left:0;top:0;width:400px;height:200px;background:#f00;color:#f00">top</div>
+<div style="position:absolute;left:0;top:1000px;width:400px;height:200px;background:#00f;color:#00f">down</div></body></html>`;
 const BLANK = `<!doctype html><html><body><div id="root"></div><script>/* the app never mounts */</script></body></html>`;
 // a button disabled by its fieldset (its own .disabled stays false), enabled later
 const FIELDSET = `<!doctype html><html><body><fieldset id="fs" disabled><button id="b2">Go</button></fieldset><p id="n">0</p>
@@ -73,6 +78,7 @@ async function serve(): Promise<{ server: Server; url: string }> {
     "/next": NEXT,
     "/blank": BLANK,
     "/fieldset": FIELDSET,
+    "/tall": TALL,
   };
   const server = createServer((req, res) => {
     const html = pages[req.url ?? "/"];
@@ -555,5 +561,180 @@ test("shoot: a button its fieldset disables is waited for, not clicked dead", {
   } finally {
     server.close();
     await rm(out, { recursive: true, force: true });
+  }
+});
+
+test("shoot: a still keeps the interface too — a saved screen, checked, named in the log; on by default, off when asked", {
+  skip,
+  timeout: 120000,
+}, async () => {
+  const { server, url } = await serve();
+  const out = await mkdtemp(join(tmpdir(), "open-take-shoot-"));
+  try {
+    // a saved screen that is not this shoot's (film init --url's home) stays put
+    await mkdir(join(out, "states", "theirs"), { recursive: true });
+    await writeFile(join(out, "states", "theirs", "state.html"), "not ours");
+    const t0 = Date.now();
+    const { log } = await runShoot({
+      ...base(out),
+      script: async (s) => {
+        await s.open(url);
+        await s.still("home");
+        await s.still("plain", { state: false });
+        await s.click("#go", { name: "home" });
+        await s.type("#q", "ab", { each: true });
+      },
+    });
+    const ms = Date.now() - t0;
+    assert.deepEqual(
+      log.stills.map((st) => st.state ?? null),
+      ["home", null, "home-2", null, null, "type"],
+      "a still and the still an action ends on keep a screen (a second of the same name its own); one that says no and the keystrokes' on the way do not",
+    );
+    assert.equal(log.states?.dir, "states");
+    assert.deepEqual(
+      log.states?.items.map((i) => [i.id, i.still]),
+      [
+        ["home", log.stills[0]!.file],
+        ["home-2", log.stills[2]!.file],
+        ["type", log.stills[5]!.file],
+      ],
+    );
+    for (const it of log.states!.items) {
+      assert.ok(it.fidelity.ok, `${it.id} re-renders as shot (psnr ${it.fidelity.psnr})`);
+      const dir = join(out, "states", it.id);
+      for (const f of ["state.html", "index.json", "live.png"])
+        assert.ok(existsSync(join(dir, f)), `${it.id}/${f}`);
+      for (const f of ["page.mhtml", "probe.json"])
+        assert.ok(!existsSync(join(dir, f)), `${it.id}/${f} is gone once converted`);
+      const index = JSON.parse(readFileSync(join(dir, "index.json"), "utf8"));
+      assert.deepEqual(index.viewport, { w: VW, h: VH, dpr: 2 });
+      assert.ok(index.fidelity.ok);
+    }
+    // the screen is the page at that moment: the click's result is in the second
+    const second = readFileSync(join(out, "states", "home-2", "state.html"), "utf8");
+    assert.match(second, /clicks: 1/);
+    assert.match(readFileSync(join(out, "states", "home", "state.html"), "utf8"), /clicks: 0/);
+    assert.equal(readFileSync(join(out, "states", "theirs", "state.html"), "utf8"), "not ours");
+    console.log(`  (6 stills, 3 saved screens: ${ms} ms)`);
+
+    // a re-shoot replaces this shoot's screens, and only those
+    const again = await runShoot({
+      ...base(out),
+      states: true,
+      script: async (s) => {
+        await s.open(url);
+        await s.still("next");
+        await s.still("bare", { state: false });
+        await s.type("#q", "c", { each: true });
+      },
+    });
+    assert.deepEqual(
+      again.log.stills.map((st) => st.state ?? null),
+      ["next", null, "type-1", "type"],
+      "--states keeps one with every still whose call does not say, the ones on the way too",
+    );
+    // a folder of the same name that no shoot's log names is steered round,
+    // not moved onto (that would fail the whole shoot)
+    await mkdir(join(out, "none", "states", "b"), { recursive: true });
+    await writeFile(join(out, "none", "states", "b", "state.html"), "not ours either");
+    const none = await runShoot({
+      ...base(join(out, "none")),
+      states: false,
+      script: async (s) => {
+        await s.open(url);
+        await s.still("a");
+        await s.still("b", { state: true });
+      },
+    });
+    assert.deepEqual(
+      none.log.stills.map((st) => st.state ?? null),
+      [null, "b-2"],
+      "--no-states keeps none but where a call asks",
+    );
+    assert.equal(
+      readFileSync(join(out, "none", "states", "b", "state.html"), "utf8"),
+      "not ours either",
+    );
+    assert.ok(existsSync(join(out, "none", "states", "b-2", "state.html")));
+    assert.ok(!existsSync(join(out, "states", "home")), "the last shoot's screens are gone");
+    assert.ok(!existsSync(join(out, "states", "home-2")));
+    assert.ok(existsSync(join(out, "states", "next", "state.html")));
+    assert.equal(readFileSync(join(out, "states", "theirs", "state.html"), "utf8"), "not ours");
+    assert.ok(!(await readdir(out)).some((n) => n.startsWith(".shoot")), "nothing left aside");
+
+    // a scrolled page: the screen is checked against what is on screen, not
+    // against the top of the document (a screenshot's clip is document px)
+    const scrolled = await runShoot({
+      ...base(out),
+      script: async (s) => {
+        await s.open(`${url}tall`);
+        await s.evaluate("window.scrollTo(0, 900)");
+        await s.still("down", { state: true, settle: true });
+      },
+    });
+    const it = scrolled.log.states!.items[0]!;
+    assert.ok(it.fidelity.ok, `the scrolled screen re-renders as shot (psnr ${it.fidelity.psnr})`);
+    const ffmpeg = await resolveFfmpeg();
+    const { stdout } = await exec(
+      ffmpeg,
+      [
+        "-v",
+        "error",
+        "-i",
+        join(out, "states", "down", "live.png"),
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        "rgb24",
+        "-",
+      ],
+      { encoding: "buffer", maxBuffer: 1 << 26 },
+    );
+    const at = (x: number, y: number) => [
+      ...(stdout as Buffer).subarray((y * VW + x) * 3, (y * VW + x) * 3 + 3),
+    ];
+    assert.deepEqual(
+      at(50, 200),
+      [0, 0, 255],
+      "the reference shows the blue a screen down, where it is scrolled to",
+    );
+  } finally {
+    server.close();
+    await rm(out, { recursive: true, force: true });
+  }
+});
+
+test("shoot: a page's landing screen saved on its own (film init --url)", {
+  skip,
+  timeout: 60000,
+}, async () => {
+  const { server, url } = await serve();
+  const dir = await mkdtemp(join(tmpdir(), "open-take-home-"));
+  try {
+    const home = await shootHome({
+      url,
+      dir,
+      chromePath: chrome!,
+      width: VW,
+      height: VH,
+      onNote: () => {},
+    });
+    assert.equal(home.dir, join(dir, "states", "home"));
+    assert.equal(home.title, "shoot fixture");
+    assert.ok(home.fidelity.ok, `psnr ${home.fidelity.psnr}`);
+    assert.ok(existsSync(join(dir, "states", "home", "state.html")));
+    assert.deepEqual(
+      (await readdir(dir)).sort(),
+      ["states"],
+      "only the saved screen: no stills, no log, no work folder",
+    );
+    // again: replaced in place
+    await shootHome({ url, dir, chromePath: chrome!, width: VW, height: VH, onNote: () => {} });
+    assert.deepEqual((await readdir(dir)).sort(), ["states"]);
+    assert.ok(existsSync(join(dir, "states", "home", "index.json")));
+  } finally {
+    server.close();
+    await rm(dir, { recursive: true, force: true });
   }
 });

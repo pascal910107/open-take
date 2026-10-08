@@ -36,6 +36,9 @@ export {
   type FilmCheckExpect,
   type FilmCheckIssue,
   formatFilmCheck,
+  type PageMaterial,
+  pageMaterialNote,
+  readPageMaterial,
 } from "./film/check";
 export {
   type FilmGalleryOptions,

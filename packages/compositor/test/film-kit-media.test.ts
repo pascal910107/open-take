@@ -103,6 +103,28 @@ test("film init copies the kit and a page to start from, and keeps what the auth
   assert.notEqual(await readFile(join(film, "kit", "camera.js"), "utf8"), "// mine\n");
 });
 
+test("film init names the product's saved screen and look when the folder has them (--url)", async () => {
+  const bare = join(dir, "init-bare");
+  await initFilm({ dir: bare });
+  const plain = await readFile(join(bare, "index.html"), "utf8");
+  assert.doesNotMatch(plain, /states\/home/, "nothing named that is not there");
+  const film = join(dir, "init-url");
+  await mkdir(join(film, "states", "home"), { recursive: true });
+  await writeFile(join(film, "states", "home", "state.html"), "<!doctype html>");
+  await mkdir(join(film, "look"), { recursive: true });
+  await writeFile(join(film, "look", "look.json"), "{}");
+  await initFilm({ dir: film });
+  const page = await readFile(join(film, "index.html"), "utf8");
+  assert.match(page, /screen\(iframe, "states\/home\/state\.html"\)/);
+  assert.match(page, /lift\(home, /);
+  assert.match(page, /look\/look\.json/);
+  // listed in a comment, like the kit: the page imports only the timeline
+  assert.deepEqual(
+    page.match(/^\s*import .*$/gm)?.map((l) => l.trim()),
+    ['import { timeline } from "./kit/time.js";'],
+  );
+});
+
 test("a saved screen's parts are where the camera puts them: live by selector, as captured by id", {
   skip,
 }, async () => {
@@ -314,6 +336,94 @@ window.__render = async (t) => {
   assert.ok(isRed(seen[0]!), "still 0 at 0.5 s");
   assert.ok(isGreen(seen[1]!), "still 1 at 1.5 s");
   assert.ok(isBlue(seen[2]!), "still 2 at 2.5 s");
+});
+
+test("a shoot's still that kept a saved screen is a screen: shown by its URL, a part lifted out", {
+  skip,
+}, async () => {
+  const film = join(dir, "shot-state");
+  await initFilm({ dir: film });
+  const shots = join(film, "shots");
+  const home = join(shots, "states", "home");
+  await mkdir(home, { recursive: true });
+  // a saved screen as a shoot writes it: state.html + index.json in states/<id>/
+  await writeFile(
+    join(home, "state.html"),
+    `<!doctype html><html><body style="margin:0;background:#fff">
+<div id="total" style="position:absolute;left:200px;top:100px;width:40px;height:20px;background:#00f"></div></body></html>`,
+  );
+  await writeFile(
+    join(home, "index.json"),
+    JSON.stringify({ version: 1, id: "home", viewport: { w: 320, h: 180, dpr: 2 }, elements: [] }),
+  );
+  await writeFile(
+    join(shots, "shots.json"),
+    JSON.stringify({
+      viewport: { w: 320, h: 180 },
+      scale: 2,
+      stills: [
+        { file: "000-home.png", name: "home", t: 0, state: "home" },
+        { file: "001-plain.png", name: "plain", t: 0.1 },
+      ],
+      states: {
+        dir: "states",
+        items: [
+          {
+            id: "home",
+            still: "000-home.png",
+            t: 0,
+            fidelity: { psnr: 50, diffFrac: 0, ok: true },
+          },
+        ],
+      },
+    }),
+  );
+  await writeFile(
+    join(film, "index.html"),
+    `<!doctype html><html><head><style>html,body{margin:0;width:320px;height:180px;overflow:hidden;background:#000}
+#layer{position:relative;width:320px;height:180px}
+iframe{position:absolute;left:0;top:0;width:320px;height:180px;border:0}
+#wrong{display:none;position:absolute;left:0;top:0;width:320px;height:180px;background:#f0f;z-index:9}</style></head>
+<body><div id="layer"><iframe id="home"></iframe></div><img id="still" alt="" style="display:none"><div id="wrong"></div>
+<script type="module">
+import { stills, screen, lift } from "./kit/media.js";
+const wrong = () => (document.getElementById("wrong").style.display = "block");
+const ready = (async () => {
+  const st = await stills("shots/shots.json", document.getElementById("still"));
+  try { st.state(1); wrong(); } catch (e) { if (!/kept no saved screen/.test(e.message)) wrong(); }
+  if (st.state("home") !== st.state(0)) wrong();
+  const s = screen(document.getElementById("home"), st.state("home"));
+  await s.ready;
+  const b = s.box("#total");
+  if (b.x !== 200 || b.y !== 100) wrong();
+  const card = lift(s, "#total", { around: "clear" });
+  await card.ready;
+  return card;
+})();
+window.__film = { duration: 2, width: 320, height: 180, ready };
+window.__render = async (t) => {
+  const card = await ready;
+  document.getElementById("home").style.visibility = t < 1 ? "visible" : "hidden";
+  // carried to the top-left corner, twice its size
+  card.place(t < 1 ? card.box : { x: 0, y: 0, w: 80, h: 40 });
+};
+</script></body></html>`,
+  );
+  const files = await filmStills({
+    page: join(film, "index.html"),
+    chromePath: chrome!,
+    at: [0.5, 1.5],
+    outDir: join(dir, "shot-state-out"),
+    blur: false,
+  });
+  const [atRest, carried] = await Promise.all(files.map((f) => rgb(f, 320, 180)));
+  assert.ok(isBlue(px(atRest!, 320, 220, 110)), "the lifted part sits where it was");
+  assert.ok(
+    !isMagenta(px(atRest!, 320, 5, 5)),
+    "the still without a screen says so, the URL is the screen's",
+  );
+  assert.ok(isBlue(px(carried!, 320, 70, 30)), "carried, it fills its new box");
+  assert.ok(!isBlue(px(carried!, 320, 220, 110)), "and has left its place");
 });
 
 test("film picture draws a saved screen at twice its pixels, where the screen puts things", {

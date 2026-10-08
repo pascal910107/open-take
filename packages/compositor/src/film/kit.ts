@@ -2,7 +2,10 @@
 // copied into a film's folder, where the film's author reads, changes or
 // drops it — it is the film's own code from then on, not a dependency. A
 // page to start from is written only where there is none, and a kit file the
-// author has changed is kept unless asked to replace it.
+// author has changed is kept unless asked to replace it. With `--url` the
+// CLI first keeps the product's landing page as a saved screen in
+// states/home/ (and its look in look/); the page to start from then names
+// them in a comment — listed, like the kit, not used.
 
 import { existsSync } from "node:fs";
 import { copyFile, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
@@ -42,9 +45,26 @@ function kitRole(source: string): string {
  *  the timeline, whose hooks carry the page's events to the score; the rest
  *  of the kit is listed, not imported, so nothing in the page suggests which
  *  blocks a film is made of. */
-export function starterPage(kit: { name: string; role: string }[]): string {
+export function starterPage(
+  kit: { name: string; role: string }[],
+  /** what the folder already holds of the product: a saved screen
+   *  (states/home/state.html) and its look (look/look.json) */
+  has: { home?: string; look?: string } = {},
+): string {
   const w = Math.max(...kit.map((k) => k.name.length)) + 6;
   const list = kit.map((k) => `  //   ${`kit/${k.name}`.padEnd(w)}${k.role}`.trimEnd()).join("\n");
+  const product = [
+    ...(has.home
+      ? [
+          `  // ${has.home}: the product's page as a saved screen — the real interface, live DOM:`,
+          `  //   const home = screen(iframe, "${has.home}");   // kit/media.js; size the iframe to its viewport`,
+          `  //   lift(home, "<selector>") one part as a layer of its own · isolate(home, [...]) the rest faded · home.box(sel) for cam.frame`,
+        ]
+      : []),
+    ...(has.look
+      ? [`  // ${has.look}: the product's colours, type and fonts (npx open-take film look)`]
+      : []),
+  ];
   return `<!doctype html>
 <html>
 <head>
@@ -62,7 +82,7 @@ export function starterPage(kit: { name: string; role: string }[]): string {
   // kit/ is yours to read, change or drop (npx open-take film gallery draws
   // what each of its blocks does):
 ${list}
-  import { timeline } from "./kit/time.js";
+${product.length ? `${product.join("\n")}\n` : ""}  import { timeline } from "./kit/time.js";
 
   // the film's moments and what happens when — <film>.events.json, for the score
   const tl = timeline();
@@ -105,7 +125,15 @@ export async function initFilm(opts: { dir: string; force?: boolean }): Promise<
   }
   const page = join(dir, "index.html");
   if (!existsSync(page)) {
-    await writeFile(page, starterPage(roles));
+    const home = "states/home/state.html";
+    const look = "look/look.json";
+    await writeFile(
+      page,
+      starterPage(roles, {
+        ...(existsSync(join(dir, home)) ? { home } : {}),
+        ...(existsSync(join(dir, look)) ? { look } : {}),
+      }),
+    );
     written.push(page);
   }
   return { written, kept };

@@ -676,16 +676,20 @@ with the editable `<out>.take/composition.json`.
 canvas, WebGL, any library — with the story, copy, typography, motion and sound you decide;
 open-take plays it frame-exactly into a 1080p60 master with measured motion blur and the
 soundtrack you make, hands you the real product's UI as material (`make --states`, and
-`shoot` for stills from a capture script of your own) — the recording, the saved screens
+`shoot` for stills from a capture script of your own, each keeping its saved screen;
+`film init --url` for the product's page) — the recording, the saved screens
 and the real results on one clock, with real parts liftable as layers — reads the product's
 own look (`film look`) and the music's grid (`film beats`), and measures what you cannot see
 or hear (`film probe`, `film listen`, `film check`; `film gallery` draws what each kit block
 does). Every report line is measured, estimated or not detected — information, not a grade.
 Read [film.md](references/film.md) (or `npx open-take skill film`) before starting; nothing in it
-is a template, and its kit, beat sheet and workflow are all optional.
-[references/cases/README.md](references/cases/README.md) takes apart films a viewer judged,
+is a template, and its kit, beat sheet and workflow are all optional. It is the guide's core —
+a way to work, an index of what is there and where, and the kit — and names its topics, each
+its own file under `references/film/` and its own print (`skill film material`, `cutting`,
+`look`, `checking`, …; `skill film --all` for everything).
+[references/cases/README.md](references/cases/README.md) (`npx open-take skill cases`) takes apart films a viewer judged,
 indexed by what a segment wants to say — each is "this film got this comment", not a pattern
-to follow.
+to follow. Every verb answers `--help` (`open-take film probe --help`, `open-take help shoot`).
 
 The older route — a JSON launch composition wrapped around one finished recording — still
 works for a quick cut. Initialize from a real recording, edit the portable JSON, validate

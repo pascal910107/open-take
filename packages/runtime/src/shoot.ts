@@ -33,7 +33,11 @@
 //                                every target tracked or acted on that the page renders
 //       action?,                 "click" | "type" | "drag" | "move" | "press": what took it
 //       down?: true,             the mouse button is held (a drag's steps)
+//       state?,                  its saved screen's id: states/<state>/state.html
 //     }],
+//     states?: { dir, items: [{ id, still, t, fidelity }] },
+//                                the saved screens kept with stills, and how each
+//                                re-rendered against its moment (fidelity.ok)
 //     error? }                   only in a failed shoot's log
 //
 // Every position is PAGE CSS px, so a box stays put when the page scrolls; to
@@ -41,13 +45,24 @@
 // px). A still a call returns is its log entry: fields the script adds to it
 // (a value read off the page) are saved with it.
 //
+// A saved screen — the interface itself, as `make --states` keeps it — goes
+// by default with every still s.still() takes and with the still an action
+// ends on; the stills on the way (a keystroke's with `each`, a drag step's
+// with `every`) keep none unless asked. `state` on a call says yes or no for
+// every still it takes; `states` for the whole shoot (`--states`: every
+// still, `--no-states`: none). It is the same capture and the same fidelity check
+// (dom-state.ts), written to <out>/states/<id>/ (state.html + index.json),
+// the id being the still's name; the kit's screen() shows it, and lift() and
+// isolate() work on it. A screen that cannot be read never fails the shoot:
+// the still is kept without one, and a line says why.
+//
 // A shoot replaces the previous one in <out> only when its script finishes. A
 // script that throws leaves the last good shoot as it was, and what it did
 // take in <out>/.shoot/ with the error in its shots.json.
 
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rename, rm, rmdir, writeFile } from "node:fs/promises";
-import { basename, join, resolve } from "node:path";
+import { mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { basename, dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   BOX_CANDIDATES,
@@ -61,6 +76,12 @@ import {
 } from "./capture";
 import { type Browser, CDP, fitViewport, launchBrowser } from "./cdp";
 import { awaitFonts, navigate, originAllowed, pressChord } from "./cdp-capture";
+import {
+  captureDomState,
+  type DomStateItem,
+  type DomStateRaw,
+  finalizeDomStates,
+} from "./dom-state";
 import { DEFAULT_SETTLE_BUDGET_MS, installActivityProbe, settle } from "./settle";
 
 // --- the contract -------------------------------------------------------------
@@ -81,11 +102,23 @@ export type ShootStill = {
   boxes: Record<string, ShootBox>;
   action?: ShootAction;
   down?: true;
+  /** its saved screen: `states/<state>/state.html` beside shots.json */
+  state?: string;
+};
+/** a saved screen kept with a still, and how it re-rendered against it */
+export type ShootStateItem = {
+  id: string;
+  /** the still it was kept with (its file) */
+  still: string;
+  t: number;
+  fidelity: NonNullable<DomStateItem["fidelity"]>;
 };
 export type ShootLog = {
   viewport: { w: number; h: number };
   scale: number;
   stills: ShootStill[];
+  /** present when any still kept a saved screen */
+  states?: { dir: "states"; items: ShootStateItem[] };
   error?: string;
 };
 
@@ -99,6 +132,10 @@ export type ShootActOpts = {
   settle?: ShootSettle;
   /** take a still once the action is done (default true) */
   still?: boolean;
+  /** keep a saved screen with every still this call takes, or with none
+   *  (default: the shoot's `states`; without one, the still the action ends
+   *  on keeps one and the stills on the way do not) */
+  state?: boolean;
   /** how long the target may take to appear and become reachable (default 5000 ms) */
   timeoutMs?: number;
 };
@@ -119,8 +156,10 @@ export type Shoot = {
     url: string,
     opts?: ShootOpenOpts,
   ): Promise<{ url: string; title: string; errors: string[] }>;
-  /** one PNG and its log entry, now (settle: false by default) */
-  still(name?: string, opts?: { settle?: ShootSettle }): Promise<ShootStill>;
+  /** one PNG and its log entry, now (settle: false by default); with the
+   *  interface itself kept as a saved screen in states/<name>/ unless
+   *  `state: false` (or the shoot's `states: false`) */
+  still(name?: string, opts?: { settle?: ShootSettle; state?: boolean }): Promise<ShootStill>;
   /** move the mouse onto the target and click it, for real */
   click(target: ShootTarget, opts?: ShootActOpts): Promise<ShootStill | null>;
   /** click into the field unless it has the caret, then type key by key
@@ -185,6 +224,10 @@ export type ShootOpts = {
   /** a persistent profile (`open-take auth`) */
   userDataDir?: string;
   headless?: boolean;
+  /** saved screens for the stills whose call does not say: true, every
+   *  still; false, none; unset (default), every still but the ones on the
+   *  way (a keystroke's with `each`, a drag step's with `every`) */
+  states?: boolean;
   /** advisories (default: stderr) */
   onNote?: (line: string) => void;
 };
@@ -465,6 +508,8 @@ export async function runShoot(opts: ShootOpts): Promise<{ log: ShootLog; path: 
   let browser: Browser | null = null;
   let raw: CDP | null = null;
   const stills: ShootStill[] = [];
+  const kept: DomStateRaw[] = [];
+  let items: ShootStateItem[] = [];
   let viewport = { w: width, h: height };
   try {
     browser = await launchBrowser({
@@ -501,16 +546,22 @@ export async function runShoot(opts: ShootOpts): Promise<{ log: ShootLog; path: 
       stage,
       stills,
       note,
+      states: opts.states,
+      kept,
     });
+    let failed: string | null = null;
     try {
       await run(s);
     } catch (e) {
-      const message = scriptFailure(e, file);
-      const partial: ShootLog = { viewport, scale, stills, error: message };
+      failed = scriptFailure(e, file);
+    }
+    items = await finishStates(browser, stage, kept, stills, viewport, note);
+    if (failed != null) {
+      const partial: ShootLog = { viewport, scale, stills, ...logStates(items), error: failed };
       await writeFile(join(stage, "shots.json"), `${JSON.stringify(partial, null, 2)}\n`);
       if (stills.length)
         note(`shoot: the ${stills.length} still(s) taken before it stopped are in ${stage}`);
-      throw new Error(`shoot: ${message}`);
+      throw new Error(`shoot: ${failed}`);
     }
   } finally {
     raw?.close();
@@ -518,18 +569,87 @@ export async function runShoot(opts: ShootOpts): Promise<{ log: ShootLog; path: 
   }
 
   // the script finished: this shoot replaces the last one
-  const log: ShootLog = { viewport, scale, stills };
+  const log: ShootLog = { viewport, scale, stills, ...logStates(items) };
   await writeFile(join(stage, "shots.json"), `${JSON.stringify(log, null, 2)}\n`);
-  await replaceShoot(
-    out,
-    stage,
-    stills.map((st) => st.file),
-  );
+  await replaceShoot(out, stage, [
+    ...stills.map((st) => st.file),
+    ...items.map((it) => `states/${it.id}`),
+  ]);
   return { log, path: join(out, "shots.json") };
 }
 
-/** Put the shoot staged in `stage` (its stills, `names`, and its shots.json)
- *  in place of the last one in `out`, but only once all of it is in place —
+const logStates = (items: ShootStateItem[]): Pick<ShootLog, "states"> =>
+  items.length ? { states: { dir: "states", items } } : {};
+
+/** The saved screens the stills kept, made whole (state.html, index.json)
+ *  and checked against their moment, in the browser that took them. Nothing
+ *  here fails the shoot: a screen that cannot be finished is a line. */
+async function finishStates(
+  browser: Browser,
+  stage: string,
+  kept: DomStateRaw[],
+  stills: ShootStill[],
+  viewport: { w: number; h: number },
+  note: (line: string) => void,
+): Promise<ShootStateItem[]> {
+  if (!kept.length) return [];
+  let done: DomStateItem[];
+  try {
+    done = await finalizeDomStates({
+      browser,
+      statesDir: join(stage, "states"),
+      states: kept,
+      vw: viewport.w,
+      vh: viewport.h,
+    });
+  } catch (e) {
+    note(`shoot: the saved screens could not be finished (${(e as Error).message})`);
+    done = kept.map((k) => ({
+      id: k.id,
+      tMs: k.tMs,
+      fidelity: { psnr: 0, diffFrac: 1, ok: false },
+    }));
+  }
+  const items = done.map((d) => {
+    const still = stills.find((st) => st.state === d.id);
+    return {
+      id: d.id,
+      still: still?.file ?? "",
+      t: still?.t ?? Math.round(d.tMs) / 1000,
+      fidelity: d.fidelity ?? { psnr: 0, diffFrac: 1, ok: false },
+    };
+  });
+  const bad = items.filter((i) => !i.fidelity.ok).map((i) => i.id);
+  if (bad.length)
+    note(
+      `shoot: ${bad.length} of ${items.length} saved screen(s) did not re-render as shot (${bad.join(", ")}) — their stills are fine; \`open-take film picture <state.html>\` shows one as it renders`,
+    );
+  return items;
+}
+
+/** A saved screen's id: the still's name, made a safe folder name, and new
+ *  in this shoot ("assets" holds their shared files). */
+export function stateId(name: string, taken: ReadonlySet<string>): string {
+  const base = name.replace(/[^\p{L}\p{N}_.-]+/gu, "-").replace(/^[-.]+|-+$/g, "") || "still";
+  const free = (id: string) => !taken.has(id) && id !== "assets";
+  if (free(base)) return base;
+  for (let i = 2; ; i++) if (free(`${base}-${i}`)) return `${base}-${i}`;
+}
+
+/** One line on what a shoot kept: how many stills kept their saved screen —
+ *  or, when none did, what keeps one. Information, printed with the result. */
+export function shootStatesLine(log: ShootLog): string {
+  const n = log.stills.length;
+  const kept = log.states?.items ?? [];
+  if (!kept.length)
+    return `kept ${n} still${n === 1 ? "" : "s"}; no saved screens — { state: true } on a still (or --states) also keeps the interface itself, for screen() / lift() / isolate() in kit/media.js (skill film material)`;
+  const ok = kept.filter((i) => i.fidelity.ok).length;
+  return `saved screens: ${kept.length} of ${n} still${n === 1 ? "" : "s"} in ${log.states!.dir}/ (${ok} re-render as shot) — screen() / lift() / isolate() in kit/media.js take states/<id>/state.html (skill film material); --no-states or { state: false } keeps none`;
+}
+
+/** Put the shoot staged in `stage` (its stills and saved screens, `names` —
+ *  "states/<id>" is a screen's folder — and its shots.json) in place of the
+ *  last one in `out`, but only once all of it is in place —
  *  the last one is moved aside first, and put back if anything of the new one
  *  cannot go where it belongs. Nothing of the last one is deleted unless the
  *  new one is whole in place: what cannot be put back stays aside, in a
@@ -544,10 +664,18 @@ export async function replaceShoot(
   const aside = await mkdtemp(join(out, ".shoot-previous-"));
   const previous: string[] = [];
   const placed: string[] = [];
+  // a nested name ("states/<id>") goes into a folder that may not exist yet
+  const into = async (from: string, to: string) => {
+    await mkdir(dirname(to), { recursive: true });
+    await move(from, to);
+  };
   try {
-    await moveAside(out, aside, previous, move);
+    // the screens' shared files first: named by their content, so one already
+    // there is the same file, and none of the last shoot's is replaced
+    await mergeAssets(join(stage, "states", "assets"), join(out, "states", "assets"));
+    await moveAside(out, aside, previous, into);
     for (const name of [...names, "shots.json"]) {
-      await move(join(stage, name), join(out, name));
+      await into(join(stage, name), join(out, name));
       placed.push(name);
     }
   } catch (e) {
@@ -556,12 +684,13 @@ export async function replaceShoot(
     // is, and the last shoot's file of the same name is not put over it
     const left: string[] = [];
     for (const name of placed.reverse())
-      await move(join(out, name), join(stage, name)).catch(() => left.push(name));
+      await into(join(out, name), join(stage, name)).catch(() => left.push(name));
     const stuck: string[] = [];
     for (const name of previous)
       if (left.includes(name)) stuck.push(name);
-      else await move(join(aside, name), join(out, name)).catch(() => stuck.push(name));
-    if (!stuck.length) await rmdir(aside).catch(() => {});
+      else await into(join(aside, name), join(out, name)).catch(() => stuck.push(name));
+    // all of it is back: what is left aside is empty folders
+    if (!stuck.length) await rm(aside, { recursive: true, force: true }).catch(() => {});
     throw new Error(
       `shoot: the new shoot could not replace the last one (${why}) — ${
         stuck.length
@@ -625,11 +754,41 @@ async function moveAside(
   const names = (Array.isArray(old.stills) ? old.stills : [])
     .map((st) => st?.file)
     .filter((f): f is string => typeof f === "string" && /^\d{3,}-[^/\\]+\.png$/.test(f));
-  for (const name of [...names, "shots.json"]) {
+  // its saved screens: the folders its log names, and no other
+  const screens = (Array.isArray(old.states?.items) ? old.states.items : [])
+    .map((it) => it?.id)
+    .filter(
+      (id): id is string =>
+        typeof id === "string" && /^[^/\\.][^/\\]*$/.test(id) && id !== "assets",
+    )
+    .map((id) => `states/${id}`);
+  for (const name of [...names, ...screens, "shots.json"]) {
     if (!existsSync(join(out, name))) continue;
     await move(join(out, name), join(aside, name));
     moved.push(name);
   }
+}
+
+/** The folders in `<out>/states/` the last shoot's log does not name: a
+ *  new screen of the same name could not go there, so its id steers round
+ *  them. */
+async function foreignStates(out: string): Promise<Set<string>> {
+  const dirs = await readdir(join(out, "states"), { withFileTypes: true }).catch(() => []);
+  let own: unknown[] = [];
+  try {
+    const old = JSON.parse(await readFile(join(out, "shots.json"), "utf8")) as ShootLog;
+    if (Array.isArray(old.states?.items)) own = old.states.items.map((it) => it?.id);
+  } catch {}
+  return new Set(dirs.filter((d) => d.isDirectory() && !own.includes(d.name)).map((d) => d.name));
+}
+
+/** Move the files of `from` that `to` lacks into it (a missing `from` is
+ *  nothing to do). */
+async function mergeAssets(from: string, to: string): Promise<void> {
+  if (!existsSync(from)) return;
+  await mkdir(to, { recursive: true });
+  for (const name of await readdir(from))
+    if (!existsSync(join(to, name))) await rename(join(from, name), join(to, name));
 }
 
 // --- s ----------------------------------------------------------------------------
@@ -644,10 +803,18 @@ type Ctx = {
   stage: string;
   stills: ShootStill[];
   note: (line: string) => void;
+  /** saved screens for the stills whose call does not say (unset: all but
+   *  the stills on the way) */
+  states: boolean | undefined;
+  /** the saved screens kept so far, raw (finished once the script is done) */
+  kept: DomStateRaw[];
 };
 
 async function shoot(ctx: Ctx): Promise<Shoot> {
-  const { cdp, raw, viewport, stills, note } = ctx;
+  const { cdp, raw, viewport, stills, note, kept } = ctx;
+  // a folder already in <out>/states/ that the last shoot's log does not name
+  // (film init's home, the author's own) is not this shoot's to replace
+  const stateIds = await foreignStates(ctx.out);
   const t0 = Date.now();
   // the mouse, viewport CSS px — until the script moves it, where a take's
   // cursor rests (cdp-capture's start: a quarter across, near the bottom)
@@ -773,8 +940,40 @@ async function shoot(ctx: Ctx): Promise<Shoot> {
       );
   };
 
+  /** the interface as the still shows it, kept as a saved screen (the same
+   *  read-only capture as `make --states`); a page that cannot be read keeps
+   *  the still without one */
+  const keepState = async (still: ShootStill) => {
+    const id = stateId(still.name, stateIds);
+    try {
+      kept.push(
+        await captureDomState(cdp, {
+          statesDir: join(ctx.stage, "states"),
+          id,
+          tMs: Math.round(still.t * 1000),
+          vw: viewport.w,
+          vh: viewport.h,
+          dpr: ctx.scale,
+        }),
+      );
+      stateIds.add(id);
+      still.state = id;
+    } catch (e) {
+      await rm(join(ctx.stage, "states", id), { recursive: true, force: true }).catch(() => {});
+      note(
+        `shoot: ${still.file} kept no saved screen (${(e as Error).message}) — the still is fine`,
+      );
+    }
+  };
+
   /** one PNG and its log entry */
-  const capture = async (name: string, action?: ShootAction): Promise<ShootStill> => {
+  const capture = async (
+    name: string,
+    action?: ShootAction,
+    state?: boolean,
+    /** a still on the way: a keystroke's (each) or a drag step's (every) */
+    onTheWay = false,
+  ): Promise<ShootStill> => {
     await within(
       evaluate(FRAME_JS, "s.still").catch(() => {}),
       500,
@@ -817,6 +1016,7 @@ async function shoot(ctx: Ctx): Promise<Shoot> {
       ...(down ? { down: true as const } : {}),
     };
     stills.push(still);
+    if (state ?? ctx.states ?? !onTheWay) await keepState(still);
     return still;
   };
 
@@ -826,7 +1026,7 @@ async function shoot(ctx: Ctx): Promise<Shoot> {
     name: string,
   ): Promise<ShootStill | null> => {
     await settleFor(o.settle, true, true);
-    return o.still === false ? null : capture(name, action);
+    return o.still === false ? null : capture(name, action, o.state);
   };
 
   /** wait for the target to appear (and, `reach`, to be hittable and enabled) */
@@ -1023,7 +1223,7 @@ async function shoot(ctx: Ctx): Promise<Shoot> {
 
     async still(name = "still", o = {}) {
       await settleFor(o.settle, false, false);
-      return capture(name);
+      return capture(name, undefined, o.state);
     },
 
     async click(target, o = {}) {
@@ -1072,7 +1272,7 @@ async function shoot(ctx: Ctx): Promise<Shoot> {
       let i = 0;
       for (const ch of text.replace(/\r\n?/g, "\n")) {
         await key(ch);
-        if (o.each) await capture(`${name}-${++i}`, "type");
+        if (o.each) await capture(`${name}-${++i}`, "type", o.state, true);
       }
       return after(o, "type", name);
     },
@@ -1109,7 +1309,7 @@ async function shoot(ctx: Ctx): Promise<Shoot> {
           r2(from.y + (to.y - from.y) * u),
           0,
         );
-        if (every != null) await capture(`${name}-${i}`, "drag");
+        if (every != null) await capture(`${name}-${i}`, "drag", o.state, true);
         else await sleep(DRAG_STEP_MS);
       }
       await mouse("mouseReleased", to.x, to.y);
@@ -1181,4 +1381,65 @@ async function shoot(ctx: Ctx): Promise<Shoot> {
     scale: ctx.scale,
     out: ctx.out,
   };
+}
+
+// --- one page's saved screen --------------------------------------------------------
+
+export type ShootHomeOpts = {
+  url: string;
+  /** the folder states/<name>/ goes in (a film's folder) */
+  dir: string;
+  /** default "home" */
+  name?: string;
+  width?: number;
+  height?: number;
+  scale?: number;
+  chromePath?: string;
+  userDataDir?: string;
+  onNote?: (line: string) => void;
+};
+
+/** Open `url` the way `s.open` does and keep that moment as a saved screen
+ *  in `<dir>/states/<name>/` (state.html, index.json, live.png), its shared
+ *  files in `<dir>/states/assets/` — `film init --url`. A screen already
+ *  there under that name is replaced once the new one is in hand. */
+export async function shootHome(opts: ShootHomeOpts): Promise<{
+  /** states/<name>/ */
+  dir: string;
+  url: string;
+  title: string;
+  fidelity: ShootStateItem["fidelity"];
+}> {
+  const dir = resolve(opts.dir);
+  const name = opts.name ?? "home";
+  if (stateId(name, new Set()) !== name)
+    throw new Error(`shoot: ${JSON.stringify(name)} is not a folder name a saved screen can have`);
+  await mkdir(dir, { recursive: true });
+  const work = await mkdtemp(join(dir, ".shoot-home-"));
+  try {
+    let page = { url: opts.url, title: "" };
+    const { log } = await runShoot({
+      script: async (s) => {
+        page = await s.open(opts.url);
+        await s.still(name, { state: true });
+      },
+      outDir: work,
+      ...(opts.width ? { width: opts.width } : {}),
+      ...(opts.height ? { height: opts.height } : {}),
+      ...(opts.scale ? { scale: opts.scale } : {}),
+      ...(opts.chromePath ? { chromePath: opts.chromePath } : {}),
+      ...(opts.userDataDir ? { userDataDir: opts.userDataDir } : {}),
+      ...(opts.onNote ? { onNote: opts.onNote } : {}),
+    });
+    const item = log.states?.items.find((i) => i.id === name);
+    if (!item) throw new Error(`shoot: ${opts.url} gave no saved screen`);
+    const states = join(dir, "states");
+    await mergeAssets(join(work, "states", "assets"), join(states, "assets"));
+    const to = join(states, name);
+    if (existsSync(to)) await rename(to, join(work, "previous"));
+    await rename(join(work, "states", name), to);
+    return { dir: to, url: page.url, title: page.title, fidelity: item.fidelity };
+  } finally {
+    await rm(work, { recursive: true, force: true });
+  }
 }

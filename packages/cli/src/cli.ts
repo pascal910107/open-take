@@ -57,6 +57,7 @@ import {
   loadCaptureLogSibling,
   makeTake,
   muxFilm,
+  pageMaterialNote,
   openPath,
   outlineState,
   type PostShootPass,
@@ -64,6 +65,7 @@ import {
   patchFilm,
   profileDir,
   readNotes,
+  readPageMaterial,
   renderAbReel,
   renderBeforeAfter,
   renderCompositionFile,
@@ -82,6 +84,8 @@ import {
   runShoot,
   SAY_IT_CARD,
   settleDefects,
+  shootHome,
+  shootStatesLine,
   skippedDefects,
   measureTake,
   stagePrev,
@@ -92,6 +96,8 @@ import {
   waitForNotes,
 } from "@open-take/runtime";
 import { autoSyncBundledAgentSkill, loadSkillBundle, syncAgentSkill } from "./init";
+import { asksForHelp, helpText } from "./help";
+import { FILM_TOPICS, skillPrint } from "./skill-print";
 
 // how to invoke this CLI, for printed follow-up commands: the bin name when
 // installed, else the literal node path the user just ran (copy-pasteable).
@@ -120,6 +126,7 @@ const BOOL_FLAGS = new Set([
   "--skip-permissions",
   "--no-teaser",
   "--states",
+  "--no-states",
   "--no-product-audio",
   "--json",
   "--no-blur",
@@ -128,6 +135,7 @@ const BOOL_FLAGS = new Set([
   "--measure",
   "--no-text",
   "--no-picture",
+  "--all",
 ]);
 
 const argv = process.argv.slice(2);
@@ -135,8 +143,13 @@ const cmd = argv[0];
 const positional: string[] = [];
 const flags: Record<string, string> = {};
 let parseError: string | undefined;
+// `<verb> --help` (or -h, anywhere after the verb) prints that verb's usage
+// instead of running it — main() checks it before any parse error, so it never
+// reads as a value flag missing its value.
+const helpAsked = asksForHelp(argv.slice(1));
 for (let i = 1; i < argv.length; i++) {
   const a = argv[i]!;
+  if (a === "--help" || a === "-h") continue;
   if (a.startsWith("--")) {
     if (BOOL_FLAGS.has(a)) {
       flags[a] = "true";
@@ -226,9 +239,9 @@ const FLAGS_BY_CMD: Record<string, string[]> = {
     "--verbose",
   ],
   init: ["--force"],
-  skill: ["--force"],
+  skill: ["--force", "--all"],
   launch: ["--video", "--out", "--draft", "--verbose"],
-  shoot: ["--out", "--scale", "--size", "--profile", "--headed"],
+  shoot: ["--out", "--scale", "--size", "--profile", "--headed", "--states", "--no-states"],
 };
 
 function rejectUnknownFlags(cmd: string): void {
@@ -271,16 +284,16 @@ Usage:
   open-take launch init <directory> --video <existing.mp4>
   open-take launch compose <brief.json> --out <launch.json>
   open-take launch check <launch.json>
-  open-take launch render <launch.json> [--out <movie.mp4>] [--draft]
-  open-take skill  [motion | film | install [--force]]
-  open-take shoot  <script.mjs> [--out shots] [--scale 2] [--size 1920x1080]
-  open-take film init   <dir> [--force]
+  open-take launch render <launch.json> [--out <movie.mp4>] [--draft] [--verbose]
+  open-take skill  [motion | film [<topic> | --all] | cases [<name>] | install [--force]]
+  open-take shoot  <script.mjs> [--out shots] [--scale 2] [--size 1920x1080] [--states | --no-states]
+  open-take film init   <dir> [--force] [--url <url> [--size 1920x1080] [--profile <name>]]
   open-take film render <page.html|dir> [--out film.mp4] [--audio <file>|none] [--draft] [--no-blur]
                    [--size 1920x1080] [--fps 60] [--duration <s>] [--from <s>] [--to <s>] [--root <dir>]
-                   [--workers 2] [--supersample 2] [--into <film.mp4>]
+                   [--workers 2] [--supersample 2] [--into <film.mp4>] [--verbose]
   open-take film mux    <film.mp4> --audio <file>|none [--out <film.mp4>]
   open-take film still  <page.html|dir> --at <s>[,<s>…] [--out <dir>] [--no-blur] [--root <dir>]
-                   [--size 1920x1080] [--supersample 2]
+                   [--size 1920x1080] [--supersample 2] [--verbose]
   open-take film picture <state.html|dir> [--scale 2] [--out picture.png]
   open-take film sheet  <film.mp4> [--out sheet.png] [--every <s> | --at <s>,<s>…]
   open-take film listen <film.mp4|score.wav> [--events <events.json>] [--stems <dir>] [--out <dir>]
@@ -288,12 +301,13 @@ Usage:
   open-take film beats  <music|film.mp4> [--out <name>.beats.json]
   open-take film look   <take|states|state|url|look.json> [--out look] [--state s0,s3] [--text <words>]
                    [--page <page.html|dir>] [--fonts <dir>] [--font-files <a.woff2,…>] [--size 1920x1080] [--no-picture]
+                   [--json] [--verbose]
   open-take film probe  <film.mp4|film dir> [--page <page.html|dir> [--root <dir>]] [--events <events.json>]
                    [--out <dir>] [--every <s>] [--text-every <s>] [--no-text]
   open-take film gallery [<film dir>] [--blocks rise,camera.shake,…] [--with <picture|state|take>]
                    [--subject <id|text|x,y,w,h>] [--beats <beats.json>] [--out <dir>]
   open-take film check  <film.mp4> [--size 1920x1080] [--fps 60] [--page <page.html|dir> [--root <dir>]]
-                   [--json]
+                   [--json] [--verbose]
 
   A take is TWO things on disk: the postable master at exactly your --out path
   (<out>.mp4), and a working directory beside it (<out>.take/) holding
@@ -474,8 +488,11 @@ Usage:
           upgrades reach the project without re-running init.
 
   skill   print the full agent guide (SKILL.md); \`skill film\` prints the
-          guide to films written as web pages, \`skill motion\` the motion
-          composition reference. \`skill install\` remains as a
+          core of the guide to films written as web pages (with an index of
+          what is there and the guide's file paths), \`skill film <topic>\`
+          one of its topics (${FILM_TOPICS.join(", ")}), \`skill film
+          --all\` all of it; \`skill cases [<name>]\` the cases' index or one
+          case; \`skill motion\` the motion composition reference. \`skill install\` remains as a
           backwards-compatible alias for \`init\`.
   shoot   shoot a film's material with a script you write: an .mjs whose
           default export is \`async (s) => { … }\`, run in open-take's Chrome
@@ -507,6 +524,15 @@ Usage:
           real speed with \`make\`. A script that throws exits 1 with its
           message and line; the last good shoot stays, and what the failed
           one took is in <out>/.shoot/.
+          A still from s.still() and the still an action ends on also keep
+          the interface itself: a saved screen in <out>/states/<name>/
+          (state.html + index.json), the same capture and fidelity check as
+          make --states, named by the still's \`state\` in shots.json;
+          kit/media.js screen() shows it as live DOM, lift() / isolate() work
+          on it. The stills on the way (each, every) keep none unless the
+          call says state: true; state: false keeps none; --states keeps one
+          with every still, --no-states with none. About 0.3–0.5 s a screen;
+          one that cannot be read never fails the shoot.
   film    a film you write yourself as a web page — open-take only performs
           it. \`film init\` copies the film kit into a folder (kit/: a camera
           with the take camera's motion, a cursor, one timeline for picture
@@ -584,7 +610,7 @@ Usage:
           less (Chrome places glyphs on whole pixels), for about 1.3–2× the
           render time; 3 smooths further. A slow push on a screen is
           steadiest as a picture of it shot at twice the pixels, rendered
-          with --supersample 3 (\`skill film\`): \`film picture\` draws a saved
+          with --supersample 3 (\`skill film render\`): \`film picture\` draws a saved
           screen that way.
 
   --out <path>   (make) where the postable master goes — taken literally, and
@@ -849,13 +875,17 @@ const clearDefects = async (takeDir: string): Promise<void> =>
   unlink(join(takeDir, "defects.json")).catch(() => {});
 
 async function main() {
+  if (helpAsked && cmd) {
+    process.stdout.write(helpText(USAGE, FLAGS_BY_CMD, [cmd, ...positional]));
+    return;
+  }
   if (parseError) throw new Error(`${cmd ?? ""}: ${parseError}`.trim());
   if (cmd) rejectUnknownFlags(cmd);
   // The vendored renderer forwards page-console noise ("Worker 0: JSHandle:…")
   // only when this is set (see revideo-renderer/scripts/build.mjs).
   if (has("--verbose")) process.env.OPEN_TAKE_VERBOSE = "1";
 
-  const bundledSkill = async () => {
+  const bundledSkillDir = async (): Promise<string> => {
     // Select one complete bundle: never pair a packaged guide with source references.
     const here = dirname(fileURLToPath(import.meta.url));
     const candidates = [
@@ -864,10 +894,11 @@ async function main() {
     ];
     for (const candidate of candidates) {
       const guide = await readFile(resolve(candidate, "SKILL.md"), "utf8").catch(() => null);
-      if (guide) return loadSkillBundle(candidate);
+      if (guide) return candidate;
     }
     throw new Error("SKILL.md not found (re-run the package build)");
   };
+  const bundledSkill = async () => loadSkillBundle(await bundledSkillDir());
 
   // package.json sits beside dist/ (or beside src/ in the monorepo) — the
   // version stamps the skill lock so a lock file names the CLI that wrote it.
@@ -1853,20 +1884,9 @@ async function main() {
   if (cmd === "skill") {
     if (positional[0] === "install") await runInit();
     else {
-      if (positional.length > 1 || (positional[0] && !["motion", "film"].includes(positional[0])))
-        throw new Error("skill: expected motion, film or install [--force]");
-      const bundle = await bundledSkill();
-      const text =
-        positional[0] === "motion"
-          ? bundle.resources?.["references/motion-composition.md"]
-          : positional[0] === "film"
-            ? bundle.resources?.["references/film.md"]
-            : bundle.skillText;
-      if (!text)
-        throw new Error(
-          `${positional[0] ?? "skill"} reference not found (re-run the package build)`,
-        );
-      process.stdout.write(text);
+      const dir = await bundledSkillDir();
+      const bundle = await loadSkillBundle(dir);
+      process.stdout.write(skillPrint(bundle, dir, { args: positional, all: has("--all") }));
     }
     return;
   }
@@ -1883,6 +1903,8 @@ async function main() {
     const scale = scaleFlag == null ? undefined : Number(scaleFlag);
     if (scale != null && !(scale > 0 && scale <= 4))
       throw new Error(`shoot: --scale takes a number above 0, at most 4 (got ${scaleFlag})`);
+    if (has("--states") && has("--no-states"))
+      throw new Error("shoot: --states or --no-states, not both");
     const profile = flag("--profile");
     const { log, path } = await runShoot({
       script,
@@ -1892,12 +1914,15 @@ async function main() {
       scale,
       ...(profile ? { userDataDir: profileDir(profile) } : {}),
       ...(has("--headed") ? { headless: false } : {}),
+      ...(has("--states") ? { states: true } : {}),
+      ...(has("--no-states") ? { states: false } : {}),
     });
     const px = (n: number) => Math.round(n * log.scale);
     process.stdout.write(
       `shots: ${path} — ${log.stills.length} still${log.stills.length === 1 ? "" : "s"}, ` +
         `${px(log.viewport.w)}×${px(log.viewport.h)} each\n`,
     );
+    if (log.stills.length) process.stdout.write(`       ${shootStatesLine(log)}\n`);
     return;
   }
 
@@ -2015,7 +2040,44 @@ async function main() {
       return;
     }
     if (action === "init") {
-      only("--force");
+      only("--force", "--url", "--size", "--profile");
+      const url = flag("--url");
+      if (has("--url") && !url) throw new Error("film init: --url <url> is the product's page");
+      if (!url && (has("--size") || has("--profile")))
+        throw new Error("film init: --size and --profile go with --url");
+      if (url) {
+        // the product's landing page, before the starter page is written so
+        // that it can name what is there; neither step stops the init
+        const profile = flag("--profile");
+        const chromePath = await ensureChrome();
+        const home = await shootHome({
+          url,
+          dir: target,
+          width: size?.width,
+          height: size?.height,
+          chromePath,
+          ...(profile ? { userDataDir: profileDir(profile) } : {}),
+        }).catch((e: Error) => {
+          process.stdout.write(`no saved screen of ${url}: ${e.message}\n`);
+          return null;
+        });
+        if (home)
+          process.stdout.write(
+            `saved screen: ${join(home.dir, "state.html")} — ${home.title || home.url}` +
+              `${home.fidelity.ok ? "" : " (it did not re-render as the page showed; `film picture` shows how it renders)"}\n`,
+          );
+        const look = await filmLook({
+          source: home ? home.dir : url,
+          out: join(resolve(target), "look"),
+          width: size?.width,
+          height: size?.height,
+          chromePath,
+        }).catch((e: Error) => {
+          process.stdout.write(`no look: ${e.message}\n`);
+          return null;
+        });
+        if (look) process.stdout.write(`look: ${look.json}\n`);
+      }
       const r = await initFilm({ dir: target, force: has("--force") });
       for (const f of r.written) process.stdout.write(`wrote ${f}\n`);
       for (const f of r.kept)
@@ -2050,6 +2112,9 @@ async function main() {
         onConsole,
       });
       process.stdout.write(`${files.join("\n")}\n`);
+      const material = await readPageMaterial(target, flag("--root")).catch(() => null);
+      const note = material && pageMaterialNote(material);
+      if (note) process.stdout.write(`material: ${note}\n`);
       return;
     }
     if (action === "sheet") {
@@ -2223,7 +2288,8 @@ async function main() {
   }
 
   if (cmd === "--help" || cmd === "-h" || cmd === "help") {
-    process.stdout.write(USAGE);
+    // `help <verb> [<sub>]` is the same as `<verb> [<sub>] --help`
+    process.stdout.write(cmd === "help" ? helpText(USAGE, FLAGS_BY_CMD, positional) : USAGE);
     return;
   }
 

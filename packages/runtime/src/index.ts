@@ -57,7 +57,9 @@ export {
   formatIssues,
   initFilm,
   muxFilm,
+  pageMaterialNote,
   patchFilm,
+  readPageMaterial,
   renderFilm,
   type TakeComposition,
   validateComposition,
@@ -113,8 +115,8 @@ export {
 export { type EditServerOpts, startEditServer } from "./edit-server";
 export {
   type AnnotateOpts,
-  annotateCaptureLog,
   alignFrames,
+  annotateCaptureLog,
   diffFrames,
   type FrameDiffResult,
   measureStateSeams,
@@ -177,8 +179,11 @@ export {
   type ShootOpts,
   type ShootScript,
   type ShootSettle,
+  type ShootStateItem,
   type ShootStill,
   type ShootTarget,
+  shootHome,
+  shootStatesLine,
 } from "./shoot";
 export {
   describeTake,

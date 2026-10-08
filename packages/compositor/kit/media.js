@@ -2,7 +2,10 @@
 // The real interface in a film — open-take's film kit. The kinds of material:
 //
 //   screen(iframe)  a saved screen (`make --states`: takes/x.take/states/s3/
-//                   state.html) shown in an <iframe> the size of its viewport.
+//                   state.html; a shoot's still kept with { state: true }:
+//                   shots/states/home/state.html — the same files) shown in
+//                   an <iframe> the size of its viewport. screen(iframe, url)
+//                   points the iframe at it.
 //                   box() says where a part of it is — measured on the page as
 //                   it is now, so restyling it moves the box too — in the
 //                   screen's own CSS px: the coordinates the camera and cursor
@@ -12,7 +15,8 @@
 //                   frame is drawn, a bounded number held at once (a long drag
 //                   can be 900 stills), and every box and cursor position the
 //                   shoot recorded — in the still's own px — so nothing is
-//                   copied by hand.
+//                   copied by hand. state(i) is the URL of the saved screen
+//                   a still kept, for screen(), and so for lift / isolate.
 //   readTake(url)   a take `open-take make` recorded (capture.json): its
 //                   actions, its recording, its saved states. clip() maps
 //                   film time onto the recording (a start and a speed, or
@@ -36,6 +40,9 @@
 //
 //   const st = await stills("shots/shots.json", document.querySelector("#still"));
 //   await st.show(st.at(t, { from: 4, start: 12, rate: 30 }));
+//
+//   const home = screen(document.querySelector("#home"), st.state("home")); // a shoot's still, as live DOM
+//   const total = lift(home, "#total", { around: "clear" });                 // that part, sharp at any size
 //
 //   const c = clip({ at: 7, from: 12.0, to: 15.5 });            // film 7 s shows 12.0 s
 //   const card = lift(s, "e126", { around: "clear" });           // the number the app worked out
@@ -99,10 +106,17 @@ function offsetWithin(what, el, layer) {
 }
 
 /**
- * A saved screen shown in an iframe of its viewport's size.
+ * A saved screen shown in an iframe of its viewport's size: one already in
+ * the iframe's src, or `src` — a state.html URL (a take's, a shoot's
+ * states/<id>/state.html, stills().state(i)).
  * @param {HTMLIFrameElement} frame
+ * @param {string | URL} [src]
  */
-export function screen(frame) {
+export function screen(frame, src) {
+  if (src != null) {
+    const url = new URL(String(src), location.href).href;
+    if (frame.src !== url) frame.src = url;
+  }
   /** @type {{ viewport?: { w: number, h: number }, elements?: { id: string, box: number[] }[] } | null} */
   let index = null;
   // an iframe that has not loaded yet holds a blank page that also reads as
@@ -237,6 +251,7 @@ export function stillCache({ keep, ahead, count, open }) {
  * @property {{ x: number, y: number }} [cursor]
  * @property {{ x: number, y: number }} [scroll]
  * @property {Record<string, Box>} [boxes]
+ * @property {string} [state] its saved screen's id: states/<state>/state.html
  */
 
 /**
@@ -248,7 +263,7 @@ export function stillCache({ keep, ahead, count, open }) {
 export async function stills(logUrl, img, { keep = 12, ahead = 3 } = {}) {
   const res = await fetch(logUrl);
   if (!res.ok) throw new Error(`stills: ${logUrl} could not be read (${res.status})`);
-  /** @type {{ viewport: { w: number, h: number }, scale?: number, stills: Still[] }} */
+  /** @type {{ viewport: { w: number, h: number }, scale?: number, stills: Still[], states?: { dir: string } }} */
   const log = await res.json();
   const base = new URL(logUrl, location.href);
   let shown = -1;
@@ -321,6 +336,25 @@ export async function stills(logUrl, img, { keep = 12, ahead = 3 } = {}) {
         width: b.width,
         height: b.height,
       };
+    },
+    /**
+     * The saved screen a still kept (shot with { state: true } or --states):
+     * its state.html URL, for screen(iframe, url) — and so lift / isolate.
+     * By the still's index, its name, or the screen's id.
+     * @param {number | string} key
+     */
+    state(key) {
+      const s =
+        typeof key === "number"
+          ? still(key)
+          : (log.stills.find((x) => x.state === key) ?? log.stills.find((x) => x.name === key));
+      if (!s) throw new Error(`stills: no still ${JSON.stringify(key)} in ${logUrl}`);
+      if (!s.state)
+        throw new Error(
+          `stills: ${s.file} kept no saved screen — shoot it with s.still(name, { state: true }) (or --states)`,
+        );
+      const dir = log.states?.dir ?? "states";
+      return new URL(`${dir}/${s.state}/state.html`, base).href;
     },
     /** where the shoot's cursor was at still i, in the still's own CSS px */
     /** @param {number} i */
