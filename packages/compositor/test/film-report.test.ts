@@ -1,17 +1,30 @@
 // What `film render` prints when it is done: the jump reader and the slow
 // text reader on cases built here with known answers, the lines on a report
-// made here, then the whole report on a film rendered from a page made here
-// (Chrome).
+// made here, then the whole report on films rendered from pages made here
+// (Chrome) — one of them naming parts of a synthetic shoot through
+// product().
 
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
+import { resolveFfmpeg, runTool } from "../src/ffmpeg";
+import { gatherComponents, readComponentSource, writeComponents } from "../src/film/components";
+import { initFilm } from "../src/film/kit";
 import { type GreyFrames, jumpMove } from "../src/film/probe";
 import { renderFilm } from "../src/film/render";
-import { type FilmReport, filmReport, formatFilmReport, slowTextSpans } from "../src/film/report";
+import {
+  type FilmReport,
+  filmReport,
+  formatFilmReport,
+  inFrameOf,
+  partUses,
+  pastPixels,
+  slowTextSpans,
+} from "../src/film/report";
 import { findChrome } from "./fixtures/find-chrome";
+import { writePartsShoot } from "./fixtures/parts-shoot";
 
 const W = 192;
 const H = 108;
@@ -116,6 +129,7 @@ const REPORT: FilmReport = {
   duration: 44.4,
   fps: 60,
   from: 0,
+  every: 0.5,
   layout: { width: 1920, height: 1080 },
   density: 1,
   slowFps: 60,
@@ -126,6 +140,8 @@ const REPORT: FilmReport = {
     list: [{ from: 19.32, to: 20.1, at: 19.52, axis: "x", kind: "back", px: 19 }],
   },
   draft: false,
+  pastPixels: { how: "measured", list: [] },
+  parts: { how: "measured", named: 0, uses: [] },
   productText: {
     how: "measured",
     pictures: { how: "read", files: 2, skipped: 0 },
@@ -238,6 +254,218 @@ test("the lines: what was measured, where, how much — and where the full repor
   assert.match(none, /live text moving under a device pixel a frame for a second or more: none/);
 });
 
+test("the parts the film named: each use, where the part was at its times, facts only", () => {
+  const seen = {
+    t: 13,
+    state: "home",
+    shown: true,
+    on: ["home"],
+    picture: [800, 400, 100, 60] as [number, number, number, number],
+    inFrame: 1,
+    covered: [] as { what: string; share: number }[],
+    drawn: "screen" as const,
+  };
+  const r: FilmReport = {
+    ...REPORT,
+    pastPixels: {
+      how: "measured",
+      list: [{ src: "/x.take/capture.mp4", label: "video", from: 3.1, to: 6, ratio: 2.4 }],
+    },
+    parts: {
+      how: "measured",
+      named: 4,
+      uses: [
+        {
+          name: '"format menu"',
+          ref: "c-1:e77",
+          use: "frame",
+          t: 9,
+          seen: [{ ...seen, t: 9, state: "c-1", shown: false, on: ["c-0", "c-1", "c-2"] }],
+        },
+        {
+          name: "toggle",
+          ref: "home:e41",
+          use: "click",
+          t: 13,
+          seen: [{ ...seen, covered: [{ what: "path in #overlay", share: 0.375 }] }],
+        },
+        {
+          name: "t1",
+          ref: "n-1:e88",
+          use: "drag",
+          t: 20.4,
+          end: 21.4,
+          seen: [
+            { ...seen, t: 20.4 },
+            { ...seen, t: 21.4, inFrame: 0.88, edge: "right" },
+          ],
+        },
+        {
+          name: "n-3:e88",
+          ref: "n-3:e88",
+          use: "frame",
+          t: 21,
+          seen: [{ ...seen, t: 21, drawn: "still", sourcePx: 2.2 }],
+        },
+      ],
+    },
+  };
+  const text = formatFilmReport(r, { probe: "p" }).join("\n");
+  assert.match(text, /parts the film named \(through product\(\); times on the film's clock\):/);
+  assert.match(
+    text,
+    /"format menu" c-1:e77 framed 9\.00 s: not on the screen shown then; it is on c-0, c-1, c-2; in frame/,
+  );
+  assert.match(text, /toggle home:e41 clicked 13\.00 s: in frame; 38% covered by path in #overlay/);
+  assert.match(
+    text,
+    /t1 n-1:e88 dragged 20\.40 s–21\.40 s: off the frame's right edge 12% at 21\.40 s/,
+  );
+  // a part named by its ref is not named twice
+  assert.match(
+    text,
+    /\n {4}n-3:e88 framed 21\.00 s: in frame; drawn from a still at 2\.2 frame px per still px/,
+  );
+  assert.match(
+    text,
+    /pictures drawn past their own pixels \(<img> and <video> on the page, every 0\.50 s\): \/x\.take\/capture\.mp4 3\.10 s–6\.00 s, up to 2\.4 frame px per source px/,
+  );
+  assert.doesNotMatch(text, /\bscore\b|\bpass\b|\bgrade:|too small|too much|\bshould\b/i);
+  // none named, and the page not played, are said as such
+  const none = formatFilmReport(REPORT, { probe: "p" }).join("\n");
+  assert.match(none, /parts: none named through product\(\)/);
+  assert.match(none, /pictures drawn past their own pixels \([^)]*\): none/);
+  assert.match(
+    formatFilmReport(
+      {
+        ...REPORT,
+        parts: { how: "not measured", note: "the page was not played", named: 0, uses: [] },
+      },
+      { probe: "p" },
+    ).join("\n"),
+    /parts named through product\(\): not measured — the page was not played/,
+  );
+});
+
+test("a part's use read at its times: on the film's clock, each use once, the frame's edges", () => {
+  const listed = [
+    {
+      key: "home:e41",
+      name: "toggle",
+      ref: "home:e41",
+      reads: true,
+      uses: [
+        { use: "frame", t: 12, ref: "home:e41" },
+        // the same move asked again on a later frame
+        { use: "frame", t: 12, ref: "home:e41" },
+        { use: "drag", t: 14, end: 15 },
+        // past the film's end: not read
+        { use: "mark", t: 99, label: "the toggle" },
+      ],
+    },
+  ];
+  const at = (picture: [number, number, number, number], o = {}) => ({
+    key: "home:e41",
+    state: "home",
+    ref: "home:e41",
+    shown: true,
+    on: ["home"],
+    picture,
+    drawn: "screen",
+    covered: [],
+    ...o,
+  });
+  const uses = partUses(
+    listed,
+    [
+      { t: 2, parts: [at([100, 100, 50, 50])] },
+      { t: 4, parts: [at([-25, 10, 50, 50], { covered: null })] },
+      { t: 5, parts: [{ key: "home:e41", error: "boom" }] },
+    ],
+    { from: 10, duration: 20, layout: { width: 1920, height: 1080 } },
+  );
+  assert.equal(uses.length, 3);
+  assert.deepEqual(
+    uses.map((u) => [u.use, u.t, u.end]),
+    [
+      ["frame", 2, undefined],
+      ["drag", 4, 5],
+      ["mark", 89, undefined],
+    ],
+  );
+  assert.equal(uses[0]!.seen[0]!.inFrame, 1);
+  assert.equal(uses[1]!.ref, "home:e41", "the ref read on the screen when the use had none");
+  assert.deepEqual(
+    [uses[1]!.seen[0]!.inFrame, uses[1]!.seen[0]!.edge, uses[1]!.seen[0]!.covered],
+    [0.5, "left", null],
+  );
+  assert.match(uses[1]!.note!, /could not be read at 5\.00 s: boom/);
+  assert.deepEqual(uses[2]!.seen, []);
+  assert.equal(uses[2]!.note, "not read (outside the film)");
+  // the ref read again at its time wins over the one given at setup
+  const again = partUses(
+    [{ ...listed[0]!, uses: [{ use: "click", t: 12, ref: "home:e41" }] }],
+    [{ t: 2, parts: [at([100, 100, 50, 50], { state: "add-1", ref: "add-1:e41" })] }],
+    { from: 10, duration: 20, layout: { width: 1920, height: 1080 } },
+  );
+  assert.equal(again[0]!.ref, "add-1:e41");
+  // inside the film but not read: said so, not "outside"; a drag no part was
+  // pressed for, said as such
+  const unread = partUses(
+    [
+      { ...listed[0]!, uses: [{ use: "frame", t: 13 }] },
+      { key: "drag n", name: "n", ref: "", reads: false, uses: [{ use: "drag", t: 12, end: 13 }] },
+    ],
+    [],
+    { from: 10, duration: 20, layout: { width: 1920, height: 1080 } },
+  );
+  assert.deepEqual(
+    unread.map((u) => u.note),
+    ["no part of components.json was pressed: where it is not read", "not read at its times"],
+  );
+  const lines = formatFilmReport(
+    { ...REPORT, parts: { how: "measured", named: 0, uses: unread } },
+    { probe: "p" },
+  ).join("\n");
+  assert.match(
+    lines,
+    /\n {4}n dragged 2\.00 s–3\.00 s: no part of components\.json was pressed: where it is not read/,
+  );
+  assert.deepEqual(inFrameOf([0, 1000, 100, 100], { width: 1920, height: 1080 }), {
+    inFrame: 0.8,
+    edge: "bottom",
+  });
+  assert.deepEqual(inFrameOf([2000, 0, 10, 10], { width: 1920, height: 1080 }), {
+    inFrame: 0,
+    edge: "right",
+  });
+});
+
+test("pictures drawn past their own pixels: the stretches each was, and the most px per px", () => {
+  const sample = (
+    t: number,
+    media: { label: string; src?: string; drawn?: number[]; natural?: number[] }[],
+  ) => ({ t, media: media.map((m) => ({ box: [0, 0, 10, 10], ...m })) }) as never;
+  const list = pastPixels(
+    [
+      sample(0, [{ label: "video", src: "/a.mp4", drawn: [0, 0, 200, 100], natural: [100, 50] }]),
+      sample(0.5, [
+        { label: "video", src: "/a.mp4", drawn: [0, 0, 250, 125], natural: [100, 50] },
+        // a 2× still drawn at half its pixels, and one without a known size
+        { label: "img", src: "/s.png", drawn: [0, 0, 100, 50], natural: [200, 100] },
+        { label: "canvas" },
+      ]),
+      sample(1, []),
+      sample(1.5, [{ label: "video", src: "/a.mp4", drawn: [0, 0, 150, 75], natural: [100, 50] }]),
+    ],
+    0.5,
+  );
+  assert.deepEqual(list, [
+    { src: "/a.mp4", label: "video", from: 0, to: 0.5, ratio: 2.5 },
+    { src: "/a.mp4", label: "video", from: 1.5, to: 1.5, ratio: 1.5 },
+  ]);
+});
+
 let dir = "";
 before(async () => {
   dir = await mkdtemp(join(tmpdir(), "film-report-"));
@@ -292,6 +520,115 @@ window.__render = (t) => {
     JSON.stringify(r.slowText),
   );
   assert.equal(r.moving.how, "measured");
+  assert.deepEqual(r.parts, { how: "measured", named: 0, uses: [] });
   const L = formatFilmReport(r, { probe: "probe" });
   assert.ok(L.length <= 10);
+  assert.match(L.join("\n"), /parts: none named through product\(\)/);
+});
+
+test("the report on a film naming parts: a part under an overlay, one framed while another screen shows, a 2× still, a video drawn past its pixels", {
+  skip: findChrome() ? false : "no Chrome for Testing",
+}, async () => {
+  const chrome = findChrome()!;
+  const shoot = join(dir, "shoot");
+  await mkdir(shoot, { recursive: true });
+  writePartsShoot(shoot);
+  writeComponents(gatherComponents(readComponentSource(shoot)), shoot);
+  await initFilm({ dir: join(shoot, "film") });
+  // a picture and a video 64×36, both drawn 160×90
+  const ffmpeg = await resolveFfmpeg();
+  const color = ["-f", "lavfi", "-i", "color=c=0x336699:s=64x36:r=10:d=4"];
+  await runTool(ffmpeg, [
+    "-v",
+    "error",
+    ...color,
+    "-frames:v",
+    "1",
+    "-y",
+    join(shoot, "film", "pic.png"),
+  ]);
+  await runTool(ffmpeg, [
+    "-v",
+    "error",
+    ...color,
+    "-pix_fmt",
+    "yuv420p",
+    "-y",
+    join(shoot, "film", "clip.mp4"),
+  ]);
+  const page = join(shoot, "film", "parts.html");
+  await writeFile(
+    page,
+    `<!doctype html><html><head><meta charset="utf-8"><style>
+html,body{margin:0;width:640px;height:360px;background:#fff;overflow:hidden}
+iframe{position:absolute;left:0;top:0;width:640px;height:360px;border:0}
+#over{position:absolute;left:300px;top:200px;width:80px;height:20px;pointer-events:none}
+#pic{position:absolute;left:470px;top:260px;width:160px;height:90px}
+#clip{position:absolute;left:0;top:260px;width:160px;height:90px}
+</style></head><body>
+<iframe id="now" src="../states/add-2/state.html"></iframe>
+<svg id="over" viewBox="0 0 80 20"><rect width="80" height="20" fill="#e33"/></svg>
+<img id="pic" src="pic.png"><video id="clip" src="clip.mp4" muted playsinline></video>
+<script>let done; window.__film = { duration: 3, width: 640, height: 360, fps: 10, ready: new Promise((r) => (done = r)) }; window.__render = () => {};</script>
+<script type="module">
+import { product } from "./kit/media.js";
+const P = await product("../");
+P.play([[0, "add-2"], [2.5, { still: 1 }]]);
+// from 2.5 s the still is drawn 4× (its screen's px)
+P.view({ place: (t) => ({ x: 0, y: 0, scale: t >= 2.5 ? 4 : 1 }) });
+P.part("t1").used("click", 1);
+P.part("home:e1", { name: "page" }).used("frame", 2);
+P.part("home:e2", { name: "title" }).used("frame", 2.75);
+done();
+</script></body></html>`,
+  );
+  const film = join(dir, "parts.mp4");
+  await renderFilm({
+    page,
+    root: shoot,
+    out: film,
+    chromePath: chrome,
+    blur: false,
+    audio: null,
+    workers: 1,
+  });
+  const r = await filmReport({ film, page, root: shoot, chromePath: chrome });
+  assert.equal(r.parts.how, "measured", JSON.stringify(r.parts));
+  assert.equal(r.parts.named, 3);
+  const [click, framed, title] = r.parts.uses;
+  assert.deepEqual([click?.use, click?.t, framed?.t, title?.t], ["click", 1, 2, 2.75]);
+  // the svg over the number's top half, pointer-events none and all
+  assert.deepEqual(click!.seen[0]!.covered, [{ what: "rect in #over", share: 0.5 }]);
+  assert.equal(click!.seen[0]!.inFrame, 1);
+  assert.deepEqual(
+    [framed!.seen[0]!.shown, framed!.seen[0]!.showing, framed!.seen[0]!.on],
+    [false, "add-2", ["home"]],
+    JSON.stringify(framed),
+  );
+  const t = title!.seen[0]!;
+  assert.deepEqual(
+    [t.drawn, t.sourcePx, t.inFrame, t.edge],
+    ["still", 2, 0.6, "right"],
+    JSON.stringify(t),
+  );
+  const past = r.pastPixels.list.map((x) => [x.src?.split("/").pop(), x.ratio]);
+  assert.deepEqual(
+    past
+      .filter(([, k]) => k === 2.5)
+      .map(([s]) => s)
+      .sort(),
+    ["clip.mp4", "pic.png"],
+    JSON.stringify(r.pastPixels),
+  );
+  const text = formatFilmReport(r, { probe: "probe" }).join("\n");
+  assert.match(text, /t1 add-2:e4 clicked 1\.00 s: in frame; 50% covered by rect in #over/);
+  assert.match(
+    text,
+    /page home:e1 framed 2\.00 s: not on the screen shown then \(add-2\); it is on home/,
+  );
+  assert.match(
+    text,
+    /title add-1:e2 framed 2\.75 s: off the frame's right edge 40%.*drawn from a still at 2\.0 frame px per still px/,
+  );
+  assert.match(text, /clip\.mp4 [\d.]+ s–[\d.]+ s, up to 2\.5 frame px per source px/);
 });

@@ -193,6 +193,43 @@ window.__render = (t) => {
   picture — to carry a part out of a moving layer, or into `matchCut`;
   `fitTransform(from, to, fit)` the transform from one box onto another.
 
+### One reference for a part
+
+`const P = await product("/shots/", { tl, states })` reads an inventory
+(`components.json`, below — a shoot's folder, a take, a film's `states/`, one
+saved screen's folder) with its log and screens' `index.json`, so later calls
+answer at once. `P.part(key, { name })` is one part followed through every
+screen it is on — key: a ref (`"n-1:e88"`), a track (`"t1"`), `{ text, up }`
+or a part; no match throws, naming what there is. The camera, the cursor,
+`lift`, `isolate`, `hold` and `screen().box` take it as they take a box:
+`cam.frame(part, { arrive })` frames where it is when the move lands,
+`cur.click(part, t)` lands on the point the capture acted on it, carried to
+where it is then, `lift(screen, part)` lifts it from whichever screen that
+frame shows.
+
+- `P.play([[t, stateId | { still: i }], …])` (or `t → id`, or a `clip()`) says
+  which screen shows when; `P.state(t)` / `P.still(t)` read it back for the
+  page's own swapping. Without it each part is read on its own screen.
+- `P.view({ place, cam, el })`: where the screens are drawn — a `seam()`
+  result, a box, `{ x, y, scale }` or `t →` one — and the camera over them.
+- The chain, all of it on `part.at(t)`: `screen` (the screen's CSS px) →
+  `stage` (the layer's px: `place`) → `picture` (through `cam`, as
+  `throughCamera`), with `inFrame`, `shown` (false: not on the screen shown
+  then, read on the nearest one that has it) and `sourcePx` (picture px per
+  px of the still or the recording that shows it). `boxAt(t)`, `pointAt(t)`
+  are the layer's px; `coveredBy(t)` what the page draws over it;
+  `mark(t, label)` names it for the report (a caption, a voice).
+- `P.drag(key, at, end, { ease, press })` — key: a track or a shoot's drag
+  name (its stills `<name>-<i>`), or a take's action (`"a3"`, with
+  `{ clip }`, its own path, times and pace) — is the cursor's path through
+  the real point of each saved step, with `steps` (when each step shows: as
+  the cursor, paced by `ease`, reaches it), `state(t)`, `value(t)`; a
+  track's steps are the screens a drag of the shoot took along it
+  (`{ states }` names others). `cur.drag(d)` walks it; `P.play([..., ...d.steps, ...])` swaps in step.
+- Every number on it is the film's to change: `ease`, `press`, `end`,
+  `steps` (a plain list), `place`; a part is also a box, a point, a ref
+  (`part.ref`, `part.in(state)`) for anything that takes those.
+
 ### The parts: `components.json`
 
 `shoot` and `make --states` measure each saved screen's parts while they

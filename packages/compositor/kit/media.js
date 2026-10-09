@@ -40,6 +40,10 @@
 //                   components.json — to fill a part the film draws itself
 //                   with what the product really showed (and, given the
 //                   timeline, to declare where each came from).
+//   product(url)    the product's parts (components.json) as references:
+//                   P.part("t1") is one part followed through every screen
+//                   it is on — cam.frame(part), cur.click(part, t), lift(s,
+//                   part), part.at(t) where it shows in the picture now.
 //
 // A box is always in one place's own CSS px. Where a screen sits inside a
 // bigger layer, box(…, { in: layer }) adds its offset — and refuses when
@@ -161,9 +165,11 @@ export function screen(frame, src, o = {}) {
     }
   })();
 
-  /** @param {string | Element | TextKey} key */
+  /** @param {string | Element | TextKey | Part} key */
   const measure = (key) => {
     const doc = frame.contentDocument;
+    // a part of product(): its element on this screen
+    if (isPart(key)) key = refOn(key, frame.src, "screen");
     const id = typeof key === "string" ? idOf("screen", key, frame.src) : null;
     if (id) {
       const e = index?.elements?.find((el) => el.id === id);
@@ -192,9 +198,9 @@ export function screen(frame, src, o = {}) {
     /**
      * Where a part of the screen is: a CSS selector (measured live), an
      * element of it, { text, up } (measured live), or an index id ("e12" or
-     * a ref "calc-end:e12", as captured). In the screen's own px, or in
-     * `layer`'s px when given.
-     * @param {string | Element | TextKey} key
+     * a ref "calc-end:e12", as captured), or a part of product(). In the
+     * screen's own px, or in `layer`'s px when given.
+     * @param {string | Element | TextKey | Part} key
      * @param {{ in?: Element }} [o]
      * @returns {Box}
      */
@@ -829,9 +835,17 @@ const isTextKey = (k) =>
   !Array.isArray(k) &&
   typeof (/** @type {{ text?: unknown }} */ (k).text) === "string";
 
-/** a bare box: not an element, a text, a list @param {unknown} k @returns {k is BoxLike} */
+/** a part of product() — anything that says which element it is on a saved
+ *  screen, and where it is at t @param {unknown} k @returns {k is Part} */
+const isPart = (k) =>
+  !!k &&
+  typeof k === "object" &&
+  typeof (/** @type {{ in?: unknown }} */ (k).in) === "function" &&
+  typeof (/** @type {{ boxAt?: unknown }} */ (k).boxAt) === "function";
+
+/** a bare box: not an element, a text, a part, a list @param {unknown} k @returns {k is BoxLike} */
 const isBoxKey = (k) =>
-  !!k && typeof k === "object" && !isElement(k) && !Array.isArray(k) && !isTextKey(k);
+  !!k && typeof k === "object" && !isElement(k) && !Array.isArray(k) && !isTextKey(k) && !isPart(k);
 
 /** what a page that cannot be measured is told */
 /** @param {string} what */
@@ -1052,12 +1066,31 @@ async function whenLoaded(frame) {
   });
 }
 
+/**
+ * A part of product() on the saved screen at `url`: its ref there — the same
+ * element followed through the screens — or an error naming the screens it
+ * is on. A page that is not a saved screen takes the part's own ref.
+ * @param {Part} part @param {string} url @param {string} what
+ */
+function refOn(part, url, what) {
+  const here = stateOf(url);
+  if (here == null) return part.ref;
+  const ref = part.in(here);
+  if (ref) return ref;
+  const on = part.states.map((s) => s.state);
+  throw new Error(
+    `${what}: ${part.name} is not on the saved screen "${here}"${on.length ? ` — it is on ${on.join(", ")}` : ""}`,
+  );
+}
+
 /** an element of a saved screen's document: by selector, by its index id
  *  ("e12", or the ref "calc-end:e12" as `open-take states` names it), by the
- *  text it shows ({ text, up }), or the element itself
- * @param {Document} doc @param {string | Element | TextKey} key @param {string} [what] */
+ *  text it shows ({ text, up }), a part of product() (its element on this
+ *  screen), or the element itself
+ * @param {Document} doc @param {string | Element | TextKey | Part} key @param {string} [what] */
 function findIn(doc, key, what = "lift") {
   if (isElement(key)) return key;
+  if (isPart(key)) key = refOn(key, doc.URL, what);
   if (isTextKey(key)) return byText(doc, key, what);
   if (typeof key !== "string") throw new Error(`${what}: ${String(key)} is not a part`);
   const id = idOf(what, key, doc.URL);
@@ -1186,10 +1219,10 @@ export function fitTransform(from, to, fit = "contain") {
  *   part.place(morphRect(t, a, b, part.rect, { x: 0, y: 0, w: 1920, h: 1080 }));  // view first
  *
  * @param {any} source a saved screen (screen(iframe)) or its iframe
- * @param {LiftKey | LiftKey[]} key a selector, an index id ("e12") or ref ("calc-end:e12"), { text, up }, an element of the screen, a box in the screen's px — or a list of them
+ * @param {LiftKey | LiftKey[]} key a selector, an index id ("e12") or ref ("calc-end:e12"), { text, up }, a part of product(), an element of the screen, a box in the screen's px — or a list of them
  * @param {{ into?: HTMLElement, around?: "keep" | "clear", box?: "layout" | "ink", background?: string, pad?: number,
  *   radius?: number, css?: string, fit?: "contain" | "cover" | "fill", parts?: (string | Element | TextKey)[] }} [o]
- * @typedef {string | Element | TextKey | BoxLike} LiftKey
+ * @typedef {string | Element | TextKey | Part | BoxLike} LiftKey
  */
 export function lift(source, key, o = {}) {
   const { frame, ready: sourceReady } = screenOf(source);
@@ -1215,7 +1248,9 @@ export function lift(source, key, o = {}) {
         ? `"${k.text}"`
         : isElement(k)
           ? k.tagName.toLowerCase()
-          : "box";
+          : isPart(k)
+            ? (k.in(stateOf(frame.src) ?? "") ?? k.ref)
+            : "box";
   const label = keys.map(name).join(" ");
   const el = document.createElement("div");
   el.dataset.otLift = label;
@@ -1295,7 +1330,7 @@ export function lift(source, key, o = {}) {
       );
     const doc = /** @type {Document} */ (frame.contentDocument);
     const targets = keys.map((k) =>
-      isBoxKey(k) ? null : findIn(doc, /** @type {string | Element | TextKey} */ (k)),
+      isBoxKey(k) ? null : findIn(doc, /** @type {string | Element | TextKey | Part} */ (k)),
     );
     const ms = targets.map((t, i) => measure(t, /** @type {LiftKey} */ (keys[i])));
     members = ms.map((m) => m.box);
@@ -1733,7 +1768,7 @@ export function carry(A, B, t, a, b, o = {}) {
  * film render reports the one-frame jumps the page did not declare, and how
  * far; this is one way to keep a part from jumping, when that is wanted.
  * @param {any[]} screens saved screens (or their iframes), in the order shown
- * @param {string | Element | TextKey | (string | Element | TextKey)[]} key the part, in every screen, or one key per screen
+ * @param {string | Element | TextKey | Part | (string | Element | TextKey | Part)[]} key the part, in every screen (a part of product() is found on each), or one key per screen
  * @param {{ to?: number, axis?: "x" | "y" | "both" }} [o]
  */
 export function hold(screens, key, o = {}) {
@@ -1788,7 +1823,7 @@ export function hold(screens, key, o = {}) {
  *   focus.set(smooth((t - 5) / 0.4));               // in __render(t)
  *
  * @param {any} source a saved screen or its iframe
- * @param {(string | Element | TextKey | BoxLike)[]} keys selectors, index ids or refs, { text, up }, elements or boxes (screen px)
+ * @param {(string | Element | TextKey | Part | BoxLike)[]} keys selectors, index ids or refs, { text, up }, parts of product(), elements or boxes (screen px)
  * @param {{ color?: string, opacity?: number, blur?: number, pad?: number, radius?: number }} [o]
  */
 export function isolate(source, keys, o = {}) {
@@ -2027,4 +2062,1112 @@ export async function readValues(url, o = {}) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`readValues: ${url} — ${res.status}`);
   return partValues(await res.json(), { ...o, file: url });
+}
+
+// --- the product's parts, as references ----------------------------------------------
+
+/**
+ * One part of the product as one reference — the same element followed
+ * through every saved screen it is on, and where it shows in the film at t
+ * through the screens shown (P.play), where they are drawn (P.view) and the
+ * camera. Boxes are the screen's CSS px (`box`), the layer's px the screens
+ * sit in (`boxAt`, `pointAt` — what cam.frame and the cursor take) and the
+ * picture's px (`at(t).picture`).
+ * @typedef {object} Part
+ * @property {string} key how the page's registry knows it (film render's report reads it by this)
+ * @property {string} name what the film calls it (its key, unless named)
+ * @property {string} ref its element on the screen it was named on, `<state>:<eN>`
+ * @property {string} [track] the track of components.json it is
+ * @property {string} [kind] its kind in components.json
+ * @property {PartState[]} states every screen it is on, in the log's order
+ * @property {(state: string) => string | null} in its ref on a screen, or null
+ * @property {(state?: string) => Box} box where it is on a screen (default: its own), the screen's px
+ * @property {(t: number) => Box} boxAt where it is at t, the layer's px
+ * @property {(t: number) => { x: number, y: number }} pointAt where the capture acted on it, carried to where it is at t — else its centre; the layer's px
+ * @property {(t: number) => PartAt} at where it shows at t, every step of the way
+ * @property {(layer: { box: Box, source: Box, map: (b: BoxLike) => Box }) => Part} via the part as a lifted copy shows it (after the copy's place())
+ * @property {(t: number, label?: string) => number} mark the film names it at t (a caption, a voice, a ring) — returns t
+ * @property {(t: number) => { what: string, share: number }[]} coveredBy what in the page is drawn over it at t, by share of its picture
+ * @property {(use: string, t: number, o?: { end?: number, label?: string, steps?: PlayEntry[] }) => void} used say the film uses it at t (the camera and the cursor do)
+ * @property {PartUse[]} uses every use, in the order made
+ */
+/** @typedef {{ state: string, ref: string, box: Box, value?: number }} PartState */
+/** @typedef {{ use: string, t: number, end?: number, label?: string, ref?: string, steps?: PlayEntry[] }} PartUse */
+/**
+ * @typedef {object} PartAt
+ * @property {number} t
+ * @property {string} state the screen it was read on
+ * @property {boolean} shown that screen is the one shown at t (false: it is not on that one, and the nearest screen it is on was read)
+ * @property {string} [showing] the screen shown at t (with play)
+ * @property {Box} screen the screen's px
+ * @property {Box} stage the layer's px
+ * @property {Box} picture the picture's px
+ * @property {number} inFrame the share of it inside the picture's frame, 0..1
+ * @property {"screen" | "still" | "recording"} drawn what shows it: the saved screen, a still, the recording
+ * @property {number} [sourcePx] picture px per px of the still or the recording that shows it
+ */
+/** @typedef {[number, string | { still: number }]} PlayEntry  from film time t, a screen or a still */
+/** @typedef {{ scale: number, offset?: { x: number, y: number } } | { x: number, y: number, width: number, height: number } | { x: number, y: number, scale: number }} PlaceLike */
+
+/** smootherstep, 6p⁵ − 15p⁴ + 10p³ — the cursor's own drag pace (kit/cursor.js) */
+/** @param {number} p */
+export const smootherstep = (p) => {
+  const x = Math.max(0, Math.min(1, p));
+  return x * x * x * (x * (x * 6 - 15) + 10);
+};
+/** @param {number} p */
+const linearPace = (p) => Math.max(0, Math.min(1, p));
+
+/** the share of `b` inside `f`, 0..1 @param {Box} b @param {Box} f */
+const shareInside = (b, f) => {
+  const w = Math.min(b.x + b.width, f.x + f.width) - Math.max(b.x, f.x);
+  const h = Math.min(b.y + b.height, f.y + f.height) - Math.max(b.y, f.y);
+  const a = b.width * b.height;
+  return a > 0 ? (Math.max(0, w) * Math.max(0, h)) / a : 0;
+};
+
+/** a box from components.json's or index.json's [x, y, w, h] @param {number[]} b @returns {Box} */
+const boxFrom = (b) => ({ x: b[0] ?? 0, y: b[1] ?? 0, width: b[2] ?? 0, height: b[3] ?? 0 });
+
+/** the fraction along a polyline at each of its points, by length (as the
+ *  cursor walks a drag) @param {{ x: number, y: number }[]} path */
+function lengthsAlong(path) {
+  const at = [0];
+  let total = 0;
+  for (let i = 1; i < path.length; i++) {
+    const a = /** @type {{ x: number, y: number }} */ (path[i - 1]);
+    const b = /** @type {{ x: number, y: number }} */ (path[i]);
+    total += Math.hypot(b.x - a.x, b.y - a.y);
+    at.push(total);
+  }
+  return at.map((d) => (total > 0 ? d / total : 0));
+}
+
+/** the progress at which a rising ease reaches `v`, by bisection
+ * @param {(p: number) => number} ease @param {number} v */
+function easeInverse(ease, v) {
+  if (v <= ease(0)) return 0;
+  if (v >= ease(1)) return 1;
+  let lo = 0;
+  let hi = 1;
+  for (let i = 0; i < 64; i++) {
+    const mid = (lo + hi) / 2;
+    if (ease(mid) < v) lo = mid;
+    else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
+/**
+ * The product's parts from what is already in hand — components.json, its
+ * log (shots.json or capture.json) and each listed screen's index.json, by
+ * state id — as product() reads them; `base` is where components.json was
+ * read (for the URLs of the screens, stills and recording that show them).
+ * @param {{ components?: any, log?: any, indexes?: Record<string, any>, base?: string, logUrl?: string,
+ *   tl?: { event: (at: number, kind: string, o?: { x?: number, y?: number, label?: string }) => number, curve: (name: string, fn: (t: number) => number) => void },
+ *   states?: string[] }} data
+ */
+export function productFrom(data) {
+  const comp = data.components ?? null;
+  const log = data.log ?? null;
+  const indexes = data.indexes ?? {};
+  const tl = data.tl;
+  if (comp && (typeof comp !== "object" || !Array.isArray(comp.components)))
+    throw new Error("product: this is not a components.json (no components list)");
+  const kind = comp?.source?.kind ?? (log?.stills ? "shoot" : log?.events ? "take" : "state");
+  /** @type {{ id: string, url?: string, since?: string, action?: any, shot?: string }[]} */
+  let screens = comp ? comp.states : Object.keys(indexes).map((id) => ({ id, url: "state.html" }));
+  if (data.states) {
+    const keep = new Set(data.states);
+    for (const id of keep)
+      if (!screens.some((s) => s.id === id))
+        throw new Error(
+          `product: no screen ${id} — it has ${screens.map((s) => s.id).join(", ") || "none"}`,
+        );
+    screens = screens.filter((s) => keep.has(s.id));
+  }
+  const order = screens.map((s) => s.id);
+  const screenOf = new Map(screens.map((s) => [s.id, s]));
+  const firstIndex = order.map((id) => indexes[id]).find(Boolean);
+  /** @type {{ w: number, h: number }} */
+  const viewport = comp?.source?.viewport ??
+    firstIndex?.viewport ??
+    log?.viewport ?? { w: 0, h: 0 };
+
+  // components.json's parts: by ref, the element before each, its repeats
+  /** @type {Map<string, any>} */
+  const entries = new Map();
+  for (const e of comp?.components ?? []) if (e && typeof e.ref === "string") entries.set(e.ref, e);
+  /** @type {Map<string, string[]>} */
+  const after = new Map();
+  for (const e of entries.values())
+    if (e.before) after.set(e.before, [...(after.get(e.before) ?? []), e.ref]);
+  /** @type {Map<string, any>} */
+  const tracks = new Map((comp?.tracks ?? []).map((/** @type {any} */ t) => [t.id, t]));
+
+  // the stills of a shoot, by the screen each kept
+  /** @type {any[]} */
+  const stills = Array.isArray(log?.stills) ? log.stills : [];
+  /** @type {Map<string, number>} */
+  const stillOfState = new Map();
+  stills.forEach((s, i) => {
+    if (s.state && !stillOfState.has(s.state)) stillOfState.set(s.state, i);
+  });
+  /** the screen a still shows: its own, else the last one kept before it, else the next @param {number} i */
+  const stateOfStill = (i) => {
+    for (let k = Math.min(i, stills.length - 1); k >= 0; k--)
+      if (stills[k]?.state && screenOf.has(stills[k].state)) return stills[k].state;
+    for (let k = i + 1; k < stills.length; k++)
+      if (stills[k]?.state && screenOf.has(stills[k].state)) return stills[k].state;
+    return order[0] ?? "";
+  };
+  /** what one px of a still or the recording is, in the screen's px */
+  const ratio = {
+    still:
+      typeof log?.scale === "number"
+        ? log.scale
+        : kind === "shoot"
+          ? comp?.source?.srcRatio
+          : undefined,
+    recording:
+      log?.video?.width && log?.viewport?.w
+        ? log.video.width / log.viewport.w
+        : kind === "take"
+          ? comp?.source?.srcRatio
+          : undefined,
+  };
+
+  /** @param {string} ref */
+  const stateOfRef = (ref) => /^(.+):(e\d+)$/.exec(ref)?.[1] ?? "";
+  /** where an element is on its screen: components.json's box, else index.json's @param {string} ref @returns {Box | null} */
+  const elementBox = (ref) => {
+    const e = entries.get(ref);
+    if (e?.box) return boxFrom(e.box);
+    const m = /^(.+):(e\d+)$/.exec(ref);
+    const el = m
+      ? indexes[m[1] ?? ""]?.elements?.find((/** @type {any} */ x) => x.id === m[2])
+      : null;
+    return el?.box ? boxFrom(el.box) : null;
+  };
+  /** the element showing `text` on a screen (its text or name, whitespace
+   *  collapsed), `up` parents out — by index.json @param {string} state @param {TextKey} k */
+  const byIndexText = (state, k) => {
+    const els = indexes[state]?.elements;
+    if (!Array.isArray(els)) return null;
+    const want = norm(k.text);
+    const hit =
+      els.find((/** @type {any} */ e) => norm(e.text ?? "") === want) ??
+      els.find((/** @type {any} */ e) => norm(e.name ?? "") === want);
+    if (!hit) return null;
+    if (!k.up) return `${state}:${hit.id}`;
+    const path = /** @type {number[]} */ (hit.path ?? []);
+    if (path.length < k.up) return null;
+    const up = path.slice(0, path.length - k.up).join(".");
+    const parent = els.find((/** @type {any} */ e) => (e.path ?? []).join(".") === up);
+    return parent ? `${state}:${parent.id}` : null;
+  };
+
+  // which screen shows at film time t (P.play)
+  /** @type {((t: number) => { state: string, still: number | null, drawn: "screen" | "still" | "recording" }) | null} */
+  let playing = null;
+  /** @param {string | { still: number }} v @returns {{ state: string, still: number | null, drawn: "screen" | "still" | "recording" }} */
+  const entryOf = (v) => {
+    if (typeof v === "string") {
+      if (!screenOf.has(v))
+        throw new Error(`product: play names a screen ${v} it does not have (${order.join(", ")})`);
+      return { state: v, still: stillOfState.get(v) ?? null, drawn: "screen" };
+    }
+    if (v && typeof v === "object" && Number.isInteger(v.still)) {
+      if (!stills[v.still])
+        throw new Error(`product: play names still ${v.still}; the shoot has ${stills.length}`);
+      return { state: stateOfStill(v.still), still: v.still, drawn: "still" };
+    }
+    throw new Error("product: play takes a screen's id or { still: i } at each time");
+  };
+  /** @param {number} t */
+  const shownAt = (t) => (playing ? playing(t) : null);
+
+  // where the screens are drawn, the camera, the frame (P.view)
+  /** @type {{ place?: PlaceLike | ((t: number) => PlaceLike), cam?: { toView: (x: number, y: number, t: number) => number[], view?: { width: number, height: number } }, el?: Element[], frame?: { width: number, height: number } }} */
+  let view = {};
+  /** @param {number} t @returns {{ x: number, y: number, scale: number }} */
+  const placeAt = (t) => {
+    const p = typeof view.place === "function" ? view.place(t) : view.place;
+    if (!p) return { x: 0, y: 0, scale: 1 };
+    const q = /** @type {any} */ (p);
+    if (typeof q.scale === "number" && q.offset)
+      return { x: q.offset.x, y: q.offset.y, scale: q.scale };
+    if (typeof q.scale === "number") return { x: q.x ?? 0, y: q.y ?? 0, scale: q.scale };
+    if (typeof q.width === "number" && viewport.w)
+      return { x: q.x ?? 0, y: q.y ?? 0, scale: q.width / viewport.w };
+    throw new Error(
+      "product: view's place is a seam() ({ scale, offset }), the box the screen is drawn in ({ x, y, width, height }) or { x, y, scale }",
+    );
+  };
+  /** @param {Box} b @param {number} t @returns {Box} */
+  const toStage = (b, t) => {
+    const p = placeAt(t);
+    return {
+      x: p.x + b.x * p.scale,
+      y: p.y + b.y * p.scale,
+      width: b.width * p.scale,
+      height: b.height * p.scale,
+    };
+  };
+  /** @param {Box} b @param {number} t */
+  const toPicture = (b, t) => (view.cam ? throughCamera(b, view.cam, t) : { ...b });
+  const frameBox = () => {
+    const f =
+      view.frame ??
+      view.cam?.view ??
+      (typeof innerWidth === "number" && typeof window !== "undefined"
+        ? { width: innerWidth, height: innerHeight }
+        : { width: viewport.w, height: viewport.h });
+    return { x: 0, y: 0, width: f.width, height: f.height };
+  };
+
+  // the page's own registry, for `film render`'s report (like __otDrift):
+  // every part made and every use of it
+  const g = /** @type {{ __otParts?: { key: string, name: string, uses: PartUse[] }[] }} */ (
+    /** @type {unknown} */ (globalThis)
+  );
+  g.__otParts ??= [];
+  const registry = g.__otParts;
+  /** @type {Part[]} */
+  const made = [];
+  /** @type {Map<string, Part>} */
+  const byKey = new Map();
+  // what a use says of where the part is waits a moment, so the screens
+  // played and the camera given just after a use are the ones it is read
+  // through
+  /** @type {(() => void)[]} */
+  let pending = [];
+  /** @param {() => void} f */
+  const later = (f) => {
+    if (!pending.length)
+      queueMicrotask(() => {
+        const run = pending;
+        pending = [];
+        for (const x of run) x();
+      });
+    pending.push(f);
+  };
+
+  /**
+   * @param {{ key: string, name: string, ref: string, track?: any, text?: TextKey }} spec
+   * @param {((b: Box, t: number) => Box) | null} [mapped] where a screen box shows in the layer, when not through view()'s place (via)
+   * @returns {Part}
+   */
+  const makePart = (spec, mapped = null) => {
+    const own = stateOfRef(spec.ref);
+    /** @type {Map<string, string | null>} */
+    const memo = new Map();
+    /** its ref on a screen: track steps → the element before / after →
+     *  repeats → the text it was named by @param {string} state */
+    const inState = (state) => {
+      if (memo.has(state)) return memo.get(state) ?? null;
+      const hit = find(state);
+      memo.set(state, hit);
+      return hit;
+    };
+    /** @param {string} state @returns {string | null} */
+    const find = (state) => {
+      if (!screenOf.has(state)) return null;
+      if (own === state) return spec.ref;
+      const step = spec.track?.steps?.find((/** @type {any} */ s) => s.state === state);
+      if (step) return step.ref;
+      const from = [spec.ref, ...(spec.track?.steps ?? []).map((/** @type {any} */ s) => s.ref)];
+      /** every ref reached from `start` by the links `next` gives @param {string[]} start @param {(r: string) => string[]} next */
+      const reach = (start, next) => {
+        const seen = new Set(start);
+        const todo = [...start];
+        while (todo.length) {
+          const r = /** @type {string} */ (todo.pop());
+          for (const n of next(r))
+            if (!seen.has(n)) {
+              seen.add(n);
+              todo.push(n);
+            }
+        }
+        return seen;
+      };
+      const chain = reach(from, (r) => [
+        ...(entries.get(r)?.before ? [entries.get(r).before] : []),
+        ...(after.get(r) ?? []),
+      ]);
+      for (const r of chain) if (stateOfRef(r) === state) return r;
+      // repeats: the same kind, text and place on an earlier screen
+      const roots = new Set([...chain].map((r) => entries.get(r)?.repeats ?? r));
+      for (const e of entries.values())
+        if (e.state === state && roots.has(e.repeats ?? e.ref)) return e.ref;
+      if (spec.text) return byIndexText(state, spec.text);
+      return null;
+    };
+    const states = () =>
+      order.flatMap((state) => {
+        const ref = inState(state);
+        const b = ref ? elementBox(ref) : null;
+        if (!ref || !b) return [];
+        const step = spec.track?.steps?.find((/** @type {any} */ s) => s.ref === ref);
+        const v = step?.value ?? entries.get(ref)?.values?.number?.value;
+        return [{ state, ref, box: b, ...(typeof v === "number" ? { value: v } : {}) }];
+      });
+    /** its own screen, or — when product(url, { states }) left that one out —
+     *  the first screen it is on */
+    const home = () => (inState(own) ? own : (order.find((id) => inState(id)) ?? own));
+    /** the screen it is read on at t, whether that is the one shown, and the
+     *  one shown (with play) @param {number} t */
+    const readOn = (t) => {
+      const s = shownAt(t);
+      if (!s)
+        return {
+          state: home() || order[0] || "",
+          shown: true,
+          drawn: /** @type {const} */ ("screen"),
+          still: null,
+        };
+      if (inState(s.state)) return { ...s, shown: true, showing: s.state };
+      // not on the screen shown: the nearest screen it is on
+      const i = order.indexOf(s.state);
+      let best = "";
+      let far = Number.POSITIVE_INFINITY;
+      order.forEach((id, k) => {
+        if (inState(id) && Math.abs(k - i) < far) {
+          far = Math.abs(k - i);
+          best = id;
+        }
+      });
+      return { ...s, state: best || own, shown: false, showing: s.state };
+    };
+    /** @param {string} [state] */
+    const box = (state = home()) => {
+      const ref = inState(state);
+      const b = ref ? elementBox(ref) : null;
+      if (!b) {
+        const on = states().map((s) => s.state);
+        throw new Error(
+          `product: ${part.name} is not on the screen ${state}${on.length ? ` — it is on ${on.join(", ")}` : ""}`,
+        );
+      }
+      return b;
+    };
+    /** @param {Box} b @param {number} t */
+    const stageOf = (b, t) => (mapped ? mapped(b, t) : toStage(b, t));
+    /** @param {number} t @returns {PartAt} */
+    const at = (t) => {
+      const r = readOn(t);
+      const screen = box(r.state);
+      const stage = stageOf(screen, t);
+      const picture = toPicture(stage, t);
+      const k =
+        r.drawn === "still" ? ratio.still : r.drawn === "recording" ? ratio.recording : undefined;
+      return {
+        t,
+        state: r.state,
+        shown: r.shown,
+        ...("showing" in r && r.showing ? { showing: r.showing } : {}),
+        screen,
+        stage,
+        picture,
+        inFrame: shareInside(picture, frameBox()),
+        drawn: r.drawn,
+        ...(k && screen.width > 0 ? { sourcePx: picture.width / screen.width / k } : {}),
+      };
+    };
+    /** where the capture acted on it: the action that led out of the screen
+     *  shown just before t (else its last one), the point the log kept (the
+     *  shoot's cursor less its scroll, the take's event), and the screen that
+     *  point is on @param {number} t */
+    const acted = (t) => {
+      const before = readOn(t - 1e-6).state;
+      const from = order.indexOf(before);
+      const found = screens.filter(({ id, since, action: a }) =>
+        a
+          ? (a.acted && a.acted === inState(id)) ||
+            (a.actedBefore && since && a.actedBefore === inState(since))
+          : false,
+      );
+      if (!found.length) return null;
+      const s = found.find((x) => order.indexOf(x.id) > from) ?? found[found.length - 1];
+      if (!s) return null;
+      /** @type {{ x: number, y: number } | null} */
+      let p = null;
+      if (kind === "shoot") {
+        const i = stillOfState.get(s.id);
+        const still = i != null ? stills[i] : null;
+        if (still?.cursor)
+          p = {
+            x: still.cursor.x - (still.scroll?.x ?? 0),
+            y: still.cursor.y - (still.scroll?.y ?? 0),
+          };
+      } else if (kind === "take") {
+        const e = log?.events?.find((/** @type {any} */ x) => x.state === s.id);
+        if (e) p = e.kind === "dropFiles" && e.to ? { x: e.to.x, y: e.to.y } : { x: e.x, y: e.y };
+      }
+      if (!p) return null;
+      // a shoot's first screen has its point on itself; every other point is
+      // on what was acted on as the screen before showed it
+      const on = s.since && inState(s.since) ? s.since : s.id;
+      return { p, on };
+    };
+    /** @param {number} t */
+    const pointAt = (t) => {
+      const a = acted(t);
+      if (!a) {
+        const s = stageOf(box(readOn(t).state), t);
+        return { x: s.x + s.width / 2, y: s.y + s.height / 2 };
+      }
+      // its offset inside the part, kept on the box shown just before t
+      const there = box(readOn(t - 1e-6).state);
+      const was = box(a.on);
+      const q = { x: there.x + (a.p.x - was.x), y: there.y + (a.p.y - was.y), width: 0, height: 0 };
+      const s = stageOf(q, t);
+      return { x: s.x, y: s.y };
+    };
+    /** @type {PartUse[]} */
+    const uses = [];
+    /** @type {{ t: number, b: Box } | null} */
+    let last = null;
+    /** @param {number} t */
+    const pictureAt = (t) => {
+      if (last?.t !== t) last = { t, b: at(t).picture };
+      return last.b;
+    };
+    let curves = false;
+    // a lifted copy is one part however often via() asks for it (a page
+    // asks on every frame)
+    /** @type {WeakMap<object, Part>} */
+    const vias = new WeakMap();
+    let copies = 0;
+    /** @type {Part} */
+    const part = {
+      key: spec.key,
+      name: spec.name,
+      ref: spec.ref,
+      ...(spec.track ? { track: spec.track.id } : {}),
+      ...(entries.get(spec.ref)?.kind ? { kind: entries.get(spec.ref).kind } : {}),
+      get states() {
+        return states();
+      },
+      in: inState,
+      box,
+      boxAt: (t) => at(t).stage,
+      pointAt,
+      at,
+      via: (layer) => {
+        if (!layer || typeof layer.map !== "function" || !layer.box || !layer.source)
+          throw new Error(
+            "product: via() takes a lifted copy (lift()) — its box, source and map()",
+          );
+        const had = vias.get(layer);
+        if (had) return had;
+        const copy = keep(
+          makePart({ ...spec, name: part.name, key: `${spec.key} via ${++copies}` }, (b) => {
+            const L = layer.box;
+            const S = layer.source;
+            return layer.map({
+              x: b.x + L.x - S.x,
+              y: b.y + L.y - S.y,
+              width: b.width,
+              height: b.height,
+            });
+          }),
+        );
+        vias.set(layer, copy);
+        return copy;
+      },
+      mark: (t, label) => {
+        part.used("mark", t, label != null ? { label } : {});
+        return t;
+      },
+      coveredBy: (t) => covered(part, at(t).picture),
+      used: (use, t, o = {}) => {
+        if (!Number.isFinite(t)) return;
+        /** @type {PartUse} */
+        const u = { use, t, ...o };
+        uses.push(u);
+        later(() => {
+          const ref = inState(readOn(t).state) ?? spec.ref;
+          u.ref = ref;
+          if (!tl) return;
+          const b = pictureAt(t);
+          tl.event(t, "part", {
+            x: b.x + b.width / 2,
+            y: b.y + b.height / 2,
+            label: `${use} ${ref}`,
+          });
+          if (curves) return;
+          curves = true;
+          // under the name it has now (a later part() may have named it)
+          tl.curve(`part:${part.name}.x`, (u) => {
+            const p = pictureAt(u);
+            return p.x + p.width / 2;
+          });
+          tl.curve(`part:${part.name}.y`, (u) => {
+            const p = pictureAt(u);
+            return p.y + p.height / 2;
+          });
+          tl.curve(`part:${part.name}.w`, (u) => pictureAt(u).width);
+          tl.curve(`part:${part.name}.h`, (u) => pictureAt(u).height);
+        });
+      },
+      uses,
+    };
+    return part;
+  };
+  /** a part the film named, kept in the page's registry @param {Part} part */
+  const keep = (part) => {
+    made.push(part);
+    registry.push(part);
+    return part;
+  };
+
+  // --- what is drawn over a part (a page in a browser) ---
+  const urls = (() => {
+    /** @type {Set<string>} */
+    const out = new Set();
+    if (!data.base) return out;
+    /** @param {string} rel @param {string} base */
+    const add = (rel, base) => {
+      try {
+        out.add(new URL(rel, base).href.replace(/[?#].*$/, ""));
+      } catch {
+        /* not a URL: nothing to match */
+      }
+    };
+    for (const s of screens) if (s.url) add(s.url, data.base);
+    const lb = data.logUrl ?? data.base;
+    for (const s of stills) if (s.file) add(s.file, lb);
+    if (kind === "take") add("capture.mp4", lb);
+    return out;
+  })();
+  /** the elements showing the screens: view()'s, else those whose src is one of them */
+  const screenEls = () =>
+    view.el ??
+    Array.from(document.querySelectorAll("iframe, img, video")).filter((e) => {
+      const src =
+        /** @type {HTMLIFrameElement} */ (e).src || /** @type {HTMLVideoElement} */ (e).currentSrc;
+      return src && urls.has(src.replace(/[?#].*$/, "")) && !e.closest("[data-ot-lift]");
+    });
+  /** @param {Part} part @param {Box} pic */
+  const covered = (part, pic) => {
+    if (typeof document === "undefined")
+      throw new Error("product: coveredBy() reads the page — it runs in a browser");
+    const mine = new Set([
+      part.ref,
+      ...part.states.map((s) => s.ref),
+      ...(part.track ? [part.track] : []),
+    ]);
+    const shows = new Set(screenEls());
+    const style = document.createElement("style");
+    style.textContent = "*{pointer-events:auto!important}";
+    document.head.appendChild(style);
+    /** @type {Map<string, number>} */
+    const counts = new Map();
+    const N = 24;
+    try {
+      for (let j = 0; j < 4; j++)
+        for (let i = 0; i < 6; i++) {
+          const x = pic.x + ((i + 0.5) * pic.width) / 6;
+          const y = pic.y + ((j + 0.5) * pic.height) / 4;
+          if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) continue;
+          const top = document.elementsFromPoint(x, y).find(paints);
+          // the screen's own element, or inside one view() gave (a wrapper)
+          if (!top || [...shows].some((e) => e === top || e.contains(top))) continue;
+          const lifted = top.closest("[data-ot-lift]");
+          if (
+            lifted instanceof HTMLElement &&
+            (lifted.dataset.otLift ?? "").split(" ").some((k) => mine.has(k))
+          )
+            continue;
+          const what = describe(top);
+          counts.set(what, (counts.get(what) ?? 0) + 1);
+        }
+    } finally {
+      style.remove();
+    }
+    return [...counts]
+      .map(([what, n]) => ({ what, share: n / N }))
+      .sort((a, b) => b.share - a.share);
+  };
+
+  /** @param {string | TextKey | Part} key @param {{ name?: string }} [o] @returns {Part} */
+  const partOf = (key, o = {}) => {
+    if (isPart(key)) return key;
+    /** @param {string} id @param {() => { name: string, ref: string, track?: any, text?: TextKey }} make */
+    const once = (id, make) => {
+      const had = byKey.get(id);
+      if (had) {
+        if (o.name) had.name = o.name;
+        return had;
+      }
+      const spec = { ...make(), key: id };
+      if (o.name) spec.name = o.name;
+      const p = makePart(spec);
+      if (!p.states.length)
+        throw new Error(
+          `product: ${spec.name} is on none of the screens read (${order.join(", ") || "none"}) — product(url, { states }) left out ${stateOfRef(spec.ref)}`,
+        );
+      byKey.set(id, keep(p));
+      return p;
+    };
+    if (typeof key === "string") {
+      // a track and the refs of its steps are one part
+      const t = tracks.get(key);
+      if (t?.steps?.length) return once(key, () => ({ name: key, ref: t.steps[0].ref, track: t }));
+      if (/^(.+):(e\d+)$/.test(key) && elementBox(key)) {
+        const track = tracks.get(entries.get(key)?.track);
+        return once(track ? track.id : key, () => ({
+          name: key,
+          ref: key,
+          ...(track ? { track } : {}),
+        }));
+      }
+    } else if (isTextKey(key)) {
+      for (const state of order) {
+        const ref = byIndexText(state, key);
+        if (!ref) continue;
+        const track = tracks.get(entries.get(ref)?.track);
+        return once(`{ text: ${JSON.stringify(key.text)}, up: ${key.up ?? 0} }`, () => ({
+          name: `"${key.text}"`,
+          ref,
+          text: key,
+          ...(track ? { track } : {}),
+        }));
+      }
+    }
+    const what =
+      typeof key === "string" ? key : isTextKey(key) ? `{ text: "${key.text}" }` : String(key);
+    throw new Error(
+      `product: no part ${what} — it has ${entries.size} part(s) by ref (${[...entries.keys()].slice(0, 3).join(", ")}${entries.size > 3 ? ", …" : ""})${tracks.size ? `, tracks ${[...tracks.keys()].join(", ")}` : ""}, screens ${order.join(", ") || "none"}; \`open-take components <dir>\` lists them`,
+    );
+  };
+
+  return {
+    kind,
+    /** the screens, in the log's order */
+    states: order,
+    /** a part: a ref ("home:e41"), a track ("t1"), { text, up }, or a part
+     *  again; `name` is what the film calls it */
+    part: partOf,
+    /**
+     * Which screen shows at film time t: a list of [t, screen id | { still:
+     * i }] (each from its time on), a function of t giving one, or a clip()
+     * of a take (the last state saved by the time the clip shows). Spread a
+     * drag's `steps` into the list. Without it, a part is read on its own
+     * screen.
+     * @param {PlayEntry[] | ((t: number) => string | { still: number }) | { toCapture: (t: number) => number }} schedule
+     */
+    play(schedule) {
+      if (Array.isArray(schedule)) {
+        const list = schedule
+          .map(([t, v], i) => ({ t, e: entryOf(v), i }))
+          .sort((a, b) => a.t - b.t || a.i - b.i);
+        if (!list.length) throw new Error("product: play needs at least one [t, screen]");
+        playing = (t) => {
+          let e = /** @type {(typeof list)[number]} */ (list[0]).e;
+          for (const x of list) if (x.t <= t) e = x.e;
+          return e;
+        };
+      } else if (typeof schedule === "function") {
+        const f = schedule;
+        playing = (t) => entryOf(f(t));
+      } else if (schedule && typeof schedule.toCapture === "function") {
+        const c = schedule;
+        const items = (log?.states?.items ?? []).filter(
+          (/** @type {any} */ s) => !s.moving && screenOf.has(s.id),
+        );
+        if (!items.length) throw new Error("product: play(clip) needs a take with saved states");
+        playing = (t) => {
+          const ms = c.toCapture(t) * 1000;
+          let id = items[0].id;
+          for (const s of items) if (s.tMs <= ms) id = s.id;
+          return { state: id, still: null, drawn: "recording" };
+        };
+      } else
+        throw new Error("product: play takes a list of [t, screen], a function of t, or a clip()");
+      return this;
+    },
+    /** the screen shown at t (play), or null @param {number} t */
+    state: (t) => shownAt(t)?.state ?? null,
+    /** the still shown at t (play: { still } or a screen a still kept), or null @param {number} t */
+    still: (t) => shownAt(t)?.still ?? null,
+    /**
+     * Where the screens are drawn and seen: `place` a seam() ({ scale,
+     * offset }), the box the screen's viewport is drawn in, { x, y, scale },
+     * or a function of t giving one (default: the screen's own px are the
+     * layer's); `cam` anything with toView(x, y, t) (kit/camera.js); `frame`
+     * the picture's size (default the camera's view); `el` the elements
+     * showing the screens (default: those whose src is one of them) — only
+     * coveredBy() reads it.
+     * @param {{ place?: PlaceLike | ((t: number) => PlaceLike), cam?: { toView: (x: number, y: number, t: number) => number[], view?: { width: number, height: number } }, el?: Element[], frame?: { width: number, height: number } }} v
+     */
+    view(v) {
+      view = { ...view, ...v };
+      return this;
+    },
+    /**
+     * A drag in step with the screens saved along it: the path the cursor
+     * takes (the layer's px) — where the control was pressed, then the real
+     * cursor at each saved step — and from when each step shows: when the
+     * cursor, paced by `ease`, reaches its point. `key`: a track ("t1") or a
+     * shoot's drag name (its stills `<name>-<i>`), with `end`; or a take's
+     * action ("a3") with `{ clip }`, from the capture's own path, times and
+     * pace. `ease`, `press` and `end` are the film's to change; `steps` is a
+     * plain list. Hand it to cur.drag(d) and spread d.steps into play().
+     * @param {string | Part} key
+     * @param {number} at
+     * @param {number | { ease?: (p: number) => number, press?: { x: number, y: number }, clip?: Clip, states?: string[] }} [end]
+     * @param {{ ease?: (p: number) => number, press?: { x: number, y: number }, clip?: Clip, states?: string[] }} [o]
+     */
+    drag(key, at, end, o = {}) {
+      if (end != null && typeof end === "object") {
+        o = end;
+        end = undefined;
+      }
+      if (!Number.isFinite(at)) throw new Error("product: drag needs the time it starts (s)");
+      /** @param {{ x: number, y: number }} p */
+      const layer = (p) => {
+        const s = toStage({ x: p.x, y: p.y, width: 0, height: 0 }, at);
+        return { x: s.x, y: s.y };
+      };
+      // a take's action: the capture's own stroke
+      if (typeof key === "string" && /^a\d+$/.test(key) && kind === "take") {
+        const i = Number(key.slice(1)) - 1;
+        const e = log?.events?.[i];
+        if (!e)
+          throw new Error(`product: no action ${key} — the take has ${log?.events?.length ?? 0}`);
+        if (e.kind !== "drag")
+          throw new Error(`product: ${key} is a ${e.kind ?? "click"}, not a drag`);
+        if (!o.clip)
+          throw new Error(
+            `product: drag ${key} needs { clip } — the clip that shows the recording`,
+          );
+        const a = o.clip.toFilm(e.tMs / 1000);
+        const b = end ?? o.clip.toFilm((e.tMs + (e.durationMs ?? 0)) / 1000);
+        if (a == null || b == null) throw new Error(`product: the clip does not show ${key}`);
+        const pts = (e.path?.length >= 2 ? e.path : [{ x: e.x, y: e.y }, e.to]).map(layer);
+        const ease = o.ease ?? (e.ease === "smooth" ? smootherstep : linearPace);
+        // the screen before it: the one saved just before the one it led to,
+        // else the last saved by its time (as `open-take states` reads it)
+        const items = log?.states?.items ?? [];
+        const k = e.state ? items.findIndex((/** @type {any} */ s) => s.id === e.state) : -1;
+        let prior = k > 0 ? items[k - 1].id : undefined;
+        if (k <= 0) for (const s of items) if (s.tMs <= e.tMs) prior = s.id;
+        const ref = prior && e.target ? `${prior}:${e.target}` : null;
+        const p = ref && elementBox(ref) ? partOf(ref) : null;
+        const d = dragOf(
+          {
+            path: o.press ? [layer(o.press), ...pts] : pts,
+            at: a,
+            end: b,
+            ease,
+            steps: [],
+            basis: "take recording",
+          },
+          p,
+          key,
+        );
+        return d;
+      }
+      if (end == null)
+        throw new Error(
+          "product: a drag over saved stills needs its end (s): their clock includes the waits",
+        );
+      if (!(end > at)) throw new Error(`product: drag ends (${end}) before it starts (${at})`);
+      // the steps: a drag's stills, or a track's screens
+      /** @type {{ still: number, state: string | null }[]} */
+      let steps = [];
+      /** @type {Part | null} */
+      let p = null;
+      if (typeof key === "string" && stills.some((s) => s.name === `${key}-1`)) {
+        const re = new RegExp(`^${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}-(\\d+)$`);
+        stills.forEach((s, i) => {
+          if (re.test(s.name ?? ""))
+            steps.push({ still: i, state: s.state && screenOf.has(s.state) ? s.state : null });
+        });
+        const lastStep = steps[steps.length - 1];
+        const fin = lastStep ? stills[lastStep.still + 1] : null;
+        if (lastStep && fin?.name === key)
+          steps.push({
+            still: lastStep.still + 1,
+            state: fin.state && screenOf.has(fin.state) ? fin.state : null,
+          });
+      } else {
+        p = partOf(/** @type {string | Part} */ (key));
+        const part = p;
+        const on = part.states
+          .filter((s) => stillOfState.has(s.state))
+          .map((s) => ({
+            still: /** @type {number} */ (stillOfState.get(s.state)),
+            state: s.state,
+          }));
+        if (o.states) steps = on.filter((s) => o.states?.includes(s.state));
+        else {
+          // the drag's own run: screens one after another whose still one
+          // drag took (its steps "<name>-<i>" and the still it ends on)
+          /** @param {number} i */
+          const dragName = (i) =>
+            stills[i]?.action === "drag" ? String(stills[i].name ?? "").replace(/-\d+$/, "") : null;
+          /** @type {(typeof on)[]} */
+          const runs = [];
+          for (const s of on) {
+            const name = dragName(s.still);
+            const run = runs[runs.length - 1];
+            const last = run?.[run.length - 1];
+            if (name == null) continue;
+            if (
+              run &&
+              last &&
+              order.indexOf(s.state) === order.indexOf(last.state) + 1 &&
+              dragName(last.still) === name
+            )
+              run.push(s);
+            else runs.push([s]);
+          }
+          // the run whose drag acted on this part, else the first
+          const mine = runs.find((run) =>
+            run.some(({ state, still }) => {
+              const a = screenOf.get(state)?.action;
+              return (
+                (a?.acted && a.acted === part.in(state)) ||
+                (a?.actedBefore && a.actedBefore === part.in(stateOfStill(still - 1)))
+              );
+            }),
+          );
+          steps = mine ?? runs[0] ?? [];
+          if (!steps.length)
+            throw new Error(
+              `product: drag ${part.name} — none of the screens it is on (${on.map((s) => s.state).join(", ") || "none with a still"}) was saved along a drag; { states } names the steps`,
+            );
+        }
+      }
+      steps = steps.filter((s) => stills[s.still]?.cursor);
+      if (!steps.length)
+        throw new Error(
+          `product: drag ${typeof key === "string" ? key : key.name} has no still with a cursor to follow`,
+        );
+      const pts = steps.map((s) => {
+        const c = stills[s.still];
+        return layer({ x: c.cursor.x - (c.scroll?.x ?? 0), y: c.cursor.y - (c.scroll?.y ?? 0) });
+      });
+      // where it was pressed: the control the first step acted on, as the
+      // screen before it showed it
+      let press = o.press ? layer(o.press) : null;
+      const step0 = /** @type {(typeof steps)[number]} */ (steps[0]);
+      const a0 = step0.state ? screenOf.get(step0.state)?.action : null;
+      const ref0 = a0?.actedBefore ?? a0?.acted;
+      if (ref0) {
+        // a drag named by its stills: the part is the control pressed
+        if (!p && elementBox(ref0))
+          try {
+            p = partOf(ref0);
+          } catch {
+            /* on none of the screens read: the drag goes without a part */
+          }
+        if (!press) {
+          const prior = stateOfStill(Math.max(0, step0.still - 1));
+          // followed to that screen without keeping it as a part the film named
+          const track = tracks.get(entries.get(ref0)?.track);
+          const control = makePart({ key: "", name: ref0, ref: ref0, ...(track ? { track } : {}) });
+          const b = elementBox(control.in(prior) ?? ref0);
+          if (b) press = layer({ x: b.x + b.width / 2, y: b.y + b.height / 2 });
+        }
+      }
+      const first = /** @type {{ x: number, y: number }} */ (pts[0]);
+      const path =
+        press && Math.hypot(press.x - first.x, press.y - first.y) > 1e-9 ? [press, ...pts] : pts;
+      if (path.length < 2)
+        throw new Error(
+          `product: drag ${typeof key === "string" ? key : key.name} has one point to follow (${steps[0]?.state ?? `still ${step0.still}`}) — { press } says where it starts`,
+        );
+      const ease = o.ease ?? smootherstep;
+      const L = lengthsAlong(path);
+      const skip = path.length - pts.length;
+      const span = /** @type {number} */ (end) - at;
+      /** @type {PlayEntry[]} */
+      const list = steps.map((s, k) => [
+        at + span * easeInverse(ease, /** @type {number} */ (L[k + skip])),
+        s.state ?? { still: s.still },
+      ]);
+      return dragOf(
+        { path, at, end, ease, steps: list, basis: "shoot stills" },
+        p,
+        typeof key === "string" ? key : key.name,
+      );
+    },
+    /** every part made, with its uses */
+    parts: () => [...made],
+  };
+
+  /**
+   * @param {{ path: { x: number, y: number }[], at: number, end: number, ease: (p: number) => number, steps: PlayEntry[], basis: string }} d
+   * @param {Part | null} p @param {string} name
+   */
+  function dragOf(d, p, name) {
+    /** @param {number} t */
+    const stepAt = (t) => {
+      let s = d.steps[0];
+      for (const x of d.steps) if (x[0] <= t) s = x;
+      return s ?? null;
+    };
+    const use = { end: d.end, steps: d.steps.map((s) => /** @type {PlayEntry} */ ([...s])) };
+    if (p) p.used("drag", d.at, use);
+    else {
+      // no part of components.json was pressed: the drag alone, by its name
+      // (once, however often the page asks for it)
+      const key = `drag ${name}`;
+      let had = registry.find((x) => x.key === key);
+      if (!had) {
+        had = { key, name, uses: [] };
+        registry.push(had);
+      }
+      if (!had.uses.some((u) => u.t === d.at && u.end === d.end))
+        had.uses.push({ use: "drag", t: d.at, ...use });
+    }
+    return {
+      ...d,
+      /** the part dragged, when the inventory knows it */
+      part: p,
+      /** the screen shown at t (its step's), or null for a take's @param {number} t */
+      state(t) {
+        const s = stepAt(t);
+        if (!s) return null;
+        return typeof s[1] === "string" ? s[1] : stateOfStill(s[1].still);
+      },
+      /** the still shown at t, or null @param {number} t */
+      still(t) {
+        const s = stepAt(t);
+        if (!s) return null;
+        return typeof s[1] === "string" ? (stillOfState.get(s[1]) ?? null) : s[1].still;
+      },
+      /** the dragged part's value at t (its track's), or null @param {number} t */
+      value(t) {
+        const st = this.state(t);
+        if (!p || !st) return null;
+        return p.states.find((s) => s.state === st)?.value ?? null;
+      },
+    };
+  }
+}
+
+/** whether an element paints something of its own at all: a picture, a
+ *  fill, a border, a shape, its own text — a bare wrapper does not
+ * @param {Element} el */
+function paints(el) {
+  const view = el.ownerDocument.defaultView;
+  if (!view) return false;
+  for (let n = /** @type {Element | null} */ (el); n; n = n.parentElement) {
+    const c = view.getComputedStyle(n);
+    if (c.display === "none" || Number(c.opacity) === 0) return false;
+  }
+  const cs = view.getComputedStyle(el);
+  if (cs.visibility === "hidden" || cs.visibility === "collapse") return false;
+  const tag = el.tagName.toUpperCase();
+  if (/^(IMG|VIDEO|CANVAS|IFRAME|OBJECT|EMBED|PICTURE)$/.test(tag)) return true;
+  if (el instanceof view.SVGElement) {
+    if (tag === "SVG" || tag === "G" || tag === "DEFS") return false;
+    return cs.fill !== "none" || cs.stroke !== "none";
+  }
+  const bg = cs.backgroundColor;
+  if (bg && bg !== "transparent" && !/rgba\(.*,\s*0\)$/.test(bg)) return true;
+  if (cs.backgroundImage && cs.backgroundImage !== "none") return true;
+  if (
+    ["Top", "Right", "Bottom", "Left"].some(
+      (s) =>
+        Number.parseFloat(cs.getPropertyValue(`border-${s.toLowerCase()}-width`)) > 0 &&
+        cs.getPropertyValue(`border-${s.toLowerCase()}-style`) !== "none",
+    )
+  )
+    return true;
+  return Array.from(el.childNodes).some((n) => n.nodeType === 3 && (n.nodeValue ?? "").trim());
+}
+
+/** an element in a few words: its tag, its id or first class, else the
+ *  nearest id around it @param {Element} el */
+function describe(el) {
+  const tag = el.tagName.toLowerCase();
+  if (el.id) return `${tag}#${el.id}`;
+  const cls = el.getAttribute("class")?.trim().split(/\s+/)[0];
+  const up = el.parentElement?.closest("[id]");
+  return `${tag}${cls ? `.${cls}` : ""}${up ? ` in #${up.id}` : ""}`;
+}
+
+/**
+ * The product's parts as references: components.json (`open-take
+ * components`), its log and every listed screen's index.json, read so every
+ * later call answers at once (a camera move or a click resolves when it is
+ * asked for). `url`: a shoot's folder (shots/), a take (x.take/), a film's
+ * states/ or one saved screen's folder, or a components.json. `states`: only
+ * these screens. `tl` (kit/time.js): each use is declared — an event "part"
+ * where it shows, and curves `part:<name>.x/.y/.w/.h` (the picture's px) —
+ * so `film probe` follows it like any declared subject.
+ *
+ *   const P = await product("../shots/", { tl });
+ *   P.view({ cam });
+ *   const part = P.part("home:e41");
+ *   cam.frame(part, { arrive: 12 });          // where it is when the move lands
+ *   cur.click(part, 13);                      // on the point the shoot clicked
+ *   const d = P.drag("t1", 20.4, 21.4);       // the cursor in step with the saved steps
+ *   cur.drag(d);
+ *   P.play([[0, "home"], ...d.steps, [23.3, "done"]]);
+ *
+ * Every part made, and what the film did with it, is in window.__otParts for
+ * `film render`'s report.
+ * @param {string} url
+ * @param {{ tl?: { event: (at: number, kind: string, o?: { x?: number, y?: number, label?: string }) => number, curve: (name: string, fn: (t: number) => number) => void }, states?: string[] }} [o]
+ */
+export async function product(url, o = {}) {
+  let at = new URL(url, location.href);
+  /** @param {URL} u */
+  const read = async (u) => {
+    const res = await fetch(u);
+    return res.ok ? res.json() : null;
+  };
+  /** @type {any} */
+  let components = null;
+  if (/\.json$/i.test(at.pathname)) {
+    components = await read(at);
+    if (!components) throw new Error(`product: ${at.href} could not be read`);
+    // a log given instead: the folder it is in
+    if (!Array.isArray(components.components)) {
+      components = null;
+      at = new URL(".", at);
+    }
+  } else at = new URL(at.href.replace(/\/?(?=[?#]|$)/, "/"));
+  const compUrl = /\.json$/i.test(at.pathname) ? at : new URL("components.json", at);
+  components ??= await read(compUrl);
+  /** @type {Record<string, any>} */
+  const indexes = {};
+  if (!components) {
+    // one saved screen without its inventory: its index alone
+    const index = await read(new URL("index.json", compUrl));
+    if (!index)
+      throw new Error(
+        `product: no components.json at ${compUrl.href} — \`open-take components <dir>\` writes it`,
+      );
+    indexes[stateOf(new URL("state.html", compUrl).href) ?? "state"] = index;
+    return productFrom({ indexes, base: compUrl.href, ...o });
+  }
+  const logUrl = components.source?.log ? new URL(components.source.log, compUrl) : null;
+  const log = logUrl ? await read(logUrl) : null;
+  const wanted = (components.states ?? []).filter(
+    (/** @type {any} */ s) => !o.states || o.states.includes(s.id),
+  );
+  await Promise.all(
+    wanted.map(async (/** @type {any} */ s) => {
+      const index = await read(
+        new URL(String(s.url).replace(/state\.html$/, "index.json"), compUrl),
+      );
+      if (index) indexes[s.id] = index;
+    }),
+  );
+  return productFrom({
+    components,
+    log,
+    indexes,
+    base: compUrl.href,
+    ...(logUrl ? { logUrl: logUrl.href } : {}),
+    ...o,
+  });
 }

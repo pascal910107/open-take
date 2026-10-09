@@ -21,6 +21,8 @@
 
 /** @typedef {{ x: number, y: number }} Pt  a point of the content, in its CSS px */
 /** @typedef {{ x: number, y: number, width: number, height: number }} Box */
+/** @typedef {{ pointAt: (t: number) => Pt, used?: (use: string, t: number) => unknown }} PartLike  a part of the product (kit/media.js product()): acted on where the capture acted on it */
+/** @typedef {{ path: Pt[], at: number, end: number, ease?: (p: number) => number }} DragLike  a drag as product().drag() gives it */
 /**
  * @typedef {object} Leg
  * @property {number} t0
@@ -41,6 +43,16 @@ const smooth = (p) => {
 /** @param {Pt | Box} target */
 const pointOf = (target) =>
   "width" in target ? { x: target.x + target.width / 2, y: target.y + target.height / 2 } : target;
+
+/** a part of the product: the point it is acted on at t, the use said;
+ *  a point or a box as it is
+ * @param {Pt | Box | PartLike} target @param {string} kind @param {number} at @returns {Pt | Box} */
+const targetAt = (target, kind, at) => {
+  if (!("pointAt" in target) || typeof target.pointAt !== "function")
+    return /** @type {Pt | Box} */ (target);
+  target.used?.(kind, at);
+  return target.pointAt(at);
+};
 
 /** a point a fraction u along a polyline, by length */
 /** @param {Pt[]} path @param {number} u */
@@ -189,29 +201,43 @@ export function cursor({
     return at;
   };
 
-  /** @param {"click" | "move" | "drag" | "type"} kind @param {Pt | Box} target @param {number} at @param {number} end @param {{ dur?: number, ease?: (p: number) => number }} o @param {Pt[]} [path] */
+  /** @param {"click" | "move" | "drag" | "type"} kind @param {Pt | Box | PartLike} target @param {number} at @param {number} end @param {{ dur?: number, ease?: (p: number) => number }} o @param {Pt[]} [path] */
   const add = (kind, target, at, end, o, path) => {
     if (!Number.isFinite(at)) throw new Error(`cursor: ${kind} needs a time`);
     if (end < at) throw new Error(`cursor: ${kind} at ${at}s ends before it starts`);
-    asked.push({ kind, at, end, to: pointOf(target), path, dur: o.dur, ease: o.ease });
+    const to = pointOf(targetAt(target, kind, at));
+    asked.push({ kind, at, end, to, path, dur: o.dur, ease: o.ease });
     planned = null;
   };
 
   return {
-    /** travel to the target and click at `at` (`dur`: this leg's travel time) */
-    /** @param {Pt | Box} target @param {number} at @param {{ dur?: number }} [o] */
+    /** travel to the target and click at `at` (`dur`: this leg's travel time);
+     *  a part of the product is clicked where the capture clicked it */
+    /** @param {Pt | Box | PartLike} target @param {number} at @param {{ dur?: number }} [o] */
     click: (target, at, o = {}) => add("click", target, at, at, o),
     /** travel to the target, arriving at `at`, without clicking */
-    /** @param {Pt | Box} target @param {number} at @param {{ dur?: number }} [o] */
+    /** @param {Pt | Box | PartLike} target @param {number} at @param {{ dur?: number }} [o] */
     move: (target, at, o = {}) => add("move", target, at, at, o),
     /** travel to the field by `at` and stay there while typing until `end` */
-    /** @param {Pt | Box} target @param {number} at @param {number} end @param {{ dur?: number }} [o] */
+    /** @param {Pt | Box | PartLike} target @param {number} at @param {number} end @param {{ dur?: number }} [o] */
     type: (target, at, end, o = {}) => add("type", target, at, end, o),
-    /** hold the button down along `path` from `at` to `end` (travelling to its start first) */
-    /** @param {Pt[]} path @param {number} at @param {number} end @param {{ dur?: number, ease?: (p: number) => number }} [o] */
+    /** hold the button down along `path` from `at` to `end` (travelling to its
+     *  start first) — or one drag as product().drag() gives it: its path,
+     *  times and pace */
+    /** @param {Pt[] | DragLike} path @param {number} [at] @param {number} [end] @param {{ dur?: number, ease?: (p: number) => number }} [o] */
     drag: (path, at, end, o = {}) => {
-      if (path.length < 2) throw new Error("cursor: a drag needs a path of at least two points");
-      add("drag", /** @type {Pt} */ (path[0]), at, end, o, path);
+      /** @type {Pt[]} */
+      let pts = /** @type {Pt[]} */ (path);
+      if (!Array.isArray(path)) {
+        pts = path?.path;
+        at = path?.at;
+        end = path?.end;
+        o = { ...o, ease: path?.ease ?? o.ease };
+      }
+      if (!Array.isArray(pts) || pts.length < 2)
+        throw new Error("cursor: a drag needs a path of at least two points");
+      if (end == null) throw new Error("cursor: a drag needs the time it ends");
+      add("drag", /** @type {Pt} */ (pts[0]), /** @type {number} */ (at), end, o, pts);
     },
     /** where it is at t (content px, and picture px with a camera), whether a
      *  button is held, and a click's ripple (0..1, or null) */

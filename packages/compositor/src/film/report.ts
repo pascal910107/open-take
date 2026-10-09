@@ -12,7 +12,12 @@
 //     product's own words (its saved screens) are most of the text on screen
 //     and how big they are on a phone; the pictures on screen that their
 //     shoot took while the product's screen was still changing; live text
-//     that moves under a pixel a frame, which Chrome draws on whole pixels.
+//     that moves under a pixel a frame, which Chrome draws on whole pixels;
+//     pictures (<img>, <video>) drawn bigger than their own pixels;
+//   - the parts the film named through product() (kit/media.js), read again
+//     at the times it used them: in the frame or past an edge, on the screen
+//     shown then or not, what the page draws over them, how many frame px
+//     each px of the still or recording that shows them takes.
 // Text inside pictures (screenshots, recordings) needs the frames read by a
 // text recognizer, which takes longer: the full probe does that.
 //
@@ -75,6 +80,8 @@ export type FilmReport = {
   /** where the film starts on the page's timeline (a render of part of it);
    *  every time here is on the film's own clock, from 0 */
   from: number;
+  /** seconds between the page's samples */
+  every: number;
   /** the size the page was laid out at: every px here is one of these */
   layout: { width: number; height: number };
   /** how the slow text below is counted: device px per page px and frames
@@ -110,8 +117,60 @@ export type FilmReport = {
   /** moves of the picture where what it ends up framing does not head
    *  straight for its place (the render's probe, in the events file) */
   turns: { how: "measured" | "not measured"; list: TurnBack[] };
+  /** <img> and <video> drawn bigger than their own pixels, at the page
+   *  samples: `ratio` the most frame px per px of the picture */
+  pastPixels: {
+    how: "measured" | "not measured";
+    note?: string;
+    list: { src?: string; label: string; from: number; to: number; ratio: number }[];
+  };
+  /** the parts the film named through product() (window.__otParts), each
+   *  use read at its times; `named` 0: none was (a drag no part of
+   *  components.json was pressed for is a use of no part) */
+  parts: {
+    how: "measured" | "not measured";
+    note?: string;
+    named: number;
+    uses: ReportPartUse[];
+  };
   /** wall time of the report, ms */
   ms: number;
+};
+
+/** one use of a part (a camera move, a click, a drag, a mark) and where the
+ *  part was at its times (its start, and its end when it has one) */
+export type ReportPartUse = {
+  name: string;
+  /** its element on the screen it was read on at the use, `<state>:<eN>` */
+  ref: string;
+  use: string;
+  t: number;
+  end?: number;
+  label?: string;
+  seen: ReportPartSeen[];
+  /** why a time was not read (the page threw there) */
+  note?: string;
+};
+
+export type ReportPartSeen = {
+  t: number;
+  /** the screen it was read on; `shown` false: not the one shown then (the
+   *  nearest screen it is on was read), `on` every screen it is on */
+  state: string;
+  shown: boolean;
+  /** the screen shown then, when the kit says */
+  showing?: string;
+  on: string[];
+  /** where it is in the picture, px of the frame */
+  picture: Box;
+  /** its share inside the frame, and the edge it is most past when not all */
+  inFrame: number;
+  edge?: "left" | "right" | "top" | "bottom";
+  /** what the page draws over it, by share of it; null: not read */
+  covered: { what: string; share: number }[] | null;
+  /** what shows it, and frame px per px of the still or recording */
+  drawn: "screen" | "still" | "recording";
+  sourcePx?: number;
 };
 
 export type FilmReportOptions = {
@@ -248,6 +307,249 @@ export function slowTextSpans(
     }));
 }
 
+// --- the parts the film named --------------------------------------------------------------
+
+type PartUseRead = { use: string; t: number; end?: number; label?: string; ref?: string };
+/** `key` the registry's own (kit/media.js), the same in every playing of
+ *  the page; `reads` false: a drag no part of components.json was pressed
+ *  for — nothing to read where it is */
+type PartListed = { key: string; name: string; ref: string; reads: boolean; uses: PartUseRead[] };
+
+// serialized into the page, like the two below. Every part product() made
+// (kit/media.js, window.__otParts) and what the film did with it, as plain
+// values.
+function partsList(): PartListed[] {
+  type Reg = { key?: unknown; name?: unknown; ref?: unknown; uses?: unknown; at?: unknown };
+  const reg = (window as unknown as { __otParts?: Reg[] }).__otParts ?? [];
+  const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
+  return reg.map((p, i) => ({
+    key: typeof p?.key === "string" && p.key ? p.key : `#${i}`,
+    name: String(p?.name ?? ""),
+    ref: typeof p?.ref === "string" ? p.ref : "",
+    reads: typeof p?.at === "function",
+    uses: (Array.isArray(p?.uses) ? (p.uses as Record<string, unknown>[]) : []).flatMap((u) => {
+      const t = num(u?.t);
+      if (t === undefined) return [];
+      const end = num(u.end);
+      return [
+        {
+          use: String(u.use ?? ""),
+          t,
+          ...(end !== undefined ? { end } : {}),
+          ...(typeof u.label === "string" ? { label: u.label } : {}),
+          ...(typeof u.ref === "string" ? { ref: u.ref } : {}),
+        },
+      ];
+    }),
+  }));
+}
+
+/** where each part with a use at the page's time `at` shows now, as the
+ *  part says (at(t), coveredBy(t)) */
+function partsAt(at: number): PartRead[] {
+  type Seen = {
+    state?: string;
+    shown?: boolean;
+    showing?: string;
+    picture?: { x: number; y: number; width: number; height: number };
+    drawn?: string;
+    sourcePx?: number;
+  };
+  type Reg = {
+    key?: unknown;
+    uses?: { t?: number; end?: number }[];
+    at?: (t: number) => Seen;
+    coveredBy?: (t: number) => { what: string; share: number }[];
+    in?: (state: string) => string | null;
+    states?: { state: string }[];
+  };
+  const reg = (window as unknown as { __otParts?: Reg[] }).__otParts ?? [];
+  const near = (v: unknown) => typeof v === "number" && Math.abs(v - at) < 1e-3;
+  return reg.flatMap((p, i): PartRead[] => {
+    if (typeof p?.at !== "function") return [];
+    const key = typeof p.key === "string" && p.key ? p.key : `#${i}`;
+    if (!(p.uses ?? []).some((u) => near(u?.t) || near(u?.end))) return [];
+    try {
+      const a = p.at(at);
+      let covered: { what: string; share: number }[] | null = null;
+      try {
+        covered = typeof p.coveredBy === "function" ? p.coveredBy(at) : null;
+      } catch {}
+      const b = a.picture ?? { x: 0, y: 0, width: 0, height: 0 };
+      return [
+        {
+          key,
+          state: String(a.state ?? ""),
+          ref: (a.state && p.in?.(a.state)) || "",
+          shown: a.shown !== false,
+          ...(typeof a.showing === "string" ? { showing: a.showing } : {}),
+          on: (p.states ?? []).map((s) => s.state),
+          picture: [b.x, b.y, b.width, b.height] as Box,
+          drawn: String(a.drawn ?? "screen"),
+          ...(typeof a.sourcePx === "number" ? { sourcePx: a.sourcePx } : {}),
+          covered,
+        },
+      ];
+    } catch (e) {
+      return [{ key, error: String((e as Error)?.message ?? e).split("\n")[0] }];
+    }
+  });
+}
+
+/** asked of the page at each sample: the drift reading, and the parts named */
+const PAGE_JS = `(() => { const __name = (f) => f; return { ...${DRIFT_JS}, parts: (${partsList.toString()})() }; })()`;
+/** asked of the page at a part's use time (the page's clock) */
+const partsAtJs = (at: number) =>
+  `(() => { const __name = (f) => f; return (${partsAt.toString()})(${at}); })()`;
+
+type PartRead = {
+  key: string;
+  error?: string;
+  state?: string;
+  ref?: string;
+  shown?: boolean;
+  showing?: string;
+  on?: string[];
+  picture?: Box;
+  drawn?: string;
+  sourcePx?: number;
+  covered?: { what: string; share: number }[] | null;
+};
+
+/** the share of a box inside the frame, and the edge it is most past */
+export function inFrameOf(
+  b: Box,
+  frame: { width: number; height: number },
+): { inFrame: number; edge?: ReportPartSeen["edge"] } {
+  const [x, y, w, h] = b;
+  if (!(w > 0 && h > 0)) return { inFrame: 0 };
+  const iw = Math.max(0, Math.min(x + w, frame.width) - Math.max(x, 0));
+  const ih = Math.max(0, Math.min(y + h, frame.height) - Math.max(y, 0));
+  const inFrame = round3((iw * ih) / (w * h));
+  if (inFrame >= 0.999) return { inFrame: 1 };
+  const past: [NonNullable<ReportPartSeen["edge"]>, number][] = [
+    ["left", Math.max(0, -x) / w],
+    ["right", Math.max(0, x + w - frame.width) / w],
+    ["top", Math.max(0, -y) / h],
+    ["bottom", Math.max(0, y + h - frame.height) / h],
+  ];
+  past.sort((a, b) => b[1] - a[1]);
+  return { inFrame, edge: past[0]![0] };
+}
+
+/** every use of every part, once (a use the page makes again on each frame
+ *  is one), its times on the film's clock; and the readings at those times
+ *  (the page's clock, by `from`) set on each */
+export function partUses(
+  listed: readonly PartListed[],
+  reads: readonly { t: number; parts: readonly PartRead[] }[],
+  o: { from: number; duration: number; layout: { width: number; height: number } },
+): ReportPartUse[] {
+  const out: ReportPartUse[] = [];
+  for (const p of listed) {
+    const seen = new Set<string>();
+    for (const u of p.uses) {
+      const key = `${u.use}|${u.t}|${u.end ?? ""}|${u.label ?? ""}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const times = [u.t, ...(u.end !== undefined && u.end !== u.t ? [u.end] : [])].map(
+        (v) => v - o.from,
+      );
+      const errors: string[] = [];
+      const read: ReportPartSeen[] = [];
+      // the ref read again at its time, over the one the use was given when
+      // the page set it up (the screens played may have changed since)
+      let ref = "";
+      const inside = times.filter((t) => t >= -1e-6 && t <= o.duration + 1e-6);
+      for (const t of inside) {
+        const r = reads.find((x) => Math.abs(x.t - t) < 1e-3)?.parts.find((x) => x.key === p.key);
+        if (!r) continue;
+        if (r.error || !r.picture) {
+          errors.push(`${fmt(t)}: ${r.error ?? "no picture"}`);
+          continue;
+        }
+        ref ||= r.ref ?? "";
+        const picture = r.picture.map((v) => Math.round(v * 10) / 10) as Box;
+        read.push({
+          t: round3(t),
+          state: r.state ?? "",
+          shown: r.shown !== false,
+          ...(r.showing ? { showing: r.showing } : {}),
+          on: r.on ?? [],
+          picture,
+          ...inFrameOf(picture, o.layout),
+          covered: r.covered
+            ? r.covered.map((c) => ({ what: c.what, share: round3(c.share) }))
+            : null,
+          drawn: r.drawn === "still" || r.drawn === "recording" ? r.drawn : "screen",
+          ...(r.sourcePx !== undefined ? { sourcePx: round2(r.sourcePx) } : {}),
+        });
+      }
+      // why nothing was read, when nothing was
+      const note = errors.length
+        ? `the part could not be read at ${errors.join("; ")}`
+        : read.length
+          ? undefined
+          : !inside.length
+            ? "not read (outside the film)"
+            : !p.reads
+              ? "no part of components.json was pressed: where it is not read"
+              : "not read at its times";
+      out.push({
+        name: p.name,
+        ref: ref || u.ref || p.ref,
+        use: u.use,
+        t: round3(u.t - o.from),
+        ...(u.end !== undefined ? { end: round3(u.end - o.from) } : {}),
+        ...(u.label !== undefined ? { label: u.label } : {}),
+        seen: read,
+        ...(note ? { note } : {}),
+      });
+    }
+  }
+  return out.sort((a, b) => a.t - b.t);
+}
+
+/** <img> and <video> drawn bigger than their own pixels at the samples, by
+ *  picture: the stretches of samples it was, and the most frame px per px */
+export function pastPixels(
+  samples: readonly PageTextSample[],
+  every: number,
+): FilmReport["pastPixels"]["list"] {
+  const runs = new Map<
+    string,
+    { src?: string; label: string; spans: { from: number; to: number; ratio: number }[] }
+  >();
+  for (const s of samples)
+    for (const m of s.media) {
+      if (!m.drawn || !m.natural) continue;
+      const ratio = Math.max(m.drawn[2] / m.natural[0], m.drawn[3] / m.natural[1]);
+      if (!(ratio > 1.01)) continue;
+      const key = m.src ?? m.label;
+      let r = runs.get(key);
+      if (!r) {
+        r = { ...(m.src ? { src: m.src } : {}), label: m.label, spans: [] };
+        runs.set(key, r);
+      }
+      const open = r.spans.at(-1);
+      if (open && s.t - open.to <= every * 1.5 + 1e-6) {
+        if (open.to !== s.t) open.to = s.t;
+        open.ratio = Math.max(open.ratio, ratio);
+      } else r.spans.push({ from: s.t, to: s.t, ratio });
+    }
+  return [...runs.values()]
+    .flatMap((r) =>
+      r.spans.map((x) => ({
+        ...(r.src ? { src: r.src } : {}),
+        label: r.label,
+        from: round3(x.from),
+        to: round3(x.to),
+        ratio: round2(x.ratio),
+      })),
+    )
+    .sort((a, b) => a.from - b.from);
+}
+
 // --- text in pictures ----------------------------------------------------------------------
 
 /** folders (and sizes) of pictures read for text at most */
@@ -360,7 +662,7 @@ export async function filmReport(opts: FilmReportOptions): Promise<FilmReport> {
       width: layout.width,
       height: layout.height,
       fallback: layout,
-      extra: DRIFT_JS,
+      extra: PAGE_JS,
       onConsole: opts.onConsole,
     }).catch((e: Error) => {
       pageNote = `the page could not be played: ${e.message.split("\n")[0]}`;
@@ -461,11 +763,68 @@ export async function filmReport(opts: FilmReportOptions): Promise<FilmReport> {
     ...(pageNote ? { note: pageNote } : {}),
   });
 
+  // the parts the film named: every one, from the samples (a part made late
+  // shows in the later ones), then the page played again at their uses' times
+  let parts: FilmReport["parts"] = {
+    how: "not measured",
+    note: pageNote ?? "the page was not played",
+    named: 0,
+    uses: [],
+  };
+  if (pageRead) {
+    const listed = new Map<string, PartListed>();
+    for (const s of pageRead.samples) {
+      const got = (s.extra as { parts?: unknown } | undefined)?.parts;
+      if (Array.isArray(got)) for (const p of got as PartListed[]) listed.set(p.key, p);
+    }
+    const all = [...listed.values()];
+    const times = [
+      ...new Set(
+        all
+          .flatMap((p) => p.uses.flatMap((u) => [u.t, ...(u.end !== undefined ? [u.end] : [])]))
+          .map((v) => round3(v - info.from))
+          .filter((t) => t >= -1e-6 && t <= duration + 1e-6),
+      ),
+    ].sort((a, b) => a - b);
+    let note: string | undefined;
+    const reads = times.length
+      ? await readPageText({
+          page: opts.page,
+          root: opts.root,
+          chromePath: opts.chromePath,
+          from: info.from,
+          times,
+          width: layout.width,
+          height: layout.height,
+          fallback: layout,
+          extra: partsAtJs,
+          onConsole: opts.onConsole,
+        }).catch((e: Error) => {
+          note = `the page could not be played again at the parts' times: ${e.message.split("\n")[0]}`;
+          return null;
+        })
+      : null;
+    parts = {
+      how: "measured",
+      ...(note ? { note } : {}),
+      named: all.filter((p) => p.reads).length,
+      uses: partUses(
+        all,
+        (reads?.samples ?? []).map((s) => ({
+          t: s.t,
+          parts: Array.isArray(s.extra) ? (s.extra as PartRead[]) : [],
+        })),
+        { from: info.from, duration, layout },
+      ),
+    };
+  }
+
   return {
     film: opts.film,
     duration: round3(duration),
     fps,
     from: info.from,
+    every,
     layout,
     density,
     slowFps,
@@ -486,6 +845,10 @@ export async function filmReport(opts: FilmReportOptions): Promise<FilmReport> {
         }
       : { how: "not measured", list: [] },
     draft: !!opts.draft,
+    pastPixels: pageRead
+      ? { how: "measured", list: pastPixels(pageRead.samples, every) }
+      : { how: "not measured", note: pageNote ?? "the page was not played", list: [] },
+    parts,
     productText,
     jumps: { how: "measured", declared: declared.length, list: jumps },
     moving,
@@ -646,6 +1009,22 @@ export function formatFilmReport(r: FilmReport, o: { probe: string }): string[] 
     );
   }
 
+  // pictures drawn bigger than their own pixels
+  const pp = r.pastPixels;
+  const ppScope = `<img> and <video> on the page, every ${fmt(r.every)}`;
+  if (pp.how === "not measured")
+    L.push(`  pictures drawn past their own pixels: not measured — ${pp.note}`);
+  else if (!pp.list.length) L.push(`  pictures drawn past their own pixels (${ppScope}): none`);
+  else {
+    const shown = pp.list.slice(0, 4).map((x) => {
+      const at = x.from === x.to ? fmt(x.from) : `${fmt(x.from)}–${fmt(x.to)}`;
+      return `${x.src ?? x.label} ${at}, up to ${x.ratio} frame px per source px`;
+    });
+    L.push(
+      `  pictures drawn past their own pixels (${ppScope}): ${shown.join("; ")}${pp.list.length > 4 ? `; ${pp.list.length - 4} more` : ""}`,
+    );
+  }
+
   // moves that turn back
   const tb = r.turns;
   if (tb.how === "not measured")
@@ -696,10 +1075,92 @@ export function formatFilmReport(r: FilmReport, o: { probe: string }): string[] 
     );
   }
 
+  // the parts the film named
+  const pa = r.parts;
+  if (pa.how === "not measured")
+    L.push(`  parts named through product(): not measured — ${pa.note}`);
+  else if (!pa.named && !pa.uses.length)
+    L.push("  parts: none named through product() (kit/media.js)");
+  else if (!pa.uses.length)
+    L.push(
+      `  parts named through product(): ${pa.named}, none used by the camera, the cursor or mark() on the film's clock`,
+    );
+  else {
+    L.push(
+      `  parts the film named (through product(); times on the film's clock)${pa.note ? ` — ${pa.note}` : ""}:`,
+    );
+    for (const u of pa.uses.slice(0, PART_LINES)) L.push(`    ${partLine(u)}`);
+    if (pa.uses.length > PART_LINES) L.push(`    … ${pa.uses.length - PART_LINES} more use(s)`);
+  }
+
   L.push(
     `full report (text in pictures, camera, sound, beat sheet): ${o.probe} — measured in ${(r.ms / 1000).toFixed(1)} s; --no-report leaves this out`,
   );
   return L;
+}
+
+/** uses of parts listed at most, one line each */
+const PART_LINES = 8;
+
+const USED: Record<string, string> = {
+  frame: "framed",
+  cut: "cut to",
+  click: "clicked",
+  move: "moved to",
+  type: "typed into",
+  drag: "dragged",
+  mark: "named",
+};
+
+/** one use of a part: who, what, when, then the facts at its times */
+function partLine(u: ReportPartUse): string {
+  const who = [u.name !== u.ref ? u.name : "", u.ref].filter(Boolean).join(" ");
+  const what = `${USED[u.use] ?? u.use}${u.label ? ` (${JSON.stringify(u.label)})` : ""}`;
+  const when = u.end !== undefined && u.end !== u.t ? `${fmt(u.t)}–${fmt(u.end)}` : fmt(u.t);
+  // at which time, when the use has more than one
+  const at = (t: number) => (u.seen.length > 1 ? ` at ${fmt(t)}` : "");
+  const facts: string[] = [];
+  const off = u.seen.find((x) => !x.shown);
+  if (off) {
+    const on =
+      off.on.length > 4
+        ? `${off.on.slice(0, 3).join(", ")}, … ${off.on.length - 3} more`
+        : off.on.join(", ");
+    facts.push(
+      `not on the screen shown then${off.showing ? ` (${off.showing})` : ""}${at(off.t)}; it is on ${on || "no screen"}`,
+    );
+  }
+  if (u.seen.length) {
+    const worst = [...u.seen].sort((a, b) => a.inFrame - b.inFrame)[0]!;
+    if (worst.inFrame >= 1) facts.push("in frame");
+    else if (worst.inFrame <= 0) facts.push(`outside the frame${at(worst.t)}`);
+    else facts.push(`off the frame's ${worst.edge} edge ${pct(1 - worst.inFrame)}${at(worst.t)}`);
+    const read = u.seen.filter((x) => x.covered);
+    const cover = (x: ReportPartSeen) => (x.covered ?? []).reduce((a, c) => a + c.share, 0);
+    const most = [...read].sort((a, b) => cover(b) - cover(a))[0];
+    if (!read.length) facts.push("what covers it not read");
+    else if (most && cover(most) > 0) {
+      const by = most.covered!;
+      facts.push(
+        `${pct(cover(most))} covered by ${by
+          .slice(0, 2)
+          .map((c) => c.what)
+          .join(", ")}${by.length > 2 ? `, ${by.length - 2} more` : ""}${at(most.t)}`,
+      );
+    }
+    const dense = u.seen
+      .filter((x) => x.sourcePx !== undefined)
+      .sort((a, b) => b.sourcePx! - a.sourcePx!)[0];
+    if (dense) {
+      const of = dense.drawn === "recording" ? "recording" : "still";
+      facts.push(
+        `drawn from ${of === "still" ? "a still" : "the recording"} at ${dense.sourcePx!.toFixed(1)} frame px per ${of} px${at(dense.t)}`,
+      );
+    }
+  }
+  if (u.note) facts.push(u.note);
+  if (!facts.length) facts.push("not read");
+  return `${who} ${what} ${when}: ${facts.join("; ")}`;
 }
 
 function median(xs: readonly number[]): number {

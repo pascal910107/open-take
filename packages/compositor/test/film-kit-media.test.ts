@@ -117,6 +117,10 @@ test("film init names the product's saved screen and look when the folder has th
   const page = await readFile(join(film, "index.html"), "utf8");
   assert.match(page, /screen\(iframe, "states\/home\/state\.html"\)/);
   assert.match(page, /lift\(home, /);
+  // its parts as references, named in a comment: product() on its folder
+  assert.match(page, /\/\/ {3}const P = await product\("states\/home\/"\);/);
+  assert.match(page, /cam\.frame\(part, …\) · cur\.click\(part, t\) · lift\(home, part\)/);
+  assert.doesNotMatch(plain, /product\(/, "nothing named that is not there");
   assert.match(page, /look\/look\.json/);
   // listed in a comment, like the kit: the page imports only the timeline
   assert.deepEqual(

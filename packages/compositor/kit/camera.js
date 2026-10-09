@@ -33,6 +33,7 @@
 
 /** @typedef {{ x: number, y: number, width: number, height: number }} Box  a region of the content, in its CSS px */
 /** @typedef {{ cx: number, cy: number, w: number }} View  what the picture shows: its centre and width, in content px */
+/** @typedef {{ boxAt: (t: number) => Box, name?: string, used?: (use: string, t: number) => unknown }} PartLike  a part of the product (kit/media.js product()): framed where it is when the move lands */
 /**
  * @typedef {object} When  when a move happens — one of `arrive` or `start`
  * @property {number} [arrive] the move lands here (s)
@@ -252,6 +253,41 @@ export function camera({
       log: moveZoom === "log",
     });
     moves = null;
+  };
+
+  /** a part of the product is framed where it is when the move lands (a
+   *  cut: where it is at the cut); a box or a view as it is
+   * @param {"move" | "cut"} kind @param {Box | View | PartLike} target @param {When} o @param {string} label */
+  const askFor = (kind, target, o, label) => {
+    if (!("boxAt" in target) || typeof target.boxAt !== "function")
+      return ask(kind, /** @type {Box | View} */ (target), o, label);
+    const named = `${label} ${target.name ?? "part"}`;
+    const part = target;
+    if (kind === "cut" || o.arrive != null || o.dur != null || o.start == null) {
+      const lands =
+        kind === "cut"
+          ? (o.start ?? Number.NaN)
+          : (o.arrive ?? (o.start ?? Number.NaN) + (o.dur ?? zoomIn)) - (o.lead ?? lead);
+      if (!Number.isFinite(lands)) return ask(kind, { cx: 0, cy: 0, w: 1 }, o, named);
+      part.used?.(kind === "cut" ? "cut" : label, lands);
+      return ask(kind, part.boxAt(lands), o, named);
+    }
+    // a move given by its start alone lasts as plan() times it — longer when
+    // it pulls out wider than the view asked for before it — so the part is
+    // read where that lands, and the move keeps that duration
+    const start = o.start;
+    const moveLead = o.lead ?? lead;
+    let leaving = all();
+    let latest = Number.NEGATIVE_INFINITY;
+    for (const a of asked)
+      if (a.at <= start && a.at >= latest) {
+        latest = a.at;
+        leaving = a.target;
+      }
+    let dur = zoomIn;
+    if (viewOf(part.boxAt(start + zoomIn - moveLead), o).w > leaving.w + 1e-9) dur = zoomOut;
+    part.used?.(label, start + dur - moveLead);
+    return ask(kind, part.boxAt(start + dur - moveLead), { ...o, dur }, named);
   };
 
   /** the moves in time order, each with its start and end resolved */
@@ -490,15 +526,16 @@ export function camera({
     /** the layer's size and the picture's, as given */
     content,
     view,
-    /** frame a box (or a view) — `{ arrive }` or `{ start }`, optionally `dur`, `ease`, `fill`, `fit` */
-    /** @param {Box | View} target @param {When} when */
-    frame: (target, when) => ask("move", target, when, "frame"),
+    /** frame a box, a view or a part of the product (where it is when the
+     *  move lands) — `{ arrive }` or `{ start }`, optionally `dur`, `ease`, `fill`, `fit` */
+    /** @param {Box | View | PartLike} target @param {When} when */
+    frame: (target, when) => askFor("move", target, when, "frame"),
     /** pull out to the whole content */
     /** @param {When} when */
     rest: (when) => ask("move", all(), when, "rest"),
     /** a cut: from `at` on the camera shows `target`, with no move */
-    /** @param {Box | View} target @param {number} at @param {When} [o] */
-    cut: (target, at, o = {}) => ask("cut", target, { ...o, start: at }, "cut"),
+    /** @param {Box | View | PartLike} target @param {number} at @param {When} [o] */
+    cut: (target, at, o = {}) => askFor("cut", target, { ...o, start: at }, "cut"),
     /** a jolt from `at` on, dying away over `dur` — an impact, a slam, a beat
      *  that lands; shakes that overlap add up */
     /** @param {number} at @param {Shake} [o] */

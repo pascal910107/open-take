@@ -108,6 +108,18 @@ travel), nor how text looks while it moves: on a live page under a slow push
 text can step a pixel at a time, which `film still` at times one frame apart
 shows; a render draws such frames finer on its own (`skill film render`).
 
+Parts the film names through `product()` (`skill film material`) — framed,
+clicked, dragged, marked — are listed after a render with each use's time:
+whether the part was in the frame (or how much was off which edge), whether
+it was on the screen shown then (and which screens have it if not), what of
+the page's own drawing covered how much of it, and px of the frame per px of
+the still it was drawn from. Pictures drawn bigger than their own pixels —
+a still, or a `<video>` past its `videoWidth` — are listed with their times
+and the most frame px per source px, parts or not. Given `{ tl }`, `product()` also
+declares each use, so `film probe` follows the part like any declared
+subject (`part:<name>.x`/`.y`). Without
+`product()` the report says that no part was named through it.
+
 `film check --page` and `film still` also look through the folder served to
 the page (as `film render` serves it, the page not run): when it holds PNG
 stills from a `shoot` (`shots.json`) and no saved screen, a `material:` line

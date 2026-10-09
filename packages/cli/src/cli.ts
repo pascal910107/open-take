@@ -44,6 +44,7 @@ import {
   filmReport,
   filmSheet,
   filmStills,
+  followedLine,
   formatComponents,
   formatFilmBeats,
   formatFilmCheck,
@@ -72,6 +73,7 @@ import {
   type PostShootPass,
   PrecheckRefusal,
   pageMaterialNote,
+  partsLine,
   patchFilm,
   profileDir,
   readNotes,
@@ -1470,10 +1472,15 @@ async function main() {
           `  ${INVOKE} beats  ${mp4Path}            (the numbered beat sheet)\n` +
           `  ${INVOKE} ab     ${mp4Path} --set zoom=light,tight --beat 2   (taste A/B)\n`,
       );
-    if (made.components)
+    if (made.components) {
+      const at = dirname(made.components.path);
       process.stdout.write(
         `${componentsLine(made.components.file, shown(made.components.path), shown(takeDir))}\n`,
       );
+      const followed = followedLine(made.components.file, at);
+      if (followed) process.stdout.write(`${followed}\n`);
+      process.stdout.write(`${partsLine(at, process.cwd())}\n`);
+    }
     printWarnings(warnings);
     // Post-shoot gates: line the delivered video up against the engine's own
     // intent. checkTake reads pixels (dead opening / static tail) and the
@@ -2041,10 +2048,15 @@ async function main() {
     if (log.stills.length) process.stdout.write(`       ${shootStatesLine(log)}\n`);
     const steadyLine = shootSteadyLine(log);
     if (steadyLine) process.stdout.write(`       ${steadyLine}\n`);
-    if (components)
+    if (components) {
+      const at = dirname(components.path);
       process.stdout.write(
         `       ${componentsLine(components.file, shown(components.path), shown(dirname(path)))}\n`,
       );
+      const followed = followedLine(components.file, at);
+      if (followed) process.stdout.write(`       ${followed}\n`);
+      process.stdout.write(`       ${partsLine(at, process.cwd())}\n`);
+    }
     for (const line of materialsSummary(materials ?? [], {
       show: shown,
       cmd: `${INVOKE} materials ${shown(dirname(path))}`,
@@ -2130,6 +2142,8 @@ async function main() {
       `${formatComponents(inv.file, {
         path: shown(inv.path ?? join(inv.source.root, "components.json")),
         dir: shown(inv.source.root),
+        at: inv.path ? dirname(inv.path) : inv.source.root,
+        servedFrom: process.cwd(),
         ...(flag("--state") ? { state: flag("--state") } : {}),
       })}\n`,
     );
@@ -2358,7 +2372,9 @@ async function main() {
         });
         if (inv?.path)
           process.stdout.write(
-            `${componentsLine(inv.file, shown(inv.path), shown(inv.source.root))}\n`,
+            `${componentsLine(inv.file, shown(inv.path), shown(inv.source.root))}\n` +
+              // the URL as film render serves it when run here
+              `${partsLine(dirname(inv.path), process.cwd())}\n`,
           );
       }
       const r = await initFilm({ dir: target, force: has("--force") });

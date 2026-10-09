@@ -53,7 +53,8 @@ product's screen was still changing; moves of the picture where what it
 ends up framing heads the wrong way first, or past its place and back (a
 view whose centre and zoom move apart, or that is clamped inside the page
 every frame, does that; `kit/camera.js` moves straight); live text moving
-under a pixel a frame. Facts, not grades; `film probe` reads all of it and
+under a pixel a frame; the parts named through `product()` at each use, and
+pictures drawn past their own pixels (`skill film checking`). Facts, not grades; `film probe` reads all of it and
 more.
 
 Text that moves slowly on a live page — a slow push or drift across an

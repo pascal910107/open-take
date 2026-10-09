@@ -149,6 +149,10 @@ export type ComponentEntry = {
   track?: string;
   /** an earlier screen shows the same part (kind, text and place): its ref */
   repeats?: string;
+  /** the same element on the screen before (matchStates, the same kind),
+   *  whether it changed or not — a part that stayed but moved is linked
+   *  here too */
+  before?: string;
   /** its crisp picture (3×, see-through around it), relative to components.json */
   picture?: string;
   noPicture?: string;
@@ -228,6 +232,10 @@ export type ComponentsFile = {
     /** the log it was read with, relative to components.json */
     log?: string;
     viewport: { w: number; h: number; dpr?: number };
+    /** px of what shows the screens — a shoot's stills (shots.json scale),
+     *  a take's recording (its video's width over the viewport's) — per CSS
+     *  px of the screen */
+    srcRatio?: number;
   };
   stage: { width: number; height: number; phoneWidth: number; phoneScale: number };
   states: ComponentState[];
@@ -280,11 +288,14 @@ export type ComponentSource = {
   root: string;
   /** the log, absolute */
   log?: string;
+  /** px of the stills or the recording per CSS px of the screen */
+  srcRatio?: number;
   states: ComponentSourceState[];
 };
 
 /** a shoot's log, as far as this reads it (runtime/src/shoot.ts) */
 type ShotsLog = {
+  scale?: number;
   stills?: {
     file?: string;
     name?: string;
@@ -387,7 +398,13 @@ function shootSource(dir: string): ComponentSource {
         : {}),
     });
   }
-  return { kind: "shoot", root: dir, log: join(dir, "shots.json"), states };
+  return {
+    kind: "shoot",
+    root: dir,
+    log: join(dir, "shots.json"),
+    ...(typeof log.scale === "number" && log.scale > 0 ? { srcRatio: log.scale } : {}),
+    states,
+  };
 }
 
 function takeSource(dir: string): ComponentSource {
@@ -419,7 +436,14 @@ function takeSource(dir: string): ComponentSource {
         : {}),
     };
   });
-  return { kind: "take", root: dir, log: join(dir, "capture.json"), states };
+  const srcRatio = log.video?.width && log.viewport?.w ? log.video.width / log.viewport.w : 0;
+  return {
+    kind: "take",
+    root: dir,
+    log: join(dir, "capture.json"),
+    ...(srcRatio > 0 ? { srcRatio } : {}),
+    states,
+  };
 }
 
 // --- arithmetic ---------------------------------------------------------------------
@@ -975,6 +999,7 @@ export function gatherComponents(
       // a control whose text and size both changed is another control in its
       // slot, not the same one (a card or a number may grow; a button does not)
       if (ACTABLE.has(eb.kind) && !samePart(A.index!, ea.el, B.index!, eb.el)) continue;
+      eb.before = ea.ref;
       let chain = steps.get(ea.ref);
       if (!chain) {
         chain = [stepOf(ea, A.index!)];
@@ -1037,6 +1062,7 @@ export function gatherComponents(
       kind: source.kind,
       ...(source.log ? { log: rel(source.log) } : {}),
       viewport,
+      ...(source.srcRatio ? { srcRatio: source.srcRatio } : {}),
     },
     stage: {
       width: stage.width,
@@ -1093,6 +1119,16 @@ export function componentCounts(file: ComponentsFile): {
 const q = (s: string) => JSON.stringify(s);
 const posix = (p: string) => p.split(sep).join("/");
 
+/** Where `abs` is as `film render` serves it when run in `servedFrom` (the
+ *  working directory, or --root): a URL from that folder ("/shots/…"),
+ *  which reads the same from any page under it ("/" is that folder) — or,
+ *  outside it, its path on this machine (`inside` false). */
+function servedUrl(abs: string, servedFrom: string): { url: string; inside: boolean } {
+  const r = relative(resolve(servedFrom), abs);
+  if (!r.startsWith("..") && !isAbsolute(r)) return { url: `/${posix(r)}`, inside: true };
+  return { url: posix(abs), inside: false };
+}
+
 /**
  * A module for the part named by `ref` (a part the film's author picked —
  * this never picks one): it lifts the part out of its saved screen with the
@@ -1124,16 +1160,11 @@ export function exampleSource(
   let url: string;
   let where = "";
   if (opts.root && opts.servedFrom) {
-    const abs = resolve(opts.root, state.url);
-    const r = relative(resolve(opts.servedFrom), abs);
-    if (r && !r.startsWith("..") && !isAbsolute(r)) {
-      url = `/${posix(r)}`;
-      where = `from the folder film render serves when run in ${posix(resolve(opts.servedFrom))} (or --root that folder)`;
-    } else {
-      url = posix(abs);
-      where =
-        "the screen's path on this machine — it is outside the folder this was printed in, and film render serves one folder: render with --root on one that holds the page and this screen, and write the URL from there";
-    }
+    const served = servedUrl(resolve(opts.root, state.url), opts.servedFrom);
+    url = served.url;
+    where = served.inside
+      ? `from the folder film render serves when run in ${posix(resolve(opts.servedFrom))} (or --root that folder)`
+      : "the screen's path on this machine — it is outside the folder this was printed in, and film render serves one folder: render with --root on one that holds the page and this screen, and write the URL from there";
   } else {
     const base = (opts.screens ?? ".").replace(/\/+$/, "");
     url = base === "." ? state.url : `${base}/${state.url}`;
@@ -1300,7 +1331,16 @@ function kindsLine(list: ComponentEntry[]): string {
  *  page's order); then where the rest is. */
 export function formatComponents(
   file: ComponentsFile,
-  opts: { path: string; state?: string; dir?: string } = { path: "components.json" },
+  opts: {
+    path: string;
+    state?: string;
+    dir?: string;
+    /** the folder components.json is in, and the one film render serves
+     *  (the working directory): with them, the followed tracks and the
+     *  product() line */
+    at?: string;
+    servedFrom?: string;
+  } = { path: "components.json" },
 ): string {
   const c = componentCounts(file);
   const byRef = new Map(file.components.map((e) => [e.ref, e]));
@@ -1337,12 +1377,70 @@ export function formatComponents(
     const more = said.length - SUMMARY_PER_SCREEN;
     if (more > 0) out.push(`  … ${more} more changed in components.json`);
   }
+  out.push("");
+  const followed = opts.at ? followedLine(file, opts.at) : null;
+  if (followed) out.push(followed);
+  if (opts.at && opts.servedFrom) out.push(partsLine(opts.at, opts.servedFrom));
   out.push(
-    "",
     `skipped: ${file.skipped.length} candidate${file.skipped.length === 1 ? "" : "s"}, each with its reason, in components.json`,
     `snippet: open-take components ${opts.dir ?? "<dir>"} --snippet <ref>   the wiring that lifts a part you name and moves it`,
   );
   return out.join("\n");
+}
+
+/** How many followed tracks a summary names (the rest are in the file). */
+export const FOLLOWED_SHOWN = 4;
+
+/** The tracks whose every step is a shoot still that kept the cursor
+ *  (shots.json) — a part followed through the screens with the mouse where
+ *  it was at each one — in the page's order: "followed: t1 input
+ *  "<label>" <a> → <b> over <first>…<last>, cursor kept at each step · …". Null when
+ *  there is none (a take's or a folder of screens' tracks have no stills).
+ *  `dir`: the folder components.json is in. Information only. */
+export function followedLine(file: ComponentsFile, dir: string): string | null {
+  if (file.source.kind !== "shoot" || !file.source.log) return null;
+  let log: ShotsLog;
+  try {
+    log = readJson<ShotsLog>(resolve(dir, file.source.log));
+  } catch {
+    return null;
+  }
+  // the states a still kept the cursor at
+  const byFile = new Map((log.states?.items ?? []).map((it) => [it.still, it.id]));
+  const cursorAt = new Set<string>();
+  for (const s of log.stills ?? []) {
+    const id = s.state ?? byFile.get(s.file);
+    if (id && s.cursor) cursorAt.add(id);
+  }
+  const order = new Map(file.components.map((e, i) => [e.ref, i]));
+  const followed = file.tracks
+    .filter((t) => t.steps.length > 1 && t.steps.every((s) => cursorAt.has(s.state)))
+    .sort((a, b) => (order.get(a.steps[0]!.ref) ?? 0) - (order.get(b.steps[0]!.ref) ?? 0));
+  if (!followed.length) return null;
+  const reads = (s: ComponentTrack["steps"][number]) =>
+    s.value != null ? `${s.value}${s.unit ?? ""}` : q(cut(s.text, 20));
+  const items = followed.slice(0, FOLLOWED_SHOWN).map((t) => {
+    const a = t.steps[0]!;
+    const b = t.steps[t.steps.length - 1]!;
+    return `${t.id} ${t.kind} ${q(cut(t.label, 30))} ${reads(a)} → ${reads(b)} over ${a.state}…${b.state}, cursor kept at each step`;
+  });
+  const more = followed.length - FOLLOWED_SHOWN;
+  if (more > 0) items.push(`… ${more} more in components.json`);
+  return `followed: ${items.join(" · ")}`;
+}
+
+/** The line that names the kit's way to use an inventory's parts:
+ *  product() on `dir` (the folder components.json is in) at the URL film
+ *  render serves it from when run in `servedFrom`. */
+export function partsLine(dir: string, servedFrom: string): string {
+  const served = servedUrl(resolve(dir), servedFrom);
+  const url = served.url.endsWith("/") ? served.url : `${served.url}/`;
+  return (
+    `parts: product(${q(url)}) in kit/media.js — each part by ref or track as one reference for cam.frame, cursor click/drag, lift, overlays; follows it through the screens and the camera` +
+    (served.inside
+      ? ""
+      : " (its path on this machine: film render serves one folder — --root one that holds the page and this)")
+  );
 }
 
 /** The one line a shoot or a take prints about its inventory. */

@@ -58,7 +58,9 @@ export function starterPage(
       ? [
           `  // ${has.home}: the product's page as a saved screen — the real interface, live DOM:`,
           `  //   const home = screen(iframe, "${has.home}");   // kit/media.js; size the iframe to its viewport`,
-          `  //   lift(home, "<selector>") one part as a layer of its own · isolate(home, [...]) the rest faded · home.box(sel) for cam.frame`,
+          `  //   lift(home, "<selector>") one part as a layer of its own · isolate(home, [...]) the rest faded`,
+          `  //   const P = await product("${has.home.replace(/[^/]*$/, "")}");   // kit/media.js: its parts (components.json) as references`,
+          '  //   P.part("<ref>") → cam.frame(part, …) · cur.click(part, t) · lift(home, part) · part.at(t) where it shows now',
         ]
       : []),
     ...(has.look

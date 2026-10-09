@@ -17,14 +17,18 @@ import {
   componentCounts,
   componentsLine,
   exampleSource,
+  FOLLOWED_SHOWN,
   fitOf,
+  followedLine,
   formatComponents,
   gatherComponents,
+  partsLine,
   phoneOf,
   readComponentSource,
   readNumber,
   writeComponents,
 } from "../src/film/components";
+import { writePartsShoot } from "./fixtures/parts-shoot";
 
 const FIX = join(import.meta.dirname, "fixtures", "components");
 const calc = () => gatherComponents(readComponentSource(join(FIX, "j01-calc")));
@@ -74,6 +78,7 @@ test("recall on calc-end: the parts j01 lifted by hand are listed (e149, e155, e
     kind: "shoot",
     log: "shots.json",
     viewport: { w: 1920, h: 1300, dpr: 2 },
+    srcRatio: 2,
   });
   assert.equal(f.states[1]!.url, "states/slide/state.html");
 });
@@ -183,6 +188,83 @@ test("a take: the capture's own target is what was acted on, and what it changed
   // a page served from this machine says so
   assert.deepEqual(entry(f, "s2:e5").provenance.local, true);
   assert.equal(entry(f, "s2:e5").provenance.url, "http://127.0.0.1:38713/page.html");
+});
+
+test("before: the same element on the screen before — a part that stayed but moved is linked too", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ot-components-"));
+  try {
+    writePartsShoot(dir);
+    const f = gatherComponents(readComponentSource(dir));
+    // the heading moved down on add-1, its text the same: no track, no
+    // repeat (another place) — only the link to itself before
+    const moved = entry(f, "add-1:e2");
+    assert.equal(moved.facts.moved, true);
+    assert.equal(moved.track, undefined);
+    assert.equal(moved.repeats, undefined);
+    assert.equal(moved.before, "home:e2");
+    // unchanged and in place: a repeat, and linked as well
+    assert.equal(entry(f, "add-2:e2").repeats, "add-1:e2");
+    assert.equal(entry(f, "add-2:e2").before, "add-1:e2");
+    // the first screen has no screen before
+    assert.equal(entry(f, "home:e2").before, undefined);
+    // tracks are as they were: the number, through every screen
+    assert.deepEqual(
+      f.tracks.map((t) => [t.id, t.steps.map((s) => s.ref)]),
+      [["t1", f.states.map((s) => `${s.id}:e4`)]],
+    );
+    assert.equal(entry(f, "n-4:e4").before, "n-3:e4");
+    // the stills' px per screen px
+    assert.equal(f.source.srcRatio, 2);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a take's srcRatio is its recording's width over the viewport's", () => {
+  const f = gatherComponents(readComponentSource(join(FIX, "bill.take")));
+  assert.equal(f.source.srcRatio, 2556 / 1280);
+});
+
+test("followed: the tracks with the cursor kept at each step, and the product() line — an index, nothing picked", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ot-components-"));
+  try {
+    writePartsShoot(dir);
+    const f = gatherComponents(readComponentSource(dir));
+    assert.equal(
+      followedLine(f, dir),
+      'followed: t1 number "9" 3 → 9 over home…n-4, cursor kept at each step',
+    );
+    // more than the summary names: the rest are in the file
+    const many: ComponentsFile = {
+      ...f,
+      tracks: Array.from({ length: FOLLOWED_SHOWN + 2 }, (_, i) => ({
+        ...f.tracks[0]!,
+        id: `t${i + 1}`,
+      })),
+    };
+    const line = followedLine(many, dir)!;
+    assert.equal(line.match(/cursor kept at each step/g)?.length, FOLLOWED_SHOWN);
+    assert.match(line, / · … 2 more in components\.json$/);
+    // a still without a cursor: that track is not followed
+    const log = JSON.parse(readFileSync(join(dir, "shots.json"), "utf8"));
+    delete log.stills[2].cursor;
+    writeFileSync(join(dir, "shots.json"), JSON.stringify(log));
+    assert.equal(followedLine(f, dir), null);
+    // the URL as film render serves it from the folder it runs in
+    assert.match(
+      partsLine(dir, join(dir, "..")),
+      new RegExp(`^parts: product\\("/${dir.split("/").pop()}/"\\) in kit/media\\.js — `),
+    );
+    assert.match(partsLine(dir, join(dir, "states")), /--root/);
+    const out = formatComponents(f, { path: "components.json", at: dir, servedFrom: dir });
+    assert.match(out, /\nparts: product\("\/"\)/);
+    assert.doesNotMatch(out, /\nfollowed:/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  // a take has no stills: nothing followed
+  const take = gatherComponents(readComponentSource(join(FIX, "bill.take")));
+  assert.equal(followedLine(take, join(FIX, "bill.take")), null);
 });
 
 test("a screen with no parts.json is listed as unmeasured, not dropped", () => {

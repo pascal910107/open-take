@@ -54,8 +54,9 @@ export type PageTextSample = {
   /** pictures on the page: img, video, canvas, iframe, a background image;
    *  `src` the file it shows (a URL as the page has it; after
    *  readPageText, a path from the served root when it is served there);
-   *  for an <img>, `drawn`: where its whole image is drawn (object-fit
-   *  and transforms taken in, the clip not), and its own size in px */
+   *  for an <img> or a <video>, `drawn`: where its whole picture is drawn
+   *  (object-fit and transforms taken in, the clip not), and its own size
+   *  in px (a video's once its size is known) */
   media: { label: string; box: Box; src?: string; drawn?: Box; natural?: [number, number] }[];
   /** where each named subject (a CSS selector) is drawn; null: an element
    *  matches but is not visible; absent: no element matches */
@@ -304,14 +305,14 @@ function probeText(subjects: string[]): Omit<PageTextSample, "t"> {
     const c = clipOf(el.parentElement, window, top, frame);
     const v = c && inter(top(r), c);
     if (!v) continue;
-    // an image's own pixels on the frame: its box as laid out, fitted as
-    // object-fit says (centred), then as transformed
+    // an image's or a video's own pixels on the frame: its box as laid
+    // out, fitted as object-fit says (centred), then as transformed
     let drawn: Box | undefined;
     let natural: [number, number] | undefined;
-    if (tag === "img") {
-      const im = el as HTMLImageElement;
-      const nw = im.naturalWidth;
-      const nh = im.naturalHeight;
+    if (tag === "img" || tag === "video") {
+      const im = el as HTMLImageElement & HTMLVideoElement;
+      const nw = tag === "img" ? im.naturalWidth : im.videoWidth;
+      const nh = tag === "img" ? im.naturalHeight : im.videoHeight;
       const lw = im.offsetWidth;
       const lh = im.offsetHeight;
       if (nw && nh && lw && lh) {
@@ -404,8 +405,9 @@ export async function readPageText(opts: {
   /** CSS selectors to locate at each time */
   subjects?: readonly string[];
   /** an expression asked of the page at each time too (awaited), kept on the
-   *  sample as `extra` — another reading on the same seek */
-  extra?: string;
+   *  sample as `extra` — another reading on the same seek; a function makes
+   *  it for each time, given the page's time (from + t) */
+  extra?: string | ((pageT: number) => string);
   onConsole?: (level: string, text: string) => void;
 }): Promise<PageTextReading> {
   const { root, urlPath } = resolveFilmPage(opts.page, opts.root);
@@ -467,7 +469,8 @@ export async function readPageText(opts: {
             await browser.evaluate(`window.__ot.seek(${opts.from + t})`);
             const r = await browser.evaluate<Omit<PageTextSample, "t">>(source);
             for (const m of r.media) if (m.src) m.src = servedPath(m.src, server.url);
-            const extra = opts.extra ? await browser.evaluate<unknown>(opts.extra) : undefined;
+            const ask = typeof opts.extra === "function" ? opts.extra(opts.from + t) : opts.extra;
+            const extra = ask ? await browser.evaluate<unknown>(ask) : undefined;
             samples.push({ t, ...r, ...(opts.extra ? { extra } : {}) });
             error = "";
             break;
