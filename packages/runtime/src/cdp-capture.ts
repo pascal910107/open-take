@@ -765,13 +765,15 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
         // ~16ms steps → ~60 distinct frames/sec captured (one redraw per move);
         // this is what keeps the ink from lagging the cursor (spike VERDICT).
         const n = Math.max(12, Math.round(target / 16));
-        const tMs = Date.now() - t0;
         // Pause the raster pump for the held-button stroke (a stalled
         // captureScreenshot would block the drag's mouse events). Drain any
         // in-flight (button-up) screenshot first.
         pumpPaused = true;
         await sleep(160);
         const tDrag = Date.now();
+        // the stroke starts here, after the pause: the event's time is when the
+        // button goes down, so a replayed cursor moves with the ink
+        const tMs = tDrag - t0;
         // All pointer events are fire-and-forget (see the move loop) — a
         // held-button dispatch withholds its ack ~5s in headless, so awaiting
         // press/release/moves would stall the stroke. Sends stay ordered on the
@@ -887,13 +889,13 @@ export async function captureTakeCDP(plan: TakePlan, opts: CaptureOpts): Promise
             data,
           });
         const n = Math.max(12, Math.round(target / 16));
-        const tMs = Date.now() - t0;
         // Pause the raster pump for the carry (mirroring drag): a mid-drag
         // captureScreenshot could stall the CDP session; the page's dragover
         // reaction (dropzone morph) self-rasters, so nothing is lost.
         pumpPaused = true;
         await sleep(160);
         const tCarry = Date.now();
+        const tMs = tCarry - t0; // when the carry starts, after the pause (see drag)
         const last = path[path.length - 1]!;
         let carriedMs: number;
         try {
