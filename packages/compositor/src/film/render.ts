@@ -100,6 +100,9 @@ export type FilmRenderResult = {
    *  how finely; none when --supersample was given or in a draft */
   fine: { from: number; to: number }[];
   fineSupersample: number;
+  /** moves where what ends up framed does not head straight for its place
+   *  (see turnsBack); null when the frames were not probed */
+  turnsBack: TurnBack[] | null;
   height: number;
   fps: number;
   frames: number;
@@ -330,8 +333,11 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
     let samples = new Array<number>(frames).fill(1);
     let sides = new Array<number>(frames).fill(0);
     let density = new Array<number>(frames).fill(ss);
+    let turns: TurnBack[] | null = null;
     let pool: HtmlBrowser[] = [first];
-    if (film.blur || auto) {
+    // every render but a draft probes: the blur's samples, the frames drawn
+    // finer, the moves that turn back
+    if (film.blur || !draft) {
       // a clock film keeps its own state, so only a render film probes in parallel
       if (info.mode === "render")
         while (pool.length < workers) {
@@ -341,6 +347,15 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
         }
       const p = await probe(pool, film, opts.onProgress);
       if (film.blur) ({ samples, sides } = p);
+      if (process.env.OT_VIEW_DUMP)
+        await writeFile(process.env.OT_VIEW_DUMP, JSON.stringify({ view: p.view, sides: p.sides }));
+      turns = turnsBack(
+        p.view,
+        p.sides,
+        film.fps,
+        { width: film.width, height: film.height },
+        film.f0,
+      );
       if (auto)
         density = fineFrames(p.text, p.sides, film.fps, scale * ss).map((f) =>
           f ? FINE_SUPERSAMPLE : ss,
@@ -466,7 +481,7 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
     const events = eventsPathFor(opts.out);
     await writeFile(
       events,
-      `${JSON.stringify(filmEvents(film, declared, sides, curveRows, film.blur, segments, credits, sources))}\n`,
+      `${JSON.stringify({ ...filmEvents(film, declared, sides, curveRows, film.blur, segments, credits, sources), ...(turns ? { turnsBack: turns } : {}) })}\n`,
     );
     const { width: w, height: h } = outSize(film);
     const fine: { from: number; to: number }[] = [];
@@ -480,6 +495,7 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
     return {
       out: resolve(opts.out),
       fine: fine.map((f) => ({ from: secs6(f.from), to: secs6(f.to) })),
+      turnsBack: turns,
       fineSupersample: FINE_SUPERSAMPLE,
       mode: info.mode,
       // as encoded: an odd side is padded to even
@@ -1430,7 +1446,25 @@ async function seek(b: HtmlBrowser, t: number, what: string): Promise<void> {
 
 /** what the shutter around t sees: how far anything moves (px), and which
  *  side of it to expose when the picture cuts in the other (see sampleTimes) */
-type Exposure = { px: number; side: number; text: number };
+type Exposure = {
+  px: number;
+  side: number;
+  text: number;
+  view: ViewRate | null;
+};
+/** the picture's zoom and pan as rates: s − 1 and t (px) a second, about the
+ *  page's top left (a point p moves (ds·p + t) a second) */
+export type ViewRate = {
+  ds: number;
+  tx: number;
+  ty: number;
+  /** the largest moving element's visible share of the frame */
+  share: number;
+  /** what of the elements' movement the zoom and pan leave unexplained, 0..1 */
+  rigid: number;
+  /** which element the fit followed (the largest that moved), by its place in the page */
+  who: string;
+};
 
 async function motionAt(b: HtmlBrowser, t: number, half: number): Promise<Exposure> {
   return b.evaluate<Exposure>(`window.__ot.motion(${t}, ${half})`);
@@ -1515,11 +1549,12 @@ async function probe(
   pool: HtmlBrowser[],
   film: Film,
   onProgress?: (p: FilmProgress) => void,
-): Promise<{ samples: number[]; sides: number[]; text: number[] }> {
+): Promise<{ samples: number[]; sides: number[]; text: number[]; view: (ViewRate | null)[] }> {
   const frames = film.f1 - film.f0;
   const samples = new Array<number>(frames).fill(1);
   const sides = new Array<number>(frames).fill(0);
   const text = new Array<number>(frames).fill(0);
+  const view = new Array<ViewRate | null>(frames).fill(null);
   const half = SHUTTER_FRACTION / film.fps / 2;
   let next = 0;
   let done = 0;
@@ -1532,13 +1567,145 @@ async function probe(
         samples[i] = samplesFor(m.px);
         sides[i] = m.side;
         text[i] = m.text ?? 0;
+        view[i] = m.view ?? null;
         done++;
         if (done % 30 === 0 || done === frames)
           onProgress?.({ phase: "probe", done, total: frames });
       }
     }),
   );
-  return { samples, sides, text };
+  return { samples, sides, text, view };
+}
+
+/** A move of the picture where what it ends up framing does not head
+ *  straight for its place: it goes the wrong way first (`back`), or past and
+ *  back (`past`), by `px` on `axis`. Times on the page's timeline. */
+export type TurnBack = {
+  from: number;
+  to: number;
+  at: number;
+  axis: "x" | "y";
+  kind: "back" | "past";
+  px: number;
+};
+
+/** Each run of frames where the picture moves (its zoom and pan, `view`, as
+ *  the motion probe fitted them), ended by a cut or a stop: the point at the
+ *  middle of the frame when it ends is followed back through it, and where
+ *  it went the wrong way, or past its place and back, by `min` px or more,
+ *  that is said. A camera that moves its centre and its zoom apart, or keeps
+ *  inside the page by clamping every frame, does this; a move straight to its
+ *  view does not. */
+export function turnsBack(
+  view: readonly (ViewRate | null)[],
+  sides: readonly number[],
+  fps: number,
+  size: { width: number; height: number },
+  f0 = 0,
+  min = 8,
+): TurnBack[] {
+  const n = view.length;
+  const c = { x: size.width / 2, y: size.height / 2 };
+  const moving = view.map((v) => {
+    // a picture moving, not a cursor or a caption: a tenth of the frame or more
+    // moving as a whole, as under a camera: not shapes changing on their own
+    if (!v || !(v.share >= 0.1) || !(v.rigid < 0.25)) return false;
+    const sx = v.ds * c.x + v.tx;
+    const sy = v.ds * c.y + v.ty;
+    return Math.hypot(sx, sy) > 20 || Math.abs(v.ds) > 0.05;
+  });
+  const out: TurnBack[] = [];
+  for (let a = 0; a < n; ) {
+    if (!moving[a]) {
+      a++;
+      continue;
+    }
+    let b = a + 1;
+    // a run ends where the picture stops, or jumps (a cut, or the camera
+    // cut to another view: a tenth of the frame in one frame) — not at every
+    // shutter the probe kept to one side (a caption appearing does that)
+    const jump = (i: number) => {
+      const v = view[i]!;
+      return (
+        sides[i] !== 0 && Math.hypot(v.ds * c.x + v.tx, v.ds * c.y + v.ty) / fps > size.width / 10
+      );
+    };
+    // …or where the element followed is another one (a tile shrinking into a
+    // grid as others grow in is not one picture moving)
+    while (b < n && moving[b] && !jump(b) && view[b]!.who === view[a]!.who) b++;
+    // one move after another without a stop (a camera that starts the next
+    // from wherever it is): each is its own, split where the picture is
+    // slowest between two faster stretches
+    const speed = (i: number) => {
+      const v = view[i]!;
+      return Math.hypot(v.ds * c.x + v.tx, v.ds * c.y + v.ty) + Math.abs(v.ds) * c.x;
+    };
+    const cutsAt: number[] = [];
+    for (let i = a + 1; i < b - 1; i++) {
+      const s0 = speed(i);
+      if (!(s0 <= speed(i - 1) && s0 <= speed(i + 1))) continue;
+      let before = 0;
+      let after = 0;
+      for (let k = a; k < i; k++) before = Math.max(before, speed(k));
+      for (let k = i + 1; k < b; k++) after = Math.max(after, speed(k));
+      if (s0 < 0.25 * before && s0 < 0.25 * after) cutsAt.push(i);
+    }
+    const moves: [number, number][] = [];
+    let m0 = a;
+    for (const i of cutsAt) {
+      moves.push([m0, i]);
+      m0 = i;
+    }
+    moves.push([m0, b]);
+    for (const [ma, mb] of moves) out.push(...turnsIn(ma, mb));
+    a = b;
+  }
+  return out;
+
+  function turnsIn(a: number, b: number): TurnBack[] {
+    const out: TurnBack[] = [];
+    if (b - a >= 6) {
+      // back from the end: where the point that ends in the middle was
+      const path: { x: number; y: number }[] = [];
+      let q = { ...c };
+      path.unshift({ ...q });
+      for (let i = b - 1; i >= a; i--) {
+        const v = view[i]!;
+        q = { x: q.x - (v.ds * q.x + v.tx) / fps, y: q.y - (v.ds * q.y + v.ty) / fps };
+        path.unshift({ ...q });
+      }
+      for (const axis of ["x", "y"] as const) {
+        const xs = path.map((p) => p[axis]);
+        const start = xs[0]!;
+        const end = xs.at(-1)!;
+        const up = end >= start;
+        const lo = up ? Math.min(...xs) : Math.max(...xs);
+        const hi = up ? Math.max(...xs) : Math.min(...xs);
+        const t = (k: number) => Math.round(((f0 + a + k) / fps) * 1000) / 1000;
+        const back = Math.abs(start - lo);
+        if (back >= min)
+          out.push({
+            from: t(0),
+            to: t(b - a),
+            at: t(xs.indexOf(lo)),
+            axis,
+            kind: "back",
+            px: Math.round(back),
+          });
+        const past = Math.abs(hi - end);
+        if (past >= min)
+          out.push({
+            from: t(0),
+            to: t(b - a),
+            at: t(xs.indexOf(hi)),
+            axis,
+            kind: "past",
+            px: Math.round(past),
+          });
+      }
+    }
+    return out;
+  }
 }
 
 /** how finely the frames where text moves slowly are drawn: what Pascal saw

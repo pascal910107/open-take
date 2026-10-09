@@ -121,6 +121,10 @@ const REPORT: FilmReport = {
   slowFps: 60,
   fine: [],
   fineSupersample: 1,
+  turns: {
+    how: "measured",
+    list: [{ from: 19.32, to: 20.1, at: 19.52, axis: "x", kind: "back", px: 19 }],
+  },
   draft: false,
   productText: {
     how: "measured",
@@ -184,6 +188,7 @@ test("the lines: what was measured, where, how much — and where the full repor
   assert.match(text, /`film picture`/);
   assert.match(text, /`hold\(\)`/, "the jumps line names the block that keeps a part in place");
   assert.match(text, /can move in steps/);
+  assert.match(text, /19\.32 s–20\.10 s the wrong way first, 19 px across \(at 19\.52 s\)/);
   // the stretch the render drew finer is said so
   assert.match(
     formatFilmReport(

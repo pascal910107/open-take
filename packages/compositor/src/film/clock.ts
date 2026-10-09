@@ -1384,7 +1384,95 @@ function installFilmClock(opts: FilmClockOptions): void {
      *  draws glyphs on whole device pixels, so text moving under one a frame
      *  steps */
     text: number;
+    /** the picture as a whole, fitted to the elements in both: b = s·a + t
+     *  (a camera's zoom and pan), from n elements; null with too few */
+    view: {
+      s: number;
+      tx: number;
+      ty: number;
+      n: number;
+      share: number;
+      rigid: number;
+      who: string;
+    } | null;
   };
+  /** the zoom and pan that carry most elements from a to b: least squares on
+   *  their centres, again without those it fits worst (a cursor, a caption
+   *  moving on its own) */
+  // the element the fit followed, by where it sits in the page (and the frame
+  // it is in): the same in every browser that probes, frame after frame
+  const idOf = (el: Element | null): string => {
+    if (!el) return "";
+    const path: number[] = [];
+    let n: Element | null = el;
+    while (n) {
+      const parent: Element | null = n.parentElement;
+      if (parent) path.unshift(Array.prototype.indexOf.call(parent.children, n));
+      else {
+        const host: Element | null = n.ownerDocument.defaultView?.frameElement ?? null;
+        path.unshift(-1);
+        n = host;
+        continue;
+      }
+      n = parent;
+    }
+    return path.join(".");
+  };
+  function fitView(
+    pairs: [number, number, number, number][],
+    share: number,
+    el: Element | null,
+  ): Change["view"] {
+    const fit = (ps: [number, number, number, number][]) => {
+      const n = ps.length;
+      let mx = 0,
+        my = 0,
+        nx = 0,
+        ny = 0;
+      for (const [ax, ay, bx, by] of ps) {
+        mx += ax;
+        my += ay;
+        nx += bx;
+        ny += by;
+      }
+      mx /= n;
+      my /= n;
+      nx /= n;
+      ny /= n;
+      let num = 0,
+        den = 0;
+      for (const [ax, ay, bx, by] of ps) {
+        num += (ax - mx) * (bx - nx) + (ay - my) * (by - ny);
+        den += (ax - mx) ** 2 + (ay - my) ** 2;
+      }
+      const sc = den > 1e-6 ? num / den : 1;
+      return { s: sc, tx: nx - sc * mx, ty: ny - sc * my };
+    };
+    if (pairs.length < 2) return null;
+    let f = fit(pairs);
+    const err = (q: [number, number, number, number]) =>
+      Math.hypot(f.s * q[0] + f.tx - q[2], f.s * q[1] + f.ty - q[3]);
+    const errs = pairs.map(err).sort((x, y) => x - y);
+    const cut = Math.max(0.5, errs[Math.floor(errs.length * 0.75)]! * 2);
+    const kept = pairs.filter((q) => err(q) <= cut);
+    if (kept.length >= 2) f = fit(kept);
+    const used = kept.length >= 2 ? kept : pairs;
+    // how much of the elements' movement the zoom and pan leave unexplained:
+    // 0 for a camera, near 1 for shapes changing on their own
+    let res = 0,
+      mov = 0;
+    for (const q of used) {
+      res += (f.s * q[0] + f.tx - q[2]) ** 2 + (f.s * q[1] + f.ty - q[3]) ** 2;
+      mov += (q[2] - q[0]) ** 2 + (q[3] - q[1]) ** 2;
+    }
+    return {
+      ...f,
+      n: used.length,
+      share,
+      rigid: mov > 0 ? Math.sqrt(res / mov) : 0,
+      who: idOf(el),
+    };
+  }
   const median = (v: number[]): number => {
     const s = v.slice().sort((x, y) => x - y);
     const m = s.length >> 1;
@@ -1395,6 +1483,10 @@ function installFilmClock(opts: FilmClockOptions): void {
     let churn = 0;
     let cuts = 0;
     const text: number[] = [];
+    // the largest element that moves: under a camera, the picture itself
+    let big: [number, number, number, number][] = [];
+    let bigEl: Element | null = null;
+    let movingArea = 0;
     const vw = innerWidth;
     const vh = innerHeight;
     const area = (r: DOMRect) =>
@@ -1418,6 +1510,19 @@ function installFilmClock(opts: FilmClockOptions): void {
       );
       if (d > px) px = d;
       if (shown?.trim() && d > 1e-4) text.push(Math.hypot(ra.left - rb.left, ra.top - rb.top));
+      // what moves: what holds still (a caption over a moving picture) is not the picture's move
+      // its two corners, so that one picture alone (a screenshot past the
+      // frame's edges under a zoom) gives the zoom as well as the pan
+      if (d > 1e-3) {
+        if (area(rb) > movingArea) {
+          movingArea = area(rb);
+          bigEl = el;
+          big = [
+            [ra.left, ra.top, rb.left, rb.top],
+            [ra.right, ra.bottom, rb.right, rb.bottom],
+          ];
+        }
+      }
     }
     for (const [el, rb] of b.rects)
       if (!a.rects.has(el)) {
@@ -1436,7 +1541,13 @@ function installFilmClock(opts: FilmClockOptions): void {
       if (changed) px = Math.max(px, OPAQUE_PX);
     }
     if (a.video || b.video) px = Math.max(px, OPAQUE_PX);
-    return { px, churn, cuts, text: text.length ? median(text) : 0 };
+    return {
+      px,
+      churn,
+      cuts,
+      text: text.length ? median(text) : 0,
+      view: fitView(big, Math.min(1, movingArea / (vw * vh)), bigEl),
+    };
   }
   /** how far anything moves while the shutter is open, and which part of the
    *  shutter to expose: side 0 all of it, -1 its first half, 1 its second;
@@ -1444,7 +1555,14 @@ function installFilmClock(opts: FilmClockOptions): void {
   async function motion(
     tSec: number,
     halfSec: number,
-  ): Promise<{ px: number; side: number; text: number }> {
+  ): Promise<{
+    px: number;
+    side: number;
+    text: number;
+    /** the picture's zoom and pan across the exposed span, as rates: s − 1
+     *  and t (px) a second, about the page's top left; null when not fitted */
+    view: { ds: number; tx: number; ty: number; share: number; rigid: number; who: string } | null;
+  }> {
     // The page's own motion(t, half) says how far its picture moves across
     // [t-half, t+half] (what a canvas draws, which no element shows); where the
     // picture cuts is still found here, so a hook never opens the shutter across one.
@@ -1477,23 +1595,37 @@ function installFilmClock(opts: FilmClockOptions): void {
       (x.cuts > 0 && y.cuts === 0);
     // with a hook, it is asked for the half that is exposed
     const quarter = halfSec / 2;
+    const rate = (v: Change["view"], sec: number) =>
+      v
+        ? {
+            ds: (v.s - 1) / sec,
+            tx: v.tx / sec,
+            ty: v.ty / sec,
+            share: v.share,
+            rigid: v.rigid,
+            who: v.who,
+          }
+        : null;
     if (onlyIn(first, second))
       return {
         px: told ? await told(tSec + quarter, quarter) : second.px,
         side: 1,
         text: second.text / halfSec,
+        view: rate(second.view, halfSec),
       };
     if (onlyIn(second, first))
       return {
         px: told ? await told(tSec - quarter, quarter) : first.px,
         side: -1,
         text: first.text / halfSec,
+        view: rate(first.view, halfSec),
       };
     const whole = moved(a, b);
     return {
       px: told ? await told(tSec, halfSec) : whole.px,
       side: 0,
       text: whole.text / (2 * halfSec),
+      view: rate(whole.view, 2 * halfSec),
     };
   }
 

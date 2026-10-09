@@ -8,7 +8,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
-import { fineFrames, renderFilm } from "../src/film/render";
+import { fineFrames, renderFilm, turnsBack } from "../src/film/render";
 import { findChrome } from "./fixtures/find-chrome";
 
 const chrome = findChrome();
@@ -106,4 +106,40 @@ window.__render = (t) => {
     supersample: 1,
   });
   assert.deepEqual(plain.fine, []);
+});
+
+test("turnsBack: a move whose framed point goes the wrong way first, or past and back", () => {
+  const fps = 60;
+  const size = { width: 1920, height: 1080 };
+  // a pan right that first drifts left: the point that ends in the middle
+  // moves left (screen) 40 px, then right
+  const pan = (vx: number) => ({ ds: 0, tx: vx, ty: 0, share: 1, rigid: 0 });
+  const view = [
+    ...Array(10).fill(null),
+    ...Array(12).fill(pan(200)), // the picture moves right: the point goes right… (followed back from the end)
+    ...Array(30).fill(pan(-600)),
+    ...Array(10).fill(null),
+  ];
+  const sides = Array(view.length).fill(0);
+  const t = turnsBack(view, sides, fps, size);
+  assert.equal(t.length, 1, JSON.stringify(t));
+  assert.equal(t[0]!.axis, "x");
+  assert.equal(t[0]!.kind, "back");
+  assert.ok(Math.abs(t[0]!.px - 40) <= 1, JSON.stringify(t));
+  // straight: none
+  const straight = [...Array(10).fill(null), ...Array(40).fill(pan(-600)), ...Array(10).fill(null)];
+  assert.deepEqual(turnsBack(straight, Array(straight.length).fill(0), fps, size), []);
+  // two moves one after another, the second the other way, with a slow
+  // point between: two moves, neither turning back
+  const two = [
+    ...Array(20).fill(pan(-600)),
+    ...Array(3).fill(pan(-30)),
+    ...Array(20).fill(pan(600)),
+  ];
+  assert.deepEqual(turnsBack(two, Array(two.length).fill(0), fps, size), []);
+  // shapes changing on their own (not rigid) or a small element: not a move
+  const shapes = view.map((v) => (v ? { ...v, rigid: 0.6 } : v));
+  assert.deepEqual(turnsBack(shapes, sides, fps, size), []);
+  const small = view.map((v) => (v ? { ...v, share: 0.02 } : v));
+  assert.deepEqual(turnsBack(small, sides, fps, size), []);
 });

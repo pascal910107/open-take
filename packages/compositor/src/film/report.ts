@@ -45,7 +45,7 @@ import {
   readPageText,
   runOcr,
 } from "./probe-text";
-import { eventsPathFor, FINE_SUPERSAMPLE, probeFilm } from "./render";
+import { eventsPathFor, FINE_SUPERSAMPLE, probeFilm, type TurnBack } from "./render";
 
 export type ReportJump = {
   t: number;
@@ -107,6 +107,9 @@ export type FilmReport = {
   };
   moving: MovingMaterial;
   slowText: { how: "measured" | "not measured"; note?: string; spans: ReportSlowText[] };
+  /** moves of the picture where what it ends up framing does not head
+   *  straight for its place (the render's probe, in the events file) */
+  turns: { how: "measured" | "not measured"; list: TurnBack[] };
   /** wall time of the report, ms */
   ms: number;
 };
@@ -471,6 +474,17 @@ export async function filmReport(opts: FilmReportOptions): Promise<FilmReport> {
       to: round3(f.to - info.from),
     })),
     fineSupersample: opts.fineSupersample ?? 1,
+    turns: Array.isArray(rawEvents.turnsBack)
+      ? {
+          how: "measured",
+          list: (rawEvents.turnsBack as TurnBack[]).map((x) => ({
+            ...x,
+            from: round3(x.from - info.from),
+            to: round3(x.to - info.from),
+            at: round3(x.at - info.from),
+          })),
+        }
+      : { how: "not measured", list: [] },
     draft: !!opts.draft,
     productText,
     jumps: { how: "measured", declared: declared.length, list: jumps },
@@ -629,6 +643,24 @@ export function formatFilmReport(r: FilmReport, o: { probe: string }): string[] 
     });
     L.push(
       `  pictures taken while the product's screen was still changing: ${shown.join("; ")}${m.list.length > 3 ? `; ${m.list.length - 3} more` : ""}`,
+    );
+  }
+
+  // moves that turn back
+  const tb = r.turns;
+  if (tb.how === "not measured")
+    L.push("  moves that turn back: not measured (a draft does not probe its frames)");
+  else if (!tb.list.length)
+    L.push(
+      "  moves of the picture where what it ends up framing heads the wrong way first, or past its place and back: none",
+    );
+  else {
+    const shown = tb.list.slice(0, 4).map((x) => {
+      const way = x.axis === "x" ? "across" : "up or down";
+      return `${fmt(x.from)}–${fmt(x.to)} ${x.kind === "back" ? "the wrong way first" : "past its place and back"}, ${x.px} px ${way} (at ${fmt(x.at)})`;
+    });
+    L.push(
+      `  moves of the picture where what it ends up framing does not head straight there: ${shown.join("; ")}${tb.list.length > 4 ? `; ${tb.list.length - 4} more` : ""}. A view whose centre and zoom move apart, or that is kept inside the page every frame rather than once per move, bends this way; kit/camera.js moves straight`,
     );
   }
 

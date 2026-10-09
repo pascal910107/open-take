@@ -49,8 +49,12 @@ how big they are on a phone; the one-frame jumps the page did not declare as
 cuts, and how far their content moved (a card that jumps, a saved screen
 swapped under the camera, a line re-centred as it is typed) or that it
 changed in place; pictures on screen that their shoot took while the
-product's screen was still changing; live text moving under a pixel a
-frame. Facts, not grades; `film probe` reads all of it and more.
+product's screen was still changing; moves of the picture where what it
+ends up framing heads the wrong way first, or past its place and back (a
+view whose centre and zoom move apart, or that is clamped inside the page
+every frame, does that; `kit/camera.js` moves straight); live text moving
+under a pixel a frame. Facts, not grades; `film probe` reads all of it and
+more.
 
 Text that moves slowly on a live page — a slow push or drift across an
 interface, the ease into and out of a move, the settle at its end — steps a
