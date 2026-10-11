@@ -100,6 +100,11 @@ film's numbers beside it (below).
   `npx open-take states takes/x.mp4 --state s3 --json` outlines it — its
   regions and the parts worth naming, each with an id and a box —
   and `states/s3/index.json` beside the saved page lists every element.
+  Its summary says how many pictures the page sent while each drag was held
+  (and the longest gap): the film can only replay those, so a stroke caught at
+  a few a second plays as a few jumps however the cursor is timed. A capture
+  falls behind when the machine is busy — another render or capture at the
+  same time took one drag from 54 a second to 6.6.
 - The recording itself (`takes/x.take/capture.mp4`) plays as a `<video>` on
   film time, frame-exact, and `capture.json` holds every click, keystroke and
   cursor position with its time — and, measured off the recording, when each

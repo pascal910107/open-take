@@ -32,7 +32,7 @@ import {
   writeComponents,
 } from "@open-take/compositor";
 import { type CaptureOpts, captureTake } from "./capture";
-import { ensureChrome } from "./cdp";
+import { type DragCadence, dragCadence, ensureChrome } from "./cdp";
 import { annotateCaptureLog } from "./frame-diff";
 import { toDraft } from "./review";
 import { ensureTakeDir, resolveTakePaths, type TakePaths, takeFile } from "./take";
@@ -89,7 +89,7 @@ export {
   type InspectResult,
   inspectPage,
 } from "./capture";
-export { ensureChrome, resolveChrome } from "./cdp";
+export { type DragCadence, dragCadence, ensureChrome, resolveChrome } from "./cdp";
 export { captureTakeCDP } from "./cdp-capture";
 export { type CheckTakeOpts, checkTake, type InventoryRule } from "./check-take";
 export {
@@ -292,6 +292,8 @@ export type MakeTakeResult = {
   /** set when a `<canvas>`/`<video>` dominated the frame — the settle probe
    *  is blind inside one, so a quiet run proves nothing about those beats. */
   paintedFrac?: number;
+  /** the pictures the capture got during each drag (see dragCadence) */
+  dragCadence: DragCadence[];
   /** non-fatal validator findings on the rendered composition. Printed at the
    *  render boundary too, but that line is minutes deep in the progress output
    *  by the time the run ends — surface these in the end-of-run summary the
@@ -435,6 +437,7 @@ async function makeTakeIn(
       precheck: log.precheck ?? [],
       settleWaits: log.settleWaits ?? [],
       ...(log.paintedFrac != null ? { paintedFrac: log.paintedFrac } : {}),
+      dragCadence: dragCadence(log.events, log.captureCadence?.frameOffsetsMs ?? []),
       warnings: [],
       ...(components ? { components } : {}),
     };
@@ -466,6 +469,7 @@ async function makeTakeIn(
     precheck: log.precheck ?? [],
     settleWaits: log.settleWaits ?? [],
     ...(log.paintedFrac != null ? { paintedFrac: log.paintedFrac } : {}),
+    dragCadence: dragCadence(log.events, log.captureCadence?.frameOffsetsMs ?? []),
     warnings,
     ...(components ? { components } : {}),
   };

@@ -685,6 +685,49 @@ export function captureCadence(frames: Frame[]) {
   };
 }
 
+/** What the capture got during each drag: the pictures the page sent while
+ *  the button was down, how many a second, and the longest gap between two.
+ *  A drag the page draws all the way (a stroke, a moved shape) sends a picture
+ *  per frame on a quiet machine; a few a second there means the capture fell
+ *  behind (another render or capture running at the same time is the usual
+ *  cause, 6.6 a second against 54 for the same drag re-made alone) and the
+ *  film replays those few. A drag that moves nothing on screen sends few by
+ *  right, so this is a fact to read, not a verdict. */
+export type DragCadence = {
+  /** index in the log's events */
+  event: number;
+  tMs: number;
+  durationMs: number;
+  frames: number;
+  perSecond: number;
+  maxGapMs: number;
+};
+
+export function dragCadence(
+  events: { kind?: string; tMs: number; durationMs?: number | null }[],
+  frameOffsetsMs: number[],
+): DragCadence[] {
+  const out: DragCadence[] = [];
+  events.forEach((e, event) => {
+    if (e.kind !== "drag" || !e.durationMs || e.durationMs < 200) return;
+    const end = e.tMs + e.durationMs;
+    const inside = frameOffsetsMs.filter((t) => t >= e.tMs && t <= end).sort((a, b) => a - b);
+    // the gap from the press to the first picture and from the last to the
+    // release counts too: a stroke that shows nothing for half a second is that
+    const marks = [e.tMs, ...inside, end];
+    const maxGapMs = Math.max(...marks.slice(1).map((t, i) => t - marks[i]!));
+    out.push({
+      event,
+      tMs: e.tMs,
+      durationMs: e.durationMs,
+      frames: inside.length,
+      perSecond: Math.round((inside.length / e.durationMs) * 10000) / 10,
+      maxGapMs: Math.round(maxGapMs),
+    });
+  });
+  return out;
+}
+
 export class Screencast {
   private cdp: CDP;
   private dir: string;

@@ -1428,6 +1428,7 @@ async function main() {
       precheck,
       settleWaits,
       paintedFrac,
+      dragCadence,
       warnings,
     } = made;
     const draftNote = has("--draft")
@@ -1578,6 +1579,24 @@ async function main() {
             : "") +
           (restless.length
             ? `${restless.length === settleWaits.length ? "None" : "Some"} of those ever went quiet — this page is always doing something (a clock, a poll, a looping animation), so no settleMs will satisfy it. Set each beat's settleMs by eye, or pass a capture with settleBudgetMs: 0 to switch the waiting off.\n`
+            : ""),
+      );
+    }
+    // What the capture got while each drag was held. The film replays exactly
+    // these pictures, so a stroke captured at a few a second plays as a few
+    // jumps however its cursor is timed — and nothing used to say so.
+    if (dragCadence.length) {
+      const low = dragCadence.filter((d) => d.perSecond < 20 || d.maxGapMs > 150);
+      process.stdout.write(
+        `\n📹 pictures the page sent while each drag was held:\n` +
+          dragCadence
+            .map(
+              (d) =>
+                `  ${(d.tMs / 1000).toFixed(2)} s drag ${(d.durationMs / 1000).toFixed(2)} s: ${d.frames} pictures, ${d.perSecond} a second, longest gap ${d.maxGapMs} ms\n`,
+            )
+            .join("") +
+          (low.length
+            ? `  if the page was drawing all through ${low.length === 1 ? "that drag" : "those drags"}, the capture fell behind and the film can only replay those pictures — usually another render or capture on this machine at the same time; re-make it when the machine is quiet (--capture-scale 1 if the page itself is heavy)\n`
             : ""),
       );
     }
