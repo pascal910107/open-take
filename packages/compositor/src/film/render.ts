@@ -85,6 +85,12 @@ export type FilmRenderOptions = {
    *  pixel a frame are drawn at FINE_SUPERSAMPLE and the rest at the film's
    *  size; a number draws every frame at it (1: none). Ignored in drafts. */
   supersample?: number;
+  /** keep the page's `will-change` hints. By default they are dropped while
+   *  rendering: Chrome draws a will-change layer once, at the size it has
+   *  then, and scales that picture, so a layer the camera enlarges shows soft
+   *  text (at a density the frame is not drawn finer at) — dropping the hint
+   *  redraws it sharp at every size. */
+  keepLayers?: boolean;
   workers?: number;
   onProgress?: (p: FilmProgress) => void;
   onConsole?: (level: string, text: string) => void;
@@ -907,6 +913,8 @@ export type FilmStillsOptions = {
   blur?: boolean;
   /** as the master is rendered (see FilmRenderOptions.supersample) */
   supersample?: number;
+  /** see FilmRenderOptions.keepLayers */
+  keepLayers?: boolean;
   onConsole?: (level: string, text: string) => void;
 };
 
@@ -1318,6 +1326,19 @@ export async function filmStills(opts: FilmStillsOptions): Promise<string[]> {
   }
 }
 
+/** Drops every `will-change` hint once the page is parsed (see
+ *  FilmRenderOptions.keepLayers): a layer Chrome keeps as one picture is
+ *  enlarged from it, soft, when the camera zooms in. */
+const DROP_LAYER_HINTS = `(() => {
+  const add = () => {
+    const s = document.createElement("style");
+    s.textContent = "*, *::before, *::after { will-change: auto !important; }";
+    (document.head || document.documentElement).appendChild(s);
+  };
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", add, { once: true });
+  else add();
+})();`;
+
 /** The film's page, served, and the Chromes that open it — each one with the
  *  film clock installed, drawing `dpr` device pixels per CSS px. */
 async function servePage(
@@ -1325,6 +1346,7 @@ async function servePage(
     page: string;
     root?: string;
     chromePath: string;
+    keepLayers?: boolean;
     onConsole?: (level: string, text: string) => void;
   },
   dpr: number,
@@ -1366,7 +1388,7 @@ async function servePage(
       width,
       height,
       deviceScaleFactor: density,
-      initScript: clock,
+      initScript: opts.keepLayers ? clock : `${clock}\n${DROP_LAYER_HINTS}`,
       stillAnimations: true,
       onConsole: opts.onConsole,
       timeoutMs: 120_000,

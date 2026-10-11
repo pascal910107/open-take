@@ -23,13 +23,23 @@ export const FILM_FLAGS: Record<string, string[]> = {
     "--to",
     "--workers",
     "--supersample",
+    "--keep-layers",
     "--into",
     "--no-report",
     "--verbose",
   ],
   mux: ["--audio", "--out"],
   picture: ["--scale", "--out"],
-  still: ["--at", "--out", "--root", "--no-blur", "--size", "--supersample", "--verbose"],
+  still: [
+    "--at",
+    "--out",
+    "--root",
+    "--no-blur",
+    "--size",
+    "--supersample",
+    "--keep-layers",
+    "--verbose",
+  ],
   sheet: ["--out", "--every", "--at"],
   beats: ["--out"],
   listen: ["--events", "--stems", "--out", "--every", "--clips", "--vs"],
@@ -103,6 +113,8 @@ it. A <video> on the page is shown from its decoded frames.
   --draft              a quick copy to look at: half size, 30 fps unless
                        --fps, no motion blur, no supersampling
   --no-blur            no motion blur
+  --keep-layers        keep the page's will-change hints (dropped by default:
+                       a layer kept as one picture turns soft when enlarged)
   --size WxH           the page's CSS px (default 1920x1080)
   --fps <n>            the film's frame rate (default the page's, else 60)
   --out <film.mp4>     where the master goes (default film.mp4)
@@ -128,8 +140,8 @@ again. --audio <file> or none (silent); --out (default: the film in place).`,
 stays steady (render it with --supersample 3). Default --out:
 picture@<scale>x.png beside state.html.`,
   still: `Write PNG stills of the page at the given film times (--at 1.5,12), into --out
-(default stills/). --size WxH (default 1920x1080), --no-blur, --verbose as for
-\`film render\`.
+(default stills/). --size WxH (default 1920x1080), --no-blur, --keep-layers,
+--verbose as for \`film render\`.
 ${SUPERSAMPLE}
 ${ROOT}`,
   sheet: `A timed contact sheet of any video: --every <s> between frames (default about

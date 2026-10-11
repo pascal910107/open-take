@@ -143,6 +143,7 @@ const BOOL_FLAGS = new Set([
   "--no-product-audio",
   "--json",
   "--no-blur",
+  "--keep-layers",
   "--no-render",
   "--clips",
   "--measure",
@@ -325,10 +326,10 @@ Usage:
                    [--from <shots|take>]
   open-take film render <page.html|dir> [--out film.mp4] [--audio <file>|none] [--draft] [--no-blur]
                    [--size 1920x1080] [--fps 60] [--duration <s>] [--from <s>] [--to <s>] [--root <dir>]
-                   [--workers 2] [--supersample 2] [--into <film.mp4>] [--no-report] [--verbose]
+                   [--workers 2] [--supersample 2] [--keep-layers] [--into <film.mp4>] [--no-report] [--verbose]
   open-take film mux    <film.mp4> --audio <file>|none [--out <film.mp4>]
   open-take film still  <page.html|dir> --at <s>[,<s>…] [--out <dir>] [--no-blur] [--root <dir>]
-                   [--size 1920x1080] [--supersample 2] [--verbose]
+                   [--size 1920x1080] [--supersample 2] [--keep-layers] [--verbose]
   open-take film picture <state.html|dir> [--scale 2] [--out picture.png]
   open-take film sheet  <film.mp4> [--out sheet.png] [--every <s> | --at <s>,<s>…]
   open-take film listen <film.mp4|score.wav> [--events <events.json>] [--stems <dir>] [--out <dir>]
@@ -2206,6 +2207,7 @@ async function main() {
         "--to",
         "--workers",
         "--supersample",
+        "--keep-layers",
         "--into",
         "--no-report",
         "--verbose",
@@ -2228,6 +2230,7 @@ async function main() {
         to: num("--to"),
         workers: num("--workers"),
         supersample: num("--supersample"),
+        keepLayers: has("--keep-layers"),
         audio: audio === "none" ? null : audio,
         blur: has("--no-blur") ? false : undefined,
         draft: has("--draft"),
@@ -2395,7 +2398,16 @@ async function main() {
       return;
     }
     if (action === "still") {
-      only("--at", "--out", "--root", "--no-blur", "--size", "--supersample", "--verbose");
+      only(
+        "--at",
+        "--out",
+        "--root",
+        "--no-blur",
+        "--size",
+        "--supersample",
+        "--keep-layers",
+        "--verbose",
+      );
       const at = times(flag("--at"));
       if (!at?.length) throw new Error("film still: --at <seconds>[,<seconds>…] is required");
       const files = await filmStills({
@@ -2408,6 +2420,7 @@ async function main() {
         height: size?.height,
         blur: has("--no-blur") ? false : undefined,
         supersample: num("--supersample"),
+        keepLayers: has("--keep-layers"),
         onConsole,
       });
       process.stdout.write(`${files.join("\n")}\n`);

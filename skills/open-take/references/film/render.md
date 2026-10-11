@@ -80,7 +80,12 @@ lines of 13–18 px text, frame-to-frame jitter): 0.49 px as the live screen,
 0.19 px as the live screen with `--supersample 3`, 0.08 px as the picture
 with `--supersample 3` (0.10 with `--supersample 2`), which rendered in about
 the live screen's time without it. The picture's last frame is as sharp as
-the live screen's, a shade lighter. A layer drawn once at its largest and
-only scaled down (`will-change: transform`) steadies large type — 40 px bold
-pushed 1.0–1.2× went from 0.26 px to 0.06 px — but not interface text
-(0.48 px on the push above), and drawing finer turns it off.
+the live screen's, a shade lighter.
+
+A render drops the page's `will-change` hints. With one, Chrome can keep a
+layer as a single picture drawn at the size it had and scale that picture:
+on two films a layer the camera had enlarged to about 2× showed its text
+soft, at a third to an eighth of the sharpness the same frame had without
+the hint, and sharp again only where frames were drawn at 3× — so the text
+went soft and sharp as the camera stopped and moved. `--keep-layers` keeps
+the hints (`film still` takes it too).

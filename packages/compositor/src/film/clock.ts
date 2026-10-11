@@ -1509,7 +1509,10 @@ function installFilmClock(opts: FilmClockOptions): void {
         Math.abs(ra.bottom - rb.bottom),
       );
       if (d > px) px = d;
-      if (shown?.trim() && d > 1e-4) text.push(Math.hypot(ra.left - rb.left, ra.top - rb.top));
+      // text, not a picture: Chrome resamples an image wherever it lands, and
+      // puts glyphs on whole device pixels
+      if (shown?.trim() && el.tagName !== "IMG" && d > 1e-4)
+        text.push(Math.hypot(ra.left - rb.left, ra.top - rb.top));
       // what moves: what holds still (a caption over a moving picture) is not the picture's move
       // its two corners, so that one picture alone (a screenshot past the
       // frame's edges under a zoom) gives the zoom as well as the pan

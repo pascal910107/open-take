@@ -108,6 +108,32 @@ window.__render = (t) => {
   assert.deepEqual(plain.fine, []);
 });
 
+test("a picture drifting as slowly is not drawn finer: Chrome resamples it wherever it lands", {
+  skip,
+}, async () => {
+  // a 64×16 picture (a data: PNG of one colour, scaled up) drifting 12 px a second
+  await writeFile(
+    join(dir, "img.html"),
+    `<!doctype html><html><body style="margin:0;background:#fff">
+<img id="i" style="position:absolute;left:20px;top:40px;width:256px;height:64px"
+ src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==">
+<script>
+window.__film = { duration: 2, width: 640, height: 160, fps: 30 };
+window.__render = (t) => {
+  document.getElementById("i").style.transform = "translateX(" + t * 12 + "px)";
+};
+</script></body></html>`,
+  );
+  const r = await renderFilm({
+    page: join(dir, "img.html"),
+    out: join(dir, "img.mp4"),
+    chromePath: chrome!,
+    audio: null,
+    blur: false,
+  });
+  assert.deepEqual(r.fine, []);
+});
+
 test("turnsBack: a move whose framed point goes the wrong way first, or past and back", () => {
   const fps = 60;
   const size = { width: 1920, height: 1080 };
