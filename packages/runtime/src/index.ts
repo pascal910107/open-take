@@ -57,6 +57,7 @@ export {
   filmReport,
   filmSheet,
   filmStills,
+  changedLine,
   followedLine,
   formatComponents,
   formatFilmBeats,

@@ -158,3 +158,30 @@ test("stills().changes and a take's changes read components.json beside the log"
     g.location = was.location;
   }
 });
+
+test("changedLine: per screen, the innermost part that changed and the words it gained", async () => {
+  const { changedLine } = await import("../src/film/components");
+  const f = {
+    ...file,
+    source: { kind: "shoot", log: "shots.json", viewport: { w: 400, h: 300 } },
+    states: file.states.map((s) => ({
+      ...s,
+      url: "",
+      components: file.components.filter((e) => e.ref.startsWith(`${s.id}:`)).map((e) => e.ref),
+    })),
+    components: file.components.map((e) => ({
+      ...e,
+      box: e.box as [number, number, number, number],
+      facts: e.facts ?? {},
+    })),
+  };
+  const line = changedLine(f as never, "/tmp/film/shots", "/tmp/film");
+  assert.match(
+    line!,
+    /^changed: typed heading "400 μs" \(\+1\) — \(await stills\("\/shots\/shots.json", img\)\)\.changes\("<screen>"\) in kit\/media.js/,
+  );
+  assert.equal(
+    changedLine({ ...f, states: [f.states[0]!] } as never, "/tmp/film/shots", "/tmp/film"),
+    null,
+  );
+});

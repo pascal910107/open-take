@@ -58,6 +58,7 @@ export {
   exampleSource,
   FILM_STAGE,
   fitOf,
+  changedLine,
   followedLine,
   formatComponents,
   gatherComponents,

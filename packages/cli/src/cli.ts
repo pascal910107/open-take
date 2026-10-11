@@ -44,6 +44,7 @@ import {
   filmReport,
   filmSheet,
   filmStills,
+  changedLine,
   followedLine,
   formatComponents,
   formatFilmBeats,
@@ -1481,6 +1482,8 @@ async function main() {
       );
       const followed = followedLine(made.components.file, at);
       if (followed) process.stdout.write(`${followed}\n`);
+      const changed = changedLine(made.components.file, at, process.cwd());
+      if (changed) process.stdout.write(`${changed}\n`);
       process.stdout.write(`${partsLine(at, process.cwd())}\n`);
     }
     printWarnings(warnings);
@@ -2075,6 +2078,8 @@ async function main() {
       );
       const followed = followedLine(components.file, at);
       if (followed) process.stdout.write(`       ${followed}\n`);
+      const changed = changedLine(components.file, at, process.cwd());
+      if (changed) process.stdout.write(`       ${changed}\n`);
       process.stdout.write(`       ${partsLine(at, process.cwd())}\n`);
     }
     for (const line of materialsSummary(materials ?? [], {
@@ -2395,6 +2400,7 @@ async function main() {
         if (inv?.path)
           process.stdout.write(
             `${componentsLine(inv.file, shown(inv.path), shown(inv.source.root))}\n` +
+              (changedLine(inv.file, dirname(inv.path), process.cwd())?.concat("\n") ?? "") +
               // the URL as film render serves it when run here
               `${partsLine(dirname(inv.path), process.cwd())}\n`,
           );

@@ -1380,6 +1380,8 @@ export function formatComponents(
   out.push("");
   const followed = opts.at ? followedLine(file, opts.at) : null;
   if (followed) out.push(followed);
+  const changed = opts.at && opts.servedFrom ? changedLine(file, opts.at, opts.servedFrom) : null;
+  if (changed) out.push(changed);
   if (opts.at && opts.servedFrom) out.push(partsLine(opts.at, opts.servedFrom));
   out.push(
     `skipped: ${file.skipped.length} candidate${file.skipped.length === 1 ? "" : "s"}, each with its reason, in components.json`,
@@ -1427,6 +1429,109 @@ export function followedLine(file: ComponentsFile, dir: string): string | null {
   const more = followed.length - FOLLOWED_SHOWN;
   if (more > 0) items.push(`… ${more} more in components.json`);
   return `followed: ${items.join(" · ")}`;
+}
+
+/** What `now` gained over `was`, in whole words of `now`, compared without
+ *  whitespace (fact strings run words together); kit/media.js wordDiff. */
+export function addedWords(was: string, now: string): string {
+  const cutShort = was.endsWith("…");
+  const w = cutShort ? was.slice(0, -1) : was;
+  const chars = (str: string) => {
+    const out: { c: string; i: number; word: number }[] = [];
+    let word = 0;
+    let inWord = false;
+    for (let i = 0; i < str.length; i++) {
+      const c = str[i]!;
+      if (/\s/.test(c)) {
+        if (inWord) word++;
+        inWord = false;
+      } else {
+        out.push({ c, i, word });
+        inWord = true;
+      }
+    }
+    return out;
+  };
+  const A = chars(w);
+  const B = chars(now);
+  let p = 0;
+  while (p < A.length && p < B.length && A[p]!.c === B[p]!.c) p++;
+  let k = 0;
+  if (!cutShort)
+    while (
+      k < A.length - p &&
+      k < B.length - p &&
+      A[A.length - 1 - k]!.c === B[B.length - 1 - k]!.c
+    )
+      k++;
+  while (p > 0 && p < B.length && B[p - 1]!.word === B[p]!.word) p--;
+  while (k > 0 && k < B.length - p && B[B.length - k]!.word === B[B.length - 1 - k]!.word) k--;
+  const from = B[p]?.i ?? now.length;
+  const to = k > 0 ? (B[B.length - k]?.i ?? now.length) : now.length;
+  return from < to ? now.slice(from, to).trim() : "";
+}
+
+/** How many screens the changed line names (the rest: changes() on any). */
+export const CHANGED_SHOWN = 5;
+
+/** One line on what the actions changed: per screen an action led to, the
+ *  innermost part that appeared or changed there and the words it gained —
+ *  and the kit's way to have them all on the material the film holds (a
+ *  shoot's stills(), a take's readTake()), at the URL film render serves
+ *  `dir` from when run in `servedFrom`. Null when no action changed a
+ *  measured part. Information only. */
+export function changedLine(file: ComponentsFile, dir: string, servedFrom: string): string | null {
+  const byRef = new Map(file.components.map((e) => [e.ref, e]));
+  const textOf = (e: ComponentEntry | undefined) => e?.values?.text?.text ?? e?.label ?? "";
+  const inside = (a: Box, b: Box) =>
+    a !== b &&
+    a[0] >= b[0] - 0.5 &&
+    a[1] >= b[1] - 0.5 &&
+    a[0] + a[2] <= b[0] + b[2] + 0.5 &&
+    a[1] + a[3] <= b[1] + b[3] + 0.5 &&
+    a[2] * a[3] < b[2] * b[3];
+  const items: string[] = [];
+  let screens = 0;
+  for (const st of file.states) {
+    const refs = new Set(st.action?.changes ?? []);
+    for (const ref of st.components) {
+      const f = byRef.get(ref)?.facts;
+      if (f?.changed || f?.appeared) refs.add(ref);
+    }
+    const parts = [...refs]
+      .map((r) => byRef.get(r))
+      .filter((e): e is ComponentEntry => !!e?.box && !!(e.facts.changed || e.facts.appeared));
+    const inner = parts
+      .filter((e) => !parts.some((o) => o !== e && inside(o.box, e.box)))
+      .sort((a, b) => a.box[1] - b.box[1] || a.box[0] - b.box[0]);
+    if (!inner.length) continue;
+    screens++;
+    if (items.length >= CHANGED_SHOWN) continue;
+    const e = inner[0]!;
+    const before = e.before ? byRef.get(e.before) : undefined;
+    const now = textOf(e);
+    const words = e.facts.appeared
+      ? now
+      : addedWords(before ? textOf(before) : ((e.facts.changed ?? "").split(" → ")[0] ?? ""), now);
+    const more = inner.length > 1 ? ` (+${inner.length - 1})` : "";
+    items.push(
+      `${st.id} ${e.kind} ${e.facts.appeared ? "+" : ""}${q(cut(words || now, 30))}${more}`,
+    );
+  }
+  if (!items.length) return null;
+  const rest = screens - items.length;
+  const served = servedUrl(resolve(dir), servedFrom);
+  const url = served.url.endsWith("/") ? served.url : `${served.url}/`;
+  const how =
+    file.source.kind === "shoot"
+      ? `(await stills(${q(`${url}${file.source.log ?? "shots.json"}`)}, img)).changes("<screen>")`
+      : file.source.kind === "take"
+        ? `(await readTake(${q(url)})).changes("<state>")`
+        : `changesIn(components.json, "<screen>")`;
+  return (
+    `changed: ${items.join(" · ")}${rest > 0 ? ` · … ${rest} more screens` : ""}` +
+    ` — ${how} in kit/media.js: each part the action before that screen changed, what it showed before and now, the words it gained and lost, its box`
+  );
 }
 
 /** The line that names the kit's way to use an inventory's parts:
