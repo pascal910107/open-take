@@ -79,6 +79,13 @@ film's numbers beside it (below).
   const total = lift(home, "#total", { around: "clear" });
   ```
 
+  `st.changes(key)` (a still's index or name, or a screen's id) is what the
+  action before that screen changed there: `parts`, innermost first, each
+  with `what` (appeared, changed, moved, restyled), `was` and `now` in full,
+  the words it gained (`added`) and lost (`removed`), and its `box` in the
+  still's own CSS px; `still` is the still that shows it. A take's
+  `changes(state | step)` is the same for a recording.
+
   `film init --url <url>` keeps one the same way, of the product's page, in
   the film's `states/home/` (once the screen holds still; `--no-steady` at
   once).

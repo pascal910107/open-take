@@ -1354,7 +1354,10 @@ async function servePage(
   const { root, pageFile, urlPath } = resolveFilmPage(opts.page, opts.root);
   const missing = new Set<string>();
   const server = await serveDirectory(root, (p) => {
-    if (!p.endsWith("/favicon.ico")) missing.add(decodeURIComponent(p));
+    // the kit looks for components.json beside every shoot and take it reads
+    // (stills(), readTake()), and does without when there is none
+    if (!p.endsWith("/favicon.ico") && !p.endsWith("/components.json"))
+      missing.add(decodeURIComponent(p));
   });
   const clock = filmClockSource({ seed: 0x5eed, epochMs: Date.now() });
   // the videos the page plays, as decoded frames (see frames.ts)

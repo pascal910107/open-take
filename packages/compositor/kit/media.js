@@ -16,7 +16,8 @@
 //                   can be 900 stills), and every box and cursor position the
 //                   shoot recorded — in the still's own px — so nothing is
 //                   copied by hand. state(i) is the URL of the saved screen
-//                   a still kept, for screen(), and so for lift / isolate.
+//                   a still kept, for screen(), and so for lift / isolate;
+//                   changes(i) is what the action before it changed there.
 //   readTake(url)   a take `open-take make` recorded (capture.json): its
 //                   actions, its recording, its saved states. clip() maps
 //                   film time onto the recording (a start and a speed, or
@@ -300,6 +301,15 @@ export async function stills(logUrl, img, { keep = 12, ahead = 3 } = {}) {
   const log = await res.json();
   const base = new URL(logUrl, location.href);
   let shown = -1;
+  // what each action changed, when the shoot measured it (it does by default)
+  /** @type {unknown} */
+  let comp = null;
+  try {
+    const r = await fetch(new URL("components.json", base));
+    if (r.ok) comp = await r.json();
+  } catch {
+    /* a shoot without components.json: changes() says so */
+  }
 
   /** @param {number} i */
   const still = (i) => {
@@ -389,6 +399,47 @@ export async function stills(logUrl, img, { keep = 12, ahead = 3 } = {}) {
       const dir = log.states?.dir ?? "states";
       return new URL(`${dir}/${s.state}/state.html`, base).href;
     },
+    /**
+     * What the action before a saved screen changed there (changesIn): the
+     * parts that appeared or changed, innermost first, each with what it
+     * showed before and now, the text it gained, and its box in the still's
+     * own CSS px; `still` is the still that shows that screen. By a still's
+     * index or name (the screen it shows: its own, else the last one kept
+     * before it) or a screen's id.
+     *
+     *   const c = st.changes("matched");   // { screen, since, action, still, parts }
+     *   cam.frame(c.parts[0].box, { arrive: 6 });
+     * @param {number | string} key
+     */
+    changes(key) {
+      if (!comp)
+        throw new Error(
+          `stills: no components.json beside ${logUrl} — the shoot writes one unless --no-components; \`open-take components <dir>\` measures one afterwards`,
+        );
+      const ids = new Set(/** @type {any} */ (comp).states.map((/** @type {any} */ x) => x.id));
+      /** @param {number} i */
+      const shownBy = (i) => {
+        for (let k = i; k >= 0; k--) {
+          const s = log.stills[k]?.state;
+          if (s && ids.has(s)) return s;
+        }
+        return null;
+      };
+      /** @type {string | null} */
+      let id = null;
+      if (typeof key === "number") {
+        still(key); // throws for a still the shoot does not have
+        id = shownBy(key);
+      } else if (ids.has(key)) id = key;
+      else {
+        const i = log.stills.findIndex((x) => x.name === key);
+        if (i >= 0) id = shownBy(i);
+      }
+      if (!id) throw new Error(`stills: no saved screen for ${JSON.stringify(key)} in ${logUrl}`);
+      const c = changesIn(comp, id);
+      const i = log.stills.findIndex((x) => x.state === id);
+      return { ...c, still: i >= 0 ? i : null };
+    },
     /** where the shoot's cursor was at still i, in the still's own CSS px */
     /** @param {number} i */
     cursor(i) {
@@ -396,6 +447,181 @@ export async function stills(logUrl, img, { keep = 12, ahead = 3 } = {}) {
       if (!s.cursor) throw new Error(`stills: still ${i} recorded no cursor`);
       return { x: s.cursor.x - (s.scroll?.x ?? 0), y: s.cursor.y - (s.scroll?.y ?? 0) };
     },
+  };
+}
+
+// --- what an action changed: components.json, by screen ------------------------
+
+/**
+ * One part an action changed, as components.json measured it on the screen
+ * the action led to.
+ * @typedef {object} Change
+ * @property {string} ref the part on this screen ("<screen>:<element id>")
+ * @property {string} kind number, stat, heading, button, input, card, …
+ * @property {string} label
+ * @property {"appeared" | "changed" | "restyled" | "moved"} what
+ * @property {string} now what it shows now, in full
+ * @property {string | null} was what it showed on the screen before (null when it appeared)
+ * @property {string} added the text it gained (was → now, the common start and end left out)
+ * @property {string} removed the text it lost
+ * @property {string | null} restyled "disabled: true → –", "fill #fff → #e7f0ff", …
+ * @property {Box} box where it is on the screen, in the screen's CSS px
+ * @property {boolean} inner no other changed part sits inside it (the change itself, not a panel round it)
+ */
+
+/**
+ * What `now` gained over `was` and what it lost, the common start and end
+ * left out, in whole words of `now`. Compared without whitespace, because a
+ * screen's fact strings run words together ("3 matches46 steps"); a `was`
+ * cut short with "…" has no common end.
+ * @param {string} was
+ * @param {string} now
+ */
+export function wordDiff(was, now) {
+  const cut = was.endsWith("…");
+  const w = cut ? was.slice(0, -1) : was;
+  /** the non-space characters of s, each with its index in s and its word's number */
+  const chars = (/** @type {string} */ str) => {
+    /** @type {{ c: string, i: number, word: number }[]} */
+    const out = [];
+    let word = 0;
+    let inWord = false;
+    for (let i = 0; i < str.length; i++) {
+      const c = str[i] ?? "";
+      if (/\s/.test(c)) {
+        if (inWord) word++;
+        inWord = false;
+      } else {
+        out.push({ c, i, word });
+        inWord = true;
+      }
+    }
+    return out;
+  };
+  const A = chars(w);
+  const B = chars(now);
+  let p = 0;
+  while (p < A.length && p < B.length && A[p]?.c === B[p]?.c) p++;
+  let q = 0;
+  if (!cut)
+    while (
+      q < A.length - p &&
+      q < B.length - p &&
+      A[A.length - 1 - q]?.c === B[B.length - 1 - q]?.c
+    )
+      q++;
+  // whole words of now: a word only partly in the common start or end is not common
+  while (p > 0 && p < B.length && B[p - 1]?.word === B[p]?.word) p--;
+  while (q > 0 && q < B.length - p && B[B.length - q]?.word === B[B.length - 1 - q]?.word) q--;
+  const span = (/** @type {typeof A} */ X, /** @type {string} */ str) => {
+    const from = X[p]?.i ?? str.length;
+    const to = q > 0 ? (X[X.length - q]?.i ?? str.length) : str.length;
+    return from < to ? str.slice(from, to).trim() : "";
+  };
+  return { added: span(B, now), removed: span(A, w) };
+}
+
+/**
+ * What the action before a screen changed there: every part components.json
+ * found changed, appeared, moved or restyled, the innermost first (a number
+ * before the card it is in), with what it showed before and now in full and
+ * the text it gained or lost. Facts only: nothing here picks one to show.
+ * @param {unknown} file components.json, parsed
+ * @param {string} id the screen's id
+ * @returns {{ screen: string, since: string | null, action: { kind: string, label?: string, acted?: string } | null, parts: Change[] }}
+ */
+export function changesIn(file, id) {
+  const f = /** @type {any} */ (file ?? {});
+  if (!f || typeof f !== "object" || !Array.isArray(f.components) || !Array.isArray(f.states))
+    throw new Error("changes: this is not a components.json (no components or screens)");
+  const states = /** @type {any[]} */ (f.states);
+  const at = states.findIndex((x) => x.id === id);
+  if (at < 0)
+    throw new Error(
+      `changes: no screen ${id} — components.json has ${states.map((x) => x.id).join(", ") || "none"}`,
+    );
+  const st = states[at];
+  /** @type {Map<string, any>} */
+  const entries = new Map();
+  for (const e of f.components) if (e && typeof e.ref === "string") entries.set(e.ref, e);
+  const textOf = (/** @type {any} */ e) => e?.values?.text?.text ?? e?.label ?? "";
+  const sides = (/** @type {string} */ v) => {
+    const m = / → /.exec(v ?? "");
+    return m ? [v.slice(0, m.index), v.slice(m.index + 3)] : [v ?? "", ""];
+  };
+  const refs = /** @type {string[]} */ (Array.isArray(st.action?.changes) ? st.action.changes : []);
+  // parts on this screen that say so themselves, in case the action's list is short
+  for (const e of entries.values()) {
+    const fa = e.facts ?? {};
+    if (
+      e.ref.startsWith(`${id}:`) &&
+      (fa.changed || fa.appeared || fa.moved || fa.restyled) &&
+      !refs.includes(e.ref)
+    )
+      refs.push(e.ref);
+  }
+  /** @type {Change[]} */
+  const parts = [];
+  for (const ref of refs) {
+    const e = entries.get(ref);
+    if (!e?.box) continue;
+    const fa = e.facts ?? {};
+    const what = fa.appeared
+      ? "appeared"
+      : fa.changed
+        ? "changed"
+        : fa.moved
+          ? "moved"
+          : fa.restyled
+            ? "restyled"
+            : "changed";
+    const now = textOf(e);
+    const prev = e.before ? entries.get(e.before) : null;
+    const was =
+      what === "appeared" ? null : prev ? textOf(prev) : fa.changed ? sides(fa.changed)[0] : null;
+    const { added, removed } = was == null ? { added: now, removed: "" } : wordDiff(was, now);
+    parts.push({
+      ref,
+      kind: e.kind ?? "",
+      label: e.label ?? "",
+      what,
+      now,
+      was,
+      added,
+      removed,
+      restyled: typeof fa.restyled === "string" ? fa.restyled : null,
+      box: boxFrom(e.box),
+      inner: true,
+    });
+  }
+  const within = (/** @type {Box} */ a, /** @type {Box} */ b) =>
+    a !== b &&
+    a.x >= b.x - 0.5 &&
+    a.y >= b.y - 0.5 &&
+    a.x + a.width <= b.x + b.width + 0.5 &&
+    a.y + a.height <= b.y + b.height + 0.5 &&
+    a.width * a.height < b.width * b.height;
+  for (const p of parts) p.inner = !parts.some((q) => q !== p && within(q.box, p.box));
+  const rank = { appeared: 0, changed: 0, moved: 1, restyled: 2 };
+  parts.sort(
+    (p, q) =>
+      Number(q.inner) - Number(p.inner) ||
+      rank[p.what] - rank[q.what] ||
+      p.box.y - q.box.y ||
+      p.box.x - q.box.x,
+  );
+  const a = st.action;
+  return {
+    screen: id,
+    since: at > 0 ? states[at - 1].id : null,
+    action: a?.kind
+      ? {
+          kind: a.kind,
+          ...(a.label ? { label: a.label } : {}),
+          ...(a.acted ? { acted: a.acted } : {}),
+        }
+      : null,
+    parts,
   };
 }
 
@@ -432,6 +658,7 @@ export async function stills(logUrl, img, { keep = 12, ahead = 3 } = {}) {
  * @property {TakeLog} log
  * @property {string} video the recording's URL (capture.mp4)
  * @property {(id: string) => string} state a saved state's state.html URL
+ * @property {(key: string | number) => ReturnType<typeof changesIn> & { tMs: number | null }} changes what an action changed (changesIn)
  */
 
 /**
@@ -447,7 +674,16 @@ export async function readTake(url) {
   );
   const res = await fetch(base);
   if (!res.ok) throw new Error(`readTake: ${base.href} could not be read (${res.status})`);
-  return fromLog(await res.json(), base.href);
+  const log = await res.json();
+  /** @type {unknown} */
+  let comp = null;
+  try {
+    const r = await fetch(new URL("components.json", base));
+    if (r.ok) comp = await r.json();
+  } catch {
+    /* recorded without --states: changes() says so */
+  }
+  return fromLog(log, base.href, comp);
 }
 
 /**
@@ -455,14 +691,34 @@ export async function readTake(url) {
  * sits, for the recording's and the states' URLs.
  * @param {TakeLog} log
  * @param {string} base
+ * @param {unknown} [comp] its components.json, parsed, for changes()
  * @returns {Take}
  */
-export function fromLog(log, base) {
+export function fromLog(log, base, comp = null) {
   if (!log || !Array.isArray(log.events) || !log.viewport)
     throw new Error("take: not a capture log (no events or viewport)");
   return {
     log,
     video: new URL("capture.mp4", base).href,
+    /**
+     * What an action changed on the saved state it led to (changesIn): by
+     * the state's id or the plan step's index. `tMs` is when that state was
+     * saved, on the capture's clock.
+     * @param {string | number} key
+     */
+    changes: (key) => {
+      if (!comp)
+        throw new Error(
+          "take: no components.json — record with --states (it is written with them; --no-components skips it)",
+        );
+      const item =
+        typeof key === "number"
+          ? log.states?.items.find((s) => s.step === key)
+          : log.states?.items.find((s) => s.id === key);
+      const id = item?.id ?? (typeof key === "string" ? key : null);
+      if (!id) throw new Error(`take: no saved state after step ${key}`);
+      return { ...changesIn(comp, id), tMs: item?.tMs ?? null };
+    },
     state: (id) => {
       if (!log.states?.items.some((s) => s.id === id))
         throw new Error(
