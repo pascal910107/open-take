@@ -64,6 +64,10 @@ Capabilities and where each is described; none of them is a step.
   changed → `components.json` (`shoot` and `make --states` write it;
   `open-take components <dir>`; `film init --from <dir>`); it lists, it does
   not pick — `skill film material`
+- each part as a file of its own — its elements with their styles inlined,
+  in the product's fonts, opening alone at any size → `parts/` (`film init
+  --url`, `shoot`, `make --states`; `partFiles()` in kit/media.js) — `skill
+  film material`
 - one part as one reference through every screen and the camera — framed,
   clicked, dragged in step with the saved steps, lifted, covered or not →
   `product()` in kit/media.js — `skill film material`

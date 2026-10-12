@@ -74,6 +74,7 @@ import {
   type PostShootPass,
   PrecheckRefusal,
   pageMaterialNote,
+  partFilesLine,
   partsLine,
   patchFilm,
   profileDir,
@@ -738,9 +739,10 @@ Usage:
               images and copy into states/<id>/materials.json (read: well
               under a second per page, plus fetching its images).
   --no-components   (make/shoot) don't measure the saved screens' parts or
-              write components.json (measured: 1–2 s more per saved screen —
-              the probe plus one picture per part; the summary line says how
-              long it took).
+              write components.json and parts/ (each part as a standalone
+              HTML file; measured: 1–2 s more per saved screen — the probe
+              plus one picture per part; the summary line says how long it
+              took).
   --no-product-audio   (make) don't record the app's own sound. By default
               everything the page sends to its speakers is recorded onto the
               capture timeline as <name>.take/product-audio.wav, and the audio
@@ -1492,6 +1494,7 @@ async function main() {
       if (changed) process.stdout.write(`${changed}\n`);
       process.stdout.write(`${partsLine(at, process.cwd())}\n`);
     }
+    if (made.parts) process.stdout.write(`${partFilesLine(made.parts, shown(made.parts.dir))}\n`);
     printWarnings(warnings);
     // Post-shoot gates: line the delivered video up against the engine's own
     // intent. checkTake reads pixels (dead opening / static tail) and the
@@ -2055,7 +2058,7 @@ async function main() {
     if (has("--states") && has("--no-states"))
       throw new Error("shoot: --states or --no-states, not both");
     const profile = flag("--profile");
-    const { log, path, components, materials } = await runShoot({
+    const { log, path, components, parts, materials } = await runShoot({
       script,
       outDir: flag("--out") ?? "shots",
       width: size?.width,
@@ -2092,6 +2095,7 @@ async function main() {
       if (changed) process.stdout.write(`       ${changed}\n`);
       process.stdout.write(`       ${partsLine(at, process.cwd())}\n`);
     }
+    if (parts) process.stdout.write(`       ${partFilesLine(parts, shown(parts.dir))}\n`);
     for (const line of materialsSummary(materials ?? [], {
       show: shown,
       cmd: `${INVOKE} materials ${shown(dirname(path))}`,
@@ -2182,6 +2186,7 @@ async function main() {
         ...(flag("--state") ? { state: flag("--state") } : {}),
       })}\n`,
     );
+    if (inv.parts) process.stdout.write(`${partFilesLine(inv.parts, shown(inv.parts.dir))}\n`);
     return;
   }
 
@@ -2403,6 +2408,8 @@ async function main() {
           process.stdout.write(
             `${componentsLine(home.components.file, shown(home.components.path), shown(home.dir))}\n`,
           );
+        if (home?.parts)
+          process.stdout.write(`${partFilesLine(home.parts, shown(home.parts.dir))}\n`);
         // no parts, no pictures, hardly a word: a shell or a "Loading…"
         if (
           home?.components &&

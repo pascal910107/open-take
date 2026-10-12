@@ -16,6 +16,21 @@ the default:
   lifted out, the result where it is used — as one continuous shot or as
   cuts on the music.
 
+Its parts also come as files: `film init --url`, `shoot` and `make --states`
+write each part `components.json` lists as `parts/<state>-<el>-<kind>.html`
+(the film's `parts/` beside its `states/`; `<out>/parts/` for a shoot,
+`<take>.take/parts/` for a take) — the part's own elements with every
+computed style inlined, the page's `@font-face` rules for its fonts and its
+images from the saved files, so it opens alone, at any size, in the
+product's styles, with no page CSS. Each file's header names its source
+URL, state, selector, kind, label and values; `parts/index.json` lists every
+file with its ref, kind, label, values, natural size and picture, and each
+part that is not a file with the reason (a frame from another site). An
+iframe of its size shows one (`transform: scale(k)` for any other size), or
+`(await partFiles("parts/")).node(ref)` in kit/media.js puts it into the
+page in a shadow root of its own. One more route beside the others; none is
+the default.
+
 ### One thing of the product's on its own
 
 A button, a number, a card, a tab, a line of its text — shown on its own,

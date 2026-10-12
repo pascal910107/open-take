@@ -45,6 +45,10 @@
 //                   P.part("t1") is one part followed through every screen
 //                   it is on — cam.frame(part), cur.click(part, t), lift(s,
 //                   part), part.at(t) where it shows in the picture now.
+//   partFiles(url)  the same parts as files (parts/index.json): each one's
+//                   own HTML with its styles inlined and its fonts, that
+//                   renders alone at its natural size — an iframe's src, or
+//                   node() into the page in a shadow root of its own.
 //
 // A box is always in one place's own CSS px. Where a screen sits inside a
 // bigger layer, box(…, { in: layer }) adds its offset — and refuses when
@@ -3446,4 +3450,119 @@ export async function product(url, o = {}) {
     ...(logUrl ? { logUrl: logUrl.href } : {}),
     ...o,
   });
+}
+
+/**
+ * @typedef {object} PartFile
+ * @property {string} file its file name in parts/ ("home-e12-card.html")
+ * @property {string} url the file's URL, for an iframe's src
+ * @property {string} ref the part in components.json ("home:e12")
+ * @property {string} state
+ * @property {string} el
+ * @property {string} kind number, stat, heading, button, input, card, …
+ * @property {string} label
+ * @property {Record<string, string>} values what it holds, by field, as the page showed it
+ * @property {number} w its natural width, CSS px
+ * @property {number} h its natural height, CSS px
+ * @property {[number, number]} [drawn] what it draws to the right and below, when more than w × h (a heading set past its width) — the size an iframe needs to show all of it
+ * @property {[number, number, number, number]} box where it sat on its screen
+ * @property {string} [picture] its crisp picture's URL
+ * @property {string} backdrop what was behind it on the page (the file is see-through)
+ * @property {string[]} fonts font families set in it that have their font in the file
+ */
+
+/**
+ * The product's parts as files (parts/index.json — beside a film's states/
+ * after `film init --url`, in a shoot's or a take's folder): each part's own
+ * elements with every computed style inlined and its fonts declared, so it
+ * renders alone, in the product's styles, at its natural size `w` × `h`.
+ * One route among the others (screen, lift, product, the film's own HTML);
+ * nothing here picks a part.
+ *
+ *   const F = await partFiles("parts/");
+ *   const card = F.get("home:e12");                  // by ref or file name
+ *   frame.src = card.url; frame.width = card.w; frame.height = card.h;  // scale the iframe
+ *   const el = await F.node("home:e12");             // or into the page itself
+ *   stage.append(el); el.style.transform = "scale(3)";
+ *
+ * node() puts the part in a shadow root of its own (the film's CSS does not
+ * reach it; its ::before / ::after rules stay with it), adds its @font-face
+ * rules to the page once (fonts are declared on the document) and makes its
+ * references absolute. The host is a block of the part's natural size.
+ * @param {string} url the parts folder, or its index.json
+ */
+export async function partFiles(url) {
+  const at = new URL(url, location.href);
+  const indexUrl = /\.json$/i.test(at.pathname)
+    ? at
+    : new URL("index.json", at.href.replace(/\/?(?=[?#]|$)/, "/"));
+  const res = await fetch(indexUrl);
+  if (!res.ok)
+    throw new Error(
+      `partFiles: no parts/index.json at ${indexUrl.href} — \`film init --url\`, \`shoot\` and \`make --states\` write it`,
+    );
+  const index = await res.json();
+  /** @type {PartFile[]} */
+  const list = (index.parts ?? []).map((/** @type {any} */ p) => ({
+    ...p,
+    url: new URL(p.file, indexUrl).href,
+    ...(p.picture ? { picture: new URL(p.picture, indexUrl).href } : {}),
+  }));
+  /** @param {string} key */
+  const get = (key) => {
+    const p = list.find((x) => x.ref === key || x.file === key || x.file === `${key}.html`);
+    if (!p) {
+      const sk = (index.skipped ?? []).find((/** @type {any} */ s) => s.ref === key);
+      throw new Error(
+        sk
+          ? `partFiles: ${key} is not a file — ${sk.why}`
+          : `partFiles: no part ${key} — there are ${list.map((x) => x.ref).join(", ") || "none"}`,
+      );
+    }
+    return p;
+  };
+  /** every url() and src / href / poster in it, absolute against `base`
+   *  @param {string} css @param {string} base */
+  const absCss = (css, base) =>
+    css.replace(/url\(\s*(["']?)([^"')]+)\1\s*\)/g, (m, q, u) =>
+      /^([a-z][a-z0-9+.-]*:|#)/i.test(u) ? m : `url(${q}${new URL(u, base).href}${q})`,
+    );
+  /** @type {Set<string>} */
+  const fontsAdded = new Set();
+  /** @param {string} key */
+  const node = async (key) => {
+    const p = get(key);
+    const r = await fetch(p.url);
+    if (!r.ok) throw new Error(`partFiles: ${p.url} could not be read`);
+    const doc = new DOMParser().parseFromString(await r.text(), "text/html");
+    for (const el of Array.from(doc.body.querySelectorAll("*"))) {
+      for (const a of ["src", "href", "poster", "xlink:href"]) {
+        const v = el.getAttribute(a);
+        if (v && !/^([a-z][a-z0-9+.-]*:|#)/i.test(v)) el.setAttribute(a, new URL(v, p.url).href);
+      }
+      const st = el.getAttribute("style");
+      if (st?.includes("url(")) el.setAttribute("style", absCss(st, p.url));
+    }
+    const fonts = doc.querySelector("style[data-part-fonts]")?.textContent ?? "";
+    if (fonts.trim()) {
+      const css = absCss(fonts, p.url);
+      if (!fontsAdded.has(css)) {
+        fontsAdded.add(css);
+        const s = document.createElement("style");
+        s.setAttribute("data-part-fonts", p.file);
+        s.textContent = css;
+        document.head.appendChild(s);
+      }
+    }
+    const host = document.createElement("div");
+    host.dataset.part = p.ref;
+    host.style.cssText = `display:block;position:relative;width:${p.w}px;height:${p.h}px;transform-origin:0 0`;
+    const root = host.attachShadow({ mode: "open" });
+    const own = document.createElement("style");
+    own.textContent = `:host{display:block}${absCss(doc.querySelector("style[data-part-pseudo]")?.textContent ?? "", p.url)}`;
+    root.appendChild(own);
+    for (const c of Array.from(doc.body.children)) root.appendChild(document.importNode(c, true));
+    return host;
+  };
+  return { list, get, node };
 }

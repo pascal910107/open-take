@@ -24,12 +24,14 @@ import {
   type ComponentsFile,
   type CompositionIssue,
   gatherComponents,
+  type PartFilesResult,
   type PlanOpts,
   planComposition,
   readComponentSource,
   renderTake,
   type TakeComposition,
   writeComponents,
+  writePartFiles,
 } from "@open-take/compositor";
 import { type CaptureOpts, captureTake } from "./capture";
 import { type DragCadence, dragCadence, ensureChrome } from "./cdp";
@@ -73,7 +75,9 @@ export {
   type MaterialsPage,
   materialsSummary,
   muxFilm,
+  type PartFilesResult,
   pageMaterialNote,
+  partFilesLine,
   partsLine,
   patchFilm,
   readPageMaterial,
@@ -304,6 +308,8 @@ export type MakeTakeResult = {
   /** the saved states' component inventory (<name>.take/components.json),
    *  when the take kept states */
   components?: { file: ComponentsFile; path: string };
+  /** each of those parts as a file of its own (<name>.take/parts/) */
+  parts?: PartFilesResult;
 };
 
 /** `<video>.mp4` → `<video>.json` — the capture log sits beside its video
@@ -404,10 +410,18 @@ async function makeTakeIn(
   const componentsPath = join(take.dir, "components.json");
   await rm(componentsPath, { force: true });
   let components: MakeTakeResult["components"];
+  let parts: PartFilesResult | undefined;
   if (log.states?.items.length && opts.capture?.components !== false)
     try {
-      const file = gatherComponents(readComponentSource(take.dir));
+      const source = readComponentSource(take.dir);
+      const file = gatherComponents(source);
       components = { file, path: writeComponents(file, take.dir) };
+      // and each part as a file of its own, <name>.take/parts/
+      try {
+        parts = writePartFiles(file, source, join(take.dir, "parts"));
+      } catch (e) {
+        console.error(`make: no part files (${(e as Error).message})`);
+      }
     } catch (e) {
       console.error(`make: no components.json (${(e as Error).message})`);
     }
@@ -442,6 +456,7 @@ async function makeTakeIn(
       dragCadence: dragCadence(log.events, log.captureCadence?.frameOffsetsMs ?? []),
       warnings: [],
       ...(components ? { components } : {}),
+      ...(parts ? { parts } : {}),
     };
   }
   const { mp4Path, compositionPath, warnings } = await renderTake({
@@ -474,6 +489,7 @@ async function makeTakeIn(
     dragCadence: dragCadence(log.events, log.captureCadence?.frameOffsetsMs ?? []),
     warnings,
     ...(components ? { components } : {}),
+    ...(parts ? { parts } : {}),
   };
 }
 

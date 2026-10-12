@@ -87,11 +87,13 @@ import {
   type MaterialSheet,
   type MaterialsPage,
   type MaterialsProbeResult,
+  type PartFilesResult,
   pageKey,
   readComponentSource,
   readMaterials,
   resolveFfmpeg,
   writeComponents,
+  writePartFiles,
 } from "@open-take/compositor";
 import {
   BOX_CANDIDATES,
@@ -709,6 +711,8 @@ export async function runShoot(opts: ShootOpts): Promise<{
   path: string;
   /** the component inventory, when the shoot kept saved screens */
   components?: { file: ComponentsFile; path: string };
+  /** each of its parts as a file of its own, <out>/parts/ */
+  parts?: PartFilesResult;
   /** each page's material list (paths in <out>/states/), in shooting order */
   materials?: MaterialsPage[];
 }> {
@@ -833,10 +837,19 @@ export async function runShoot(opts: ShootOpts): Promise<{
   // the parts each saved screen holds, gathered with what the log adds (no
   // browser); one that cannot be gathered never fails the shoot
   let inventory: ComponentsFile | null = null;
+  let parts: PartFilesResult | null = null;
   if (items.length && opts.components !== false)
     try {
-      inventory = gatherComponents(readComponentSource(stage));
+      const source = readComponentSource(stage);
+      inventory = gatherComponents(source);
       writeComponents(inventory, stage);
+      // and each part as a file of its own (parts/), from what each screen's
+      // page gave while it was measured
+      try {
+        parts = writePartFiles(inventory, source, join(stage, "parts"));
+      } catch (e) {
+        note(`shoot: no part files (${(e as Error).message})`);
+      }
     } catch (e) {
       inventory = null;
       note(`shoot: no components.json (${(e as Error).message})`);
@@ -846,11 +859,15 @@ export async function runShoot(opts: ShootOpts): Promise<{
     ...outputs.map((o) => o.file),
     ...items.map((it) => `states/${it.id}`),
     ...(inventory ? ["components.json"] : []),
+    ...(parts ? ["parts"] : []),
   ]);
   return {
     log,
     path: join(out, "shots.json"),
     ...(inventory ? { components: { file: inventory, path: join(out, "components.json") } } : {}),
+    ...(parts
+      ? { parts: { ...parts, dir: join(out, "parts"), index: join(out, "parts", "index.json") } }
+      : {}),
     // where they are now: the screens moved from the stage into <out>
     ...(materials.length ? { materials: placedMaterials(out, materials) } : {}),
   };
@@ -1135,7 +1152,9 @@ async function moveAside(
     );
   // its inventory goes with it: a shoot that keeps none must not leave the
   // last one's components.json naming screens that are gone
-  for (const name of [...names, ...saved, ...screens, "components.json", "shots.json"]) {
+  // its part files too (parts/, when it is the folder a shoot wrote)
+  const parts = existsSync(join(out, "parts", "index.json")) ? ["parts"] : [];
+  for (const name of [...names, ...saved, ...screens, ...parts, "components.json", "shots.json"]) {
     if (!existsSync(join(out, name))) continue;
     await move(join(out, name), join(aside, name));
     moved.push(name);
@@ -2135,6 +2154,8 @@ export async function shootHome(opts: ShootHomeOpts): Promise<{
   fidelity: ShootStateItem["fidelity"];
   /** its component inventory, states/<name>/components.json */
   components?: { file: ComponentsFile; path: string };
+  /** each of its parts as a file of its own, <dir>/parts/ */
+  parts?: PartFilesResult;
   /** the whole page's material, states/<name>/materials.json */
   materials?: MaterialsPage;
   /** present when the screen was still changing as it was kept (the
@@ -2178,14 +2199,21 @@ export async function shootHome(opts: ShootHomeOpts): Promise<{
     await rename(join(work, "states", name), to);
     // its parts, gathered where the screen now is (picture paths are relative to it)
     let components: { file: ComponentsFile; path: string } | undefined;
+    let parts: PartFilesResult | undefined;
+    const note = opts.onNote ?? ((l: string) => process.stderr.write(`${l}\n`));
     if (opts.components !== false && existsSync(join(to, "parts.json")))
       try {
-        const file = gatherComponents(readComponentSource(to));
+        const source = readComponentSource(to);
+        const file = gatherComponents(source);
         components = { file, path: writeComponents(file, to) };
+        // each part as a file of its own, in the film's parts/
+        try {
+          parts = writePartFiles(file, source, join(dir, "parts"));
+        } catch (e) {
+          note(`shoot: no part files for ${name} (${(e as Error).message})`);
+        }
       } catch (e) {
-        (opts.onNote ?? ((l: string) => process.stderr.write(`${l}\n`)))(
-          `shoot: no components.json for ${name} (${(e as Error).message})`,
-        );
+        note(`shoot: no components.json for ${name} (${(e as Error).message})`);
       }
     const materials =
       opts.materials === false
@@ -2197,6 +2225,7 @@ export async function shootHome(opts: ShootHomeOpts): Promise<{
       title: page.title,
       fidelity: item.fidelity,
       ...(components ? { components } : {}),
+      ...(parts ? { parts } : {}),
       ...(materials ? { materials } : {}),
       ...(moving ? { moving } : {}),
     };

@@ -145,6 +145,20 @@ export {
   pageKey,
   readMaterials,
 } from "./film/materials";
+export {
+  PART_DOM_JS,
+  type PartDom,
+  type PartDomFile,
+  type PartDomInput,
+  type PartFileEntry,
+  type PartFilesIndex,
+  type PartFilesResult,
+  partDomExpression,
+  partFileName,
+  partFilesLine,
+  stateFontFaces,
+  writePartFiles,
+} from "./film/part-files";
 export { type FilmPictureOptions, filmPicture } from "./film/picture";
 export {
   type FilmProbe,

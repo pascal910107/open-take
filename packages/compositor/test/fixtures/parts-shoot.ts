@@ -8,8 +8,9 @@
 // index.json (each element marked data-ot-id in state.html) and parts.json
 // — so gatherComponents reads it like any shoot.
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { PartDomFile } from "../../src/film/part-files";
 
 type Box = [number, number, number, number];
 
@@ -160,4 +161,70 @@ button{left:${button[0]}px;top:${button[1]}px;width:100px;height:40px;background
       }),
     );
   });
+}
+
+/** Beside writePartsShoot: home's page linking a stylesheet that declares
+ *  its font and @imports another, and what home's page gave of its parts as
+ *  the runtime writes it (states/home/parts-dom.json) — the heading and the
+ *  number (with a picture in it); the button skipped, with the page's reason. */
+export function writePartDom(dir: string): void {
+  const assets = join(dir, "states", "assets");
+  mkdirSync(assets, { recursive: true });
+  copyFileSync(
+    join(import.meta.dirname, "fonts", "geist-mono-latin-400.woff2"),
+    join(assets, "font.woff2"),
+  );
+  writeFileSync(join(assets, "mono.woff2"), "woff2");
+  writeFileSync(
+    join(assets, "pic.svg"),
+    '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><rect width="20" height="20" fill="#00f"/></svg>',
+  );
+  writeFileSync(
+    join(assets, "a.css"),
+    '@import url("b.css");\n@font-face{font-family:"Brand Sans";src:url(font.woff2) format("woff2");font-weight:400}\nh1{color:red}',
+  );
+  writeFileSync(
+    join(assets, "b.css"),
+    "@font-face{font-family:Mono;src:url('../assets/mono.woff2')}",
+  );
+  const home = join(dir, "states", "home");
+  const html = readFileSync(join(home, "state.html"), "utf8").replace(
+    "</head>",
+    '<link rel="stylesheet" href="../assets/a.css"><style>@font-face{font-family:Unused;src:url(../assets/none.woff2)}</style></head>',
+  );
+  writeFileSync(join(home, "state.html"), html);
+  const dom: PartDomFile = {
+    version: 1,
+    state: "home",
+    parts: [
+      {
+        el: "e2",
+        html: '<h1 style="font-family:&quot;Brand Sans&quot;, sans-serif;font-size:20px;margin:0;position:relative;float:none">Counter</h1>',
+        css: "",
+        defs: "",
+        w: 200,
+        h: 30,
+        families: ["brand sans", "sans-serif"],
+        nodes: 1,
+      },
+      {
+        el: "e4",
+        html: '<div id="n" data-ot-p="1" style="background-image:url(&quot;otrel:assets/pic.svg&quot;);margin:0"><img src="otrel:assets/pic.svg" style="width:20px;height:20px">3</div>',
+        css: '[data-ot-p="1"]::before{content:"--> $"}',
+        defs: "",
+        w: 79.5,
+        h: 40,
+        families: ["mono"],
+        nodes: 1,
+      },
+    ],
+    skipped: [
+      {
+        el: "e3",
+        why: "it holds an <iframe>: what is inside a frame is another page, not carried into a file",
+      },
+    ],
+    ms: 3,
+  };
+  writeFileSync(join(home, "parts-dom.json"), JSON.stringify(dom));
 }

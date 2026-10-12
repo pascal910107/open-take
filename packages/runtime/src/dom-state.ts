@@ -44,7 +44,9 @@ import {
   CLIP_CLEAR_CSS,
   type ComponentProbeResult,
   componentProbeExpression,
+  type PartDomFile,
   type PartsFile,
+  partDomExpression,
   pictureClip,
   readStateIndex,
   resolveFfmpeg,
@@ -1699,6 +1701,8 @@ export async function measureParts(
     index: StateIndex;
     assetsDir: string;
     pictures?: boolean;
+    /** keep each part's elements for its file (parts-dom.json) — default true */
+    dom?: boolean;
     minArea?: number;
   },
 ): Promise<PartsFile> {
@@ -1727,6 +1731,9 @@ export async function measureParts(
     skipped: res.skipped,
     ms: { measure: res.ms },
   };
+  // each part as a file of its own (parts-dom.json): read here, while its
+  // computed styles are live and before the pictures restyle the page
+  if (opts.dom !== false && file.parts.length) await keepPartDom(cdp, opts.dir, file);
   if (opts.pictures !== false && file.parts.length) {
     const t0 = Date.now();
     mkdirSync(opts.assetsDir, { recursive: true });
@@ -1799,6 +1806,38 @@ export async function measureParts(
   }
   await writeFile(join(opts.dir, "parts.json"), `${JSON.stringify(file, null, 2)}\n`);
   return file;
+}
+
+/**
+ * Each measured part's elements with their computed styles inlined, its
+ * fonts' families and its natural size — what `parts/<state>-<el>-<kind>.html`
+ * is written from (compositor part-files.ts) — as `<dir>/parts-dom.json`.
+ * One that cannot be read is a line, never a failure of the parts; a page
+ * that stops answering is passed on (the caller drops it).
+ */
+async function keepPartDom(cdp: CDP, dir: string, parts: PartsFile): Promise<void> {
+  const path = join(dir, "parts-dom.json");
+  try {
+    const r = await cdp.send<{ result?: { value?: string }; exceptionDetails?: { text?: string } }>(
+      "Runtime.evaluate",
+      {
+        expression: partDomExpression(parts.parts.map((p) => p.el)),
+        returnByValue: true,
+      },
+      { timeoutMs: 30_000 },
+    );
+    const raw = r.result?.value;
+    if (typeof raw !== "string")
+      throw new Error(`the page returned nothing (${r.exceptionDetails?.text ?? "?"})`);
+    const res = JSON.parse(raw) as Omit<PartDomFile, "version" | "state"> | { error: string };
+    if ("error" in res) throw new Error(res.error.split("\n")[0]);
+    const file: PartDomFile = { version: 1, state: parts.state, ...res };
+    await writeFile(path, `${JSON.stringify(file)}\n`);
+  } catch (e) {
+    if (isCdpStall(e)) throw e;
+    await rm(path, { force: true });
+    console.error(`dom-state ${parts.state}: parts not kept as files (${(e as Error).message})`);
+  }
 }
 
 /**

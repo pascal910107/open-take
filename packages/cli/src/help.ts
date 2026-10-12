@@ -111,6 +111,8 @@ kept and listed; --force replaces it.
                      written into <dir> for it and the page to start from
                      is unchanged
 With --url the saved screen's parts are measured too (states/home/components.json),
+each part also written as a standalone HTML file in its own styles and fonts
+(<dir>/parts/<state>-<el>-<kind>.html, listed in parts/index.json),
 and the whole page is read: its images (saved in states/assets/), its copy
 below the first screen too, and the page as one sheet
 (states/home/materials.json, sheet.jpg; all of it: open-take materials <dir>).`,

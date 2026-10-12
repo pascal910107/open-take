@@ -8,15 +8,16 @@
 
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import { resolveFfmpeg } from "@open-take/compositor";
-import { resolveChrome } from "../src/cdp";
+import { partDomExpression, resolveFfmpeg } from "@open-take/compositor";
+import { type Browser, type CDP, launchBrowser, resolveChrome } from "../src/cdp";
 import { replaceShoot, runShoot, type ShootLog, type ShootOpts, shootHome } from "../src/shoot";
 
 const exec = promisify(execFile);
@@ -128,6 +129,42 @@ const FIELDSET = `<!doctype html><html><body><fieldset id="fs" disabled><button 
 document.getElementById("b2").addEventListener("click", () => { const n = document.getElementById("n"); n.textContent = String(+n.textContent + 1); });</script>
 </body></html>`;
 
+// a product's card: a web font, a gradient fill, round corners, a shadow,
+// nested text, a ::before, an image — and beside it a panel holding a frame
+const CARD = `<!doctype html><html><head><meta charset="utf-8"><title>card fixture</title><style>
+@font-face{font-family:"Fx";src:url("/font.woff2") format("woff2")}
+body{margin:0;font:16px Arial,sans-serif;background:#f4f4f0;color:#222}
+.card{position:absolute;left:60px;top:50px;width:320px;padding:20px;background:linear-gradient(#2a3b8f,#1d2a66);border-radius:18px;color:#fff;box-shadow:0 4px 12px rgba(0,0,0,.25);font-family:"Fx",monospace}
+.card h2{margin:0 0 8px;font-size:28px;letter-spacing:1px}
+.card p{margin:0 0 8px}
+.price{font-size:40px;font-weight:700}
+.price::before{content:"$";font-size:20px;color:#ffd166}
+.card img{display:block;width:48px;height:48px;border-radius:50%;margin-bottom:8px}
+.more{display:block;color:#ffd166;text-decoration:none;margin-top:8px}
+#go{position:absolute;left:60px;top:330px;width:140px;height:44px;background:#0a7;color:#fff;border:0;border-radius:10px;font-size:16px}
+.ad{position:absolute;left:440px;top:50px;width:300px;padding:16px;background:#fff;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.2)}
+.ad iframe{display:block;width:260px;height:120px;border:0}
+</style></head><body>
+<div class="card" id="card"><img src="/pic.svg" alt="logo"><h2>Pro plan</h2><p>Billed <b>monthly</b></p><span class="price" id="price">4,466</span><a class="more" href="/plans">See plans</a></div>
+<button id="go">Start now</button>
+<div class="ad" id="ad"><h3>Sponsored</h3><iframe src="/framed"></iframe></div>
+</body></html>`;
+const FRAMED = `<!doctype html><html><body style="margin:0;background:#fd0"><p>framed</p></body></html>`;
+/** a real woff2 from the workspace's font packages, if one is installed */
+function findWoff2(): Buffer | null {
+  const store = join(import.meta.dirname, "..", "..", "..", "node_modules", ".pnpm");
+  if (!existsSync(store)) return null;
+  for (const pkg of readdirSync(store).filter((d) => d.startsWith("@fontsource+"))) {
+    const name = pkg.slice("@fontsource+".length).replace(/@.*$/, "");
+    const files = join(store, pkg, "node_modules", "@fontsource", name, "files");
+    if (!existsSync(files)) continue;
+    const f = readdirSync(files).find((x) => /-latin-400-normal\.woff2$/.test(x));
+    if (f) return readFileSync(join(files, f));
+  }
+  return null;
+}
+const WOFF2 = findWoff2();
+
 async function serve(): Promise<{ server: Server; url: string }> {
   const pages: Record<string, string> = {
     "/": PAGE,
@@ -142,8 +179,12 @@ async function serve(): Promise<{ server: Server; url: string }> {
     "/slow.js": SLOW_JS,
     "/makes": MAKES,
     "/pic.svg": PIC,
+    "/card": CARD,
+    "/framed": FRAMED,
   };
   const server = createServer((req, res) => {
+    if (req.url === "/font.woff2" && WOFF2)
+      return res.writeHead(200, { "content-type": "font/woff2" }).end(WOFF2);
     const html = pages[req.url ?? "/"];
     if (html == null) return res.writeHead(404).end();
     // the page a link leads to answers slowly: an action must wait for it,
@@ -796,14 +837,181 @@ test("shoot: a page's landing screen saved on its own (film init --url)", {
     assert.ok(existsSync(join(dir, "states", "home", "state.html")));
     assert.deepEqual(
       (await readdir(dir)).sort(),
-      ["states"],
-      "only the saved screen: no stills, no log, no work folder",
+      ["parts", "states"],
+      "only the saved screen and its parts as files: no stills, no log, no work folder",
     );
     // again: replaced in place
     await shootHome({ url, dir, chromePath: chrome!, width: VW, height: VH, onNote: () => {} });
-    assert.deepEqual((await readdir(dir)).sort(), ["states"]);
+    assert.deepEqual((await readdir(dir)).sort(), ["parts", "states"]);
     assert.ok(existsSync(join(dir, "states", "home", "index.json")));
   } finally {
+    server.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("shoot: each part of a saved screen as a file of its own — its styles inlined, the product's font, its image — that renders alone", {
+  skip,
+  timeout: 90000,
+}, async () => {
+  const { server, url } = await serve();
+  const dir = await mkdtemp(join(tmpdir(), "open-take-part-files-"));
+  let browser: Browser | null = null;
+  try {
+    const home = await shootHome({
+      url: `${url}card`,
+      dir,
+      chromePath: chrome!,
+      width: VW,
+      height: VH,
+      onNote: () => {},
+    });
+    assert.ok(home.parts, "the part files were written");
+    assert.equal(home.parts!.dir, join(dir, "parts"));
+    const index = JSON.parse(readFileSync(join(dir, "parts", "index.json"), "utf8")) as {
+      version: number;
+      components: string;
+      parts: {
+        file: string;
+        ref: string;
+        kind: string;
+        label: string;
+        values: Record<string, string>;
+        w: number;
+        h: number;
+        picture?: string;
+        fonts: string[];
+      }[];
+      skipped: { ref: string; why: string }[];
+    };
+    const comps = home.components!.file.components;
+    assert.equal(index.version, 1);
+    assert.equal(index.components, "../states/home/components.json");
+    assert.equal(
+      index.parts.length + index.skipped.length,
+      comps.length,
+      "every part of components.json is a file or skipped with its reason",
+    );
+    assert.equal(home.parts!.written, index.parts.length);
+    const listed = index.parts.map((p) => `${p.ref}:${p.kind}:${p.label}`).join(" | ");
+    const card = index.parts.find((p) => p.kind === "card" && p.label.includes("Pro plan"));
+    assert.ok(card, `the card is a part file: ${listed}`);
+    assert.equal(card.file, `${card.ref.replace(":", "-")}-card.html`);
+    assert.equal(card.w, 360, "its natural width: 320 + its padding");
+    assert.ok(card.values.text?.includes("4,466"), JSON.stringify(card.values));
+    assert.ok(card.picture && existsSync(join(dir, "parts", card.picture)), "its picture, beside");
+    if (WOFF2) assert.deepEqual(card.fonts, ["Fx"], "its font is carried");
+    // the panel holding a frame is not a file: its reason says why
+    const ad = comps.find((c) => c.label.includes("Sponsored") && c.kind === "card");
+    if (ad) {
+      const sk = index.skipped.find((s) => s.ref === ad.ref);
+      assert.match(
+        sk?.why ?? "",
+        /<iframe>/,
+        `the framed panel is skipped: ${JSON.stringify(index.skipped)}`,
+      );
+    }
+
+    const html = readFileSync(join(dir, "parts", card.file), "utf8");
+    assert.match(html, /^<!doctype html>\n<!--\n/);
+    assert.match(html, new RegExp(`source: {3}${url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}card`));
+    assert.match(html, /state: {4}home \(\.\.\/states\/home\/state\.html\)/);
+    assert.match(html, /kind: {5}card/);
+    assert.match(html, /values: {3}\{"text":/);
+    assert.match(html, /captured: \d{4}-\d\d-\d\dT/);
+    assert.match(html, /<iframe src="parts\/[^"]+" width="360" height="\d+"/, "the one-liner");
+    assert.match(html, /<body data-w="360" data-h="\d+"/);
+    assert.ok(
+      !/<link\b/.test(html) && !/otrel:/.test(html),
+      "no page CSS, no unresolved reference",
+    );
+    if (WOFF2)
+      assert.match(
+        html,
+        /@font-face\{font-family:"?Fx"?;src:url\("\.\.\/states\/assets\/[0-9a-f]+\.woff2"\)/,
+      );
+
+    // opened alone from the file, no network: it is drawn as the page drew it
+    browser = await launchBrowser({ width: VW, height: VH, chromePath: chrome! });
+    const cdp: CDP = browser.cdp;
+    await cdp.send("Page.enable");
+    await cdp.send("Network.enable");
+    await cdp.send("Network.setBlockedURLs", { urls: ["http://*", "https://*"] });
+    const loaded = new Promise<void>((r) => cdp.on("Page.loadEventFired", () => r()));
+    await cdp.send("Page.navigate", { url: pathToFileURL(join(dir, "parts", card.file)).href });
+    await loaded;
+    const got = (
+      await cdp.send<{ result?: { value?: string } }>("Runtime.evaluate", {
+        expression: `document.fonts.ready.then(() => {
+          const root = document.body.firstElementChild, cs = getComputedStyle(root);
+          const price = root.querySelector(".price"), img = root.querySelector("img");
+          const r = root.getBoundingClientRect();
+          return JSON.stringify({
+            radius: cs.borderTopLeftRadius, bg: cs.backgroundImage, shadow: cs.boxShadow, color: cs.color,
+            family: cs.fontFamily, w: r.width, h: r.height, x: r.left, y: r.top,
+            price: price && price.textContent, priceSize: price && getComputedStyle(price).fontSize,
+            before: price && getComputedStyle(price, "::before").content,
+            beforeColor: price && getComputedStyle(price, "::before").color,
+            img: img ? img.naturalWidth : -1,
+            link: getComputedStyle(root.querySelector("a")).textDecorationLine,
+            font: document.fonts.check('16px "Fx"') && [...document.fonts].some((f) => f.family.replace(/"/g, "") === "Fx" && f.status === "loaded"),
+            sheets: document.styleSheets.length,
+          });
+        })`,
+        awaitPromise: true,
+        returnByValue: true,
+      })
+    ).result?.value;
+    const p = JSON.parse(got ?? "{}");
+    console.error(`part file alone: ${got}`);
+    assert.equal(p.radius, "18px", "its round corners, with no page CSS");
+    assert.match(p.bg, /linear-gradient/, "its gradient fill");
+    assert.match(p.shadow, /rgba\(0, 0, 0, 0\.25\)/);
+    assert.equal(p.color, "rgb(255, 255, 255)");
+    assert.equal(p.w, 360);
+    assert.equal(p.x, 0, "where it sat on the page is not carried");
+    assert.equal(p.y, 0);
+    assert.equal(p.price, "4,466");
+    assert.equal(p.priceSize, "40px");
+    assert.equal(p.before, '"$"', "its ::before");
+    assert.equal(p.beforeColor, "rgb(255, 209, 102)");
+    assert.equal(p.img, 40, "its image, from the saved files");
+    assert.equal(p.link, "none", "a link the page took the underline off stays without it");
+    if (WOFF2) assert.equal(p.font, true, "the product's own font, loaded from the saved file");
+
+    // a part holding a frame is not carried: the page says why (the panel
+    // beside the card, asked for directly in its restored screen)
+    const again = new Promise<void>((r) => cdp.on("Page.loadEventFired", () => r()));
+    await cdp.send("Page.navigate", {
+      url: pathToFileURL(join(dir, "states", "home", "state.html")).href,
+    });
+    await again;
+    const asked = async (expression: string) =>
+      (
+        await cdp.send<{ result?: { value?: string } }>("Runtime.evaluate", {
+          expression,
+          awaitPromise: true,
+          returnByValue: true,
+        })
+      ).result?.value;
+    const adId = await asked(
+      `new Promise((res) => { const t = setInterval(() => { if (document.documentElement.dataset.otReady === "1") { clearInterval(t); res(document.getElementById("ad").getAttribute("data-ot-id")); } }, 50); })`,
+    );
+    assert.ok(adId, "the panel has an element id");
+    const framed = JSON.parse((await asked(partDomExpression([adId!, "e99999"]))) ?? "{}") as {
+      parts: unknown[];
+      skipped: { el: string; why: string }[];
+    };
+    assert.equal(framed.parts.length, 0);
+    assert.match(framed.skipped[0]!.why, /it holds an <iframe>/);
+    assert.equal(framed.skipped[1]!.why, "not found in the restored page");
+    assert.equal(
+      await asked("document.querySelectorAll('iframe').length"),
+      1,
+      "the hidden frame for the defaults is gone again",
+    );
+  } finally {
+    await browser?.close();
     server.close();
     await rm(dir, { recursive: true, force: true });
   }

@@ -123,6 +123,7 @@ test("film init names the product's saved screen and look when the folder has th
     /const P = await product\("states\/home\/"\); P\.part\("<ref>"\) → cam\.frame\(part, …\) · lift\(home, part\)/,
   );
   assert.doesNotMatch(plain, /product\(/, "nothing named that is not there");
+  assert.doesNotMatch(page, /partFiles/, "no parts/index.json, no part files named");
   assert.match(page, /look\/look\.json/);
   // what it says and what it makes stand beside its interface, none the default
   assert.match(page, /what it says: states\/home\/materials\.json/);
@@ -132,6 +133,18 @@ test("film init names the product's saved screen and look when the folder has th
     assert.match(p, /what it makes: a shoot's s\.save\(name, target\)/);
     assert.match(p, /rebuilt: the film's own HTML at film size/);
   }
+  // its parts as files, when film init --url wrote them: one more route, beside
+  const withParts = join(dir, "init-url-parts");
+  await mkdir(join(withParts, "parts"), { recursive: true });
+  await writeFile(join(withParts, "parts", "index.json"), "{}");
+  await initFilm({ dir: withParts });
+  const partsPage = await readFile(join(withParts, "index.html"), "utf8");
+  assert.match(
+    partsPage,
+    /its parts as files: parts\/index\.json — each part's own HTML, its styles inlined, in its fonts/,
+  );
+  assert.match(partsPage, /\(await partFiles\("parts\/"\)\)\.node\("<ref>"\)/);
+  assert.match(partsPage, /none of these is the default/);
   // listed in a comment, like the kit: the page imports only the timeline
   assert.deepEqual(
     page.match(/^\s*import .*$/gm)?.map((l) => l.trim()),

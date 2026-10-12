@@ -4,8 +4,8 @@
 // page to start from is written only where there is none, and a kit file the
 // author has changed is kept unless asked to replace it. With `--url` the
 // CLI first keeps the product's landing page as a saved screen in
-// states/home/ (and its look in look/); the page to start from then names
-// them in a comment — listed, like the kit, not used.
+// states/home/ (its parts as files in parts/, its look in look/); the page
+// to start from then names them in a comment — listed, like the kit, not used.
 
 import { existsSync } from "node:fs";
 import { copyFile, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
@@ -48,8 +48,9 @@ function kitRole(source: string): string {
 export function starterPage(
   kit: { name: string; role: string }[],
   /** what the folder already holds of the product: a saved screen
-   *  (states/home/state.html) and its look (look/look.json) */
-  has: { home?: string; look?: string } = {},
+   *  (states/home/state.html), its look (look/look.json) and its parts as
+   *  files (parts/index.json) */
+  has: { home?: string; look?: string; parts?: string } = {},
 ): string {
   const w = Math.max(...kit.map((k) => k.name.length)) + 6;
   const list = kit.map((k) => `  //   ${`kit/${k.name}`.padEnd(w)}${k.role}`.trimEnd()).join("\n");
@@ -69,6 +70,12 @@ export function starterPage(
           `  //   its interface, live DOM: const home = screen(iframe, "${has.home}");   // kit/media.js`,
           `  //     in place: cam.frame(box) · isolate(home, [...]) the rest faded; lifted out: lift(home, "<selector>")`,
           `  //     its parts as references: const P = await product("${dir}"); P.part("<ref>") → cam.frame(part, …) · lift(home, part)`,
+        ]
+      : []),
+    ...(has.parts
+      ? [
+          `  //   its parts as files: ${has.parts} — each part's own HTML, its styles inlined, in its fonts, alone at`,
+          `  //     any size: an iframe's src, or (await partFiles("${has.parts.replace(/[^/]*$/, "")}")).node("<ref>")   // kit/media.js`,
         ]
       : []),
     `  //   rebuilt: the film's own HTML at film size, in the product's fonts and colours${has.look ? ` (${has.look}, npx open-take film look)` : " (npx open-take film look)"}, with its real values (readValues)`,
@@ -135,11 +142,13 @@ export async function initFilm(opts: { dir: string; force?: boolean }): Promise<
   if (!existsSync(page)) {
     const home = "states/home/state.html";
     const look = "look/look.json";
+    const parts = "parts/index.json";
     await writeFile(
       page,
       starterPage(roles, {
         ...(existsSync(join(dir, home)) ? { home } : {}),
         ...(existsSync(join(dir, look)) ? { look } : {}),
+        ...(existsSync(join(dir, parts)) ? { parts } : {}),
       }),
     );
     written.push(page);

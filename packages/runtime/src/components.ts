@@ -5,15 +5,17 @@
 // opens them (dom-state.ts measureStateDirs); the rest is the compositor's
 // gather, which needs no browser.
 
-import { readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import {
   type ComponentSource,
   type ComponentsFile,
   gatherComponents,
+  type PartFilesResult,
   readComponentSource,
   readStateIndex,
   writeComponents,
+  writePartFiles,
 } from "@open-take/compositor";
 import { ensureChrome, launchBrowser } from "./cdp";
 import { measureStateDirs } from "./dom-state";
@@ -37,6 +39,9 @@ export type InventoryResult = {
   file: ComponentsFile;
   /** components.json, when written */
   path?: string;
+  /** each part as a file of its own (<root>/parts/), when written and
+   *  any screen's page gave them */
+  parts?: PartFilesResult;
   source: ComponentSource;
   /** screens measured now, and how long that took in all (Chrome included) */
   measured: string[];
@@ -128,5 +133,23 @@ export async function inventoryComponents(opts: InventoryOpts): Promise<Inventor
   }
   const file = gatherComponents(source);
   const path = opts.write === false ? undefined : writeComponents(file, source.root);
-  return { file, ...(path ? { path } : {}), source, measured, measureMs, failed };
+  // the part files beside it — not where the root's own folders are its
+  // saved screens (a parts/ there would read as one)
+  let parts: PartFilesResult | undefined;
+  const flat = source.states.some((s) => resolve(dirname(s.dir)) === resolve(source.root));
+  if (path && !flat && scope.some((s) => existsSync(join(s.dir, "parts-dom.json"))))
+    try {
+      parts = writePartFiles(file, source, join(source.root, "parts"));
+    } catch (e) {
+      console.error(`components: no part files (${(e as Error).message})`);
+    }
+  return {
+    file,
+    ...(path ? { path } : {}),
+    ...(parts ? { parts } : {}),
+    source,
+    measured,
+    measureMs,
+    failed,
+  };
 }
