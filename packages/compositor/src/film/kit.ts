@@ -53,19 +53,25 @@ export function starterPage(
 ): string {
   const w = Math.max(...kit.map((k) => k.name.length)) + 6;
   const list = kit.map((k) => `  //   ${`kit/${k.name}`.padEnd(w)}${k.role}`.trimEnd()).join("\n");
+  const dir = has.home ? has.home.replace(/[^/]*$/, "") : null;
   const product = [
-    ...(has.home
+    "  // the product, as material — none of these is the default, and a film needs not all:",
+    ...(dir
       ? [
-          `  // ${has.home}: the product's page as a saved screen — the real interface, live DOM:`,
-          `  //   const home = screen(iframe, "${has.home}");   // kit/media.js; size the iframe to its viewport`,
-          `  //   lift(home, "<selector>") one part as a layer of its own · isolate(home, [...]) the rest faded`,
-          `  //   const P = await product("${has.home.replace(/[^/]*$/, "")}");   // kit/media.js: its parts (components.json) as references`,
-          '  //   P.part("<ref>") → cam.frame(part, …) · cur.click(part, t) · lift(home, part) · part.at(t) where it shows now',
+          `  //   what it says: ${dir}materials.json — its headings and copy, its images (saved), the pages it`,
+          `  //     links to (its About, docs, repository); npx open-take materials ${dir.replace(/\/$/, "")}`,
         ]
       : []),
-    ...(has.look
-      ? [`  // ${has.look}: the product's colours, type and fonts (npx open-take film look)`]
+    "  //   what it makes: a shoot's s.save(name, target) keeps a drawn shape, a picture, a result, a",
+    "  //     download as a file of its own — (await stills(url, img)).output(name) in kit/media.js",
+    ...(has.home
+      ? [
+          `  //   its interface, live DOM: const home = screen(iframe, "${has.home}");   // kit/media.js`,
+          `  //     in place: cam.frame(box) · isolate(home, [...]) the rest faded; lifted out: lift(home, "<selector>")`,
+          `  //     its parts as references: const P = await product("${dir}"); P.part("<ref>") → cam.frame(part, …) · lift(home, part)`,
+        ]
       : []),
+    `  //   rebuilt: the film's own HTML at film size, in the product's fonts and colours${has.look ? ` (${has.look}, npx open-take film look)` : " (npx open-take film look)"}, with its real values (readValues)`,
   ];
   return `<!doctype html>
 <html>

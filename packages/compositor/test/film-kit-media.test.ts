@@ -118,10 +118,20 @@ test("film init names the product's saved screen and look when the folder has th
   assert.match(page, /screen\(iframe, "states\/home\/state\.html"\)/);
   assert.match(page, /lift\(home, /);
   // its parts as references, named in a comment: product() on its folder
-  assert.match(page, /\/\/ {3}const P = await product\("states\/home\/"\);/);
-  assert.match(page, /cam\.frame\(part, …\) · cur\.click\(part, t\) · lift\(home, part\)/);
+  assert.match(
+    page,
+    /const P = await product\("states\/home\/"\); P\.part\("<ref>"\) → cam\.frame\(part, …\) · lift\(home, part\)/,
+  );
   assert.doesNotMatch(plain, /product\(/, "nothing named that is not there");
   assert.match(page, /look\/look\.json/);
+  // what it says and what it makes stand beside its interface, none the default
+  assert.match(page, /what it says: states\/home\/materials\.json/);
+  assert.doesNotMatch(plain, /materials\.json/, "nothing named that is not there");
+  for (const p of [page, plain]) {
+    assert.match(p, /none of these is the default/);
+    assert.match(p, /what it makes: a shoot's s\.save\(name, target\)/);
+    assert.match(p, /rebuilt: the film's own HTML at film size/);
+  }
   // listed in a comment, like the kit: the page imports only the timeline
   assert.deepEqual(
     page.match(/^\s*import .*$/gm)?.map((l) => l.trim()),
