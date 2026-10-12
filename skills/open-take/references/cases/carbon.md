@@ -13,16 +13,6 @@ story: open on something the viewer cares about, answer it at the end;
 features are things the story uses, not a list to tour. Length, style and
 music were the model's choice.
 
-**The comment this film got** (blind, one viewer — the project's owner —
-four films of the same product; this one ranked first of four, verdict "會"):
-
-> 片 16：會，第 1 名
-> 片 16是我覺得最有節奏的，或是說對到拍？
-
-(Translation: "Film 16: yes, rank 1." / "Film 16 is the one I found most
-rhythmic — or, say, on the beat?") One viewer; in that experiment the films
-were asked for varied real material and a story, see the README.
-
 ## Structure: problem → question → answer, with a bookend
 
 All cuts sit on the beat of a 120 BPM score (measured, scene > 0.30: 20 cuts,

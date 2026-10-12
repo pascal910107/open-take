@@ -18,38 +18,6 @@ list of motion rules (curves by role, masked word rises, one hard hit),
 which the author kept. The site's scripts did not run in its headless
 browser, so recording the live site was not an option.
 
-**The comments this film got** (the project's owner; not blind — it was
-shown beside a film made the same day with an earlier open-take, a JSON
-scene description over recordings):
-
-> 我覺得B整體好看很多 所以open-take反而限制了模型的發揮誒
-
-(2026-09-30. "I think B looks much better overall — so open-take actually
-held the model back.")
-
-On 2026-10-08, after a blind round of other films of the same product, he
-pointed to this film's animation as what he had meant by animating the
-product's components:
-
-> …或是拆的東西錯了所以沒那個效果(…[this film]，他的動畫很好看，拆的元件是會籍卡片)…
-
-("…or the wrong thing was taken apart, so it lacked that effect ([this
-film] — its animation is lovely; the component it took apart was the
-membership card)…") — and, the same day, about what that must not become:
-
-> 我不知道我回答你之後，是不是框架走向會完全變成每隻影片都用一個元件來串聯全部場景，這是框架，不要限制他，我也沒說findgym就一定要用會員卡才好看 那只是之前影片剛好用這個例子，假如我之後錄製findgym結果每次都使用相同的會員卡做傳遞，這根本不是我想要的
-
-("I wonder whether, after my answer, the framework will turn into every
-film using one component to string all its scenes together. It's a
-framework — don't restrict it. I never said FindGym has to use the
-membership card to look good; that was just the example this earlier film
-happened to use. If from now on every FindGym film passed the same
-membership card along, that is not at all what I want.")
-
-So: what he liked is the product's own things shown on their own, big
-enough to read, with something happening to them. The card, and one object
-carried through the film, were this film's choices for this product.
-
 ## Structure: a problem, one card's journey through the product, the site's own end card
 
 120 BPM; every scene boundary on a bar. 6 hard cuts in 43.5 s (measured,

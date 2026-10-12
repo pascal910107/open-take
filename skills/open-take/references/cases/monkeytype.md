@@ -11,13 +11,6 @@ the last cut melts into the end card.
 of it"; length, style and music were the model's choice (the plain arm of an
 experiment whose other arm got the Carbon brief's direction).
 
-**The comment this film got** (blind, one viewer — the project's owner —
-four films of the same product; this one ranked first of four, verdict "會"):
-
-> 片 40：會，第 1 名
-
-(Translation: "Film 40: yes, rank 1.") No further words about this film.
-
 ## Structure: long continuous opening, accelerating burst, colour-matched end
 
 Measured (scene > 0.30): no hard cut before 25.5 s; then 25.5, 26.0, 26.5,

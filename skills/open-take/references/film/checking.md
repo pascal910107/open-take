@@ -66,9 +66,7 @@ necessarily a bar's first; where the tempo is not steady an even pulse
 departs from the beats, which `film beats` keeps in a file `grid()` takes) —
 sections, bars that repeat an earlier one
 verbatim, silences, which events have no sound within 40 ms (next to how
-often chance would), each cut's offset to the nearest onset, and the film's
-tempo, key and kick pattern beside those of earlier films' scores (counts
-only). With
+often chance would), and each cut's offset to the nearest onset. With
 `--stems <dir>` it says which stem rises at each event and how far over the
 rest, and `--clips` writes each stem solo and muted. `--vs <previous.wav|mp4>`
 sets it beside an earlier version on the same film time: loudness, tempo,

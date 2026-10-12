@@ -7,14 +7,6 @@ number; one fact, its proof, one interaction, breadth, brand.
 **Brief it was given:** a 15-second vertical (9:16) social short that
 grabs people in the first 2 seconds. Everything else was the model's choice.
 
-**The comment this film got** (blind, one viewer — the project's owner —
-batch of six; verdict "會"):
-
-> 會，但感覺有點偏短？或是他比較適合這麼短的？
-
-(Translation: "Yes, but it feels a bit short? Or maybe it suits being this
-short?") One viewer, one film; the length was the brief's, not a finding.
-
 ## Structure: fact → proof → touch → breadth → brand
 
 Everything sits on the site's deep blue, so changes read as one surface

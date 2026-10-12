@@ -9,14 +9,6 @@ they escalate, stops the music for one of them, and ends on scale.
 **Brief it was given:** humorous and light — make people smile. Everything
 else was the model's choice.
 
-**The comment this film got** (blind, one viewer — the project's owner —
-batch of six; verdict "會"):
-
-> 會，畢竟有動畫就會讓人覺得整部不錯
-
-(Translation: "Yes — after all, having animation makes the whole film feel
-good.") One viewer, one film.
-
 ## Structure: setup → escalation → pause gag → escalation → scale → punchlines
 
 Everything sits on the game's own purple sunburst, so even its cuts are soft
@@ -66,5 +58,4 @@ Everything sits on the game's own purple sunburst, so even its cuts are soft
 - The real drag dropped frames in the recording; the drag second was redrawn
   with the game's own icon on a smooth arc and handed back to the recording
   at the drop.
-- A two-frame flash at 24.5 s (a clip cut on the game's own transition) was
-  caught by a reviewer, not by the viewer.
+- A clip cut on the game's own transition left a two-frame flash at 24.5 s.

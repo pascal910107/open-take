@@ -1,27 +1,10 @@
 # Framer AI launch film — an external reference
 
 Framer's 85.5 s launch film for its AI site generator (public on YouTube,
-`BSRkq1UCda0`), made by people, not by open-take. It is here because it is the
-launch film the project's owner liked best of the human-made ones he watched,
-and because it is built differently from every film above: it never shows a
-whole page for long, the cut density changes a lot from section to section,
-and its richness comes from the many different things the product made.
-
-**The comments it got** (the owner, 2026-10-05, after watching five human-made
-launch films; not blind):
-
-> 我只覺得Framer AI的很好，就是他快速切換搭配聲音的感覺是我很喜歡的(但這可能是個人喜好)，而且他內容很豐富，配樂也很有層次(不過內容豐富度可能也跟該次launch的功能數量有關？)
-
-> framer比起我們內容就豐富很多(但應該也不用到他們那麼多 就是有內容有故事我覺得就可以) 也很有節奏感(這點我覺得滿重要)
-
-(Translation: "I just think Framer AI's is very good — the feeling of quick
-switching together with the sound is something I really like (but that may be
-personal taste); its content is very rich and the music has a lot of layers
-(though the richness may have to do with how many features that launch had)."
-/ "Framer's content is much richer than ours (but we probably don't need that
-much — content and a story are enough, I think) and it has a strong sense of
-rhythm (which I think matters a lot).") He described what he liked; he did
-not ask for its density or its look.
+`BSRkq1UCda0`), made by people, not by open-take. It is kept because it is
+built differently from the other cases: it never shows a whole page for long,
+its cut density changes a lot from section to section, and its richness comes
+from the many different things the product made.
 
 ## Structure: manifesto → product action → bursts and breaths → montage → logo
 

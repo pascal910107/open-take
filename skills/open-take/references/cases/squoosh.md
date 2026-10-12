@@ -8,13 +8,6 @@ real page.
 **Brief it was given:** fast-paced and information-dense, like a product
 showcase. Length, style and music were the model's choice.
 
-**The comment this film got** (blind, one viewer — the project's owner —
-batch of six; verdict "會"):
-
-> 會，感覺整部都很不錯
-
-(Translation: "Yes, the whole film feels really good.") One viewer, one film.
-
 ## Structure: a list of claims, cut on the beat
 
 Hard cuts land on beats of a 120 BPM score (measured, scene > 0.30: 5, 8,

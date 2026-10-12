@@ -399,14 +399,7 @@ test("inertia: how many earlier films share this one's tempo, key and low end â€
   assert.ok(shipped.of >= 28, `${shipped.of} films in the shipped corpus`);
 });
 
-test("listen's text: the line beside earlier films, and that timbre is not measured", () => {
-  const n = inertiaOf(
-    "/x/new/film.mp4",
-    120,
-    { name: "A minor", correlation: 0.8 },
-    "x---x---x---x---",
-    corpus,
-  );
+test("listen's text: nothing about earlier films, and that timbre is not measured", () => {
   const md = formatFilmListen({
     input: "/x/new/film.mp4",
     duration: 10,
@@ -430,13 +423,9 @@ test("listen's text: the line beside earlier films, and that timbre is not measu
     stems: { how: "not measured", dir: null, list: [], laneS: 0.05, eventWindows: [] },
     curves: { names: [], t0: 0, dt: 1 / 60, rows: [] },
     clips: [],
-    inertia: n,
     timbre: { how: "not measured" },
   });
-  assert.match(
-    md,
-    /this one â‰ˆ 120 BPM; of 4 earlier films, measured the same way, 3 sit within 1\.5% of it/,
-  );
-  assert.match(md, /reads as A minor .*2 of 4 read the same, 3 the same or its relative C major/);
+  // how earlier trial films sounded is research-side; a film being made never sees it
+  assert.doesNotMatch(md, /earlier/i);
   assert.match(md, /## What it sounds like\n\n- .*nothing here hears timbre \(not measured\)/);
 });

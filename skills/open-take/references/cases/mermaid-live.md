@@ -7,15 +7,6 @@ shown happening in the real editor, then an end card.
 **Brief it was given:** a 30-second technical short for engineers — how it
 works and why it saves effort. Everything else was the model's choice.
 
-**The comment this film got** (blind, one viewer — the project's owner —
-batch of six; verdict "會"):
-
-> 會，我覺得音效跟節奏都很不錯！一開始的zoom搭配鼓點進來很棒 真的有堆疊的感覺(當然不只這個地方)
-
-(Translation: "Yes, I think the sound effects and the rhythm are both really
-good! The zoom at the start with the drums coming in is great — it really
-feels like things stacking up (and not only there).") One viewer, one film.
-
 ## Structure: close-in hook, pull out, claim by claim
 
 | Time | Wants to express | Moves | Holds | Handoff into next | Sound |
@@ -52,8 +43,7 @@ everything is camera and content changing inside one picture.
   { t: 3.5, x: 800, y: 450, z: 1.0 },  // the whole editor
   // score: for (let t = 3.0; t < 25.5; t += BEAT) kick(t, …)
   ```
-  This is the "zoom with the drums coming in" the comment names. Today the
-  same coupling can run through `tl.curve` (e.g. the camera's speed) and the
+  Today the same coupling can run through `tl.curve` (e.g. the camera's speed) and the
   score's `curveOf`.
 - **The section about a hidden property thins the music** — the URL section
   keeps only downbeat kicks under a louder pad, so the explanation reads as a

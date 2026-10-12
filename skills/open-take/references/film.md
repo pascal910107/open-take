@@ -13,29 +13,36 @@ motion and the music are the film's author's, and so is how good the film is.
 A path through a film, there when it helps. Any step can be skipped,
 reordered or done another way; nothing checks that it was followed.
 
-1. **What the product has.** What can be recorded (`make`), saved as a
-   screen (`make --states`), what it really puts out — a number it works out,
-   a file it makes, a sound — and what exists about it outside the app (its
-   About page, repository, store listing, changelog). A shoot's or a take's
-   saved screens come with `components.json`: each part they hold, its
-   values, what an action changed; the first screen kept on each page with
-   `materials.json`: that whole page's images (saved), its copy below the
-   first screen too, and a sheet of it top to bottom. In earlier films the pace often followed
-   the material more than the plan (`skill film material`).
-2. **The main line** — what the film is about, in one sentence.
-3. **A beat sheet**, if you keep one: `tl.segment` in `time.js` — what each
+1. **What the product is, and for whom.** What it makes — a file, a
+   picture, a page, a number it works out, a sound — and what it says about
+   itself: its headline and copy (`materials.json` from `film init --url`),
+   its About page, repository, store listing, changelog, the people who use
+   it. A launch film gives someone who has never heard of the product a
+   reason to care and the proof of it; a walkthrough teaches a task. Both
+   are films you can write; they need different things on screen.
+2. **The main line** — what someone who has never seen it should come away
+   with, in one sentence.
+3. **What shows it.** For each thing the film says, what on screen makes it
+   believable: what the product made, at a size that reads; one of its parts
+   doing something; a real action and the result it gives; its own words and
+   pictures. The interface is material for this step: what can be recorded
+   (`make`), saved as a screen (`make --states`, `shoot`), each part a saved
+   screen holds with its values and what an action changed
+   (`components.json`). In earlier films the pace often followed the
+   material more than the plan (`skill film material`).
+4. **A beat sheet**, if you keep one: `tl.segment` in `time.js` — what each
    stretch is meant to do, what moves, what holds, how it hands over to the
    next, what is heard. Free words; nothing grades them.
-4. **A draft** — `film render --draft`, `film still`, `film sheet`. A render
+5. **A draft** — `film render --draft`, `film still`, `film sheet`. A render
    ends with a few lines measured on the film (`--no-report` leaves them out).
-5. **Look and listen** — `film probe`, `film listen`, `film check`: what the
+6. **Look and listen** — `film probe`, `film listen`, `film check`: what the
    picture and the sound did, beside what the page declared, each line
    measured, estimated or not detected (`skill film checking`).
-6. **The seconds that matter, as the master will show them** — a handoff, a
+7. **The seconds that matter, as the master will show them** — a handoff, a
    whip, a burst of cuts: `film render --from --to`, blurred, alone.
-7. **Change what you decide to change**, and go round 4–6 as often as it
+8. **Change what you decide to change**, and go round 5–7 as often as it
    helps. The reports are there to see by, not to satisfy.
-8. **The master.**
+9. **The master.**
 
 ## What's there for…
 
@@ -99,7 +106,7 @@ Capabilities and where each is described; none of them is a step.
 - how the renderer plays a page (`__film`, `__render`, clocks) → `skill film
   page`
 - the product's own sound from a take, a soundtrack → `skill film sound`
-- films a viewer said he would post, segment by segment → `skill cases`
+- launch films taken apart, segment by segment → `skill cases`
 
 ## Start
 

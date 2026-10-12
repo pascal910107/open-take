@@ -21,15 +21,11 @@ import { launchHtmlBrowser } from "../html/cdp";
 import {
   BANDS,
   chanceWithin,
-  chromagram,
   decodeMono,
-  estimateKey,
-  estimateMeter,
   estimateTempo,
   FLOOR_DB,
   findSections,
   LISTEN_RATE,
-  lowPattern,
   nearestOffset,
   onsetStrength,
   pickOnsets,
@@ -262,8 +258,6 @@ export type FilmListen = {
   };
   curves: FilmEvents["curves"];
   clips: string[];
-  /** this film's tempo, key and low-end pattern beside earlier Opus films' scores */
-  inertia: Inertia;
   /** what the sound is like — instruments, synthesized or recorded — is not measured */
   timbre: { how: "not measured" };
   /** the events file's "credits", as written there (absent: no such field) */
@@ -544,16 +538,6 @@ export async function filmListen(opts: FilmListenOptions): Promise<{
     const tempo = estimateTempo(s, env, onsets, duration);
     const sections = findSections(s, onsets, duration);
     const bars = tempo && tempo.beats.length >= 8 ? repeatedBars(s, tempo.beats) : null;
-    const chroma = chromagram(pcm);
-    const meter = tempo ? estimateMeter(s, chroma, tempo.beats) : null;
-    const downbeats =
-      tempo && meter ? tempo.beats.filter((_, k) => k % meter.beatsPerBar === meter.first) : [];
-    const inertia = inertiaOf(
-      input,
-      tempo && tempo.gridFit > tempo.chance ? tempo.bpm : null,
-      estimateKey(chroma),
-      lowPattern(s, downbeats),
-    );
 
     const events = (ev?.events ?? []).map((e) => ({
       ...e,
@@ -621,7 +605,6 @@ export async function filmListen(opts: FilmListenOptions): Promise<{
       },
       curves: ev?.curves ?? { names: [], t0: 0, dt: 1 / 60, rows: [] },
       clips: [],
-      inertia,
       timbre: { how: "not measured" },
     };
 
@@ -1494,29 +1477,6 @@ export function formatFilmListen(l: FilmListen): string {
       "",
       `- ${l.curves.names.join(", ")} — drawn in listen.png`,
     );
-  const n = l.inertia;
-  L.push("", "## Beside earlier Opus films' scores", "");
-  if (!n.of) L.push(`- no earlier films to set this one beside ${tag("not measured")}`);
-  else {
-    const corpus = `${n.of} earlier film${n.of === 1 ? "" : "s"}${n.self ? ` (${n.self}, this film, left out)` : ""}, measured the same way`;
-    const top = <T>(xs: T[], fmt: (x: T) => string) =>
-      xs.length > 5 ? `${xs.slice(0, 5).map(fmt).join(", ")}, …` : xs.map(fmt).join(", ");
-    L.push(
-      n.tempo.value == null
-        ? `- tempo: no beat grid in this one; of ${corpus}, ${n.tempo.withGrid} have one: ${top(n.tempo.spread, (x) => `${x.bpm} BPM ×${x.films}`)} ${tag("estimated")}`
-        : `- tempo: this one ≈ ${n.tempo.value} BPM; of ${corpus}, ${n.tempo.same} sit within 1.5% of it (${n.tempo.withGrid} have a clear beat grid: ${top(n.tempo.spread, (x) => `${x.bpm} BPM ×${x.films}`)}) ${tag("estimated")}`,
-    );
-    L.push(
-      n.key.value == null
-        ? `- key: nothing pitched to read ${tag("not detected")}`
-        : `- key: this one reads as ${n.key.value} (profile correlation ${n.key.correlation}); ${n.key.same} of ${n.of} read the same, ${n.key.sameOrRelative} the same or its relative ${RELATIVE[n.key.value] ?? ""} (all: ${top(n.key.spread, (x) => `${x.key} ×${x.films}`)}) ${tag("estimated")}`,
-    );
-    L.push(
-      n.lowPattern.value == null
-        ? `- where the low end lands in a bar: no bars or no low end to read ${tag("not detected")}`
-        : `- where the low end (under 160 Hz) lands in a bar, 16 steps from the downbeat: this one ${n.lowPattern.value}; ${n.lowPattern.same} of ${n.of} have the same (most common: ${top(n.lowPattern.spread.slice(0, 3), (x) => `${x.pattern} ×${x.films}`)}) ${tag("estimated")}`,
-    );
-  }
   L.push(
     "",
     "## What it sounds like",

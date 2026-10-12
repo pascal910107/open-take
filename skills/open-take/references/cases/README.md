@@ -1,26 +1,17 @@
-# Cases: films that were judged, taken apart
+# Cases: launch films, taken apart
 
-Breakdowns of launch films that a viewer — the project's owner, watching
-blind — said he would post, plus one human-made film he liked best and one
-film Opus made without open-take that he preferred in an open side-by-side.
-Each
-case says what the film is, how it is built segment by segment (what moves,
-what holds, how each part hands off to the next, what the sound does), what
-material it used, and **the comment that film got**, quoted as he wrote it.
+Launch films taken apart segment by segment: what moves, what holds, how each
+part hands off to the next, what the sound does, and what material it used.
+Read them as evidence of what has been done and how — not as rules or
+templates:
 
-Read them as evidence of what has been done and how it was received — not as
-rules, scores or templates:
-
-- A comment is one viewer on one film. "This film got this comment" is all it
-  says; it does not say the next film should do the same.
 - Every film here was made for a different product with a different brief.
   Much of each film is that product's own things: its sound, its jokes, its
   numbers, its outputs. Your product has different ones.
 - A whole structure carried over tends to become a template: four films of
-  one product, each made separately, came out as nearly one script, and the
-  viewer said films of one product felt like a template. The index below is
-  keyed by what one segment wants to say, so a film can look up the segment
-  it is stuck on and see how others did it with their own material.
+  one product, each made separately, came out as nearly one script. The index
+  below is keyed by what one segment wants to say, so a film can look up the
+  segment it is stuck on and see how others did it with their own material.
 - The cases are built in different ways, side by side, and none of them is
   the template: one object carried through most scenes (FindGym), a subject
   that changes every few seconds with nothing carried (Framer AI), one
@@ -63,32 +54,29 @@ rules, scores or templates:
 
 ## The cases
 
-| Case | Length | Structure in one line | Material | Comment |
-|---|---|---|---|---|
-| [Song Maker](song-maker.md) | 54.6 s | one recorded session built up in layers; the product's sound only | recording + the product's own audio | 會！ |
-| [Mermaid Live Editor](mermaid-live.md) | 30 s | close-in hook, pull out on the drums, four claims shown live | per-keystroke stills of the real site | 會 |
-| [Squoosh](squoosh.md) | 48 s | thirteen claims, each with its real number, cut on the beat | stills + a real drag + measured facts | 會 |
-| [Carbon](carbon.md) | 47 s | problem → question → short tour → where it goes → proof → answer | stills + real exports + real pages around the product | 會, ranked 1 of 4 |
-| [Monkeytype](monkeytype.md) | 36 s | one continuous run with a speed ramp, then accelerating cuts | recording + stills | 會, ranked 1 of 4 |
-| [Little Alchemy 2](little-alchemy.md) | 52 s | the game's own jokes escalating, a silent gag, scale | recording + the game's own icons, music, effects | 會 |
-| [Our World in Data](our-world-in-data.md) | 15 s, vertical | fact → proof → touch → breadth → brand | stills + the site's public data | 會 |
-| [Framer AI](framer-ai.md) (external) | 85.5 s | manifesto → action → bursts and breaths → montage | real UI + many real outputs + voice-over | liked best |
-| [FindGym](findgym-promo.md) (no open-take) | 43.5 s | a problem → one card's journey through the product → the site's own end card | the product's components rebuilt from its source, its fonts and illustrations; demo data plus one made-up listing | 好看很多 (preferred, not blind) |
+| Case | Length | Structure in one line | Material |
+|---|---|---|---|
+| [Song Maker](song-maker.md) | 54.6 s | one recorded session built up in layers; the product's sound only | recording + the product's own audio |
+| [Mermaid Live Editor](mermaid-live.md) | 30 s | close-in hook, pull out on the drums, four claims shown live | per-keystroke stills of the real site |
+| [Squoosh](squoosh.md) | 48 s | thirteen claims, each with its real number, cut on the beat | stills + a real drag + measured facts |
+| [Carbon](carbon.md) | 47 s | problem → question → short tour → where it goes → proof → answer | stills + real exports + real pages around the product |
+| [Monkeytype](monkeytype.md) | 36 s | one continuous run with a speed ramp, then accelerating cuts | recording + stills |
+| [Little Alchemy 2](little-alchemy.md) | 52 s | the game's own jokes escalating, a silent gag, scale | recording + the game's own icons, music, effects |
+| [Our World in Data](our-world-in-data.md) | 15 s, vertical | fact → proof → touch → breadth → brand | stills + the site's public data |
+| [Framer AI](framer-ai.md) (external) | 85.5 s | manifesto → action → bursts and breaths → montage | real UI + many real outputs + voice-over |
+| [FindGym](findgym-promo.md) (no open-take) | 43.5 s | a problem → one card's journey through the product → the site's own end card | the product's components rebuilt from its source, its fonts and illustrations; demo data plus one made-up listing |
 
 ## Where these come from
 
 All but Framer AI and FindGym were written by Opus 5.5 as its own film page
-and rendered with `film render`, in October 2026 trials; each had a short brief (quoted in
-its case), was watched blind among others, and got the comment quoted. Song
-Maker, Mermaid, Squoosh, Little Alchemy and Our World in Data had the renderer
-and its checks but no kit; Carbon and Monkeytype had the first kit (camera,
+and rendered with `film render`, in October 2026 trials; each had a short brief
+(quoted in its case). Song Maker, Mermaid, Squoosh, Little Alchemy and Our
+World in Data had the renderer and its checks but no kit; Carbon and Monkeytype had the first kit (camera,
 cursor, time, media, audio basics). None had `motion.js`, `film probe`,
 `film listen` or product-sound capture, so where a case did by hand what a
 block now does, the case says so. FindGym (September 2026) was Opus 5.5 with
 no open-take at all, with the product's source code and demo data to read,
-and more time than the trials gave. Films the
-viewer would not post are not here: a comment on one film is not a rule, in
-either direction.
+and more time than the trials gave.
 
 Each case table uses the same columns as a segment sheet
 (`tl.segment(from, to, { label, hold, handoff, subject, sound })`), so a film

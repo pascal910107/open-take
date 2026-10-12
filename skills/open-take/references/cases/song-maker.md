@@ -10,15 +10,6 @@ product's own output.
 it; no added music — every sound must come from the product itself. Length,
 style and everything else were the model's choice.
 
-**The comment this film got** (blind, one viewer — the project's owner —
-batch of six; verdict "會！", the only one with an exclamation mark):
-
-> 會！讓人一看就懂誒，而且教學的同時整體音樂又好聽，不會讓人覺得切換時很突兀，最後結尾的音量漸弱設計也很棒
-
-(Translation: "Yes! You get it at a glance, and while it teaches, the music is
-nice to listen to; the switches never feel abrupt; and the volume fading out
-at the end is a great touch.") This is one viewer on one film, not a rule.
-
 ## Structure: one session, built up in layers
 
 The whole film is one real recorded session. The edit jumps forward inside it
@@ -72,8 +63,7 @@ build-up.
   export const LAG = { prev: 0.33, play: 0.05 };
   ```
 - **The ending keeps the product alive.** The interface becomes the end
-  card's picture while the song keeps playing, then fades — the fade-out is
-  the moment the comment named.
+  card's picture while the song keeps playing, then fades out.
 
 ## Known limits (from its own notes)
 
