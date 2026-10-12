@@ -1,12 +1,20 @@
 ## Material from the real product
 
-One moment of the product comes three ways from one `make --states`
-recording, on one clock: the **recording** (the real action at its real
-speed), the **saved screen** (the interface itself — sharp at any size, its
-parts separable) and the **real output** (what the product actually made,
-which can become the next shot's subject). A film can go from one to another
-— the real action, its real result lifted out, the result where it is used —
-as one continuous shot or as cuts on the music.
+The product gives a film several kinds of material, side by side; none is
+the default:
+
+- **What it says** — its headline, copy, numbers and pictures, and the pages
+  it links to (About, docs, repository): `materials.json`, from
+  `film init --url` or any saved screen.
+- **What it makes** — the file, picture, page or result it puts out, kept as
+  a file of its own with `s.save` in `open-take shoot` and read on the page
+  with `(await stills(url, img)).output(name)` (below).
+- **Its interface** — from one `make --states` recording, on one clock: the
+  **recording** (the real action at its real speed), the **saved screen**
+  (sharp at any size, its parts separable) and the **real output** of that
+  action. A film can go from one to another — the real action, its result
+  lifted out, the result where it is used — as one continuous shot or as
+  cuts on the music.
 
 ### One thing of the product's on its own
 
