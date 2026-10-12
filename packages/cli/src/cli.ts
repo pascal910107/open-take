@@ -2077,6 +2077,10 @@ async function main() {
     if (log.stills.length) process.stdout.write(`       ${shootStatesLine(log)}\n`);
     const steadyLine = shootSteadyLine(log);
     if (steadyLine) process.stdout.write(`       ${steadyLine}\n`);
+    if (log.outputs?.length)
+      process.stdout.write(
+        `       outputs: ${log.outputs.map((o) => `${o.file} (${o.kind}${o.w ? ` ${Math.round(o.w)}×${Math.round(o.h ?? 0)}` : ""})`).join(", ")} — (await stills(".../shots.json", img)).output("<name>") in kit/media.js\n`,
+      );
     if (components) {
       const at = dirname(components.path);
       process.stdout.write(

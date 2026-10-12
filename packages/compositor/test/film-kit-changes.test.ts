@@ -108,7 +108,7 @@ test("wordDiff: whole words, run-together facts, a cut-short before", () => {
   assert.deepEqual(wordDiff("same", "same"), { added: "", removed: "" });
 });
 
-test("stills().changes and a take's changes read components.json beside the log", async () => {
+test("stills().changes, stills().output and a take's changes read what the shoot kept beside the log", async () => {
   const shots = {
     viewport: { w: 400, h: 300 },
     stills: [
@@ -116,6 +116,20 @@ test("stills().changes and a take's changes read components.json beside the log"
       { file: "001-k.png", name: "k-1", t: 1 },
       { file: "002-typed.png", name: "rx", t: 2, state: "typed" },
       { file: "003-after.png", name: "after", t: 3 },
+    ],
+    outputs: [
+      {
+        name: "result",
+        file: "outputs/result.svg",
+        kind: "svg",
+        bytes: 10,
+        t: 2.5,
+        url: "https://p/",
+        still: 2,
+        after: "rx",
+        w: 120,
+        h: 80,
+      },
     ],
   };
   const take = {
@@ -146,6 +160,12 @@ test("stills().changes and a take's changes read components.json beside the log"
     const { stills, readTake } = await import("../kit/media.js");
     const st = await stills("../shots/shots.json", {} as HTMLImageElement);
     assert.equal(st.changes("typed").still, 2);
+    assert.deepEqual(st.outputs, ["result"]);
+    const o = st.output("result");
+    assert.equal(o.url, "http://x/shots/outputs/result.svg");
+    assert.equal(o.still, 2);
+    assert.equal(o.kind, "svg");
+    assert.throws(() => st.output("nope"), /saved nothing called "nope" — it has "result"/);
     assert.equal(st.changes(3).screen, "typed", "a still shows the last screen kept before it");
     assert.equal(st.changes("rx").parts[0]!.added, "400 μs");
     assert.equal(st.changes(1).screen, "empty");

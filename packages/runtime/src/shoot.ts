@@ -162,6 +162,36 @@ export type ShootStateItem = {
   /** its still was taken while the screen was still changing (the still's `moving`) */
   moving?: true;
 };
+/** Something the product made, kept as a file of its own by s.save */
+export type ShootOutput = {
+  name: string;
+  /** outputs/<name>.<ext>, relative to the shoot's directory */
+  file: string;
+  /** svg: the element as SVG; png: a canvas's own pixels; image: an <img>'s
+   *  source bytes; text: a field's value or an element's text; picture: the
+   *  element's box as it was on screen (2×); download: the file the page
+   *  downloaded */
+  kind: "svg" | "png" | "image" | "text" | "picture" | "download";
+  bytes: number;
+  /** seconds since the shoot began, like a still's t */
+  t: number;
+  /** the page it was made on */
+  url: string;
+  /** what was saved: the target as the script named it */
+  target?: string;
+  /** the last still before it — the moment of the product it belongs to:
+   *  its index in stills, and its name */
+  still?: number;
+  after?: string;
+  /** its size, CSS px (svg, png, image, picture) */
+  w?: number;
+  h?: number;
+  /** its text, the first 400 characters (text, and a picture's words) */
+  text?: string;
+  /** the name the page gave a download */
+  filename?: string;
+};
+
 export type ShootLog = {
   viewport: { w: number; h: number };
   scale: number;
@@ -172,6 +202,8 @@ export type ShootLog = {
   stills: ShootStill[];
   /** present when any still kept a saved screen */
   states?: { dir: "states"; items: ShootStateItem[] };
+  /** what the script kept of what the product made (s.save), in order */
+  outputs?: ShootOutput[];
   error?: string;
 };
 
@@ -256,6 +288,17 @@ export type Shoot = {
   evaluate<T = unknown>(fn: string | ((...args: never[]) => T), ...args: unknown[]): Promise<T>;
   /** run before the page's own scripts on every later navigation (call it before open) */
   inject(js: string | (() => void)): Promise<void>;
+  /** keep something the product made as a file of its own, outputs/<name>.<ext>:
+   *  an <svg> as SVG (its styles inlined), a <canvas> as its PNG, an <img> as
+   *  its source, a field's value or a <pre>/<code>/<output>'s text as text,
+   *  anything else as a picture of its box; `as` says which instead. With
+   *  `{ download }`, the file the page downloads while that function runs (a
+   *  click on its export button). It takes no still. */
+  save(
+    name: string,
+    what: ShootTarget | { download: () => unknown },
+    opts?: { as?: "svg" | "png" | "image" | "text" | "picture"; timeoutMs?: number },
+  ): Promise<ShootOutput>;
   /** a raw CDP session on the shot page — its own, so its listeners cannot
    *  disturb the shoot's; mouse events sent through it move the logged cursor */
   readonly cdp: {
@@ -522,6 +565,63 @@ const LOCATE_JS =
   `var l;try{l=document.querySelectorAll(q);}catch(e){return {err:String(e&&e.message||e)};}` +
   `for(var i=0;i<l.length;i++){if(shown(l[i]))return {el:l[i]};}return null;}`;
 
+/** What s.save reads of its target in the page: the element as SVG (with the
+ *  computed paint and type of every node inlined, so it stands on its own), a
+ *  canvas's PNG, an image's source bytes, a value or text — or only its box,
+ *  for a picture taken from the screen. */
+const SAVE_STYLE = [
+  "fill",
+  "fill-opacity",
+  "fill-rule",
+  "stroke",
+  "stroke-width",
+  "stroke-opacity",
+  "stroke-linecap",
+  "stroke-linejoin",
+  "stroke-dasharray",
+  "opacity",
+  "color",
+  "stop-color",
+  "stop-opacity",
+  "font-family",
+  "font-size",
+  "font-weight",
+  "font-style",
+  "letter-spacing",
+  "text-anchor",
+  "dominant-baseline",
+  "visibility",
+];
+function saveJs(target: string, as: string | undefined): string {
+  return (
+    `(async function(){${LOCATE_JS}` +
+    `var f=locate(${JSON.stringify(target)},'box');if(!f)return null;if(f.err)return JSON.stringify({err:f.err});` +
+    `var e=f.el,r=e.getBoundingClientRect(),tag=e.tagName.toLowerCase(),as=${JSON.stringify(as ?? "")};` +
+    `var box={x:r.left,y:r.top,w:r.width,h:r.height};` +
+    `var text=(typeof e.value==='string'?e.value:(e.innerText||e.textContent||''));` +
+    `function b64(buf){var s='',u=new Uint8Array(buf);for(var i=0;i<u.length;i+=32768)s+=String.fromCharCode.apply(null,u.subarray(i,i+32768));return btoa(s);}` +
+    `if(!as)as=tag==='svg'?'svg':tag==='canvas'?'png':tag==='img'?'image':` +
+    `(typeof e.value==='string'||/^(pre|code|output|samp|kbd)$/.test(tag))?'text':'picture';` +
+    `if(as==='svg'){var svg=tag==='svg'?e:e.querySelector('svg');if(!svg)return JSON.stringify({err:'no <svg> in it'});` +
+    `var c=svg.cloneNode(true),src=[svg].concat([].slice.call(svg.querySelectorAll('*'))),dst=[c].concat([].slice.call(c.querySelectorAll('*')));` +
+    `var P=${JSON.stringify(SAVE_STYLE)};for(var i=0;i<src.length;i++){var cs=getComputedStyle(src[i]),st='';` +
+    `for(var j=0;j<P.length;j++){var v=cs.getPropertyValue(P[j]);if(v)st+=P[j]+':'+v+';';}dst[i].setAttribute('style',st+(dst[i].getAttribute('style')||''));}` +
+    `var sr=svg.getBoundingClientRect();c.setAttribute('xmlns','http://www.w3.org/2000/svg');` +
+    `if(!c.getAttribute('width'))c.setAttribute('width',String(Math.round(sr.width)));if(!c.getAttribute('height'))c.setAttribute('height',String(Math.round(sr.height)));` +
+    `return JSON.stringify({kind:'svg',data:new XMLSerializer().serializeToString(c),w:sr.width,h:sr.height});}` +
+    `if(as==='png'){if(tag!=='canvas')return JSON.stringify({err:'it is not a <canvas> (as: "picture" takes its box)'});` +
+    `try{return JSON.stringify({kind:'png',b64:e.toDataURL('image/png').split(',')[1],w:r.width,h:r.height});}` +
+    `catch(x){return JSON.stringify({kind:'picture',box:box,why:'the canvas is tainted (drawn from another site), so its box is pictured'});}}` +
+    `if(as==='image'){var im=tag==='img'?e:e.querySelector('img');if(!im)return JSON.stringify({err:'no <img> in it'});` +
+    `try{var res=await fetch(im.currentSrc||im.src);var buf=await res.arrayBuffer();` +
+    `return JSON.stringify({kind:'image',b64:b64(buf),mime:res.headers.get('content-type')||'',src:im.currentSrc||im.src,w:r.width,h:r.height});}` +
+    `catch(x){return JSON.stringify({kind:'picture',box:box,why:'its source could not be read from the page, so its box is pictured'});}}` +
+    `if(as==='text')return JSON.stringify({kind:'text',data:text});` +
+    `e.scrollIntoView({block:'nearest',inline:'nearest'});r=e.getBoundingClientRect();` +
+    `return JSON.stringify({kind:'picture',box:{x:r.left,y:r.top,w:r.width,h:r.height},text:text.slice(0,400)});})()`
+  );
+}
+
 type Found = {
   x: number;
   y: number;
@@ -636,6 +736,7 @@ export async function runShoot(opts: ShootOpts): Promise<{
   let raw: CDP | null = null;
   const stills: ShootStill[] = [];
   const kept: DomStateRaw[] = [];
+  const outputs: ShootOutput[] = [];
   /** each page's material, read live with the first screen kept on it */
   const scans: PageScan[] = [];
   let items: ShootStateItem[] = [];
@@ -679,6 +780,7 @@ export async function runShoot(opts: ShootOpts): Promise<{
       states: opts.states,
       steady: opts.steady !== false,
       kept,
+      outputs,
       ...(opts.materials !== false ? { scans } : {}),
     });
     let failed: string | null = null;
@@ -705,6 +807,7 @@ export async function runShoot(opts: ShootOpts): Promise<{
         steady: opts.steady !== false,
         stills,
         ...logStates(items),
+        ...(outputs.length ? { outputs } : {}),
         error: failed,
       };
       await writeFile(join(stage, "shots.json"), `${JSON.stringify(partial, null, 2)}\n`);
@@ -724,6 +827,7 @@ export async function runShoot(opts: ShootOpts): Promise<{
     steady: opts.steady !== false,
     stills,
     ...logStates(items),
+    ...(outputs.length ? { outputs } : {}),
   };
   await writeFile(join(stage, "shots.json"), `${JSON.stringify(log, null, 2)}\n`);
   // the parts each saved screen holds, gathered with what the log adds (no
@@ -739,6 +843,7 @@ export async function runShoot(opts: ShootOpts): Promise<{
     }
   await replaceShoot(out, stage, [
     ...stills.map((st) => st.file),
+    ...outputs.map((o) => o.file),
     ...items.map((it) => `states/${it.id}`),
     ...(inventory ? ["components.json"] : []),
   ]);
@@ -1022,9 +1127,15 @@ async function moveAside(
         typeof id === "string" && /^[^/\\.][^/\\]*$/.test(id) && id !== "assets",
     )
     .map((id) => `states/${id}`);
+  // what it saved of the product's output (outputs/<name>.<ext>, as logged)
+  const saved = (Array.isArray(old.outputs) ? old.outputs : [])
+    .map((o) => o?.file)
+    .filter(
+      (f): f is string => typeof f === "string" && /^outputs\/[A-Za-z0-9][A-Za-z0-9._-]*$/.test(f),
+    );
   // its inventory goes with it: a shoot that keeps none must not leave the
   // last one's components.json naming screens that are gone
-  for (const name of [...names, ...screens, "components.json", "shots.json"]) {
+  for (const name of [...names, ...saved, ...screens, "components.json", "shots.json"]) {
     if (!existsSync(join(out, name))) continue;
     await move(join(out, name), join(aside, name));
     moved.push(name);
@@ -1074,6 +1185,8 @@ type Ctx = {
   kept: DomStateRaw[];
   /** pages read so far (absent: --no-materials) */
   scans?: PageScan[];
+  /** what s.save kept, in order */
+  outputs: ShootOutput[];
 };
 
 async function shoot(ctx: Ctx): Promise<Shoot> {
@@ -1820,6 +1933,147 @@ async function shoot(ctx: Ctx): Promise<Shoot> {
     async inject(js) {
       const source = typeof js === "function" ? `(${js.toString()})()` : String(js);
       await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source });
+    },
+
+    async save(name, what, o = {}) {
+      const label = `s.save(${JSON.stringify(name)})`;
+      if (
+        typeof name !== "string" ||
+        !/^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$/.test(name) ||
+        /\.\./.test(name)
+      )
+        throw new Error(`${label}: the name is a file name of letters, digits, . _ - (no folders)`);
+      if (ctx.outputs.some((x) => x.name === name))
+        throw new Error(`${label}: this shoot already saved one by that name`);
+      await mkdir(join(ctx.stage, "outputs"), { recursive: true });
+      const t = Math.round(Date.now() - t0) / 1000;
+      const page = JSON.parse(await evaluate<string>(SHOWS_JS, label)) as { url: string };
+      const after = stills.at(-1)?.name;
+      const base = {
+        name,
+        t,
+        url: page.url,
+        ...(after ? { still: stills.length - 1, after } : {}),
+      };
+      const put = async (ext: string, data: Buffer, rest: Partial<ShootOutput>) => {
+        const file = `outputs/${name}.${ext}`;
+        await writeFile(join(ctx.stage, file), data);
+        const out = { ...base, file, bytes: data.length, ...rest } as ShootOutput;
+        ctx.outputs.push(out);
+        return out;
+      };
+      if (what && typeof what === "object" && "download" in what) {
+        if (typeof what.download !== "function")
+          throw new Error(
+            `${label}: { download } is a function that makes the page download (a click on its export button)`,
+          );
+        const dir = join(ctx.stage, "outputs", `.download-${name}`);
+        await mkdir(dir, { recursive: true });
+        await cdp.send("Page.setDownloadBehavior", { behavior: "allow", downloadPath: dir });
+        let suggested = "";
+        let done: (() => void) | null = null;
+        const finished = new Promise<void>((r) => {
+          done = r;
+        });
+        // the session's listeners stay; these two answer for this save only
+        let listening = true;
+        cdp.on<{ suggestedFilename?: string }>("Page.downloadWillBegin", (p) => {
+          if (listening) suggested = p.suggestedFilename ?? "";
+        });
+        cdp.on<{ state?: string }>("Page.downloadProgress", (p) => {
+          if (listening && (p.state === "completed" || p.state === "canceled")) done?.();
+        });
+        try {
+          await what.download();
+          const ok = await within(
+            finished.then(() => true),
+            o.timeoutMs ?? 15_000,
+          );
+          if (!ok)
+            throw new Error(
+              `${label}: the page downloaded nothing within ${secs(o.timeoutMs ?? 15_000)}`,
+            );
+        } finally {
+          listening = false;
+          await cdp.send("Page.setDownloadBehavior", { behavior: "default" }).catch(() => {});
+        }
+        const got = (await readdir(dir)).filter((f) => !f.endsWith(".crdownload"));
+        if (!got.length) throw new Error(`${label}: the download did not finish`);
+        const data = await readFile(join(dir, got[0]!));
+        await rm(dir, { recursive: true, force: true });
+        const ext =
+          (suggested || got[0]!).match(/\.([A-Za-z0-9]{1,8})$/)?.[1]?.toLowerCase() ?? "bin";
+        return put(ext, data, { kind: "download", ...(suggested ? { filename: suggested } : {}) });
+      }
+      if (typeof what !== "string")
+        throw new Error(
+          `${label}: what to save is a target (a selector or text=<name>) or { download }`,
+        );
+      const deadline = Date.now() + (o.timeoutMs ?? TARGET_WAIT_MS);
+      let json: string | null = null;
+      for (;;) {
+        json = await evaluate<string | null>(saveJs(what, o.as), label);
+        if (json || Date.now() >= deadline) break;
+        await sleep(100);
+      }
+      if (!json) throw new Error(`${label}: ${JSON.stringify(what)} never appeared`);
+      const r = JSON.parse(json) as {
+        err?: string;
+        why?: string;
+        kind: ShootOutput["kind"];
+        data?: string;
+        b64?: string;
+        mime?: string;
+        w?: number;
+        h?: number;
+        text?: string;
+        box?: { x: number; y: number; w: number; h: number };
+      };
+      if (r.err) throw new Error(`${label}: ${JSON.stringify(what)}: ${r.err}`);
+      if (r.why) note(`${label}: ${r.why}`);
+      const size = r.w != null && r.h != null ? { w: r2(r.w), h: r2(r.h) } : {};
+      const target = { target: what };
+      if (r.kind === "svg")
+        return put("svg", Buffer.from(r.data!, "utf8"), { kind: "svg", ...target, ...size });
+      if (r.kind === "png")
+        return put("png", Buffer.from(r.b64!, "base64"), { kind: "png", ...target, ...size });
+      if (r.kind === "image") {
+        const ext =
+          {
+            "image/png": "png",
+            "image/jpeg": "jpg",
+            "image/webp": "webp",
+            "image/gif": "gif",
+            "image/svg+xml": "svg",
+            "image/avif": "avif",
+          }[(r.mime ?? "").split(";")[0]!.trim()] ?? "img";
+        return put(ext, Buffer.from(r.b64!, "base64"), { kind: "image", ...target, ...size });
+      }
+      if (r.kind === "text")
+        return put("txt", Buffer.from(r.data ?? "", "utf8"), {
+          kind: "text",
+          ...target,
+          text: (r.data ?? "").slice(0, 400),
+        });
+      // a picture: the element's box as the screen shows it, at the shoot's scale
+      const b = r.box!;
+      if (!(b.w > 0 && b.h > 0))
+        throw new Error(`${label}: ${JSON.stringify(what)} has no size on screen`);
+      const shot = await within(
+        cdp.send<{ data: string }>("Page.captureScreenshot", {
+          format: "png",
+          clip: { x: b.x, y: b.y, width: b.w, height: b.h, scale: 1 },
+        }),
+        60_000,
+      );
+      if (!shot) throw new Error(`${label}: the page did not paint within 60 s`);
+      return put("png", Buffer.from(shot.data, "base64"), {
+        kind: "picture",
+        ...target,
+        w: r2(b.w),
+        h: r2(b.h),
+        ...(r.text ? { text: r.text } : {}),
+      });
     },
 
     cdp: exit,

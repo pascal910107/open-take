@@ -60,6 +60,9 @@ Capabilities and where each is described; none of them is a step.
 - one part as one reference through every screen and the camera — framed,
   clicked, dragged in step with the saved steps, lifted, covered or not →
   `product()` in kit/media.js — `skill film material`
+- what the product made — a file, a picture, a drawn shape, a result — as
+  material of its own, at any size → `s.save` in a `shoot`, read with
+  `st.output(name)` — `skill film material`
 - what the whole page holds, top to bottom — its images with alt, largest
   source and a saved copy, its headings and copy, a sheet of it →
   `materials.json` (`shoot`, `film init --url`; `open-take materials <dir>`)

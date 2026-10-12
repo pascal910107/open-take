@@ -297,7 +297,7 @@ export function stillCache({ keep, ahead, count, open }) {
 export async function stills(logUrl, img, { keep = 12, ahead = 3 } = {}) {
   const res = await fetch(logUrl);
   if (!res.ok) throw new Error(`stills: ${logUrl} could not be read (${res.status})`);
-  /** @type {{ viewport: { w: number, h: number }, scale?: number, stills: Still[], states?: { dir: string } }} */
+  /** @type {{ viewport: { w: number, h: number }, scale?: number, stills: Still[], states?: { dir: string }, outputs?: any[] }} */
   const log = await res.json();
   const base = new URL(logUrl, location.href);
   let shown = -1;
@@ -446,6 +446,26 @@ export async function stills(logUrl, img, { keep = 12, ahead = 3 } = {}) {
       const s = still(i);
       if (!s.cursor) throw new Error(`stills: still ${i} recorded no cursor`);
       return { x: s.cursor.x - (s.scroll?.x ?? 0), y: s.cursor.y - (s.scroll?.y ?? 0) };
+    },
+    /** the names of what the shoot kept of the product's output (s.save), in order */
+    outputs: (log.outputs ?? []).map((/** @type {any} */ o) => o.name),
+    /**
+     * Something the product made, as the shoot kept it with s.save: its URL
+     * (an <img>'s src, a fetch, an <object>), its kind (svg, png, image,
+     * text, picture, download), its size in CSS px, its text, and `still`,
+     * the still just before it — the product's moment it belongs to.
+     *
+     *   const o = st.output("shape");   // { url, kind, w, h, text, still, … }
+     *   img.src = o.url;
+     * @param {string} name
+     */
+    output(name) {
+      const o = (log.outputs ?? []).find((/** @type {any} */ x) => x.name === name);
+      if (!o)
+        throw new Error(
+          `stills: the shoot saved nothing called ${JSON.stringify(name)} — it has ${(log.outputs ?? []).map((/** @type {any} */ x) => JSON.stringify(x.name)).join(", ") || "none (s.save(name, target) keeps one)"}`,
+        );
+      return { ...o, url: new URL(o.file, base).href, still: o.still ?? null };
     },
   };
 }

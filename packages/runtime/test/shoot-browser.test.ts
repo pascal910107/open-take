@@ -106,6 +106,21 @@ addEventListener("load", () => { const s = document.createElement("script"); s.s
 </body></html>`;
 const SLOW_JS = `document.getElementById("root").innerHTML = '<h1 id="mounted">The app</h1><button>Make</button>';
 document.getElementById("wait").remove();`;
+// a page that makes things: a styled SVG, a drawn canvas, an image, a field
+// with a result, a result panel, and an export button that downloads a file
+const MAKES = `<!doctype html><html><head><style>.blob{fill:rgb(200,30,90)}#panel{width:200px;height:80px;background:#123;color:#fff}</style></head><body>
+<svg id="shape" width="120" height="100"><path class="blob" d="M10 50 Q60 0 110 50 T10 50Z"/></svg>
+<canvas id="cv" width="60" height="40"></canvas>
+<img id="pic" src="/pic.svg" width="40" height="40">
+<textarea id="out">sha256: 3f2a…</textarea>
+<div id="panel">Saved 42%</div>
+<button id="export">Export</button>
+<script>const g = document.getElementById("cv").getContext("2d"); g.fillStyle = "#0a0"; g.fillRect(0, 0, 60, 40);
+document.getElementById("export").addEventListener("click", () => {
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["<svg>made</svg>"], { type: "image/svg+xml" }));
+  a.download = "shape.svg"; document.body.append(a); a.click();
+});</script></body></html>`;
+const PIC = `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="40" height="40" fill="#00f"/></svg>`;
 const BLANK = `<!doctype html><html><body><div id="root"></div><script>/* the app never mounts */</script></body></html>`;
 // a button disabled by its fieldset (its own .disabled stays false), enabled later
 const FIELDSET = `<!doctype html><html><body><fieldset id="fs" disabled><button id="b2">Go</button></fieldset><p id="n">0</p>
@@ -125,6 +140,8 @@ async function serve(): Promise<{ server: Server; url: string }> {
     "/tick": TICK,
     "/slow": SLOW,
     "/slow.js": SLOW_JS,
+    "/makes": MAKES,
+    "/pic.svg": PIC,
   };
   const server = createServer((req, res) => {
     const html = pages[req.url ?? "/"];
@@ -132,7 +149,11 @@ async function serve(): Promise<{ server: Server; url: string }> {
     // the page a link leads to answers slowly: an action must wait for it,
     // not read the quiet page it is leaving
     const delay = req.url === "/next" ? 700 : req.url === "/slow.js" ? 2500 : 0;
-    const type = req.url?.endsWith(".js") ? "text/javascript" : "text/html; charset=utf-8";
+    const type = req.url?.endsWith(".js")
+      ? "text/javascript"
+      : req.url?.endsWith(".svg")
+        ? "image/svg+xml"
+        : "text/html; charset=utf-8";
     setTimeout(() => res.writeHead(200, { "content-type": type }).end(html), delay);
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
@@ -922,6 +943,81 @@ test("shoot: a screen that never holds still — the steps stop waiting after a 
     });
     assert.ok(home.moving, "kept while the counter ran");
     assert.ok(home.moving.texts.some((c) => /^\d+$/.test(c.before) && c.before !== c.after));
+  } finally {
+    server.close();
+    await rm(out, { recursive: true, force: true });
+  }
+});
+
+test("shoot: s.save keeps what the product made — an SVG with its styles, a canvas, an image, a value, a picture of a box, a download — and the log says what each is", {
+  skip,
+  timeout: 90000,
+}, async () => {
+  const { server, url } = await serve();
+  const out = await mkdtemp(join(tmpdir(), "open-take-save-"));
+  try {
+    const { log } = await runShoot({
+      ...base(out),
+      states: false,
+      components: false,
+      materials: false,
+      script: async (s) => {
+        await s.open(`${url}makes`);
+        await s.still("made");
+        await s.save("shape", "#shape");
+        await s.save("drawn", "#cv");
+        await s.save("pic", "#pic");
+        await s.save("hash", "#out");
+        await s.save("panel", "#panel");
+        await s.save("export", { download: () => s.click("#export", { still: false }) });
+        await assert.rejects(s.save("shape", "#shape"), /already saved one by that name/);
+        await assert.rejects(s.save("../x", "#shape"), /a file name/);
+      },
+    });
+    const by = Object.fromEntries((log.outputs ?? []).map((o) => [o.name, o]));
+    assert.deepEqual(
+      Object.fromEntries(Object.entries(by).map(([k, o]) => [k, [o.kind, o.file]])),
+      {
+        shape: ["svg", "outputs/shape.svg"],
+        drawn: ["png", "outputs/drawn.png"],
+        pic: ["image", "outputs/pic.svg"],
+        hash: ["text", "outputs/hash.txt"],
+        panel: ["picture", "outputs/panel.png"],
+        export: ["download", "outputs/export.svg"],
+      },
+    );
+    const svg = readFileSync(join(out, "outputs/shape.svg"), "utf8");
+    assert.match(svg, /xmlns="http:\/\/www.w3.org\/2000\/svg"/);
+    assert.match(svg, /fill:\s*rgb\(200, 30, 90\)/, "the class's fill is inlined");
+    assert.deepEqual(pngSize(join(out, "outputs/drawn.png")), [60, 40], "the canvas's own pixels");
+    assert.match(readFileSync(join(out, "outputs/pic.svg"), "utf8"), /fill="#00f"/);
+    assert.equal(readFileSync(join(out, "outputs/hash.txt"), "utf8"), "sha256: 3f2a…");
+    assert.deepEqual(
+      pngSize(join(out, "outputs/panel.png")),
+      [400, 160],
+      "the box at the shoot's 2×",
+    );
+    assert.equal(by.panel!.text, "Saved 42%");
+    assert.equal(readFileSync(join(out, "outputs/export.svg"), "utf8"), "<svg>made</svg>");
+    assert.equal(by.export!.filename, "shape.svg");
+    for (const o of Object.values(by)) {
+      assert.equal(o.after, "made", `${o.name}: the still before it`);
+      assert.equal(o.still, 0);
+      assert.match(o.url, /\/makes$/);
+    }
+    // a new shoot replaces the last one's outputs with its own
+    await runShoot({
+      ...base(out),
+      states: false,
+      components: false,
+      materials: false,
+      script: async (s) => {
+        await s.open(`${url}makes`);
+        await s.save("again", "#out");
+      },
+    });
+    assert.ok(existsSync(join(out, "outputs/again.txt")));
+    assert.ok(!existsSync(join(out, "outputs/shape.svg")), "the last shoot's outputs went with it");
   } finally {
     server.close();
     await rm(out, { recursive: true, force: true });

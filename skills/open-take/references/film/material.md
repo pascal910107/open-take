@@ -48,7 +48,14 @@ film's numbers beside it (below).
 - `npx open-take shoot shoot.mjs --out shots` runs your own capture script in
   open-take's browser and keeps the log: `s.open(url)` (loaded, hydrated, arrived,
   settled), `s.still(name)`, `s.click` / `s.type(…, { each: true })` /
-  `s.drag(…, { every: 4 })` (real input, then a 2× still), `s.track(selector)`.
+  `s.drag(…, { every: 4 })` (real input, then a 2× still), `s.track(selector)`,
+  `s.save(name, target)` (what the product made, as a file of its own in
+  `shots/outputs/`: an `<svg>` with its styles inlined, a `<canvas>`'s PNG, an
+  `<img>`'s source, a field's value or a result's text, or a picture of any
+  box; `s.save(name, { download: () => s.click("text=Export") })` keeps the
+  file the page downloads) — the film reads it with
+  `(await stills(url, img)).output(name)`: its URL, kind, size, text and the
+  still before it.
   `shots/shots.json` holds every still with the cursor, the scroll and the box
   of everything tracked or acted on — read it, never copy coordinates by hand.
   A still keeps the interface too: each `s.still()` and the still an action
