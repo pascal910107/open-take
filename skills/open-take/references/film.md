@@ -64,8 +64,9 @@ Capabilities and where each is described; none of them is a step.
   material of its own, at any size → `s.save` in a `shoot`, read with
   `st.output(name)` — `skill film material`
 - what the whole page holds, top to bottom — its images with alt, largest
-  source and a saved copy, its headings and copy, a sheet of it →
-  `materials.json` (`shoot`, `film init --url`; `open-take materials <dir>`)
+  source and a saved copy, its headings and copy, the other pages it links
+  to (its About, docs, repository), a sheet of it → `materials.json`
+  (`shoot`, `film init --url`; `open-take materials <dir>`)
 - where a number or a string on screen comes from → a part's values, a live
   URL, or a note that it is demo data: `tl.source`; `readValues(url, { tl })`
   says it for what it reads; `film probe` sets the film's numbers beside

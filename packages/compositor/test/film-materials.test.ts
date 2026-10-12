@@ -373,3 +373,47 @@ test("readMaterials: one list per page from the screens that hold one; a page wi
     "the same page by its fragment is covered; another page once, by its first screen",
   );
 });
+
+test("links: kept in materials.json as the probe read them; the summary names a few, navigation and the own site first; the list has them all", () => {
+  const links = [
+    { text: "Read the docs", href: "https://p.example/docs", own: true, firstScreen: true },
+    { text: "GitHub", href: "https://github.com/p/p", own: false, in: "nav", firstScreen: true },
+    { text: "About", href: "https://p.example/about", own: true, in: "nav", firstScreen: true },
+    {
+      text: "Privacy",
+      href: "https://p.example/privacy",
+      own: true,
+      in: "footer",
+      firstScreen: false,
+    },
+    {
+      text: "about",
+      href: "https://p.example/about-us",
+      own: true,
+      in: "footer",
+      firstScreen: false,
+    },
+  ];
+  const { file } = materialsFromProbe({ ...probe, links } as never, {
+    state: "home",
+    read: "live",
+  });
+  assert.deepEqual(file.links, links);
+  const text = materialsSummary([pageOf(file)], { show: (p) => p, cmd: "x" }).join("\n");
+  assert.match(
+    text,
+    /links \(5, pages a film can read the product from\): About · GitHub ↗ · Privacy · Read the docs — each with its address in materials\.json \(links\[\]\)/,
+  );
+  const full = formatMaterials([pageOf(file)], { show: (p) => p });
+  assert.match(
+    full,
+    /links, in page order \(5\):\n {4}"Read the docs" → https:\/\/p\.example\/docs\n {4}"GitHub" → https:\/\/github\.com\/p\/p \(another site\) \[nav\]/,
+  );
+  // a file from before links were read prints no line
+  const { file: old } = materialsFromProbe(probe, { state: "home", read: "live" });
+  assert.equal(old.links, undefined);
+  assert.doesNotMatch(
+    materialsSummary([pageOf(old)], { show: (p) => p, cmd: "x" }).join("\n"),
+    /links \(/,
+  );
+});

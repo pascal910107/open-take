@@ -99,6 +99,19 @@ export type MaterialMeta = {
   icon?: string;
 };
 
+/** A link the page offers — to its About, docs, examples, repository, store
+ *  page: other pages a film can read the product from. */
+export type MaterialLink = {
+  /** what it says (its text, else its accessible name) */
+  text: string;
+  href: string;
+  /** on the page's own site (its host's last two labels) */
+  own: boolean;
+  /** the landmark it sits in: nav, header, footer, aside, dialog */
+  in?: string;
+  firstScreen: boolean;
+};
+
 /** The full-page picture: the page from top to bottom, small, cut into
  *  columns side by side (column k shows page y k·columnPx … (k+1)·columnPx). */
 export type MaterialSheet = {
@@ -133,6 +146,9 @@ export type MaterialsFile = {
   images: MaterialImage[];
   /** in page order */
   copy: MaterialText[];
+  /** the other pages it links to, one per address, in page order (absent in
+   *  a file written before links were read) */
+  links?: MaterialLink[];
   /** counted, not listed — each with its reason in `scope` */
   skipped: MaterialSkipped;
   sheet?: MaterialSheet;
@@ -161,6 +177,7 @@ export const MATERIAL_MIN_IMAGE_PX = 24;
 export const MATERIAL_MIN_SVG_AREA = 3000;
 export const MATERIAL_MAX_IMAGES = 400;
 export const MATERIAL_MAX_COPY = 600;
+export const MATERIAL_MAX_LINKS = 120;
 
 /** A source the page offers for an image. */
 export type MaterialCandidate = {
@@ -197,6 +214,7 @@ export type MaterialsProbeResult =
       meta: MaterialMeta;
       images: MaterialProbeImage[];
       copy: MaterialText[];
+      links?: MaterialLink[];
       skipped: MaterialSkipped;
       ms: number;
     }
@@ -216,7 +234,7 @@ export const MATERIALS_PROBE_JS = String.raw`function () {
     var pageH = Math.max(de.scrollHeight, body.scrollHeight, vh);
     var R = Math.round;
     var MIN_PX = ${MATERIAL_MIN_IMAGE_PX}, MIN_SVG = ${MATERIAL_MIN_SVG_AREA};
-    var MAX_IMAGES = ${MATERIAL_MAX_IMAGES}, MAX_COPY = ${MATERIAL_MAX_COPY}, TEXT_MAX = ${MATERIAL_TEXT_MAX};
+    var MAX_IMAGES = ${MATERIAL_MAX_IMAGES}, MAX_COPY = ${MATERIAL_MAX_COPY}, TEXT_MAX = ${MATERIAL_TEXT_MAX}, MAX_LINKS = ${MATERIAL_MAX_LINKS};
     var collapse = function (s) { return (s || "").replace(/\s+/g, " ").trim(); };
     var absUrl = function (u) {
       if (!u) return null;
@@ -512,6 +530,30 @@ export const MATERIALS_PROBE_JS = String.raw`function () {
       copy.push(co);
     }
 
+    // --- the other pages it links to ---------------------------------------------------
+    var site = function (h) { return h.split(".").slice(-2).join("."); };
+    var here = location.href.split("#")[0], ownSite = site(location.hostname);
+    var links = [], seenHref = new Set();
+    Array.prototype.forEach.call(body.querySelectorAll("a[href]"), function (a) {
+      if (links.length >= MAX_LINKS) return;
+      var href = absUrl(a.getAttribute("href"));
+      if (!href || !/^https?:/i.test(href)) return;
+      var bare = href.split("#")[0];
+      if (bare === here || seenHref.has(bare)) return;
+      var lr = a.getBoundingClientRect();
+      if (lr.width < 1 || lr.height < 1) return;
+      var text = collapse(a.innerText || "") || nameOf(a) || "";
+      if (!text) { var im = a.querySelector("img[alt]"); if (im) text = collapse(im.getAttribute("alt")); }
+      if (!text) return;
+      seenHref.add(bare);
+      var lo = { text: text.length > 80 ? text.slice(0, 79) + "…" : text, href: href, own: site(new URL(href).hostname) === ownSite,
+        firstScreen: (fixedOf(a) ? lr.top : lr.top + sy) < vh, box: pageBox(lr, fixedOf(a)) };
+      var lm = landmarkOf(a); if (lm) lo.in = lm;
+      links.push(lo);
+    });
+    links.sort(function (a, b) { return a.box[1] - b.box[1] || a.box[0] - b.box[0]; });
+    links.forEach(function (l) { delete l.box; });
+
     // --- the head: what the page says about itself ----------------------------------
     var metaOf = function (sel) { var m = document.querySelector(sel); return m ? collapse(m.getAttribute("content")) : ""; };
     var meta = {};
@@ -528,7 +570,7 @@ export const MATERIALS_PROBE_JS = String.raw`function () {
     return JSON.stringify({
       url: location.href, title: document.title,
       viewport: { w: vw, h: vh }, page: { w: pageW, h: pageH },
-      medianTextPx: median, meta: meta, images: images, copy: copy, skipped: skipped,
+      medianTextPx: median, meta: meta, images: images, copy: copy, links: links, skipped: skipped,
       ms: R(performance.now() - t0)
     });
   } catch (e) {
@@ -690,6 +732,7 @@ export function materialsFromProbe(
     meta: res.meta,
     images,
     copy: res.copy,
+    ...(res.links ? { links: res.links } : {}),
     skipped: res.skipped,
     scope: materialsScope(o.read),
     ms: { read: res.ms },
@@ -702,6 +745,7 @@ export function materialsScope(read: MaterialsFile["read"]): string {
     `the whole page, top to bottom, ${read === "live" ? "read in the product's page as it was shot" : "read in its saved screen (state.html: sources are the saved files)"}: ` +
     `<img>/<picture> (largest source), inline <svg> of ${MATERIAL_MIN_SVG_AREA} px² or more, CSS background images, <video>, <canvas>; ` +
     `headings, paragraphs, list items, quotes, captions, and text set ≥ 1.25× the body size; ` +
+    `the other pages it links to (one per address, its own site or not); ` +
     `not read: iframes, shadow roots, ::before/::after, text inside links and buttons (headings aside), aria-hidden copies. ` +
     `Nothing is ranked: every list is in page order`
   );
@@ -835,6 +879,8 @@ export function materialsSummary(
   for (const im of [...top, ...low]) lines.push(`  ${imageLine(im, first!.dir, o.show)}`);
   const texts = f.copy.filter((t) => !t.firstScreen && display(t, f)).slice(0, 3);
   for (const t of texts) lines.push(`  ${copyLine(t, 70)}`);
+  const links = linksLine(f);
+  if (links) lines.push(`  ${links}`);
   for (const p of rest.slice(0, 2)) lines.push(`  + ${head(p)}`);
   if (rest.length > 2)
     lines.push(`  + ${rest.length - 2} more page${rest.length - 2 === 1 ? "" : "s"}`);
@@ -845,6 +891,27 @@ export function materialsSummary(
     `  all of it in page order: ${o.cmd} (${o.show(first!.path)}${pages.length > 1 ? ", one per page" : ""})${sheet}`,
   );
   return lines;
+}
+
+/** The pages a film can read the product from, as the page's links name
+ *  them: its navigation, header and footer first, its own site before
+ *  others, a few words each. Null when it links nowhere. */
+export function linksLine(f: MaterialsFile, max = 10): string | null {
+  const all = f.links ?? [];
+  if (!all.length) return null;
+  const rank = (l: MaterialLink) =>
+    (l.in === "nav" || l.in === "header" ? 0 : l.in === "footer" ? 1 : 2) + (l.own ? 0 : 0.5);
+  const seen = new Set<string>();
+  const distinct = [...all]
+    .sort((a, b) => rank(a) - rank(b))
+    .filter((l) => {
+      const k = l.text.toLowerCase();
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  const shown = distinct.slice(0, max).map((l) => `${cut(l.text, 28)}${l.own ? "" : " ↗"}`);
+  return `links (${all.length}, pages a film can read the product from): ${shown.join(" · ")}${distinct.length > shown.length ? " · …" : ""} — each with its address in materials.json (links[])`;
 }
 
 /** The whole list, as `open-take materials` prints it: per page, images
@@ -880,6 +947,13 @@ export function formatMaterials(
         fold = true;
       }
       out.push(`  ${it.line}`);
+    }
+    if (f.links?.length) {
+      out.push(`  links, in page order (${f.links.length}):`);
+      for (const l of f.links)
+        out.push(
+          `    ${q(cut(l.text, 60))} → ${l.href}${l.own ? "" : " (another site)"}${l.in ? ` [${l.in}]` : ""}`,
+        );
     }
     const sk = f.skipped;
     const counted = (
