@@ -97,6 +97,15 @@ const TICK = `<!doctype html><html><head><title>tick</title></head><body style="
 <input id="q" style="position:absolute;left:100px;top:120px;width:300px;height:30px">
 <script>let i = 0; setInterval(() => { document.getElementById("n").textContent = String(++i); }, 30);</script>
 </body></html>`;
+// a shell that listens at once and says "Loading…", its app arriving as a
+// script fetched after the load event, 2.5 s later: no mutation, no fetch, no
+// timer in between — only the request itself says the page is not there yet
+const SLOW = `<!doctype html><html><body><p id="wait">Loading…</p><div id="root"></div>
+<script>document.addEventListener("click", () => {});
+addEventListener("load", () => { const s = document.createElement("script"); s.src = "/slow.js"; document.head.append(s); });</script>
+</body></html>`;
+const SLOW_JS = `document.getElementById("root").innerHTML = '<h1 id="mounted">The app</h1><button>Make</button>';
+document.getElementById("wait").remove();`;
 const BLANK = `<!doctype html><html><body><div id="root"></div><script>/* the app never mounts */</script></body></html>`;
 // a button disabled by its fieldset (its own .disabled stays false), enabled later
 const FIELDSET = `<!doctype html><html><body><fieldset id="fs" disabled><button id="b2">Go</button></fieldset><p id="n">0</p>
@@ -114,17 +123,17 @@ async function serve(): Promise<{ server: Server; url: string }> {
     "/tall": TALL,
     "/count": COUNT,
     "/tick": TICK,
+    "/slow": SLOW,
+    "/slow.js": SLOW_JS,
   };
   const server = createServer((req, res) => {
     const html = pages[req.url ?? "/"];
     if (html == null) return res.writeHead(404).end();
     // the page a link leads to answers slowly: an action must wait for it,
     // not read the quiet page it is leaving
-    const delay = req.url === "/next" ? 700 : 0;
-    setTimeout(
-      () => res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(html),
-      delay,
-    );
+    const delay = req.url === "/next" ? 700 : req.url === "/slow.js" ? 2500 : 0;
+    const type = req.url?.endsWith(".js") ? "text/javascript" : "text/html; charset=utf-8";
+    setTimeout(() => res.writeHead(200, { "content-type": type }).end(html), delay);
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
   return { server, url: `http://127.0.0.1:${(server.address() as { port: number }).port}/` };
@@ -381,7 +390,7 @@ test("shoot: a script that throws fails with its own message; the last good shoo
   }
 });
 
-test("shoot: s.open waits for a page that hydrates late, follows a link, refuses a blank or dead page", {
+test("shoot: s.open waits for a page that hydrates late or is still arriving, follows a link, refuses a blank or dead page", {
   skip,
   timeout: 90000,
 }, async () => {
@@ -397,8 +406,13 @@ test("shoot: s.open waits for a page that hydrates late, follows a link, refuses
         await s.click("text=Next", { name: "next" });
         seen.path = await s.evaluate("location.pathname");
         seen.ready = await s.evaluate("document.readyState");
+        await s.open(`${url}slow`);
+        seen.mounted = await s.evaluate(
+          "!!document.getElementById('mounted') && !document.getElementById('wait')",
+        );
       },
     });
+    assert.equal(seen.mounted, true, "open waited for the app its shell was still fetching");
     assert.equal(seen.hydrated, true, "open returned only once the page had its input handlers");
     assert.equal(seen.path, "/next", "a click that navigates returns on the new page");
     assert.equal(seen.ready, "complete");

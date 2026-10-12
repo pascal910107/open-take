@@ -46,7 +46,7 @@ film's numbers beside it (below).
   `look.css` (`skill film look`) — use them rather than lookalikes. When
   you can read the product's repository, its source assets are there too.
 - `npx open-take shoot shoot.mjs --out shots` runs your own capture script in
-  open-take's browser and keeps the log: `s.open(url)` (loaded, hydrated,
+  open-take's browser and keeps the log: `s.open(url)` (loaded, hydrated, arrived,
   settled), `s.still(name)`, `s.click` / `s.type(…, { each: true })` /
   `s.drag(…, { every: 4 })` (real input, then a 2× still), `s.track(selector)`.
   `shots/shots.json` holds every still with the cursor, the scroll and the box

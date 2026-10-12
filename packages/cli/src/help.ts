@@ -9,7 +9,17 @@
 
 /** the flags each `film <sub>` accepts — the same lists its `only(…)` call in cli.ts takes */
 export const FILM_FLAGS: Record<string, string[]> = {
-  init: ["--force", "--url", "--size", "--profile", "--no-steady", "--no-materials", "--from"],
+  init: [
+    "--force",
+    "--url",
+    "--size",
+    "--profile",
+    "--no-steady",
+    "--no-materials",
+    "--ready",
+    "--timeout",
+    "--from",
+  ],
   render: [
     "--out",
     "--root",

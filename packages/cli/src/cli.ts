@@ -21,6 +21,7 @@ import {
   buildDefectReport,
   type CaptureLog,
   type CompositionIssue,
+  changedLine,
   checkFilm,
   checkLaunchFile,
   checkTake,
@@ -44,7 +45,6 @@ import {
   filmReport,
   filmSheet,
   filmStills,
-  changedLine,
   followedLine,
   formatComponents,
   formatFilmBeats,
@@ -323,7 +323,8 @@ Usage:
   open-take skill  [motion | film [<topic> | --all] | cases [<name>] | install [--force]]
   open-take shoot  <script.mjs> [--out shots] [--scale 2] [--size 1920x1080] [--states | --no-states]
                    [--no-components] [--no-materials] [--no-steady]
-  open-take film init   <dir> [--force] [--url <url> [--size 1920x1080] [--profile <name>] [--no-steady] [--no-materials]]
+  open-take film init   <dir> [--force] [--url <url> [--size 1920x1080] [--profile <name>] [--no-steady] [--no-materials]
+                   [--ready <selector|text=name>] [--timeout <s>]]
                    [--from <shots|take>]
   open-take film render <page.html|dir> [--out film.mp4] [--audio <file>|none] [--draft] [--no-blur]
                    [--size 1920x1080] [--fps 60] [--duration <s>] [--from <s>] [--to <s>] [--root <dir>]
@@ -728,6 +729,11 @@ Usage:
               adds a few hundred ms of take time per state (reported). Each
               state is fidelity-checked against a live screenshot; one that
               fails stays on disk, marked failed — use the recording there.
+  --ready <selector|text=name>   (film init --url) a part of the page that has
+              to be there before it is kept; by default it is kept once
+              nothing it builds itself from is still arriving and what it
+              shows has stopped growing (up to 45 s).
+  --timeout <s>   (film init --url) how long the page may take (default 45).
   --no-materials   (shoot, film init --url) don't read the whole page's
               images and copy into states/<id>/materials.json (read: well
               under a second per page, plus fetching its images).
@@ -2325,16 +2331,39 @@ async function main() {
       return;
     }
     if (action === "init") {
-      only("--force", "--url", "--size", "--profile", "--no-steady", "--no-materials", "--from");
+      only(
+        "--force",
+        "--url",
+        "--size",
+        "--profile",
+        "--no-steady",
+        "--no-materials",
+        "--ready",
+        "--timeout",
+        "--from",
+      );
       const url = flag("--url");
       if (has("--url") && !url) throw new Error("film init: --url <url> is the product's page");
       if (
         !url &&
-        (has("--size") || has("--profile") || has("--no-steady") || has("--no-materials"))
+        (has("--size") ||
+          has("--profile") ||
+          has("--no-steady") ||
+          has("--no-materials") ||
+          has("--ready") ||
+          has("--timeout"))
       )
         throw new Error(
-          "film init: --size, --profile, --no-steady and --no-materials go with --url",
+          "film init: --size, --profile, --no-steady, --no-materials, --ready and --timeout go with --url",
         );
+      const ready = flag("--ready");
+      if (has("--ready") && !ready)
+        throw new Error(
+          "film init: --ready <selector|text=name> is a part of the page to wait for",
+        );
+      const waitS = num("--timeout");
+      if (waitS != null && !(waitS > 0))
+        throw new Error("film init: --timeout <s> is how long the page may take, in seconds");
       if (url) {
         // the product's landing page, before the starter page is written so
         // that it can name what is there; neither step stops the init
@@ -2349,6 +2378,8 @@ async function main() {
           ...(profile ? { userDataDir: profileDir(profile) } : {}),
           ...(has("--no-steady") ? { steady: false } : {}),
           ...(has("--no-materials") ? { materials: false } : {}),
+          ...(ready ? { ready } : {}),
+          ...(waitS ? { timeoutMs: waitS * 1000 } : {}),
         }).catch((e: Error) => {
           process.stdout.write(`no saved screen of ${url}: ${e.message}\n`);
           return null;
@@ -2367,6 +2398,16 @@ async function main() {
         if (home?.components)
           process.stdout.write(
             `${componentsLine(home.components.file, shown(home.components.path), shown(home.dir))}\n`,
+          );
+        // no parts, no pictures, hardly a word: a shell or a "Loading…"
+        if (
+          home?.components &&
+          home.components.file.components.length === 0 &&
+          (home.materials?.file.images.length ?? 0) === 0 &&
+          (home.materials?.file.copy.length ?? 0) <= 1
+        )
+          process.stdout.write(
+            `  the saved screen holds no parts, no pictures and hardly a word — the page may not have finished building when it was kept (look: ${shown(join(home.dir, "live.png"))}); --ready "<selector or text=name>" waits for a part of it, --timeout <s> gives it longer\n`,
           );
         if (home?.materials)
           for (const line of materialsSummary([home.materials], {
@@ -2664,7 +2705,7 @@ async function main() {
       if (quiet) return;
       throw e;
     }
-    const wait = has("--wait");
+    const wait = has("--timeout");
     const timeoutFlag = flag("--timeout");
     const timeoutS = timeoutFlag ? Number(timeoutFlag) : undefined;
     if (timeoutFlag != null && (!Number.isFinite(timeoutS) || timeoutS! <= 0))

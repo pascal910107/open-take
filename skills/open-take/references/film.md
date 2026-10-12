@@ -108,7 +108,11 @@ npx open-take film init film/ --from shots                  # also a shoot's or 
 With `--url` (and `--size`, `--profile` for a signed-in page) `film init`
 first keeps the product's page as a saved screen in `states/home/` and reads
 its look into `look/` (`film look`); the page it starts from names both in a
-comment. Either one failing is a line, and the init goes on. With `--from`
+comment. The page is kept once nothing it builds itself from is still
+arriving and what it shows has stopped growing; a page that needs something
+more says so with `--ready "<selector or text=name>"`, and `--timeout <s>`
+gives it longer. A kept screen with no parts, no pictures and hardly a word
+is pointed out. Either one failing is a line, and the init goes on. With `--from`
 it measures that shoot's or take's `components.json` where it is missing
 and prints where it is; the page it starts from stays the same. Every verb
 answers `--help` (`open-take film probe --help`, `open-take help shoot`) with

@@ -153,11 +153,11 @@ test("launch help exposes init, recipe compose, cheap check, and editable render
   assert.match(result.out, /launch render <launch\.json>/);
 });
 
-test("film init takes --no-steady and --no-materials with --url only, before touching files or Chrome", async () => {
-  for (const f of ["--no-steady", "--no-materials"]) {
-    const r = await run(["film", "init", "some-film", f]);
+test("film init takes --no-steady, --no-materials, --ready and --timeout with --url only, before touching files or Chrome", async () => {
+  for (const f of [["--no-steady"], ["--no-materials"], ["--ready", "#app"], ["--timeout", "20"]]) {
+    const r = await run(["film", "init", "some-film", ...f]);
     assert.equal(r.code, 1);
-    assert.match(r.err, /--no-steady and --no-materials go with --url/);
+    assert.match(r.err, /--no-materials, --ready and --timeout go with --url/);
   }
 });
 

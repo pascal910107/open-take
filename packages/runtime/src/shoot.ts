@@ -211,7 +211,9 @@ export type ShootOpenOpts = {
 
 export type Shoot = {
   /** navigate, then wait until the page answers, shows something, has its
-   *  input handlers (has hydrated) and has gone quiet */
+   *  input handlers (has hydrated), has arrived (nothing it builds itself
+   *  from still in flight, what it shows no longer growing) and has gone
+   *  quiet */
   open(
     url: string,
     opts?: ShootOpenOpts,
@@ -321,6 +323,25 @@ const OPEN_WAIT_MS = 15_000;
 const HANDLERS_WAIT_MS = 3000;
 /** a fresh page's trailing requests (fonts, analytics, lazy chunks) */
 const OPEN_SETTLE_MS = 3000;
+/** how long, once it shows something, a page may go on arriving — its own
+ *  scripts, styles, fonts and data still coming, or what it shows still
+ *  growing — before s.open stops waiting for it */
+const ARRIVE_WAIT_MS = 45_000;
+/** what it shows has to hold this long to count as arrived */
+const ARRIVE_QUIET_MS = 1000;
+/** a data request open longer than this is a stream or a long poll, not the
+ *  page still building itself */
+const STREAM_MS = 8000;
+/** the requests a page builds itself from */
+const BUILDS = new Set(["Document", "Script", "Stylesheet", "Font", "Fetch", "XHR"]);
+/** what is in the viewport, as a few numbers that change while a page builds */
+const ARRIVING_JS =
+  `(function(){var vw=innerWidth,vh=innerHeight,n=0,c=0;` +
+  `var all=document.body?document.body.getElementsByTagName('*'):[];` +
+  `for(var i=0;i<all.length&&i<20000;i++){var r=all[i].getBoundingClientRect();` +
+  `if(r.width>0&&r.height>0&&r.right>0&&r.bottom>0&&r.left<vw&&r.top<vh){n++;` +
+  `if(/^(BUTTON|INPUT|SELECT|TEXTAREA|A|CANVAS|SVG)$/i.test(all[i].tagName))c++;}}` +
+  `var t=document.body?document.body.innerText.length:0;return n+'/'+c+'/'+t;})()`;
 /** a mouse event's acknowledgement can be withheld for seconds in headless
  *  while the button is held and nothing paints (see cdp-capture's drag); the
  *  events stay ordered on the socket, so waiting longer buys nothing */
@@ -1085,6 +1106,18 @@ async function shoot(ctx: Ctx): Promise<Shoot> {
     loading = false;
     for (const r of stopped.splice(0)) r();
   });
+  // What the page is still fetching to build itself: its scripts, styles,
+  // fonts and data. An app's own bundle can arrive long after the load event
+  // and the first painted words ("Loading…"), with nothing else moving.
+  const fetching = new Map<string, { type: string; at: number }>();
+  await cdp.send("Network.enable").catch(() => {});
+  cdp.on<{ requestId: string; type?: string }>("Network.requestWillBeSent", (p) => {
+    if (BUILDS.has(p.type ?? "")) fetching.set(p.requestId, { type: p.type!, at: Date.now() });
+  });
+  for (const ev of ["Network.loadingFinished", "Network.loadingFailed"])
+    cdp.on<{ requestId: string }>(ev, (p) => {
+      fetching.delete(p.requestId);
+    });
   const pageErrors: string[] = [];
   cdp.on<{ exceptionDetails?: { text?: string; exception?: { description?: string } } }>(
     "Runtime.exceptionThrown",
@@ -1575,6 +1608,34 @@ async function shoot(ctx: Ctx): Promise<Shoot> {
         throw new Error(
           `${what}: the page shows nothing after ${secs(timeoutMs)} — did its script fail, or does it need a login (--profile)?`,
         );
+      // Arrived: what it showed first can be a shell or a "Loading…" while
+      // its own bundle and data are still coming. Wait until nothing it
+      // builds itself from is in flight and what it shows has stopped
+      // growing (a carousel or a clock that only changes does not count).
+      const arriveMs = Math.max(timeoutMs, ARRIVE_WAIT_MS);
+      const from = Date.now();
+      let grewAt = from;
+      let most = [-1, -1, -1];
+      for (;;) {
+        const now = Date.now();
+        const sig = (await evaluate<string>(ARRIVING_JS, what).catch(() => "0/0/0"))
+          .split("/")
+          .map(Number);
+        if (sig[0]! > most[0]! + 2 || sig[1]! > most[1]! || sig[2]! > most[2]! + 20) grewAt = now;
+        most = most.map((m, i) => Math.max(m, sig[i]!));
+        const pending = [...fetching.values()].filter(
+          (f) => (f.type !== "Fetch" && f.type !== "XHR") || now - f.at < STREAM_MS,
+        ).length;
+        if (!loading && pending === 0 && now - grewAt >= ARRIVE_QUIET_MS) break;
+        if (now - from >= arriveMs) {
+          note(
+            `${what}: the page was still arriving after ${secs(arriveMs)} (${pending ? `${pending} of its own request(s) in flight` : "what it shows still growing"}) — taken as it is; ready: "<selector>" waits for a part of it`,
+          );
+          break;
+        }
+        await sleep(200);
+      }
+      if (!hydrated && (await inputHandlers()) !== 0) hydrated = true;
       if (!hydrated)
         note(
           `${what}: the page's scripts attached no click, key or pointer handlers within ${secs(HANDLERS_WAIT_MS)} — fine for a static page; an app has not hydrated, and clicks on it will do nothing`,
@@ -1779,6 +1840,11 @@ export type ShootHomeOpts = {
   /** wait for what is on screen to stop changing first (default true; see
    *  ShootOpts.steady) */
   steady?: boolean;
+  /** what "ready" means for this page (ShootOpenOpts.ready): a target that
+   *  must appear first */
+  ready?: string;
+  /** how long the page may take (ShootOpenOpts.timeoutMs) */
+  timeoutMs?: number;
   onNote?: (line: string) => void;
 };
 
@@ -1810,7 +1876,10 @@ export async function shootHome(opts: ShootHomeOpts): Promise<{
     let page = { url: opts.url, title: "" };
     const { log } = await runShoot({
       script: async (s) => {
-        page = await s.open(opts.url);
+        page = await s.open(opts.url, {
+          ...(opts.ready ? { ready: opts.ready } : {}),
+          ...(opts.timeoutMs ? { timeoutMs: opts.timeoutMs } : {}),
+        });
         await s.still(name, { state: true });
       },
       outDir: work,
