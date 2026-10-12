@@ -45,26 +45,27 @@ captions, or a launch film with designed scenes. Each choice can be adjusted;
 sound is optional. Explicit preferences take priority, so “just record it,
 no captions or sound” stays a clean recording.
 
-Launch films arrange real footage, text, screenshot crops, shapes, groups and
-drawn lines in an editable `launch.json`. Video can also play inside an animated
-group, keeping a real operation connected to its surrounding graphics. Layers have independent animation
-tracks; music, narration and sound effects use optional local files. Length
-follows the scenes and their timing. New projects start with a simple
-recording-led composition that you can restructure for the product.
+A recording or a demo is the real app, driven: `make` captures it and adds the
+cursor, the zoom and, for a demo, a title and captions. It shows how something
+works.
+
+A launch film is a different thing: a film you write yourself as a web page —
+what the product makes and says, its own type, colours and parts, motion and
+sound, with real footage only where it is the proof. open-take copies in a kit
+(camera, cursor, one timeline for picture and sound, the product's saved
+screens and parts as material) and renders the page frame-exactly with motion
+blur and its soundtrack.
 
 ```sh
-npx open-take launch init demos/launch-film --video demos/myapp.mp4
-npx open-take launch check demos/launch-film/launch.json
-npx open-take launch render demos/launch-film/launch.json --draft
-npx open-take launch render demos/launch-film/launch.json
+npx open-take film init demos/launch-film --url https://myapp.example/
+npx open-take film render demos/launch-film --draft
+npx open-take film render demos/launch-film
 ```
 
-Read the [composition guide][launch] and the [examples][launch-example]. Agent
-authors can run `npx open-take skill motion` for protected layouts and the
-free-layer schema. `launch compose brief.json
---out launch.json` turns a short content brief into a focus, comparison or steps
-scene with programmatic layout; visual review still decides whether the story
-and framing work.
+Agent authors read `npx open-take skill film`. The older `launch` JSON
+composition (`launch init/check/render`) still builds a quick cut around one
+finished recording — the way to put sound under a recording or a demo; see the
+[composition guide][launch] and the [examples][launch-example].
 
 ## In CI
 

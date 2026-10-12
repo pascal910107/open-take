@@ -332,6 +332,15 @@ const ARRIVE_QUIET_MS = 1000;
 /** a data request open longer than this is a stream or a long poll, not the
  *  page still building itself */
 const STREAM_MS = 8000;
+/** a URL's site, roughly: its host's last two labels ("app.example.com" and
+ *  "cdn.example.com" are one site) */
+function siteOf(url: string): string {
+  try {
+    return new URL(url).hostname.split(".").slice(-2).join(".");
+  } catch {
+    return "";
+  }
+}
 /** the requests a page builds itself from */
 const BUILDS = new Set(["Document", "Script", "Stylesheet", "Font", "Fetch", "XHR"]);
 /** what is in the viewport, as a few numbers that change while a page builds */
@@ -1109,11 +1118,21 @@ async function shoot(ctx: Ctx): Promise<Shoot> {
   // What the page is still fetching to build itself: its scripts, styles,
   // fonts and data. An app's own bundle can arrive long after the load event
   // and the first painted words ("Loading…"), with nothing else moving.
-  const fetching = new Map<string, { type: string; at: number }>();
+  // Only the product's own site counts: ads, trackers and challenge widgets
+  // on other sites can keep loading for as long as the page is open.
+  const fetching = new Map<string, { type: string; at: number; site: string }>();
   await cdp.send("Network.enable").catch(() => {});
-  cdp.on<{ requestId: string; type?: string }>("Network.requestWillBeSent", (p) => {
-    if (BUILDS.has(p.type ?? "")) fetching.set(p.requestId, { type: p.type!, at: Date.now() });
-  });
+  cdp.on<{ requestId: string; type?: string; request?: { url?: string } }>(
+    "Network.requestWillBeSent",
+    (p) => {
+      if (BUILDS.has(p.type ?? ""))
+        fetching.set(p.requestId, {
+          type: p.type!,
+          at: Date.now(),
+          site: siteOf(p.request?.url ?? ""),
+        });
+    },
+  );
   for (const ev of ["Network.loadingFinished", "Network.loadingFailed"])
     cdp.on<{ requestId: string }>(ev, (p) => {
       fetching.delete(p.requestId);
@@ -1623,13 +1642,15 @@ async function shoot(ctx: Ctx): Promise<Shoot> {
           .map(Number);
         if (sig[0]! > most[0]! + 2 || sig[1]! > most[1]! || sig[2]! > most[2]! + 20) grewAt = now;
         most = most.map((m, i) => Math.max(m, sig[i]!));
+        const own = siteOf(page.url);
         const pending = [...fetching.values()].filter(
-          (f) => (f.type !== "Fetch" && f.type !== "XHR") || now - f.at < STREAM_MS,
+          (f) =>
+            f.site === own && ((f.type !== "Fetch" && f.type !== "XHR") || now - f.at < STREAM_MS),
         ).length;
         if (!loading && pending === 0 && now - grewAt >= ARRIVE_QUIET_MS) break;
         if (now - from >= arriveMs) {
           note(
-            `${what}: the page was still arriving after ${secs(arriveMs)} (${pending ? `${pending} of its own request(s) in flight` : "what it shows still growing"}) — taken as it is; ready: "<selector>" waits for a part of it`,
+            `${what}: the page was still arriving after ${secs(arriveMs)} (${pending ? `${pending} request(s) to its own site in flight` : "what it shows still growing"}) — taken as it is; ready: "<selector>" waits for a part of it`,
           );
           break;
         }
