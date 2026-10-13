@@ -22,7 +22,14 @@ reordered or done another way; nothing checks that it was followed.
    are films you can write; they need different things on screen.
 2. **The main line** — what someone who has never seen it should come away
    with, in one sentence.
-3. **What shows it.** For each thing the film says, what on screen makes it
+3. **A rough film you can look at, before the long capture.** The key
+   moment of each stretch as a still, in the product's own fonts, colours
+   and words, with plain blocks where the material is not there yet; then
+   `film sheet` on it. The capture then gets what the rough film asks for.
+   The first thing that can be run tends to become the film — a capture
+   script written first usually turns into a film of its steps
+   (`skill film story`).
+4. **What shows it.** For each thing the film says, what on screen makes it
    believable: what the product made, at a size that reads; one of its parts
    doing something; a real action and the result it gives; its own words and
    pictures. The interface is material for this step: what can be recorded
@@ -30,19 +37,19 @@ reordered or done another way; nothing checks that it was followed.
    screen holds with its values and what an action changed
    (`components.json`). In earlier films the pace often followed the
    material more than the plan (`skill film material`).
-4. **A beat sheet**, if you keep one: `tl.segment` in `time.js` — what each
+5. **A beat sheet**, if you keep one: `tl.segment` in `time.js` — what each
    stretch is meant to do, what moves, what holds, how it hands over to the
    next, what is heard. Free words; nothing grades them.
-5. **A draft** — `film render --draft`, `film still`, `film sheet`. A render
+6. **A draft** — `film render --draft`, `film still`, `film sheet`. A render
    ends with a few lines measured on the film (`--no-report` leaves them out).
-6. **Look and listen** — `film probe`, `film listen`, `film check`: what the
+7. **Look and listen** — `film probe`, `film listen`, `film check`: what the
    picture and the sound did, beside what the page declared, each line
    measured, estimated or not detected (`skill film checking`).
-7. **The seconds that matter, as the master will show them** — a handoff, a
+8. **The seconds that matter, as the master will show them** — a handoff, a
    whip, a burst of cuts: `film render --from --to`, blurred, alone.
-8. **Change what you decide to change**, and go round 5–7 as often as it
+9. **Change what you decide to change**, and go round 6–8 as often as it
    helps. The reports are there to see by, not to satisfy.
-9. **The master.**
+10. **The master.**
 
 ## What's there for…
 
@@ -257,6 +264,8 @@ per camera; for 3D, read `cam.at(t)` and project it yourself.
 Each prints on its own; `skill film --all` prints the whole guide in this
 order. The files are under `film/` beside this one.
 
+- `skill film story` — the film before its material: a rough film you
+  can look at first, then the capture it asks for
 - `skill film material` — material from the real product: one part shown
   three ways, saved screens, recordings, `shoot`, `components.json`,
   `kit/media.js` (`lift`, `isolate`, `seam`, `clipEvents`, `readValues`),

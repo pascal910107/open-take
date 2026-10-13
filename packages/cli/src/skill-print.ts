@@ -11,6 +11,7 @@ import type { SkillBundle } from "./init";
 
 /** The film guide's topics, in the order `skill film --all` prints them. */
 export const FILM_TOPICS = [
+  "story",
   "material",
   "page",
   "cutting",
