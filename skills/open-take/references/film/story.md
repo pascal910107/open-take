@@ -22,6 +22,8 @@ out.
 1. **Look around.** Use the product, try what it does, read what it says
    about itself (`materials.json`, its About page, repository, changelog).
    Short captures to see how something behaves are part of looking around.
+   The order you tried things in is how you learned the product; it is not
+   yet the order in which someone else comes to care about it.
 2. **The reason to watch** — what someone who has never seen it should come
    away with, in one sentence.
 3. **A rough film you can look at.** On the page `film init` starts from,
