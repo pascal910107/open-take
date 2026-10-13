@@ -691,8 +691,19 @@ export function captureCadence(frames: Frame[]) {
  *  per frame on a quiet machine; a few a second there means the capture fell
  *  behind (another render or capture running at the same time is the usual
  *  cause, 6.6 a second against 54 for the same drag re-made alone) and the
- *  film replays those few. A drag that moves nothing on screen sends few by
- *  right, so this is a fact to read, not a verdict. */
+ *  film replays those few.
+ *
+ *  A gap alone is not a loss: a page sends nothing while nothing changes, and
+ *  every eased stroke has a slow start and end, so a drag whose pointer barely
+ *  moves for 100 ms (a canvas app waiting out its drag threshold) is right to
+ *  send nothing. `holes` counts only the gaps that ARE losses: between two
+ *  pictures, longer than 40 ms (two frames at 60 fps), while the pointer moved
+ *  at least 16 px along the drag's own eased path. Measured on tldraw: a quiet
+ *  machine had none in 18 drags; the same plan under a saturated CPU had 22,
+ *  the pointer moving up to 74 px through one. `deliveryMs` is the median time
+ *  from Chrome drawing a picture to the recorder receiving it, the busy-machine
+ *  evidence: ~30 ms quiet, 45 saturated, 134 in a take whose drags lost up to
+ *  118 px at a time. */
 export type DragCadence = {
   /** index in the log's events */
   event: number;
@@ -701,28 +712,113 @@ export type DragCadence = {
   frames: number;
   perSecond: number;
   maxGapMs: number;
+  /** gaps that lost moving pictures (see above); 0 when the drag has no path */
+  holes: number;
+  /** the hole the pointer moved furthest through */
+  worstHole?: { atMs: number; gapMs: number; movedPx: number };
+  /** median ms from drawn to received, over this drag's pictures */
+  deliveryMs?: number;
 };
 
+const HOLE_GAP_MS = 40;
+const HOLE_MOVE_PX = 16;
+
+type DragPt = { x: number; y: number };
+
+// the same eased arc-length walk the capture drives the mouse along
+// (cdp-capture.ts smoother + capture.ts sampleAlong), kept here to avoid an
+// import cycle with capture.ts
+function easedPoint(path: DragPt[], u: number, ease: "smooth" | "linear"): DragPt {
+  const c = Math.max(0, Math.min(1, u));
+  const k = ease === "linear" ? c : c * c * c * (c * (c * 6 - 15) + 10);
+  if (path.length === 1) return path[0]!;
+  const seg = path.slice(1).map((q, i) => Math.hypot(q.x - path[i]!.x, q.y - path[i]!.y));
+  let left = k * seg.reduce((t, d) => t + d, 0);
+  for (let i = 0; i < seg.length; i++) {
+    if (left <= seg[i]! || i === seg.length - 1) {
+      const f = seg[i]! > 0 ? left / seg[i]! : 0;
+      return {
+        x: path[i]!.x + (path[i + 1]!.x - path[i]!.x) * f,
+        y: path[i]!.y + (path[i + 1]!.y - path[i]!.y) * f,
+      };
+    }
+    left -= seg[i]!;
+  }
+  return path[path.length - 1]!;
+}
+
 export function dragCadence(
-  events: { kind?: string; tMs: number; durationMs?: number | null }[],
+  events: {
+    kind?: string;
+    tMs: number;
+    durationMs?: number | null;
+    x?: number;
+    y?: number;
+    to?: DragPt;
+    path?: DragPt[];
+    ease?: string;
+  }[],
   frameOffsetsMs: number[],
+  arrivalOffsetsMs?: number[],
 ): DragCadence[] {
   const out: DragCadence[] = [];
   events.forEach((e, event) => {
     if (e.kind !== "drag" || !e.durationMs || e.durationMs < 200) return;
-    const end = e.tMs + e.durationMs;
-    const inside = frameOffsetsMs.filter((t) => t >= e.tMs && t <= end).sort((a, b) => a - b);
+    const start = e.tMs;
+    const dur = e.durationMs;
+    const end = start + dur;
+    const inside = frameOffsetsMs.filter((t) => t >= start && t <= end).sort((a, b) => a - b);
     // the gap from the press to the first picture and from the last to the
     // release counts too: a stroke that shows nothing for half a second is that
-    const marks = [e.tMs, ...inside, end];
+    const marks = [start, ...inside, end];
     const maxGapMs = Math.max(...marks.slice(1).map((t, i) => t - marks[i]!));
+    const path =
+      e.path?.length
+        ? e.path
+        : e.x != null && e.y != null && e.to
+          ? [{ x: e.x, y: e.y }, e.to]
+          : null;
+    let holes = 0;
+    let worstHole: DragCadence["worstHole"];
+    if (path) {
+      const ease = e.ease === "linear" ? "linear" : "smooth";
+      const at = (t: number) => easedPoint(path, (t - start) / dur, ease);
+      // between two pictures only: before the first one the page may not have
+      // started drawing yet (a drag threshold), and that is not a loss
+      for (let i = 1; i < inside.length; i++) {
+        const gapMs = inside[i]! - inside[i - 1]!;
+        if (gapMs <= HOLE_GAP_MS) continue;
+        const p = at(inside[i - 1]!);
+        const q = at(inside[i]!);
+        const movedPx = Math.hypot(q.x - p.x, q.y - p.y);
+        if (movedPx < HOLE_MOVE_PX) continue;
+        holes++;
+        if (!worstHole || movedPx > worstHole.movedPx)
+          worstHole = {
+            atMs: Math.round(inside[i - 1]!),
+            gapMs: Math.round(gapMs),
+            movedPx: Math.round(movedPx),
+          };
+      }
+    }
+    let deliveryMs: number | undefined;
+    if (arrivalOffsetsMs && arrivalOffsetsMs.length === frameOffsetsMs.length) {
+      const delays = frameOffsetsMs
+        .map((t, i) => (t >= start && t <= end ? arrivalOffsetsMs[i]! - t : null))
+        .filter((d): d is number => d != null)
+        .sort((a, b) => a - b);
+      if (delays.length) deliveryMs = Math.round(delays[Math.floor(delays.length / 2)]!);
+    }
     out.push({
       event,
-      tMs: e.tMs,
-      durationMs: e.durationMs,
+      tMs: start,
+      durationMs: dur,
       frames: inside.length,
-      perSecond: Math.round((inside.length / e.durationMs) * 10000) / 10,
+      perSecond: Math.round((inside.length / dur) * 10000) / 10,
       maxGapMs: Math.round(maxGapMs),
+      holes,
+      ...(worstHole ? { worstHole } : {}),
+      ...(deliveryMs != null ? { deliveryMs } : {}),
     });
   });
   return out;

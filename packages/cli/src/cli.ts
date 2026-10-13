@@ -1597,18 +1597,29 @@ async function main() {
     // What the capture got while each drag was held. The film replays exactly
     // these pictures, so a stroke captured at a few a second plays as a few
     // jumps however its cursor is timed — and nothing used to say so.
+    // A gap only counts as lost pictures while the pointer was moving (a page
+    // sends nothing while nothing changes) — see DragCadence.
     if (dragCadence.length) {
-      const low = dragCadence.filter((d) => d.perSecond < 20 || d.maxGapMs > 150);
+      const lost = dragCadence.filter((d) => d.holes > 0);
+      const delivery = dragCadence
+        .map((d) => d.deliveryMs)
+        .filter((n): n is number => n != null)
+        .sort((a, b) => a - b);
+      const medDelivery = delivery.length ? delivery[Math.floor(delivery.length / 2)] : undefined;
       process.stdout.write(
         `\n📹 pictures the page sent while each drag was held:\n` +
           dragCadence
             .map(
               (d) =>
-                `  ${(d.tMs / 1000).toFixed(2)} s drag ${(d.durationMs / 1000).toFixed(2)} s: ${d.frames} pictures, ${d.perSecond} a second, longest gap ${d.maxGapMs} ms\n`,
+                `  ${(d.tMs / 1000).toFixed(2)} s drag ${(d.durationMs / 1000).toFixed(2)} s: ${d.frames} pictures, ${d.perSecond} a second, longest gap ${d.maxGapMs} ms` +
+                (d.worstHole
+                  ? ` — LOST pictures ${d.holes}×, worst ${d.worstHole.gapMs} ms while the pointer moved ${d.worstHole.movedPx} px`
+                  : "") +
+                `\n`,
             )
             .join("") +
-          (low.length
-            ? `  if the page was drawing all through ${low.length === 1 ? "that drag" : "those drags"}, the capture fell behind and the film can only replay those pictures — usually another render or capture on this machine at the same time; re-make it when the machine is quiet (--capture-scale 1 if the page itself is heavy)\n`
+          (lost.length
+            ? `  ${lost.length === 1 ? "that drag plays" : `those ${lost.length} drags play`} as jumps in the film, whatever the cursor does: the capture fell behind${medDelivery != null ? ` (pictures reached the recorder ${medDelivery} ms after Chrome drew them; ~30 ms on a quiet machine)` : ""}. The usual cause is other heavy work on this machine at the same time (a render, tests, another capture) — re-making while it runs records the same jumps. Re-make it when the machine is quiet (--capture-scale 1 if the page itself is heavy).\n`
             : ""),
       );
     }
