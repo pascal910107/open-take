@@ -68,6 +68,7 @@ export const FILM_FLAGS: Record<string, string[]> = {
     "--verbose",
   ],
   check: ["--size", "--fps", "--json", "--page", "--root", "--verbose"],
+  viewer: [],
 };
 
 /** the flags each `launch <sub>` reads */
@@ -237,6 +238,13 @@ screen (information, not a verdict). Each finding has a time; one the page
 marks as intended (window.__film.marks = [{ at, until?, what? }]) is listed as
 marked, not as a defect. --size/--fps: what the film should be. --json prints
 the result as data. Exits 1 when a finding is an error.`,
+  viewer: `Set up a round for a first-time viewer: <film>.viewer/<n>/ with a copy of the
+film and BRIEF.md, a brief for an agent that has seen nothing of how the film
+was made — it watches the film as someone scrolling a feed and writes
+VIEWER.md: where it would scroll on and why, what it did not follow, what
+felt forced, what was good. Prints how to start it (a subagent given only the
+brief, or a fresh session in that folder). Each round is a new folder and
+wants a new viewer. A non-draft render says whether this film has had one.`,
 };
 
 const LAUNCH_ABOUT: Record<string, string> = {

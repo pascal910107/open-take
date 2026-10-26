@@ -80,10 +80,12 @@ export {
   partFilesLine,
   partsLine,
   patchFilm,
+  prepareViewer,
   readPageMaterial,
   renderFilm,
   type TakeComposition,
   validateComposition,
+  viewerRounds,
 } from "@open-take/compositor";
 export { type AuthOpts, type AuthResult, authProfile, profileDir } from "./auth";
 export {

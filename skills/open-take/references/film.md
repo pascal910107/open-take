@@ -47,9 +47,13 @@ reordered or done another way; nothing checks that it was followed.
    measured, estimated or not detected (`skill film checking`).
 8. **The seconds that matter, as the master will show them** — a handoff, a
    whip, a burst of cuts: `film render --from --to`, blurred, alone.
-9. **Change what you decide to change**, and go round 6–8 as often as it
-   helps. The reports are there to see by, not to satisfy.
-10. **The master.**
+9. **A first-time viewer** — `film viewer film.mp4`: an agent that has
+   seen nothing of how the film was made watches it and says where it would
+   scroll on, and why (`skill film viewer`).
+10. **Change what you decide to change**, and go round 6–9 as often as it
+   helps, a new viewer for each new cut. The reports and the viewer are
+   there to see by, not to satisfy.
+11. **The master.**
 
 ## What's there for…
 
@@ -111,6 +115,8 @@ Capabilities and where each is described; none of them is a step.
   the text reads on a phone, and where the product's own words are most of
   it), `film listen` (its grid as `grid({ bpm, offset })` for the page),
   `film check`, `film sheet`, `film still` — `skill film checking`
+- how the film lands on someone who has never seen it → `film viewer` —
+  `skill film viewer`
 - a few seconds as the master shows them, a patch into the master, slow
   pushes over interface text without jitter (`film picture`,
   `--supersample`) → `skill film render`
@@ -274,6 +280,7 @@ order. The files are under `film/` beside this one.
 - `skill film cutting` — cutting on the music: `film beats`, `kit/cut.js`, bar edits
 - `skill film look` — the product's look: `film look`, `kit/look.js`
 - `skill film checking` — look at it: still, sheet, check, listen, probe, gallery
+- `skill film viewer` — a first-time viewer watches it: `film viewer`
 - `skill film render` — render: draft, master, `--from --to --into`, motion
   blur, the events file, moving text
 - `skill film sound` — the soundtrack and the product's own sound

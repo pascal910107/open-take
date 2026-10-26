@@ -77,6 +77,7 @@ import {
   partFilesLine,
   partsLine,
   patchFilm,
+  prepareViewer,
   profileDir,
   readNotes,
   readPageMaterial,
@@ -107,6 +108,7 @@ import {
   type TakePaths,
   type TakePlan,
   toDraft,
+  viewerRounds,
   waitForNotes,
 } from "@open-take/runtime";
 import { asksForHelp, helpText } from "./help";
@@ -347,6 +349,7 @@ Usage:
                    [--subject <id|text|x,y,w,h>] [--beats <beats.json>] [--out <dir>]
   open-take film check  <film.mp4> [--size 1920x1080] [--fps 60] [--page <page.html|dir> [--root <dir>]]
                    [--json] [--verbose]
+  open-take film viewer <film.mp4>
 
   A take is TWO things on disk: the postable master at exactly your --out path
   (<out>.mp4), and a working directory beside it (<out>.take/) holding
@@ -703,7 +706,10 @@ Usage:
           smallest text on screen (information, not a verdict). Each finding
           has a time; one the page marks as intended (window.__film.marks =
           [{ at, until?, what? }], kept in the film by \`film render\`) is
-          listed as marked, not as a defect.
+          listed as marked, not as a defect. \`film viewer\` sets up a
+          round for a first-time viewer: a copy of the film and a brief in
+          <film>.viewer/<n>/ for an agent that has seen nothing of how it was
+          made, which writes VIEWER.md — where it would scroll on and why.
           --supersample 2 (render, still) draws each frame at twice the pixels
           each way and averages it down: text in a slow zoom or drift steps
           less (Chrome places glyphs on whole pixels). Without it, a render
@@ -2208,7 +2214,7 @@ async function main() {
     const target = positional[1] ?? "";
     if (!action || (!bare && (!target || positional.length !== 2)))
       throw new Error(
-        "film: expected init <dir>, render <page>, still <page> --at <s>, picture <state.html>, sheet <film.mp4>, listen <film.mp4>, beats <music>, probe <film.mp4>, gallery [<film dir>], check <film.mp4> or mux <film.mp4> --audio <file>",
+        "film: expected init <dir>, render <page>, still <page> --at <s>, picture <state.html>, sheet <film.mp4>, listen <film.mp4>, beats <music>, probe <film.mp4>, gallery [<film dir>], check <film.mp4>, viewer <film.mp4> or mux <film.mp4> --audio <file>",
       );
     const only = (...allowed: string[]) => {
       for (const f of Object.keys(flags))
@@ -2334,6 +2340,18 @@ async function main() {
             probe: `${INVOKE} film probe ${shown(result.out)} --page ${shown(target)}${has("--root") ? ` --root ${shown(flag("--root")!)}` : ""}`,
           }))
             process.stdout.write(`${line}\n`);
+      }
+      if (!has("--draft")) {
+        const v = await viewerRounds(result.out).catch(() => null);
+        const last = v?.done.at(-1);
+        if (v && !last)
+          process.stdout.write(
+            `first-time viewer: no one has watched this film yet — \`${INVOKE} film viewer ${shown(result.out)}\` (skill film viewer)\n`,
+          );
+        else if (last)
+          process.stdout.write(
+            `first-time viewer: ${v!.done.length} round${v!.done.length > 1 ? "s" : ""}, the last on an earlier cut (${shown(last.notes)}) — a new viewer for this one: \`${INVOKE} film viewer ${shown(result.out)}\`\n`,
+          );
       }
       return;
     }
@@ -2529,6 +2547,18 @@ async function main() {
       process.stdout.write(`sheet: ${r.out} (${r.times.length} frames)\n`);
       return;
     }
+    if (action === "viewer") {
+      only();
+      const v = await prepareViewer(target);
+      process.stdout.write(
+        `viewer round ${v.round}: ${shown(v.dir)} — a copy of the film and BRIEF.md\n` +
+          `start a viewer that has seen nothing of this work, with only the brief — a subagent whose whole prompt is\n` +
+          `  Read ${v.brief} and do what it says.\n` +
+          `or a fresh session in that folder (claude -p < BRIEF.md). It writes ${shown(v.notes)}.\n` +
+          `Add nothing of your own to its prompt — no plan, no notes, nothing to look for (skill film viewer).\n`,
+      );
+      return;
+    }
     if (action === "beats") {
       only("--out");
       const r = await filmBeats({ input: target, out: flag("--out") });
@@ -2672,7 +2702,7 @@ async function main() {
       return;
     }
     throw new Error(
-      `film: unknown action ${action} — render, still, sheet, listen, beats, probe or check`,
+      `film: unknown action ${action} — render, still, sheet, listen, beats, probe, check or viewer`,
     );
   }
 

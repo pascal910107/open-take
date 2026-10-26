@@ -17,6 +17,7 @@ export const FILM_TOPICS = [
   "cutting",
   "look",
   "checking",
+  "viewer",
   "render",
   "sound",
   "cases",

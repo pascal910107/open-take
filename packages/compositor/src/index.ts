@@ -192,6 +192,13 @@ export {
 } from "./film/report";
 export { type FilmSheetOptions, filmSheet } from "./film/sheet";
 export {
+  prepareViewer,
+  type ViewerRound,
+  type ViewerRounds,
+  viewerBrief,
+  viewerRounds,
+} from "./film/viewer";
+export {
   evaluateUiMorph,
   launchAudioAtS,
   launchDurationS,
