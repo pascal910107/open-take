@@ -25,3 +25,15 @@ Then either:
 out at 1920×1080 CSS px unless `__film` says `width`/`height` (a vertical cut:
 1080×1920). `__film.ready` (a promise) holds the first frame until your assets
 are in; fonts and images are awaited anyway.
+
+A Lottie animation (`lottie.json`) plays like any other: `lottie-web`
+autoplaying is put on film time with the rest, or load it with
+`autoplay: false` and draw the moment yourself —
+
+```js
+const anim = lottie.loadAnimation({ container, renderer: "svg", autoplay: false, loop: false, animationData });
+window.__film = { duration: 12, ready: new Promise((r) => anim.addEventListener("DOMLoaded", r)) };
+window.__render = (t) => anim.goToAndStop(Math.max(0, t - 2.5) * 1000, false); // starts at 2.5 s
+```
+
+Both were rendered at 60 fps with every frame its own.

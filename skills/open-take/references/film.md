@@ -115,6 +115,18 @@ Capabilities and where each is described; none of them is a step.
   the text reads on a phone, and where the product's own words are most of
   it), `film listen` (its grid as `grid({ bpm, offset })` for the page),
   `film check`, `film sheet`, `film still` — `skill film checking`
+- a designed thing that moves — a logo, an icon, a title, a figure, a
+  lower third, a small diagram — as an animation of its own → a Lottie file:
+  the text-to-lottie skill (MIT; `git clone
+  https://github.com/diffusionstudio/lottie`, `skills/text-to-lottie/`)
+  writes one and checks it in its own player; on the page `lottie-web`
+  plays it frame-exact, autoplaying or seeked in `__render` — `skill film
+  page`
+- how a move should feel — timing, easing, choreography, what a motion says
+  → the motion-design skill (MIT; `git clone
+  https://github.com/lottiefiles/motion-design-skill`,
+  `skills/motion-design/`), written for interfaces; its `director/` notes
+  on choreography and narrative are about any motion
 - how the film lands on someone who has never seen it → `film viewer` —
   `skill film viewer`
 - a few seconds as the master shows them, a patch into the master, slow
