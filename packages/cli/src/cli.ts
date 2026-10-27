@@ -323,7 +323,7 @@ Usage:
   open-take launch compose <brief.json> --out <launch.json>
   open-take launch check <launch.json>
   open-take launch render <launch.json> [--out <movie.mp4>] [--draft] [--verbose]
-  open-take skill  [motion | film [<topic> | --all] | cases [<name>] | install [--force]]
+  open-take skill  [motion | film [<topic> | --all] | install [--force]]
   open-take shoot  <script.mjs> [--out shots] [--scale 2] [--size 1920x1080] [--states | --no-states]
                    [--no-components] [--no-materials] [--no-steady]
   open-take film init   <dir> [--force] [--url <url> [--size 1920x1080] [--profile <name>] [--no-steady] [--no-materials]
@@ -577,8 +577,7 @@ Usage:
           core of the guide to films written as web pages (with an index of
           what is there and the guide's file paths), \`skill film <topic>\`
           one of its topics (${FILM_TOPICS.join(", ")}), \`skill film
-          --all\` all of it; \`skill cases [<name>]\` the cases' index or one
-          case; \`skill motion\` the motion composition reference. \`skill install\` remains as a
+          --all\` all of it; \`skill motion\` the motion composition reference. \`skill install\` remains as a
           backwards-compatible alias for \`init\`.
   shoot   shoot a film's material with a script you write: an .mjs whose
           default export is \`async (s) => { … }\`, run in open-take's Chrome

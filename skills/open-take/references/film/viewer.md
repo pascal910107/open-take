@@ -31,5 +31,4 @@ helps; a non-draft render says whether the film on disk has had a viewer.
 
 In earlier films, a viewer working a few minutes found what the author's own
 checks had missed — a fault in the first second, a screen that argued
-against the product, a film speaking to two audiences at once — and the cut
-made after it was the one preferred.
+against the product, a film speaking to two audiences at once.

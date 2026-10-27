@@ -14,7 +14,7 @@
 //   // a line from you to the nearest place, drawn 12 → 13.5 s
 //   const r = along(t, 12, 13.5, [you, pts[k]]);   // r.tip, r.length, r.p
 //
-// The timings come from films people liked, measured (`skill film craft`);
+// The timings come from widely shared launch films, measured (`skill film craft`);
 // each is an option of its call.
 
 /** @typedef {{ x: number, y: number }} Pt */

@@ -47,9 +47,9 @@ type Box = [number, number, number, number];
 export type ComponentValue = {
   /** as the page had it, in full */
   text: string;
-  /** the number in it, read as written ("NT$4,466" → 4466; "18.5個月" → 18.5) */
+  /** the number in it, read as written ("US$4,466" → 4466; "18.5個月" → 18.5) */
   value?: number;
-  /** what stands with that number ("NT$", "個月", "%") */
+  /** what stands with that number ("US$", "個月", "%") */
   unit?: string;
   /** read from a parts.json measured before the probe kept full text: the
    *  80-character label it had — `open-take components` measures it again */
@@ -556,8 +556,8 @@ function load(src: ComponentSourceState): Loaded {
 const NUMBER_PARTS_RE =
   /(NT\$|US\$|HK\$|[$€£¥₩])?\s?([-−]?\d(?:[\d,]*\d)?(?:\.\d+)?)\s?(%|[kKM](?![A-Za-z])|\+|萬|億|ms(?![A-Za-z])|fps(?![A-Za-z])|×|x(?![A-Za-z])|[぀-ヿ㐀-鿿]{1,3})?/;
 
-/** The first number in a text, as written, with what stands with it: "轉讓省
- *  NT$4,466" → { text: "NT$4,466", value: 4466, unit: "NT$" }; "18.5個月" →
+/** The first number in a text, as written, with what stands with it: "Save
+ *  US$4,466" → { text: "US$4,466", value: 4466, unit: "US$" }; "18.5個月" →
  *  18.5 "個月". Null when it holds no digit. */
 export function readNumber(s: string): { text: string; value: number; unit?: string } | null {
   const m = NUMBER_PARTS_RE.exec(s);

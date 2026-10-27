@@ -731,7 +731,7 @@ export function impact(t, at, opts = {}) {
  * @typedef {object} NumberFormat how a number is written: what comes before
  *   and after it, the mark between thousands ("" for none) and before the
  *   decimals, how many decimals
- * @property {string} prefix e.g. "NT$"
+ * @property {string} prefix e.g. "$"
  * @property {string} suffix e.g. "%", "+", " 萬"
  * @property {string} sep e.g. ",", ".", " ", ""
  * @property {string} point e.g. ".", ","
@@ -740,7 +740,7 @@ export function impact(t, at, opts = {}) {
  */
 
 /**
- * A number as written, read back: "NT$4,466" → 4466 with prefix "NT$" and
+ * A number as written, read back: "$4,466" → 4466 with prefix "$" and
  * separator ","; "12.5%" → 12.5, one decimal, suffix "%"; "1.234,56 €" →
  * 1234.56. One mark that occurs once with three digits after it is a
  * thousands separator if it is "," (or a space or an apostrophe), a decimal
@@ -823,14 +823,14 @@ const COUNT_DUR = 1;
 
 /**
  * A number running from one value to another, written the product's way:
- * the format is read from `to` ("NT$4,466": prefix "NT$", "," between
+ * the format is read from `to` ("$4,466": prefix "$", "," between
  * thousands, no decimals) — or from `from` for what `to` does not show —
  * and every value along the way is written in it. `from` may be a number
  * (0) or a string as the product wrote it. `steps`: how many values it
  * shows along the way (an odometer feel); `ease`: the run's shape (default:
  * lands without overshoot); `dur` s long (default 1).
  *
- *   part.text(count(t, 4, "NT$4,212", "NT$4,466").text);
+ *   part.text(count(t, 4, "$4,212", "$4,466").text);
  * @param {number} t
  * @param {number} start
  * @param {string | number} from
@@ -883,7 +883,7 @@ function pick(a, b, seed, n) {
  * unless `keep` says which to leave. Defaults from films measured: the first
  * locks after 0.2 s, then one every 0.05 s, glyphs changing 30 times a second.
  *
- *   el.textContent = scramble(t, 3, "NT$990").text;
+ *   el.textContent = scramble(t, 3, "$990").text;
  * @param {number} t
  * @param {number} start
  * @param {string} text what it lands on

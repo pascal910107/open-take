@@ -1,8 +1,8 @@
 // `open-take film viewer`: a round for a first-time viewer — someone who has
 // seen nothing of how the film was made watches it and says where they would
 // scroll on. The film's author knows what every shot means; a viewer does not,
-// and in Exp23 such a viewer found in minutes what the author's own checks had
-// not, and the version made after it was preferred both times. This only sets
+// and such a viewer has found in minutes what the author's own checks had
+// not. This only sets
 // the round up: a copy of the film and a brief in <film>.viewer/<n>/. Who
 // watches is the author's to start — an agent given that brief and nothing
 // else. The brief names no faults to look for: what the viewer notices on its

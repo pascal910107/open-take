@@ -110,7 +110,7 @@ export type NumberToken = { raw: string; norm: string };
 const NUMBER_RE = /(?:[A-Z]{0,3}[$€£¥₩₹]\s?)?\d+(?:[.,]\d+)*(?:\s?%)?/g;
 
 /** the numbers in a text, as written, and each as a plain number to compare
- *  ("NT$3,376" → "3376", "4.50" → "4.5"): separators of thousands are commas
+ *  ("US$3,376" → "3376", "4.50" → "4.5"): separators of thousands are commas
  *  followed by three digits; any other comma is read as a decimal point */
 export function numberTokens(text: string): NumberToken[] {
   const out: NumberToken[] = [];

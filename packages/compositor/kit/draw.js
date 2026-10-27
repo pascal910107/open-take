@@ -17,7 +17,7 @@
 //   // the after layer swept over the before, 4 → 4.5 s
 //   after.style.clipPath = sweep(t, 4, 4.5, { width: 1920, height: 1080 }).clip;
 //
-// The numbers come from films people liked, measured frame by frame (`skill
+// The numbers come from widely shared launch films, measured frame by frame (`skill
 // film craft`); each is an option of its call.
 
 /** @typedef {{ x: number, y: number }} Pt */
@@ -75,7 +75,7 @@ function wobble(u, seed) {
  * - "arrow": from `from` to the box's nearest edge, bowed, with a head.
  *
  * `wobble` is how far the hand strays, in px (default 3% of the box's short
- * side, at least 2): marks in the films people liked strayed a few px, never
+ * side, at least 2): marks in those films strayed a few px, never
  * enough to read as shaky.
  * @param {BoxLike} box
  * @param {{ kind?: "circle" | "underline" | "box" | "strike" | "arrow", pad?: number,

@@ -22,7 +22,7 @@ import {
   formatFilmBeats,
   LISTEN_RATE,
 } from "../src/film/beats";
-import { formatFilmListen, inertiaOf, type ScoreCorpusFilm } from "../src/film/listen";
+import { formatFilmListen } from "../src/film/listen";
 
 const R = LISTEN_RATE;
 
@@ -355,49 +355,6 @@ test("the Framer launch film's sound: a grid, labelled an estimate", {
 });
 
 // --- film listen beside earlier films ----------------------------------------------------
-
-const corpus: ScoreCorpusFilm[] = [
-  ["a", 120, "A minor", "x---x---x---x---"],
-  ["b", 120, "C major", "x---x---x---x---"],
-  ["c", 120, "A minor", "x-x-x-x-x-x-x-x-"],
-  ["d", 100, "D major", "x---x---x---x---"],
-].map(([id, bpm, key, lowPattern]) => ({
-  id: id as string,
-  group: "test",
-  music: "synthesized in the score's code",
-  declaredBpm: bpm as number,
-  bpm: bpm as number,
-  tempoConfidence: 0.7,
-  key: key as string,
-  keyCorrelation: 0.9,
-  lowPattern: lowPattern as string,
-  duration: 40,
-}));
-
-test("inertia: how many earlier films share this one's tempo, key and low end — counted, not judged", () => {
-  const n = inertiaOf(
-    "/x/new/film.mp4",
-    120.4,
-    { name: "A minor", correlation: 0.8 },
-    "x---x---x---x---",
-    corpus,
-  );
-  assert.equal(n.of, 4);
-  assert.equal(n.self, null);
-  assert.equal(n.tempo.same, 3);
-  assert.deepEqual(n.tempo.spread[0], { bpm: 120, films: 3 });
-  assert.equal(n.key.same, 2);
-  assert.equal(n.key.sameOrRelative, 3, "C major is A minor's relative");
-  assert.equal(n.lowPattern.same, 3);
-  // a film that is in the corpus is left out of its own counts
-  const self = inertiaOf("/trials/c/film.mp4", 120, null, null, corpus);
-  assert.equal(self.self, "c");
-  assert.equal(self.of, 3);
-  assert.equal(self.tempo.same, 2);
-  // the shipped corpus loads and holds the earlier films
-  const shipped = inertiaOf("/x/film.mp4", 120, null, null);
-  assert.ok(shipped.of >= 28, `${shipped.of} films in the shipped corpus`);
-});
 
 test("listen's text: nothing about earlier films, and that timbre is not measured", () => {
   const md = formatFilmListen({

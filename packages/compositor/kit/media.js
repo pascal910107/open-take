@@ -31,7 +31,7 @@
 //                   anywhere at any size, the page around it kept or
 //                   cleared; isolate() fades all but chosen parts instead.
 //                   A part is a selector, an index id ("e12"), a ref of
-//                   `open-take states` ("calc-end:e12"), { text: "會籍手續費",
+//                   `open-take states` ("result:e12"), { text: "Total due",
 //                   up: 2 } (the element showing that text, two parents
 //                   out), an element or a box — or a list of them, lifted
 //                   as one layer. group() moves several lifts as one body,
@@ -67,7 +67,7 @@
 //   const c = clip({ at: 7, from: 12.0, to: 15.5 });            // film 7 s shows 12.0 s
 //   const card = lift(s, "e126", { around: "clear" });           // the number the app worked out
 //   let shown = 0;                                               // when the new number showed
-//   const ready = Promise.all([card.ready, readTake("../takes/calc.take/").then((take) => {
+//   const ready = Promise.all([card.ready, readTake("../takes/form.take/").then((take) => {
 //     const ev = clipEvents(take, c, { tl });                    // also declared for the score
 //     shown = ev.find((e) => e.kind === "result" && e.action === "a2").t;
 //   })]);
@@ -136,7 +136,7 @@ function offsetWithin(what, el, layer) {
  * lifted from it sit beside it and show. (`display: none` would leave it
  * nothing to measure.)
  *
- *   const src = screen(iframe, st.state("calc-end"), { hidden: true });
+ *   const src = screen(iframe, st.state("result"), { hidden: true });
  *   const total = lift(src, "e170", { around: "clear" });  // shows; the screen does not
  * @param {HTMLIFrameElement} frame
  * @param {string | URL | { hidden?: boolean }} [src]
@@ -203,7 +203,7 @@ export function screen(frame, src, o = {}) {
     /**
      * Where a part of the screen is: a CSS selector (measured live), an
      * element of it, { text, up } (measured live), or an index id ("e12" or
-     * a ref "calc-end:e12", as captured), or a part of product(). In the
+     * a ref "result:e12", as captured), or a part of product(). In the
      * screen's own px, or in `layer`'s px when given.
      * @param {string | Element | TextKey | Part} key
      * @param {{ in?: Element }} [o]
@@ -1132,7 +1132,7 @@ const isBoxKey = (k) =>
 const noLayout = (what) =>
   `${what}: the screen's iframe has no layout (display:none on it or an ancestor) — hide a scene with visibility, or use scenes() (kit/time.js)`;
 
-/** the saved screen a state.html URL is, by its folder's name ("calc-end"), or null @param {string} url */
+/** the saved screen a state.html URL is, by its folder's name ("result"), or null @param {string} url */
 function stateOf(url) {
   const m = /\/([^/?#]+)\/state\.html(?:[?#].*)?$/.exec(url);
   if (!m?.[1]) return null;
@@ -1144,7 +1144,7 @@ function stateOf(url) {
 }
 
 /**
- * The index id a key names — "e12", or a ref "calc-end:e12" as `open-take
+ * The index id a key names — "e12", or a ref "result:e12" as `open-take
  * states` and components.json write it (refused on another state's screen) —
  * or null when it names none.
  * @param {string} what @param {string} key @param {string} url the screen's
@@ -1364,7 +1364,7 @@ function refOn(part, url, what) {
 }
 
 /** an element of a saved screen's document: by selector, by its index id
- *  ("e12", or the ref "calc-end:e12" as `open-take states` names it), by the
+ *  ("e12", or the ref "result:e12" as `open-take states` names it), by the
  *  text it shows ({ text, up }), a part of product() (its element on this
  *  screen), or the element itself
  * @param {Document} doc @param {string | Element | TextKey | Part} key @param {string} [what] */
@@ -1460,7 +1460,7 @@ export function fitTransform(from, to, fit = "contain") {
  * moves it there. The layer takes its visibility from where it sits: in a
  * hidden scene it is hidden too.
  *
- *   const s = screen(document.querySelector("#calc"));
+ *   const s = screen(document.querySelector("#form"));
  *   const card = lift(s, "e126", { around: "clear" });    // or a selector, a ref, { text }, a box
  *   window.__film = { duration: 12, ready: card.ready };
  *   // in __render(t):
@@ -1499,7 +1499,7 @@ export function fitTransform(from, to, fit = "contain") {
  *   part.place(morphRect(t, a, b, part.rect, { x: 0, y: 0, w: 1920, h: 1080 }));  // view first
  *
  * @param {any} source a saved screen (screen(iframe)) or its iframe
- * @param {LiftKey | LiftKey[]} key a selector, an index id ("e12") or ref ("calc-end:e12"), { text, up }, a part of product(), an element of the screen, a box in the screen's px — or a list of them
+ * @param {LiftKey | LiftKey[]} key a selector, an index id ("e12") or ref ("result:e12"), { text, up }, a part of product(), an element of the screen, a box in the screen's px — or a list of them
  * @param {{ into?: HTMLElement, around?: "keep" | "clear", box?: "layout" | "ink", background?: string, pad?: number,
  *   radius?: number, css?: string, fit?: "contain" | "cover" | "fill", parts?: (string | Element | TextKey)[] }} [o]
  * @typedef {string | Element | TextKey | Part | BoxLike} LiftKey
@@ -1813,7 +1813,7 @@ body *{visibility:hidden!important}
      * Set the text it shows — of the part, or of `k` inside it: the first
      * text holding a digit (a number), else its first text; the text around
      * it stays, and what `s` starts or ends with that the product already
-     * shows beside it in elements of their own ("NT$" in a span before the
+     * shows beside it in elements of their own ("$" in a span before the
      * digits) is not shown twice. A longer text can widen its own box.
      * Returns the element.
      * @param {string} s @param {string | Element | TextKey} [k]
@@ -1831,7 +1831,7 @@ body *{visibility:hidden!important}
       }
       const v = n.nodeValue ?? "";
       // what the product wrote round the number in elements of their own
-      // ("NT$" in a span before it, " ms" after) is not written twice
+      // ("$" in a span before it, " ms" after) is not written twice
       const i = nodes.indexOf(n);
       const before = nodes
         .slice(0, i)
@@ -2224,10 +2224,10 @@ export function throughCamera(b, cam, t) {
  * did not show is an error that names the fields it did.
  *
  *   const v = await readValues("../shots/components.json", { tl });
- *   v.fields("calc-end:e149")              // ["number", "label", …] — what it showed
- *   price.textContent = v.text("calc-end:e149", "number");      // "NT$3,376"
- *   const n = v.valueOf("calc-end:e149", "number").value;       // 3376, for a count
- *   v.relations("calc:e12")                // [{ kind: "changes", to: "calc-end:e149" }]
+ *   v.fields("result:e149")              // ["number", "label", …] — what it showed
+ *   price.textContent = v.text("result:e149", "number");      // "$3,376"
+ *   const n = v.valueOf("result:e149", "number").value;       // 3376, for a count
+ *   v.relations("form:e12")                // [{ kind: "changes", to: "result:e149" }]
  *
  * With `tl` (kit/time.js), every value read is declared as the source of its
  * text (tl.source), once, so `film probe` can say where it came from. A part

@@ -267,7 +267,7 @@ function units(text, phrases) {
   } else segs = text.split(/(\s+)/).filter(Boolean);
   // CJK runs broken into characters unless kept as phrases; Latin words kept
   if (!phrases) segs = segs.flatMap((s) => (CJK.test(s) ? [...s] : [s]));
-  // no break inside Latin, numbers and their marks ("NT$3,176", "findgym.tw"):
+  // no break inside Latin, numbers and their marks ("$3,176", "example.com"):
   // only at a space, next to a CJK character, or after a dash
   /** @type {string[]} */
   const glued = [];

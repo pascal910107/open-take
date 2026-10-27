@@ -59,7 +59,7 @@ of the three ways, a number or a string on screen can be one the product
 showed (a part's values in `components.json`), one its live page shows (a
 URL), one it works out from inputs the film states, or data you made up —
 then say so on screen, so a viewer can tell it is a demo. Where the real
-data is empty (no listings yet), the film can show that honestly, or show
+data is empty (nothing there yet), the film can show that honestly, or show
 another feature. `tl.source` records which, and `film probe` sets the
 film's numbers beside it (below).
 
@@ -67,11 +67,9 @@ film's numbers beside it (below).
   page with its fonts, colours and images as the page served them, and
   `film look` reads its fonts (the files), colours and type sizes into
   `look.css` (`skill film look`) — use them rather than lookalikes. When
-  you can read the product's repository, its source assets are there too —
-  with what the live product no longer shows or never did (spare and
-  retired pictures, stock photos kept for empty states), which someone who
-  knows the product will not take for it. Where a picture is on the live
-  site, and where, says which it is.
+  you can read the product's repository, its source assets are there too,
+  some of them ones the live product no longer shows or never did. Where a
+  picture is on the live site, and where, says which it is.
 - `npx open-take shoot shoot.mjs --out shots` runs your own capture script in
   open-take's browser and keeps the log: `s.open(url)` (loaded, hydrated, arrived,
   settled), `s.still(name)`, `s.click` / `s.type(…, { each: true })` /
@@ -208,7 +206,7 @@ window.__render = (t) => {
   (checked on a 2× stage: the plain stage box carries the card twice too big).
 - `lift(screen, part, { around, into, box, pad, radius, background, css,
   fit, parts })` lifts one real part — a selector, an index id (`"e126"`),
-  a ref (`"calc-end:e126"`), `{ text: "會籍手續費", up: 2 }` (found by its
+  a ref (`"result:e126"`), `{ text: "Total due", up: 2 }` (found by its
   visible text, then that many ancestors), an element or a box — or a list
   of them as one layer, as a layer of its own, sitting exactly where it was,
   live DOM so it stays sharp at any size. `box`/`rect` are where it sat
@@ -345,12 +343,12 @@ the first screen ends, and reads a screen saved before this from its
 ```js
 import { readValues } from "./kit/media.js";
 const v = await readValues("../shots/components.json", { tl });  // before __film.ready
-v.fields("calc-end:e149");                          // a stat: ["text", "number", "label"]
-price.textContent = v.text("calc-end:e149", "number");          // "NT$3,376"
-const n = v.valueOf("calc-end:e149", "number").value;           // 3376
-v.relations("calc:e12");                            // [{ kind: "changes", to: "calc-end:e149", by: "seen" }]
-tl.source("six listings", { note: "demo", selector: "#market" });
-tl.source("monthly fee", { url: "https://…/brands/world-gym", text: "NT$1,688" });
+v.fields("result:e149");                          // a stat: ["text", "number", "label"]
+price.textContent = v.text("result:e149", "number");            // "$3,376"
+const n = v.valueOf("result:e149", "number").value;             // 3376
+v.relations("form:e12");                            // [{ kind: "changes", to: "result:e149", by: "seen" }]
+tl.source("six sample rows", { note: "demo", selector: "#table" });
+tl.source("monthly price", { url: "https://…/pricing", text: "$16" });
 ```
 
 `readValues(url, { tl })` (or `partValues(json, { tl })`) reads a

@@ -70,9 +70,9 @@
 // needs no line of its own. `film render` asks for the list once, when the
 // page is ready: declare (and read values) before that, not in __render.
 //
-//   tl.source("NT$3,376", { ref: "calc-end:e149", field: "number" });
-//   tl.source("six listings", { note: "demo", selector: "#market" });
-//   tl.source("World Gym monthly fee", { url: "https://…/brands/world-gym", text: "NT$1,688" });
+//   tl.source("$3,376", { ref: "result:e149", field: "number" });
+//   tl.source("six sample rows", { note: "demo", selector: "#table" });
+//   tl.source("monthly price", { url: "https://…/pricing", text: "$16" });
 //   tl.sources()                // [{ label, ref?, field?, file?, url?, note?, text?, selector? }], as given
 //
 // Scenes, if the film has them: which element shows when. Hidden by
@@ -80,8 +80,8 @@
 // can still be measured and lifted from) and what was lifted out of it hides
 // with it; each start is a cut on the timeline, for the score and the probe.
 //
-//   const sc = scenes({ calc: [7.2, 16.8], find: [21.6, 31.2] }, { tl });  // ids of elements
-//   sc.show(t);                 // in __render(t): "calc" shown 7.2–16.8 s, hidden otherwise
+//   const sc = scenes({ result: [7.2, 16.8], search: [21.6, 31.2] }, { tl });  // ids of elements
+//   sc.show(t);                 // in __render(t): "result" shown 7.2–16.8 s, hidden otherwise
 
 /**
  * One thing that happens in the film, in seconds; where on the stage (CSS px)

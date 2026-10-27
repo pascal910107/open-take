@@ -1,8 +1,8 @@
 // What `open-take skill …` prints. The film guide is split into a core and
 // topic files because a coding agent reads it from stdout, and a print past
 // the agent host's inline limit (about 30 KB in Claude Code) comes back as a
-// 2 KB preview plus a saved file the session may not be allowed to open — one
-// Exp7 session saw 200 of the guide's 555 lines that way. Every print except
+// 2 KB preview plus a saved file the session may not be allowed to open (a
+// session once saw 200 of the guide's 555 lines that way). Every print except
 // `skill film --all` stays well under that, and each starts with the absolute
 // paths of the files it came from, so a session can page them with its own
 // file reader when stdout is cut anyway.
@@ -21,14 +21,12 @@ export const FILM_TOPICS = [
   "viewer",
   "render",
   "sound",
-  "cases",
   "numbers",
 ] as const;
 export type FilmTopic = (typeof FILM_TOPICS)[number];
 
 const FILM_CORE = "references/film.md";
 const filmTopicPath = (topic: FilmTopic) => `references/film/${topic}.md`;
-const CASES_DIR = "references/cases";
 /** The core's own list of the topics; `--all` drops it, since they follow. */
 const REST_HEADING = /^## The rest of this guide\n[\s\S]*?(?=^## |(?![\s\S]))/m;
 
@@ -40,17 +38,8 @@ function resource(bundle: SkillBundle, path: string): string {
   return text;
 }
 
-/** Case names, as `skill cases <name>` takes them: the file name without `.md`. */
-export function caseNames(bundle: SkillBundle): string[] {
-  return Object.keys(bundle.resources ?? {})
-    .filter((p) => p.startsWith(`${CASES_DIR}/`) && p.split("/").length === 3)
-    .map((p) => p.slice(CASES_DIR.length + 1, -3))
-    .filter((n) => n !== "README")
-    .sort();
-}
-
 export type SkillPrintRequest = {
-  /** The positional words after `skill`: [], ["film"], ["film", "material"], ["cases", "carbon"], … */
+  /** The positional words after `skill`: [], ["film"], ["film", "material"], … */
   args: string[];
   /** `--all`: with `skill film`, the whole film guide. */
   all?: boolean;
@@ -58,7 +47,7 @@ export type SkillPrintRequest = {
 
 /**
  * The text `skill …` prints, from one bundle read from `dir` (whose absolute
- * paths head the film and cases prints). Throws on an unknown word, naming
+ * paths head the film prints). Throws on an unknown word, naming
  * the ones there are.
  */
 export function skillPrint(bundle: SkillBundle, dir: string, req: SkillPrintRequest): string {
@@ -78,7 +67,6 @@ export function skillPrint(bundle: SkillBundle, dir: string, req: SkillPrintRequ
     const header = [
       `guide: ${abs(FILM_CORE)}`,
       `topics: ${abs("references/film")}/ (${FILM_TOPICS.map((t) => `${t}.md`).join(", ")})`,
-      `cases: ${abs(CASES_DIR)}/`,
       "",
       "",
     ].join("\n");
@@ -97,25 +85,13 @@ export function skillPrint(bundle: SkillBundle, dir: string, req: SkillPrintRequ
       );
     return [
       `guide: ${abs(filmTopicPath(topic))}`,
-      `core: ${abs(FILM_CORE)} (skill film) · cases: ${abs(CASES_DIR)}/`,
+      `core: ${abs(FILM_CORE)} (skill film)`,
       "",
       resource(bundle, filmTopicPath(topic)),
     ].join("\n");
   }
 
-  if (what === "cases") {
-    const names = caseNames(bundle);
-    const header = `cases: ${abs(CASES_DIR)}/ · each case: skill cases <${names.join("|")}>\n\n`;
-    if (which === undefined) return header + resource(bundle, `${CASES_DIR}/README.md`);
-    const key = which.toLowerCase().replace(/\.md$/, "");
-    if (key === "readme") return header + resource(bundle, `${CASES_DIR}/README.md`);
-    const name = names.find((n) => n.toLowerCase() === key);
-    if (!name)
-      throw new Error(`skill cases: no case "${which}" — cases: ${names.join(", ") || "none"}`);
-    return `case: ${abs(`${CASES_DIR}/${name}.md`)} · index: skill cases\n\n${resource(bundle, `${CASES_DIR}/${name}.md`)}`;
-  }
-
   throw new Error(
-    "skill: expected motion, film [<topic> | --all], cases [<name>] or install [--force]",
+    "skill: expected motion, film [<topic> | --all] or install [--force]",
   );
 }

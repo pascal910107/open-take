@@ -35,7 +35,6 @@ import {
   type Tempo,
   WIN,
 } from "./beats";
-import scoreCorpus from "./data/score-corpus.json";
 
 // the analysis lives in ./beats (shared with `film beats` and `film probe`);
 // what this module has always exported is still exported from here
@@ -265,107 +264,6 @@ export type FilmListen = {
   /** this sound beside a previous version of it (`--vs`) */
   vs?: ListenVs;
 };
-
-// --- beside earlier films ---------------------------------------------------------------
-
-export type ScoreCorpusFilm = {
-  id: string;
-  group: string;
-  music: string;
-  declaredBpm: number | null;
-  bpm: number | null;
-  tempoConfidence: number;
-  key: string | null;
-  keyCorrelation: number | null;
-  lowPattern: string | null;
-  duration: number;
-};
-
-export type Inertia = {
-  how: How;
-  /** the earlier films compared with (this film left out if it is one of them) */
-  of: number;
-  /** a corpus film this input is (by its path), left out of the counts */
-  self: string | null;
-  tempo: {
-    value: number | null;
-    /** earlier films with a clear beat grid (confidence ≥ 0.2) within 1.5% of it */
-    same: number;
-    withGrid: number;
-    /** how many earlier films sit at each tempo (rounded), most first */
-    spread: { bpm: number; films: number }[];
-  };
-  key: {
-    value: string | null;
-    correlation: number | null;
-    same: number;
-    /** the same key or its relative major/minor */
-    sameOrRelative: number;
-    spread: { key: string; films: number }[];
-  };
-  lowPattern: { value: string | null; same: number; spread: { pattern: string; films: number }[] };
-};
-
-const RELATIVE: Record<string, string> = {};
-{
-  const notes = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
-  notes.forEach((n, i) => {
-    const major = `${notes[(i + 3) % 12]} major`;
-    RELATIVE[`${n} minor`] = major;
-    RELATIVE[major] = `${n} minor`;
-  });
-}
-
-const spreadOf = <T extends string | number>(xs: T[]) =>
-  [...xs.reduce((m, x) => m.set(x, (m.get(x) ?? 0) + 1), new Map<T, number>())].sort(
-    (a, b) => b[1] - a[1],
-  );
-
-/** this film's tempo, key and low-end pattern counted against the corpus:
- *  how many earlier films share each — information, never a judgement */
-export function inertiaOf(
-  input: string,
-  tempo: number | null,
-  key: { name: string; correlation: number } | null,
-  pattern: string | null,
-  corpus: ScoreCorpusFilm[] = (scoreCorpus as { films: ScoreCorpusFilm[] }).films,
-): Inertia {
-  const path = input.replaceAll("\\", "/");
-  const self = corpus.find((f) => path.endsWith(`/${f.id}/film.mp4`))?.id ?? null;
-  const films = corpus.filter((f) => f.id !== self);
-  const grid = films.filter((f) => f.bpm != null && f.tempoConfidence >= 0.2);
-  return {
-    how: films.length ? "estimated" : "not measured",
-    of: films.length,
-    self,
-    tempo: {
-      value: tempo,
-      same:
-        tempo == null ? 0 : grid.filter((f) => Math.abs(f.bpm! - tempo) <= tempo * 0.015).length,
-      withGrid: grid.length,
-      spread: spreadOf(grid.map((f) => Math.round(f.bpm!))).map(([bpm, n]) => ({ bpm, films: n })),
-    },
-    key: {
-      value: key?.name ?? null,
-      correlation: key?.correlation ?? null,
-      same: key ? films.filter((f) => f.key === key.name).length : 0,
-      sameOrRelative: key
-        ? films.filter((f) => f.key === key.name || f.key === RELATIVE[key.name]).length
-        : 0,
-      spread: spreadOf(films.flatMap((f) => (f.key ? [f.key] : []))).map(([k, n]) => ({
-        key: k,
-        films: n,
-      })),
-    },
-    lowPattern: {
-      value: pattern,
-      same: pattern ? films.filter((f) => f.lowPattern === pattern).length : 0,
-      spread: spreadOf(films.flatMap((f) => (f.lowPattern ? [f.lowPattern] : []))).map(
-        ([p, n]) => ({ pattern: p, films: n }),
-      ),
-    },
-  };
-}
 
 export type FilmListenOptions = {
   /** the film (an mp4) or the score alone (a wav, or any sound) */

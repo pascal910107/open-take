@@ -688,9 +688,7 @@ is a template, and its kit, beat sheet and workflow are all optional. It is the 
 a way to work, an index of what is there and where, and the kit — and names its topics, each
 its own file under `references/film/` and its own print (`skill film material`, `cutting`,
 `look`, `checking`, …; `skill film --all` for everything).
-[references/cases/README.md](references/cases/README.md) (`npx open-take skill cases`) takes apart films a viewer judged,
-indexed by what a segment wants to say — each is "this film got this comment", not a pattern
-to follow. Every verb answers `--help` (`open-take film probe --help`, `open-take help shoot`).
+Every verb answers `--help` (`open-take film probe --help`, `open-take help shoot`).
 
 The older route — a JSON launch composition wrapped around one finished recording — still
 works for a quick cut. Initialize from a real recording, edit the portable JSON, validate

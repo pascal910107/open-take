@@ -353,8 +353,6 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
         }
       const p = await probe(pool, film, opts.onProgress);
       if (film.blur) ({ samples, sides } = p);
-      if (process.env.OT_VIEW_DUMP)
-        await writeFile(process.env.OT_VIEW_DUMP, JSON.stringify({ view: p.view, sides: p.sides }));
       turns = turnsBack(
         p.view,
         p.sides,
@@ -1733,11 +1731,11 @@ export function turnsBack(
   }
 }
 
-/** how finely the frames where text moves slowly are drawn: what Pascal saw
- *  stop the 「抖」 in a blind check (k01 14.4–21.6 s and 21.6–26.4 s) */
+/** how finely the frames where text moves slowly are drawn: what stopped the
+ *  visible stepping in a blind check (two stretches of one film) */
 export const FINE_SUPERSAMPLE = 3;
 /** a frame drawn at FINE_SUPERSAMPLE costs about this many of one at the
- *  film's size (measured 4.8× and 6.8× on two stretches of k01) */
+ *  film's size (measured 4.8× and 6.8× on two stretches of one film) */
 const FINE_COST = 5;
 
 /** Which frames to draw finer: those where the page's moving text moves

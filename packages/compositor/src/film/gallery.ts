@@ -866,7 +866,7 @@ function blocks(kit: Kit, mat: GalleryMaterial, img: string, beats?: unknown): B
   });
 
   // a line, a figure, landing
-  const figure = "NT$1,290";
+  const figure = "$1,290";
   add({
     name: "scramble",
     group: "motion",
@@ -908,7 +908,7 @@ function blocks(kit: Kit, mat: GalleryMaterial, img: string, beats?: unknown): B
     view: "subject",
     rows: [
       { label: "default", o: {} },
-      { label: 'from: "NT$990"', o: { from: "NT$990" } },
+      { label: 'from: "$990"', o: { from: "$990" } },
       { label: 'order: "right", laps: 0', o: { order: "right", laps: 0 } },
       { label: "each: 0, overshoot: 0", o: { each: 0, overshoot: 0 } },
     ],
@@ -927,7 +927,7 @@ function blocks(kit: Kit, mat: GalleryMaterial, img: string, beats?: unknown): B
     group: "motion",
     signature:
       "flap(t, start, from, to, { each, dur }) → { tiles: [{ old, now, top, bottom, p }], done }",
-    note: "NT$990 → NT$1,290: the old top half folds down, then the new bottom half; 0.26 s a tile, 0.2 s apart",
+    note: "$990 → $1,290: the old top half folds down, then the new bottom half; 0.26 s a tile, 0.2 s apart",
     needs: ["motion.flap"],
     t0: 0,
     t1: 1.8,
@@ -943,7 +943,7 @@ function blocks(kit: Kit, mat: GalleryMaterial, img: string, beats?: unknown): B
       `<div style="position:absolute;left:${textBox.x}px;top:${textBox.y}px;font:600 ${fs}px system-ui,sans-serif;white-space:nowrap">${M.flap(
         t,
         0,
-        "NT$990",
+        "$990",
         figure,
         r.o,
       )
@@ -952,7 +952,7 @@ function blocks(kit: Kit, mat: GalleryMaterial, img: string, beats?: unknown): B
         )
         .join("")}</div>`,
     value: (t, r) =>
-      M.flap(t, 0, "NT$990", figure, r.o).tiles.filter((x: { p: number }) => x.p >= 1).length,
+      M.flap(t, 0, "$990", figure, r.o).tiles.filter((x: { p: number }) => x.p >= 1).length,
     valueLabel: "tiles turned",
   });
 

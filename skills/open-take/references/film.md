@@ -29,7 +29,7 @@ reordered or done another way; nothing checks that it was followed.
    The first thing that can be run tends to become the film — a capture
    script written first usually turns into a film of its steps
    (`skill film story`). How each stretch could move and hand over —
-   the ways films people liked used, measured — `skill film craft`.
+   the ways widely shared launch films used, measured — `skill film craft`.
 4. **What shows it.** For each thing the film says, what on screen makes it
    believable: what the product made, at a size that reads; one of its parts
    doing something; a real action and the result it gives; its own words and
@@ -131,7 +131,7 @@ Capabilities and where each is described; none of them is a step.
 - how a scene can hand over to the next, a camera that never stops dead, the
   product's own things moved as objects, words that land, numbers and maps
   that earn their figures, a first second and an ending that closes — as
-  films people liked did them, with their numbers → `skill film craft`
+  widely shared launch films did them, with their numbers → `skill film craft`
 - how the film lands on someone who has never seen it → `film viewer` —
   `skill film viewer`
 - a few seconds as the master shows them, a patch into the master, slow
@@ -140,7 +140,6 @@ Capabilities and where each is described; none of them is a step.
 - how the renderer plays a page (`__film`, `__render`, clocks) → `skill film
   page`
 - the product's own sound from a take, a soundtrack → `skill film sound`
-- launch films taken apart, segment by segment → `skill cases`
 
 ## Start
 
@@ -230,7 +229,7 @@ only `time.js` and lists the rest; its length is a placeholder.
   each shot is measured on its own, so a hard cut is not read as a jump of
   thousands of px a second), and
   `window.__film = { …, ...tl.hooks() }` hands both to the renderer.
-  `scenes({ calc: [7.2, 16.8] }, { tl })` shows each scene in its span by
+  `scenes({ result: [7.2, 16.8] }, { tl })` shows each scene in its span by
   visibility (so what is in it keeps its layout) and declares its cuts. A beat
   sheet can live there too: `tl.segment(from, to, { label, hold, handoff,
   subject, sound })` (moments' names or seconds; `handoff` is how it hands
@@ -300,7 +299,7 @@ order. The files are under `film/` beside this one.
 
 - `skill film story` — the film before its material: a rough film you
   can look at first, then the capture it asks for
-- `skill film craft` — how films people liked were shot: getting from one
+- `skill film craft` — how launch films were shot: getting from one
   scene to the next, the camera, the product on screen, words, numbers,
   maps, openings, endings, rhythm — the moves, measured, and how to build them
 - `skill film material` — material from the real product: one part shown
@@ -315,5 +314,4 @@ order. The files are under `film/` beside this one.
 - `skill film render` — render: draft, master, `--from --to --into`, motion
   blur, the events file, moving text
 - `skill film sound` — the soundtrack and the product's own sound
-- `skill film cases` — where the cases are (`skill cases` prints them)
 - `skill film numbers` — render times, loudness

@@ -434,7 +434,7 @@ export const COMPONENT_PROBE_JS = String.raw`function (input) {
     };
     var valueCell = function (el) { return inValueCell(el) || pairValue(el); };
     // a value with a digit too long for numericText's 24 characters
-    // ("NT$1,688 起 / 月（含稅）") — a number when it sits in a value cell
+    // ("US$16 起 / 月（含稅）") — a number when it sits in a value cell
     var valueText = function (t) { return !!t && t.length <= 40 && /\d/.test(t); };
     // 1. numbers — text from one leaf (its own, or one element inside it);
     //    innermost wins; a control whose label is a number is a control

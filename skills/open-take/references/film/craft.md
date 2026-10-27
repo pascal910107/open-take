@@ -1,4 +1,4 @@
-## How films people liked were shot
+## How launch films were shot
 
 Launch and explainer films made in code — HTML, canvas, three.js — that
 people shared widely, taken apart frame by frame and, where their source was
@@ -81,8 +81,7 @@ by an object; hard cuts were kept for punctuation, on the beat.
 - **A band brushes the scene over.** A brand-colour band (≈0.25–0.3 s,
   ease-in-out) crosses the frame; the new scene on one side, the old on the
   other, each carrying its own caption, so the band literally brushes the
-  headline over. One band kind per film reads as designed; four kinds read
-  as noise.
+  headline over. The films measured kept to one band kind each.
 - **Punctuation.** One or two frames of white or inverted picture on a
   beat, the new scene decaying from over-exposed over 0.3 s; or the
   outgoing frame darkened ≈40 % for 3 frames before a hard cut, so the cut
@@ -102,12 +101,12 @@ in 0.13–0.2 s; in: sharpen in 0.13 s).
   so ×1→×2 takes as long as ×2→×4 and a long zoom does not rush its end.
   `camera()` with `zoom: "log"`; a move is `cam.frame(box, { arrive, dur,
   ease })`.
-- **Holds are never locked.** A slow 2–5 % push or a ≈0.2 rad orbit across
+- **Holds keep moving.** A slow 2–5 % push or a ≈0.2 rad orbit across
   a hold, and a hand underneath: a sum of slow sines, ≤3 px and ≤0.1° roll,
-  never a visible wobble. `handheld`.
+  too small to read as a wobble. `handheld`.
 - **Start on the part being used.** 1.5–2.5× on the control, the action
   happens there, then a fast blurred pull-out (≈0.35 s) shows where we are,
-  then a push to the next part. Never a long hold on a whole screen. At 3–5×
+  then a push to the next part. Long holds on a whole screen were rare. At 3–5×
   a tiny action — a typed comment, a toggled filter — becomes the shot.
 - **Follow the cursor or the caret.** The panel slides so the cursor stays
   near the centre, lagging slightly (a critically damped spring, ≈0.4 s);
@@ -187,17 +186,17 @@ in 0.13–0.2 s; in: sharpen in 0.13 s).
   space and after punctuation, cps 9–15).
 - **The cursor as someone.** Bigger than a real cursor, travelling on a
   slight arc (20–40 px), arriving decelerating, pressing for ≈0.08–0.1 s
-  (scale ≈0.85–0.96); one payoff click per film can carry a ripple. Without
+  (scale ≈0.85–0.96); a payoff click can carry a ripple. Without
   a mascot, the product's mark or its core object (a pin, a card) can play
   the part.
 
 ### Words
 
 - **Few, one at a time, still once landed.** Most lines small (≈2.5–4 % of
-  the frame height); one to three words per film at hero size. A line held
+  the frame height); a few words at hero size. A line held
   ≈0.5 s + 0.3 s a word (Chinese: characters ÷ 4.5 + 1.5 s after it lands);
-  the last line at least 2 s. Text that keeps drifting after it lands, or
-  breathes, reads as generated.
+  the last line at least 2 s. In these films text stayed still once it had
+  landed.
 - **How a word arrives.** Out of its own line (a mask, `translateY(110%)` → 0
   on `cubic-bezier(.7,0,.2,1)`, ≈0.125–0.35 s, lines 0.1 s apart); grey to ink
   per word, 0.07–0.1 s apart, nothing moving; a 6 px blur resolving in 0.13 s,
@@ -220,7 +219,7 @@ in 0.13–0.2 s; in: sharpen in 0.13 s).
 
 - **A number lands with what it counts.** The counter is computed from how
   many things have landed — pins, plates, rows — so it stops exactly when
-  the motion stops; never a separate tween that finishes early. Or an
+  the motion stops, rather than a separate tween that finishes early. Or an
   ease-out with a long tail (the last values crawl), weight growing thin →
   black with a variable font, tabular figures, a small source line under it.
   `count`.
@@ -229,7 +228,7 @@ in 0.13–0.2 s; in: sharpen in 0.13 s).
   split-flap where the old value's top half folds down and the new one's
   bottom half folds open (0.26 s, tiles 0.2 s apart) — before/after prices;
   digits cycling through glyphs and locking one per sixteenth, each landing
-  with a damped bounce. One headline number gets this; the rest just count.
+  with a damped bounce. These films gave it to the headline number and let the rest count.
   `odometer`, `flap`, `scramble` (kit/motion.js).
 - **The number becomes the header.** It lands big, shrinks to header size,
   and a small dashboard builds round it (bars growing 0.3 s, 0.05 s apart, a
@@ -305,20 +304,11 @@ with the product's input inside it; a clock already running.
   continuous shot. Related items at half length (three cards at 0.5 s
   each); acceleration by subdividing (quarter notes → eighths → sixteenths),
   not by changing tempo.
-- One breath per film: a beat of near-silence before the turn, the first
+- A breath: a beat of near-silence before the turn, the first
   sound after it the key action.
 - Each kind of thing arriving its own way — files drop, photos fling,
-  notifications slide, windows pop — 0.2–0.3 s each; nothing just fades
-  except captions.
+  notifications slide, windows pop — 0.2–0.3 s each; in these films only
+  captions simply faded.
 - Where the films had a pulse, every landing sat on it (`skill film
   cutting`); where real material had its own events — a click, a page
   load — the change sat there instead.
-
-### What did not travel
-
-Moves that looked expensive and said nothing about the product: particle
-storms, black holes, cloth, shards flying onto a wireframe, light beams,
-a style flickering for more than a few frames, brand-specimen sequences.
-A mascot carried half the charm of several films; a product without one
-used its mark or its core object instead. The 25–37 s films held up; the
-60–80 s ones sagged in the middle under small interface text.
