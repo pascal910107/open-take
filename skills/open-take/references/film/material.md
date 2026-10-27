@@ -67,7 +67,11 @@ film's numbers beside it (below).
   page with its fonts, colours and images as the page served them, and
   `film look` reads its fonts (the files), colours and type sizes into
   `look.css` (`skill film look`) — use them rather than lookalikes. When
-  you can read the product's repository, its source assets are there too.
+  you can read the product's repository, its source assets are there too —
+  with what the live product no longer shows or never did (spare and
+  retired pictures, stock photos kept for empty states), which someone who
+  knows the product will not take for it. Where a picture is on the live
+  site, and where, says which it is.
 - `npx open-take shoot shoot.mjs --out shots` runs your own capture script in
   open-take's browser and keeps the log: `s.open(url)` (loaded, hydrated, arrived,
   settled), `s.still(name)`, `s.click` / `s.type(…, { each: true })` /

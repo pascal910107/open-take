@@ -2549,7 +2549,7 @@ async function main() {
     }
     if (action === "viewer") {
       only();
-      const v = await prepareViewer(target);
+      const v = await prepareViewer(target, INVOKE);
       process.stdout.write(
         `viewer round ${v.round}: ${shown(v.dir)} — a copy of the film and BRIEF.md\n` +
           `start a viewer that has seen nothing of this work, with only the brief — a subagent whose whole prompt is\n` +

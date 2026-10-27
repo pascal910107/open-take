@@ -55,13 +55,13 @@ export async function viewerRounds(film: string): Promise<ViewerRounds> {
   return out;
 }
 
-export function viewerBrief(filmCopy: string, notes: string): string {
+export function viewerBrief(filmCopy: string, notes: string, invoke = "npx open-take"): string {
   return `# Watch this film as a first-time viewer
 
 You came across this film in a social feed. You have never heard of the product.
 The film: ${filmCopy}
 
-Watch it closely. You cannot see moving pictures, so take frames with ffmpeg / ffprobe — as dense as you can, denser where the picture moves — lay them out on sheets, read the words on screen, and look at how the sound changes. Install whatever you need.
+Watch it closely. You cannot see moving pictures, so take frames with ffmpeg / ffprobe — as dense as you can, denser where the picture moves — lay them out on sheets, read the words on screen, and look at how the sound changes. \`${invoke} film listen <film>\` lays the sound out against time (its beats, sections, loudness, and how far each cut sits from a sound) and \`${invoke} film probe <film>\` the picture (every cut, how much each frame changes, the zoom and travel); both describe, neither judges. Install whatever else you need.
 
 Then write ${notes} for the person who made the film, in the language of the film's own words. Write what you honestly felt watching it: at which second, and why, you would scroll on or keep watching; what you did not understand, what bored you, what felt uncomfortable or forced; what was good. Most important first.
 
@@ -70,7 +70,7 @@ Work only in ${resolve(filmCopy, "..")}. Do not read anything else about how the
 }
 
 /** sets up the next round: <film>.viewer/<n>/film.mp4 and BRIEF.md */
-export async function prepareViewer(film: string): Promise<ViewerRound> {
+export async function prepareViewer(film: string, invoke?: string): Promise<ViewerRound> {
   const src = resolve(film);
   if (!existsSync(src)) throw new Error(`film viewer: ${film} not found`);
   const { done, open } = await viewerRounds(src);
@@ -81,6 +81,6 @@ export async function prepareViewer(film: string): Promise<ViewerRound> {
   await copyFile(src, copy);
   const notes = join(dir, "VIEWER.md");
   const brief = join(dir, "BRIEF.md");
-  await writeFile(brief, viewerBrief(copy, notes));
+  await writeFile(brief, viewerBrief(copy, notes, invoke));
   return { dir, round, brief, notes };
 }
