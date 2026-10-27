@@ -56,8 +56,18 @@ export type PageTextSample = {
    *  readPageText, a path from the served root when it is served there);
    *  for an <img> or a <video>, `drawn`: where its whole picture is drawn
    *  (object-fit and transforms taken in, the clip not), and its own size
-   *  in px (a video's once its size is known) */
-  media: { label: string; box: Box; src?: string; drawn?: Box; natural?: [number, number] }[];
+   *  in px (a video's once its size is known); a <canvas> the same, its
+   *  own size its width × height. `why` "tilt": a layer under a CSS
+   *  perspective bigger on the frame than the frame, which Chrome draws at
+   *  about the frame's area and stretches — `natural` the size it draws it */
+  media: {
+    label: string;
+    box: Box;
+    src?: string;
+    drawn?: Box;
+    natural?: [number, number];
+    why?: "tilt";
+  }[];
   /** where each named subject (a CSS selector) is drawn; null: an element
    *  matches but is not visible; absent: no element matches */
   subjects: Record<string, Box | null>;
@@ -299,7 +309,8 @@ function probeText(subjects: string[]): Omit<PageTextSample, "t"> {
       } catch {}
     }
     if (!picture) continue;
-    if (opacityOf(el, window) < MIN_O) continue;
+    // a canvas is often a texture laid over everything at a few percent (grain)
+    if (opacityOf(el, window) < (tag === "canvas" ? 0.02 : MIN_O)) continue;
     const r = el.getBoundingClientRect();
     if (r.width * r.height < 0.01 * vw * vh) continue;
     const c = clipOf(el.parentElement, window, top, frame);
@@ -309,10 +320,10 @@ function probeText(subjects: string[]): Omit<PageTextSample, "t"> {
     // out, fitted as object-fit says (centred), then as transformed
     let drawn: Box | undefined;
     let natural: [number, number] | undefined;
-    if (tag === "img" || tag === "video") {
-      const im = el as HTMLImageElement & HTMLVideoElement;
-      const nw = tag === "img" ? im.naturalWidth : im.videoWidth;
-      const nh = tag === "img" ? im.naturalHeight : im.videoHeight;
+    if (tag === "img" || tag === "video" || tag === "canvas") {
+      const im = el as HTMLImageElement & HTMLVideoElement & HTMLCanvasElement;
+      const nw = tag === "img" ? im.naturalWidth : tag === "video" ? im.videoWidth : im.width;
+      const nh = tag === "img" ? im.naturalHeight : tag === "video" ? im.videoHeight : im.height;
       const lw = im.offsetWidth;
       const lh = im.offsetHeight;
       if (nw && nh && lw && lh) {
@@ -346,6 +357,54 @@ function probeText(subjects: string[]): Omit<PageTextSample, "t"> {
       box: [Math.round(v.x), Math.round(v.y), Math.round(v.w), Math.round(v.h)],
       ...(src && !src.startsWith("data:") && !src.startsWith("blob:") ? { src } : {}),
       ...(drawn ? { drawn, natural } : {}),
+    });
+  }
+
+  // layers under a perspective: Chrome draws one whose area on the frame
+  // would pass the frame's at about the frame's area and stretches it
+  // (measured: a 950×450 box tilted at 2.3× soft, 800×400 sharp, at
+  // 1920×1080; --supersample does not change it), so its text goes soft
+  const under = (el: Element) => {
+    for (let a = el.parentElement; a; a = a.parentElement)
+      if (getComputedStyle(a).perspective !== "none") return true;
+    return false;
+  };
+  const tilted: Element[] = [];
+  for (const el of Array.from(document.body?.querySelectorAll("*") ?? [])) {
+    const tf = getComputedStyle(el).transform;
+    if (!tf.startsWith("matrix3d(")) continue;
+    if (tilted.some((t) => t.contains(el))) continue;
+    // its own perspective() leaves m34 (the 12th number) non-zero
+    const m34 = Number(tf.slice(9, -1).split(",")[11]);
+    if (!(m34 !== 0 || under(el))) continue;
+    if (opacityOf(el, window) < MIN_O) continue;
+    const h = el as HTMLElement;
+    const lw = h.offsetWidth;
+    const lh = h.offsetHeight;
+    if (!lw || !lh) continue;
+    const clips = getComputedStyle(el).overflow !== "visible";
+    const aw = clips ? lw : Math.max(lw, el.scrollWidth);
+    const ah = clips ? lh : Math.max(lh, el.scrollHeight);
+    const r = el.getBoundingClientRect();
+    const sx = r.width / lw;
+    const sy = r.height / lh;
+    const k = Math.sqrt((vw * vh) / (aw * ah));
+    if (aw * ah * sx * sy <= vw * vh || Math.max(sx, sy) <= k * 1.01) continue;
+    const c = clipOf(el.parentElement, window, top, frame);
+    const v = c && inter(top(r), c);
+    if (!v) continue;
+    tilted.push(el);
+    media.push({
+      label: describe(el).slice(0, 60),
+      box: [Math.round(v.x), Math.round(v.y), Math.round(v.w), Math.round(v.h)],
+      drawn: [
+        Math.round(r.left * 10) / 10,
+        Math.round(r.top * 10) / 10,
+        Math.round(r.width * 10) / 10,
+        Math.round(r.height * 10) / 10,
+      ],
+      natural: [Math.round(lw * k), Math.round(lh * k)],
+      why: "tilt",
     });
   }
 

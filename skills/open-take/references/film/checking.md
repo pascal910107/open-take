@@ -112,8 +112,9 @@ whether the part was in the frame (or how much was off which edge), whether
 it was on the screen shown then (and which screens have it if not), what of
 the page's own drawing covered how much of it, and px of the frame per px of
 the still it was drawn from. Pictures drawn bigger than their own pixels —
-a still, or a `<video>` past its `videoWidth` — are listed with their times
-and the most frame px per source px, parts or not. Given `{ tl }`, `product()` also
+a still, a `<video>` past its `videoWidth`, a `<canvas>` past its `width`, a
+layer under a perspective past what Chrome draws it at (`skill film render`)
+— are listed with their times and the most frame px per source px, parts or not. Given `{ tl }`, `product()` also
 declares each use, so `film probe` follows the part like any declared
 subject (`part:<name>.x`/`.y`). Without
 `product()` the report says that no part was named through it.

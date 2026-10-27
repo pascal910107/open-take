@@ -117,12 +117,21 @@ export type FilmReport = {
   /** moves of the picture where what it ends up framing does not head
    *  straight for its place (the render's probe, in the events file) */
   turns: { how: "measured" | "not measured"; list: TurnBack[] };
-  /** <img> and <video> drawn bigger than their own pixels, at the page
-   *  samples: `ratio` the most frame px per px of the picture */
+  /** <img>, <video> and <canvas> drawn bigger than their own pixels, and
+   *  layers under a perspective drawn bigger than Chrome draws them
+   *  (`why` "tilt"), at the page samples: `ratio` the most frame px per px
+   *  of the picture */
   pastPixels: {
     how: "measured" | "not measured";
     note?: string;
-    list: { src?: string; label: string; from: number; to: number; ratio: number }[];
+    list: {
+      src?: string;
+      label: string;
+      from: number;
+      to: number;
+      ratio: number;
+      why?: "tilt";
+    }[];
   };
   /** the parts the film named through product() (window.__otParts), each
    *  use read at its times; `named` 0: none was (a drag no part of
@@ -510,25 +519,36 @@ export function partUses(
   return out.sort((a, b) => a.t - b.t);
 }
 
-/** <img> and <video> drawn bigger than their own pixels at the samples, by
- *  picture: the stretches of samples it was, and the most frame px per px */
+/** <img>, <video>, <canvas> and tilted layers drawn bigger than their own
+ *  pixels at the samples, by picture: the stretches of samples it was, and
+ *  the most frame px per px */
 export function pastPixels(
   samples: readonly PageTextSample[],
   every: number,
 ): FilmReport["pastPixels"]["list"] {
   const runs = new Map<
     string,
-    { src?: string; label: string; spans: { from: number; to: number; ratio: number }[] }
+    {
+      src?: string;
+      label: string;
+      why?: "tilt";
+      spans: { from: number; to: number; ratio: number }[];
+    }
   >();
   for (const s of samples)
     for (const m of s.media) {
       if (!m.drawn || !m.natural) continue;
       const ratio = Math.max(m.drawn[2] / m.natural[0], m.drawn[3] / m.natural[1]);
       if (!(ratio > 1.01)) continue;
-      const key = m.src ?? m.label;
+      const key = `${m.why ?? ""} ${m.src ?? m.label}`;
       let r = runs.get(key);
       if (!r) {
-        r = { ...(m.src ? { src: m.src } : {}), label: m.label, spans: [] };
+        r = {
+          ...(m.src ? { src: m.src } : {}),
+          label: m.label,
+          ...(m.why ? { why: m.why } : {}),
+          spans: [],
+        };
         runs.set(key, r);
       }
       const open = r.spans.at(-1);
@@ -545,6 +565,7 @@ export function pastPixels(
         from: round3(x.from),
         to: round3(x.to),
         ratio: round2(x.ratio),
+        ...(r.why ? { why: r.why } : {}),
       })),
     )
     .sort((a, b) => a.from - b.from);
@@ -1011,18 +1032,24 @@ export function formatFilmReport(r: FilmReport, o: { probe: string }): string[] 
 
   // pictures drawn bigger than their own pixels
   const pp = r.pastPixels;
-  const ppScope = `<img> and <video> on the page, every ${fmt(r.every)}`;
+  const ppScope = `<img>, <video>, <canvas> and tilted layers on the page, every ${fmt(r.every)}`;
   if (pp.how === "not measured")
     L.push(`  pictures drawn past their own pixels: not measured — ${pp.note}`);
   else if (!pp.list.length) L.push(`  pictures drawn past their own pixels (${ppScope}): none`);
   else {
     const shown = pp.list.slice(0, 4).map((x) => {
       const at = x.from === x.to ? fmt(x.from) : `${fmt(x.from)}–${fmt(x.to)}`;
-      return `${x.src ?? x.label} ${at}, up to ${x.ratio} frame px per source px`;
+      return x.why === "tilt"
+        ? `${x.label} (under a perspective) ${at}, up to ${x.ratio} frame px per px Chrome drew`
+        : `${x.src ?? x.label} ${at}, up to ${x.ratio} frame px per source px`;
     });
     L.push(
       `  pictures drawn past their own pixels (${ppScope}): ${shown.join("; ")}${pp.list.length > 4 ? `; ${pp.list.length - 4} more` : ""}`,
     );
+    if (pp.list.some((x) => x.why === "tilt"))
+      L.push(
+        "  a layer under a CSS perspective that would cover more than the frame's area is drawn by Chrome at about the frame's area and stretched, so its text goes soft (--supersample does not change it); a tilted box no bigger than the part it shows (overflow: hidden around it) is drawn sharp",
+      );
   }
 
   // moves that turn back

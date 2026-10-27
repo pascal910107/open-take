@@ -13,6 +13,7 @@ import { resolveFfmpeg, runTool } from "../src/ffmpeg";
 import { gatherComponents, readComponentSource, writeComponents } from "../src/film/components";
 import { initFilm } from "../src/film/kit";
 import { type GreyFrames, jumpMove } from "../src/film/probe";
+import { readPageText } from "../src/film/probe-text";
 import { renderFilm } from "../src/film/render";
 import {
   type FilmReport,
@@ -328,7 +329,7 @@ test("the parts the film named: each use, where the part was at its times, facts
   );
   assert.match(
     text,
-    /pictures drawn past their own pixels \(<img> and <video> on the page, every 0\.50 s\): \/x\.take\/capture\.mp4 3\.10 s–6\.00 s, up to 2\.4 frame px per source px/,
+    /pictures drawn past their own pixels \(<img>, <video>, <canvas> and tilted layers on the page, every 0\.50 s\): \/x\.take\/capture\.mp4 3\.10 s–6\.00 s, up to 2\.4 frame px per source px/,
   );
   assert.doesNotMatch(text, /\bscore\b|\bpass\b|\bgrade:|too small|too much|\bshould\b/i);
   // none named, and the page not played, are said as such
@@ -464,6 +465,27 @@ test("pictures drawn past their own pixels: the stretches each was, and the most
     { src: "/a.mp4", label: "video", from: 0, to: 0.5, ratio: 2.5 },
     { src: "/a.mp4", label: "video", from: 1.5, to: 1.5, ratio: 1.5 },
   ]);
+});
+
+test("a tilted layer drawn past the pixels Chrome drew it at keeps its why", () => {
+  const list = pastPixels(
+    [
+      {
+        t: 2,
+        media: [
+          {
+            label: "div#rig",
+            box: [0, 0, 10, 10],
+            drawn: [0, 0, 600, 300],
+            natural: [200, 100],
+            why: "tilt",
+          },
+        ],
+      } as never,
+    ],
+    0.5,
+  );
+  assert.deepEqual(list, [{ label: "div#rig", from: 2, to: 2, ratio: 3, why: "tilt" }]);
 });
 
 let dir = "";
@@ -631,4 +653,49 @@ done();
     /title add-1:e2 framed 2\.75 s: off the frame's right edge 40%.*drawn from a still at 2\.0 frame px per still px/,
   );
   assert.match(text, /clip\.mp4 [\d.]+ s–[\d.]+ s, up to 2\.5 frame px per source px/);
+});
+
+test("the page probe: a big layer under a perspective and a stretched canvas, not a small tilted box", {
+  skip: findChrome() ? false : "no Chrome for Testing",
+}, async () => {
+  const page = join(dir, "tilt", "index.html");
+  await mkdir(join(dir, "tilt"), { recursive: true });
+  // at 320×180: #big is 300×150 shown at 2× (4× the frame's area), #small
+  // 60×30 at 2×, #win a 60×30 window (overflow hidden) round 300×150 of text
+  await writeFile(
+    page,
+    `<!doctype html><style>body{margin:0;width:320px;height:180px;overflow:hidden}
+.p{position:absolute;inset:0;perspective:800px}
+.t{position:absolute;left:0;top:0;transform-origin:0 0;background:#fff;font:12px sans-serif}
+#big{width:300px;height:150px;transform:translate(-100px,-60px) rotateY(8deg) scale(2)}
+#small{width:60px;height:30px;transform:translate(200px,120px) rotateY(8deg) scale(2)}
+#win{width:60px;height:30px;overflow:hidden;transform:translate(20px,120px) rotateY(8deg) scale(2)}
+#grain{position:absolute;inset:0;width:320px;height:180px;opacity:.07}</style>
+<div class=p><div class=t id=big>big</div></div>
+<div class=p><div class=t id=small>small</div></div>
+<div class=p><div class=t id=win><div style="width:300px;height:150px">window</div></div></div>
+<canvas id=grain width=80 height=45></canvas>
+<script>window.__film={duration:1,width:320,height:180};window.__render=()=>{};</script>`,
+  );
+  const read = await readPageText({
+    page,
+    chromePath: findChrome()!,
+    from: 0,
+    times: [0],
+    fallback: { width: 320, height: 180 },
+  });
+  const list = pastPixels(read.samples, 0.5);
+  const seen = JSON.stringify(list);
+  assert.deepEqual(
+    list.map((x) => [x.label.split(" ")[0], x.why ?? ""]).sort(),
+    [
+      ["canvas#grain", ""],
+      ["div#big", "tilt"],
+    ],
+    seen,
+  );
+  assert.equal(list.find((x) => x.why === "tilt")!.ratio > 1.6, true, seen);
+  // drawn at about the frame's area: 2× over sqrt(320·180 / (300·150)) ≈ 1.13
+  assert.ok(list.find((x) => x.why === "tilt")!.ratio < 1.9, seen);
+  assert.equal(list.find((x) => !x.why)!.ratio, 4, "80×45 drawn at 320×180");
 });

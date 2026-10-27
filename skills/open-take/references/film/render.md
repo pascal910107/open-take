@@ -89,3 +89,17 @@ soft, at a third to an eighth of the sharpness the same frame had without
 the hint, and sharp again only where frames were drawn at 3× — so the text
 went soft and sharp as the camera stopped and moved. `--keep-layers` keeps
 the hints (`film still` takes it too).
+
+A layer under a CSS `perspective` is drawn by Chrome at no more than about
+the frame's area. Tilt a whole saved page (1920×1300) and push in to 2.3×,
+and its text is drawn at about a third of the size it is shown, then
+stretched: soft, on one film, and as soft with `--supersample 3`. The same
+frame without the perspective was sharp, and so was a tilted box no bigger
+than the part it shows: an `overflow: hidden` window around the card, or the
+card alone. The render's report names such layers among the pictures drawn
+past their own pixels ("under a perspective").
+
+A `<canvas>` is drawn at its own `width` × `height`. On one film a grain laid
+over the whole frame from a 480×270 canvas (4× stretched, 7 %, overlay)
+looked yellowish and smeared at full screen; the same grain from a
+1920×1080 canvas looked clean. The report lists a stretched canvas too.
