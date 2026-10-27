@@ -690,7 +690,8 @@ Usage:
           subject leaves the frame, marked with the sheet's times, then
           before/after thumbnails of every big change) and probe.md, each
           line measured, estimated or not detected — no score; \`film gallery\` draws each block of the kit (the film's own
-          kit/ when given its folder) — motion, camera options, cut helpers —
+          kit/ when given its folder) — motion, camera options, cut helpers,
+          marks and light, places —
           at six instants with its value and speed over time, its default
           beside three other settings, on a neutral stand-in or, with --with,
           on the product's own picture, saved screen or take (one element of

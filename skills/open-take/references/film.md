@@ -28,7 +28,8 @@ reordered or done another way; nothing checks that it was followed.
    `film sheet` on it. The capture then gets what the rough film asks for.
    The first thing that can be run tends to become the film — a capture
    script written first usually turns into a film of its steps
-   (`skill film story`).
+   (`skill film story`). How each stretch could move and hand over —
+   the ways films people liked used, measured — `skill film craft`.
 4. **What shows it.** For each thing the film says, what on screen makes it
    believable: what the product made, at a size that reads; one of its parts
    doing something; a real action and the result it gives; its own words and
@@ -127,6 +128,10 @@ Capabilities and where each is described; none of them is a step.
   https://github.com/lottiefiles/motion-design-skill`,
   `skills/motion-design/`), written for interfaces; its `director/` notes
   on choreography and narrative are about any motion
+- how a scene can hand over to the next, a camera that never stops dead, the
+  product's own things moved as objects, words that land, numbers and maps
+  that earn their figures, a first second and an ending that closes — as
+  films people liked did them, with their numbers → `skill film craft`
 - how the film lands on someone who has never seen it → `film viewer` —
   `skill film viewer`
 - a few seconds as the master shows them, a patch into the master, slow
@@ -248,6 +253,17 @@ only `time.js` and lists the rest; its length is a placeholder.
   with others (`group`, `arrange`, `carry`), and the parts' real values
   read from `components.json` (`readValues`, `partValues`)
   (`skill film material`).
+- `draw.js` — marks and light: a pen's stroke round a part, drawn on and
+  drawn off (`scribble`, `stroke`), a leader out to a label (`leader`), the
+  rest dimmed round one part (`spotlight`), an after swept over a before
+  (`sweep`), a band of light uncovering a screen (`lightSweep`), a flash on
+  a beat (`flash`). In `motion.js` beside them, a figure landing: a line out
+  of random glyphs (`scramble`), digits rolling (`odometer`), a split-flap
+  board (`flap`).
+- `map.js` — places: longitude and latitude into the frame as web maps
+  project them (`fit`), places switching on one after another (`switchOn`),
+  a line travelling between them with its tip and length (`along`,
+  `pathOf`).
 - `cut.js` — cutting on the music (`skill film cutting`): the
   music's grid, a match cut's framing, cuts declared for the score. Nothing
   in it cuts on its own.
@@ -284,6 +300,9 @@ order. The files are under `film/` beside this one.
 
 - `skill film story` — the film before its material: a rough film you
   can look at first, then the capture it asks for
+- `skill film craft` — how films people liked were shot: getting from one
+  scene to the next, the camera, the product on screen, words, numbers,
+  maps, openings, endings, rhythm — the moves, measured, and how to build them
 - `skill film material` — material from the real product: one part shown
   three ways, saved screens, recordings, `shoot`, `components.json`,
   `kit/media.js` (`lift`, `isolate`, `seam`, `clipEvents`, `readValues`),

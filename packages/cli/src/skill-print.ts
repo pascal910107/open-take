@@ -12,6 +12,7 @@ import type { SkillBundle } from "./init";
 /** The film guide's topics, in the order `skill film --all` prints them. */
 export const FILM_TOPICS = [
   "story",
+  "craft",
   "material",
   "page",
   "cutting",
@@ -114,5 +115,7 @@ export function skillPrint(bundle: SkillBundle, dir: string, req: SkillPrintRequ
     return `case: ${abs(`${CASES_DIR}/${name}.md`)} · index: skill cases\n\n${resource(bundle, `${CASES_DIR}/${name}.md`)}`;
   }
 
-  throw new Error("skill: expected motion, film [<topic> | --all], cases [<name>] or install [--force]");
+  throw new Error(
+    "skill: expected motion, film [<topic> | --all], cases [<name>] or install [--force]",
+  );
 }

@@ -15,8 +15,10 @@
 //     gathering into one place;
 //   - contact: a button that sinks and comes back, a hit that kicks;
 //   - numbers and parts: a number counting in the product's own format, a
-//     part's pieces arriving one after another (assemble, which also writes
-//     its numbers onto elements when it is given elements — from t alone).
+//     line of text scrambling into place, digits rolling like an odometer or
+//     folding over like a split-flap board, a part's pieces arriving one
+//     after another (assemble, which also writes its numbers onto elements
+//     when it is given elements — from t alone).
 //
 // Every default below says where it comes from; none of them is a style.
 // Change any of them per call, or write the move yourself.
@@ -855,6 +857,167 @@ export function count(t, start, from, to, opts = {}) {
   const k = 10 ** f.decimals;
   const value = Math.round((a.value + (b.value - a.value) * p) * k) / k;
   return { text: writeNumber(value, f), value, p };
+}
+
+// --- a line, a figure, landing -----------------------------------------------
+
+const GLYPHS = "ABCDEFGHJKLMNPQRSTUVWXYZ0123456789#$%&*+?<>/";
+
+/** a seeded integer in [0, n) for (a, b, seed): the same every render */
+/** @param {number} a @param {number} b @param {number} seed @param {number} n */
+function pick(a, b, seed, n) {
+  let h = Math.imul(a ^ 0x9e3779b9, 0x85ebca6b) ^ Math.imul(b + 0x632be5ab, 0xc2b2ae35) ^ seed;
+  h ^= h >>> 15;
+  h = Math.imul(h, 0x2c1b3c6d);
+  h ^= h >>> 12;
+  return (h >>> 0) % n;
+}
+
+/**
+ * A line resolving out of random glyphs: each character cycles through
+ * `glyphs` until its lock time, then holds — left to right (or `from:
+ * "right"`), `each` s apart, the first after `lead` s. The glyph shown
+ * changes `rate` times a second and is seeded by the character and that
+ * step, so any frame renders the same. Spaces stay spaces; characters
+ * outside the glyph set's script (Chinese, say) cycle through `glyphs` too
+ * unless `keep` says which to leave. Defaults from films measured: the first
+ * locks after 0.2 s, then one every 0.05 s, glyphs changing 30 times a second.
+ *
+ *   el.textContent = scramble(t, 3, "NT$990").text;
+ * @param {number} t
+ * @param {number} start
+ * @param {string} text what it lands on
+ * @param {{ each?: number, lead?: number, rate?: number, glyphs?: string, seed?: number,
+ *   from?: "left" | "right", keep?: RegExp }} [opts]
+ * @returns {{ text: string, locked: number, done: boolean }}
+ */
+export function scramble(t, start, text, opts = {}) {
+  const { each = 0.05, lead = 0.2, rate = 30, glyphs = GLYPHS, seed = 1, from = "left" } = opts;
+  const keep = opts.keep ?? /\s/;
+  const chars = Array.from(text);
+  const n = chars.length;
+  if (t < start) return { text: "", locked: 0, done: false };
+  const step = Math.floor((t - start) * rate);
+  let locked = 0;
+  const out = chars.map((c, i) => {
+    const k = from === "right" ? n - 1 - i : i;
+    if (keep.test(c) || t >= start + lead + k * each) {
+      locked++;
+      return c;
+    }
+    return glyphs[pick(i, step, seed, glyphs.length)];
+  });
+  return { text: out.join(""), locked, done: locked === n };
+}
+
+/** an ease-out that runs past the end by `overshoot` of the travel and comes
+ *  back (the "back" ease, its constant solved for the overshoot asked): a
+ *  roll that slows into place, unlike a spring step, which is most of the
+ *  way there in its first fifth */
+/** @param {number} overshoot */
+function backOut(overshoot) {
+  const f = (/** @type {number} */ c, /** @type {number} */ p) =>
+    1 + (c + 1) * (p - 1) ** 3 + c * (p - 1) ** 2;
+  // the peak of f is at p = 1 − 2c / (3(c + 1)); bisect c for the overshoot
+  const peak = (/** @type {number} */ c) => f(c, 1 - (2 * c) / (3 * (c + 1))) - 1;
+  let lo = 0;
+  let hi = 10;
+  if (!(overshoot > 0)) return (/** @type {number} */ p) => 1 - (1 - clamp01(p)) ** 3;
+  for (let i = 0; i < 40; i++) {
+    const mid = (lo + hi) / 2;
+    if (peak(mid) < overshoot) lo = mid;
+    else hi = mid;
+  }
+  const c = (lo + hi) / 2;
+  return (/** @type {number} */ p) => (p <= 0 ? 0 : p >= 1 ? 1 : f(c, p));
+}
+
+/**
+ * Digits rolling into place like an odometer: each digit column spins from
+ * its old digit to its new one (going round `laps` extra times), the
+ * columns landing left to right `each` s apart, each over `dur` s, with a
+ * small overshoot. A column's `pos` is how far down its strip of digits it
+ * is (in digit heights; 0–9 then 0 again …): translate a strip of
+ * "0123456789" stacked `laps + 2` times by −pos em. `blur` is its speed in
+ * digit heights a second, for a vertical motion blur. Non-digits (",", "$")
+ * come back as fixed columns. The format of `to` is kept: "1,240" lands as
+ * "1,240". From films measured: columns 0.15 s apart, ≈5 % overshoot.
+ * @param {number} t
+ * @param {number} start
+ * @param {string | number} to
+ * @param {{ from?: string | number, each?: number, dur?: number, laps?: number, overshoot?: number,
+ *   order?: "left" | "right" }} [opts]
+ * @returns {{ columns: { char: string, digit: boolean, pos: number, value: number, speed: number }[], text: string, done: boolean }}
+ */
+export function odometer(t, start, to, opts = {}) {
+  const { each = 0.15, dur = 0.6, laps = 1, overshoot = 0.05, order = "left" } = opts;
+  const target = String(to);
+  const fromStr = opts.from == null ? "" : String(opts.from);
+  const digitsTo = Array.from(target).filter((c) => /\d/.test(c)).length;
+  // the old value's digits, right-aligned against the new ones
+  const fromDigits = Array.from(fromStr).filter((c) => /\d/.test(c));
+  const pad = Array(Math.max(0, digitsTo - fromDigits.length)).fill("0");
+  const old = [...pad, ...fromDigits].slice(-digitsTo || 0);
+  const ease = backOut(overshoot);
+  let d = -1;
+  const chars = Array.from(target);
+  const columns = chars.map((c) => {
+    if (!/\d/.test(c)) return { char: c, digit: false, pos: 0, value: 0, speed: 0 };
+    d++;
+    const k = order === "left" ? d : digitsTo - 1 - d;
+    const a = Number(old[d] ?? 0);
+    const b = Number(c);
+    const span = ((b - a + 10) % 10) + laps * 10;
+    const t0 = start + k * each;
+    const p = dur > 0 ? ease(clamp01((t - t0) / dur)) : t >= t0 ? 1 : 0;
+    const h = 1 / 240;
+    const p2 = dur > 0 ? ease(clamp01((t + h - t0) / dur)) : p;
+    const pos = a + span * p;
+    return {
+      char: c,
+      digit: true,
+      pos,
+      value: ((Math.round(pos) % 10) + 10) % 10,
+      speed: (span * (p2 - p)) / h,
+    };
+  });
+  const text = columns.map((c) => (c.digit ? String(c.value) : c.char)).join("");
+  return { columns, text, done: t >= start + Math.max(0, digitsTo - 1) * each + dur };
+}
+
+/**
+ * A split-flap board turning from one value to the next: per character
+ * tile, the old character's top half folds down (`top` 1 → 0, a scaleY
+ * about the tile's middle) in the first half of `dur`, then the new
+ * character's bottom half folds open (`bottom` 0 → 1). Draw each tile as
+ * four halves: the new top behind, the old bottom behind, then the folding
+ * old top and new bottom. Tiles turn `each` s apart, left to right; the
+ * shorter string is padded with spaces on the left. From a film's board:
+ * 0.26 s a tile, 0.2 s apart.
+ * @param {number} t
+ * @param {number} start
+ * @param {string | number} from
+ * @param {string | number} to
+ * @param {{ each?: number, dur?: number }} [opts]
+ * @returns {{ tiles: { old: string, now: string, top: number, bottom: number, p: number }[], done: boolean }}
+ */
+export function flap(t, start, from, to, opts = {}) {
+  const { each = 0.2, dur = 0.26 } = opts;
+  const a = Array.from(String(from));
+  const b = Array.from(String(to));
+  const n = Math.max(a.length, b.length);
+  while (a.length < n) a.unshift(" ");
+  while (b.length < n) b.unshift(" ");
+  const tiles = b.map((now, i) => {
+    const old = a[i];
+    if (old === now) return { old, now, top: 0, bottom: 1, p: 1 };
+    const p = dur > 0 ? clamp01((t - (start + i * each)) / dur) : t >= start + i * each ? 1 : 0;
+    // gravity on the fold: it leaves slowly and slaps down
+    const top = p < 0.5 ? 1 - easeIn(p / 0.5) : 0;
+    const bottom = p < 0.5 ? 0 : easeOut((p - 0.5) / 0.5);
+    return { old, now, top, bottom, p };
+  });
+  return { tiles, done: tiles.every((x) => x.p >= 1) };
 }
 
 // Parts arrive 0.06 s apart by default: ≈ 4 frames at 60 fps, so each one is

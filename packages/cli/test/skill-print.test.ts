@@ -47,7 +47,7 @@ test("each film topic prints on its own, under 24 KB, with its path", async () =
     assert.match(text, /\n## /);
   }
   assert.equal(await print(["film", "MATERIAL"]), await print(["film", "material"]));
-  await assert.rejects(print(["film", "nope"]), /no topic "nope" — topics: story, material, page/);
+  await assert.rejects(print(["film", "nope"]), /no topic "nope" — topics: story, craft, material, page/);
 });
 
 test("skill film --all is the core and every topic, material before the plumbing", async () => {

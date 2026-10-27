@@ -96,7 +96,7 @@ export type GalleryRow = {
 
 export type GalleryEntry = {
   name: string;
-  group: "motion" | "camera" | "cut";
+  group: "motion" | "camera" | "cut" | "draw" | "map";
   /** the call, as the film writes it */
   signature: string;
   /** where its defaults come from */
@@ -140,7 +140,14 @@ export type FilmGalleryResult = {
 
 // biome-ignore lint/suspicious/noExplicitAny: the kit is the film's own JavaScript, untyped here
 type Mod = Record<string, any>;
-type Kit = { dir: string; motion: Mod; camera: Mod; cut: Mod | null };
+type Kit = {
+  dir: string;
+  motion: Mod;
+  camera: Mod;
+  cut: Mod | null;
+  draw: Mod | null;
+  map: Mod | null;
+};
 
 /** the kit folder a --kit names: a film's kit/, or a kit folder itself */
 export function galleryKitDir(given?: string): string {
@@ -168,6 +175,8 @@ async function loadKit(dir: string): Promise<Kit> {
     motion: (await load("motion.js")) ?? {},
     camera: (await load("camera.js")) ?? {},
     cut: await load("cut.js"),
+    draw: await load("draw.js"),
+    map: await load("map.js"),
   };
 }
 
@@ -856,6 +865,97 @@ function blocks(kit: Kit, mat: GalleryMaterial, img: string, beats?: unknown): B
     speedOver: 0.25,
   });
 
+  // a line, a figure, landing
+  const figure = "NT$1,290";
+  add({
+    name: "scramble",
+    group: "motion",
+    signature:
+      "scramble(t, start, text, { each, lead, rate, glyphs, seed, from, keep }) → { text, locked, done }",
+    note: "the first character locks after 0.2 s, then one every 0.05 s, left to right; glyphs change 30 times a second, seeded",
+    needs: ["motion.scramble"],
+    t0: 0,
+    t1: Math.max(0.6, 0.2 + Array.from(mat.text).length * 0.05 * 1.15),
+    view: "subject",
+    rows: [
+      { label: "default", o: {} },
+      { label: 'from: "right"', o: { from: "right" } },
+      { label: "each: 0.02, lead: 0.1", o: { each: 0.02, lead: 0.1 } },
+      { label: "rate: 12", o: { rate: 12 } },
+    ],
+    draw: (t, r) => typed(M.scramble(t, 0, mat.text, r.o).text),
+    value: (t, r) => M.scramble(t, 0, mat.text, r.o).locked,
+    valueLabel: "characters locked",
+    speedOver: 0.25,
+  });
+  const strip = (pos: number, h: number) =>
+    `<span style="display:inline-block;height:${h}px;overflow:hidden;vertical-align:top"><span style="display:block;transform:translateY(${n3(-(pos % 10) * h)}px)">${"01234567890"
+      .split("")
+      .map((d) => `<span style="display:block;height:${h}px">${d}</span>`)
+      .join("")}</span></span>`;
+  const rolled = (cols: { char: string; digit: boolean; pos: number }[]) =>
+    dim +
+    `<div class="txt" style="left:${textBox.x}px;top:${textBox.y}px;width:${textBox.width}px;height:${textBox.height}px;font-size:${fs}px;line-height:${textBox.height}px;padding-left:${fs * 0.5}px">${cols.map((c) => (c.digit ? strip(c.pos, textBox.height) : esc(c.char))).join("")}</div>`;
+  add({
+    name: "odometer",
+    group: "motion",
+    signature:
+      "odometer(t, start, to, { from, each, dur, laps, overshoot, order }) → { columns: [{ pos, speed }], text, done }",
+    note: `${figure}: columns land left to right 0.15 s apart, each rolling 0.6 s with one extra lap and ≈ 5 % past its digit`,
+    needs: ["motion.odometer"],
+    t0: 0,
+    t1: 1.3,
+    view: "subject",
+    rows: [
+      { label: "default", o: {} },
+      { label: 'from: "NT$990"', o: { from: "NT$990" } },
+      { label: 'order: "right", laps: 0', o: { order: "right", laps: 0 } },
+      { label: "each: 0, overshoot: 0", o: { each: 0, overshoot: 0 } },
+    ],
+    draw: (t, r) => rolled(M.odometer(t, 0, figure, r.o).columns),
+    value: (t, r) =>
+      M.odometer(t, 0, figure, r.o).columns.filter((c: { digit: boolean }) => c.digit)[0]?.pos ?? 0,
+    valueLabel: "first digit column's roll (digits)",
+  });
+  const tile = (o: string, nw: string, top: number, bottom: number) => {
+    const half = (ch: string, part: "top" | "bottom", sy: number) =>
+      `<span style="position:absolute;left:0;right:0;${part}:0;height:50%;overflow:hidden;background:#1f1f1d;transform-origin:${part === "top" ? "50% 100%" : "50% 0"};transform:scaleY(${n3(sy)})"><span style="position:absolute;left:0;right:0;${part === "top" ? "top:0" : "bottom:0"};height:${textBox.height}px;line-height:${textBox.height}px;text-align:center;color:#fff">${esc(ch)}</span></span>`;
+    return `<span style="position:relative;display:inline-block;width:${fs * 0.72}px;height:${textBox.height}px;margin-right:${fs * 0.06}px">${half(nw, "top", 1)}${half(o, "bottom", 1)}${top > 0 ? half(o, "top", top) : ""}${bottom > 0 ? half(nw, "bottom", bottom) : ""}<span style="position:absolute;left:0;right:0;top:50%;height:2px;background:#000"></span></span>`;
+  };
+  add({
+    name: "flap",
+    group: "motion",
+    signature:
+      "flap(t, start, from, to, { each, dur }) → { tiles: [{ old, now, top, bottom, p }], done }",
+    note: "NT$990 → NT$1,290: the old top half folds down, then the new bottom half; 0.26 s a tile, 0.2 s apart",
+    needs: ["motion.flap"],
+    t0: 0,
+    t1: 1.8,
+    view: "subject",
+    rows: [
+      { label: "default", o: {} },
+      { label: "each: 0.08", o: { each: 0.08 } },
+      { label: "each: 0, dur: 0.4", o: { each: 0, dur: 0.4 } },
+      { label: "dur: 0.6", o: { dur: 0.6 } },
+    ],
+    draw: (t, r) =>
+      dim +
+      `<div style="position:absolute;left:${textBox.x}px;top:${textBox.y}px;font:600 ${fs}px system-ui,sans-serif;white-space:nowrap">${M.flap(
+        t,
+        0,
+        "NT$990",
+        figure,
+        r.o,
+      )
+        .tiles.map((x: { old: string; now: string; top: number; bottom: number }) =>
+          tile(x.old, x.now, x.top, x.bottom),
+        )
+        .join("")}</div>`,
+    value: (t, r) =>
+      M.flap(t, 0, "NT$990", figure, r.o).tiles.filter((x: { p: number }) => x.p >= 1).length,
+    valueLabel: "tiles turned",
+  });
+
   // handoffs: one picture becomes the next
   const subjRect = { x: S.x, y: S.y, w: S.width, h: S.height, r: Math.min(S.height / 2, 12) };
   const morphRows: Row[] = [
@@ -1486,6 +1586,217 @@ function blocks(kit: Kit, mat: GalleryMaterial, img: string, beats?: unknown): B
     }
   }
 
+  // kit/draw.js: marks and light on the picture
+  const svg = (inner: string) =>
+    `<svg style="position:absolute;left:0;top:0;overflow:visible" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${inner}</svg>`;
+  const sw = Math.max(3, Math.min(W, H) * 0.006);
+  const D = kit.draw;
+  if (D && typeof D.stroke === "function") {
+    const mark = (d: string, s: { dasharray: string; dashoffset: number; visible: boolean }) =>
+      s.visible
+        ? `<path d="${d}" pathLength="1" fill="none" stroke="#e8462a" stroke-width="${n3(sw)}" stroke-linecap="round" stroke-linejoin="round" style="stroke-dasharray:${s.dasharray};stroke-dashoffset:${s.dashoffset}"/>`
+        : "";
+    const far = {
+      x: S.x - Math.max(S.width, W * 0.12),
+      y: S.y + S.height + Math.max(S.height * 2, H * 0.12),
+    };
+    add({
+      name: "draw.stroke",
+      group: "draw",
+      signature:
+        "scribble(box, { kind, pad, turns, wobble, seed, from }) → d · stroke(t, start, { dur, off, offDur }) → { dasharray, dashoffset }",
+      note: "a pen's mark round the subject: drawn on in 0.4 s, held, drawn off from its start in 0.3 s (pathLength 1)",
+      needs: ["draw.scribble", "draw.stroke"],
+      t0: 0,
+      t1: 1.4,
+      view: "full",
+      rows: [
+        { label: 'kind: "circle", off: 1', o: { kind: "circle", off: 1 } },
+        { label: 'kind: "circle", turns: 2.1', o: { kind: "circle", turns: 2.1 } },
+        { label: 'kind: "underline"', o: { kind: "underline" } },
+        { label: 'kind: "arrow"', o: { kind: "arrow", from: far } },
+      ],
+      draw: (t, r) => {
+        const { off, ...o } = r.o as { off?: number };
+        return pic() + svg(mark(D.scribble(S, o), D.stroke(t, 0, { off })));
+      },
+      value: (t, r) => D.stroke(t, 0, { off: (r.o as { off?: number }).off }).p,
+      valueLabel: "drawn (0 → 1 on, → 2 off)",
+    });
+    add({
+      name: "draw.spotlight",
+      group: "draw",
+      signature:
+        "spotlight(t, start, box, { amount, in, release, out, color, spread }) → { background, k }",
+      note: "the rest dimmed round the subject: 55 % dark at the edge, on in 0.3 s, off in 0.5 s from `release`",
+      needs: ["draw.spotlight"],
+      t0: 0,
+      t1: 1.6,
+      view: "full",
+      rows: [
+        { label: "release: 1", o: { release: 1 } },
+        { label: "amount: 0.8", o: { amount: 0.8 } },
+        { label: "spread: 1.1", o: { spread: 1.1 } },
+        { label: "in: 0.8", o: { in: 0.8 } },
+      ],
+      draw: (t, r) =>
+        pic() +
+        `<div style="position:absolute;left:0;top:0;width:${W}px;height:${H}px;background:${D.spotlight(t, 0, S, r.o).background}"></div>`,
+      value: (t, r) => D.spotlight(t, 0, S, r.o).k,
+      valueLabel: "on (0 → 1)",
+    });
+    const before = pic("filter:grayscale(1) contrast(0.7) brightness(1.15)");
+    add({
+      name: "draw.sweep",
+      group: "draw",
+      signature: "sweep(t, start, end, frame, { dir, ease }) → { clip, at, p, moving }",
+      note: "a line sweeping the after over the before on the same picture, 0.5 s (here: before = the picture in grey)",
+      needs: ["draw.sweep"],
+      t0: 0,
+      t1: 0.7,
+      view: "full",
+      rows: [
+        { label: "default", o: {} },
+        { label: 'dir: "left"', o: { dir: "left" } },
+        { label: 'dir: "down"', o: { dir: "down" } },
+        { label: "ease: linear", o: { ease: (p: number) => Math.max(0, Math.min(1, p)) } },
+      ],
+      draw: (t, r) => {
+        const w = D.sweep(t, 0, 0.6, { width: W, height: H }, r.o);
+        const dir = (r.o as { dir?: string }).dir ?? "right";
+        const v = dir === "right" || dir === "left";
+        const line = w.moving
+          ? `<div style="position:absolute;${v ? `left:${n3(w.at - sw / 2)}px;top:0;width:${n3(sw)}px;height:${H}px` : `top:${n3(w.at - sw / 2)}px;left:0;height:${n3(sw)}px;width:${W}px`};background:#fff;box-shadow:0 0 ${n3(sw * 5)}px #fff"></div>`
+          : "";
+        return `${before}${pic(`clip-path:${w.clip}`)}${line}`;
+      },
+      value: (t, r) => D.sweep(t, 0, 0.6, { width: W, height: H }, r.o).p,
+      valueLabel: "swept (0 → 1)",
+    });
+    add({
+      name: "draw.lightSweep",
+      group: "draw",
+      signature:
+        "lightSweep(t, start, end, frame, { angle, soft, glint, dim, ease }) → { mask, glint, dim }",
+      note: "a band of light leaving the picture lit: 115°, the lit part 700 px behind the front (scaled to the picture here), unlit at 7 %, 1.3 s",
+      needs: ["draw.lightSweep"],
+      t0: 0,
+      t1: 1.5,
+      view: "full",
+      rows: [
+        { label: "soft: ⅓ of the width", o: { soft: W / 3 } },
+        { label: "angle: 90", o: { angle: 90, soft: W / 3 } },
+        { label: "glint: 0", o: { glint: 0, soft: W / 3 } },
+        { label: "dim: 0.3", o: { dim: 0.3, soft: W / 3 } },
+      ],
+      draw: (t, r) => {
+        const l = D.lightSweep(t, 0, 1.3, { width: W, height: H }, r.o);
+        return `${pic(`filter:brightness(${l.dim})`)}${pic(`-webkit-mask-image:${l.mask};mask-image:${l.mask}`)}<div style="position:absolute;left:0;top:0;width:${W}px;height:${H}px;background:${l.glint};mix-blend-mode:screen"></div>`;
+      },
+      value: (t, r) => D.lightSweep(t, 0, 1.3, { width: W, height: H }, r.o).p,
+      valueLabel: "lit (0 → 1)",
+    });
+    add({
+      name: "draw.flash",
+      group: "draw",
+      signature: "flash(t, at, { attack, decay, peak }) → { opacity }",
+      note: "punctuation on a beat: up in 40 ms, gone over 0.3 s, peaking at 0.55",
+      needs: ["draw.flash"],
+      t0: -0.1,
+      t1: 0.5,
+      frames: [-0.05, -0.02, 0, 0.06, 0.15, 0.3],
+      view: "full",
+      rows: [
+        { label: "default", o: {} },
+        { label: "peak: 1", o: { peak: 1 } },
+        { label: "decay: 0.12", o: { decay: 0.12 } },
+        { label: "attack: 0", o: { attack: 0 } },
+      ],
+      draw: (t, r) =>
+        `${pic()}<div style="position:absolute;left:0;top:0;width:${W}px;height:${H}px;background:#fff;opacity:${D.flash(t, 0, r.o).opacity}"></div>`,
+      value: (t, r) => D.flash(t, 0, r.o).opacity,
+      valueLabel: "opacity",
+    });
+  }
+
+  // kit/map.js: places switching on, a line travelling between them
+  const P = kit.map;
+  if (P && typeof P.switchOn === "function") {
+    // stand-in places scattered over the picture, seeded: the gallery has no map of the film's
+    const spots: { x: number; y: number }[] = [];
+    for (let i = 0; i < 24; i++) {
+      const a = Math.sin(i * 12.9898 + 78.233) * 43758.5453;
+      const b = Math.sin(i * 39.3468 + 11.135) * 24634.6345;
+      spots.push({
+        x: W * (0.08 + 0.84 * (a - Math.floor(a))),
+        y: H * (0.1 + 0.8 * (b - Math.floor(b))),
+      });
+    }
+    spots.sort((p, q) => Math.hypot(p.x - sc.x, p.y - sc.y) - Math.hypot(q.x - sc.x, q.y - sc.y));
+    const dot = Math.max(6, Math.min(W, H) * 0.014);
+    add({
+      name: "map.switchOn",
+      group: "map",
+      signature:
+        "switchOn(t, start, n, { over, accel, fade, flashFor }) → { items: [{ on, flash, at }], lit, done }",
+      note: "24 stand-in places by distance from the subject, the picture dimmed: each fades on in 0.22 s with a flash, the gaps shrinking (accel 1.6)",
+      needs: ["map.switchOn"],
+      t0: 0,
+      t1: 2.2,
+      view: "full",
+      rows: [
+        { label: "over: 2", o: { over: 2 } },
+        { label: "over: 2, accel: 1", o: { over: 2, accel: 1 } },
+        { label: "over: 2, accel: 3", o: { over: 2, accel: 3 } },
+        { label: "over: 1, flashFor: 0", o: { over: 1, flashFor: 0 } },
+      ],
+      draw: (t, r) => {
+        const s = P.switchOn(t, 0, spots.length, r.o);
+        return (
+          pic("filter:brightness(0.25) saturate(0.4)") +
+          s.items
+            .map((it: { on: number; flash: number }, i: number) =>
+              it.on > 0
+                ? `<div style="position:absolute;left:${n3(spots[i]!.x - dot)}px;top:${n3(spots[i]!.y - dot)}px;width:${n3(dot * 2)}px;height:${n3(dot * 2)}px;border-radius:50%;background:rgb(${n3(255)},${n3(170 + 85 * it.flash)},${n3(60 + 195 * it.flash)});opacity:${n3(it.on)};box-shadow:0 0 ${n3(dot * (1 + 3 * it.flash))}px rgba(255,200,120,0.9)"></div>`
+                : "",
+            )
+            .join("")
+        );
+      },
+      value: (t, r) => P.switchOn(t, 0, spots.length, r.o).lit,
+      valueLabel: "places fully on",
+    });
+    const route = [spots[spots.length - 1]!, { x: sc.x, y: spots[spots.length - 1]!.y }, sc];
+    add({
+      name: "map.along",
+      group: "map",
+      signature:
+        "along(t, start, end, points, { ease }) → { tip, angle, length, total, p } · pathOf(points)",
+      note: "a line from a far place to the subject, drawn ahead of its tip, a figure rolling with it (count at p)",
+      needs: ["map.along", "map.pathOf"],
+      t0: 0,
+      t1: 1.4,
+      view: "full",
+      rows: [
+        { label: "default", o: {} },
+        { label: "ease: linear", o: { ease: (p: number) => Math.max(0, Math.min(1, p)) } },
+        { label: "ease: easeOut", o: { ease: M.easeOut } },
+        { label: "ease: easeIn", o: { ease: M.easeIn } },
+      ],
+      draw: (t, r) => {
+        const a = P.along(t, 0, 1.2, route, r.o);
+        const m = Math.round(420 * a.p);
+        return (
+          pic("filter:brightness(0.6)") +
+          svg(
+            `<path d="${P.pathOf(route)}" pathLength="1" fill="none" stroke="#fff" stroke-width="${n3(sw)}" stroke-linecap="round" style="stroke-dasharray:1 1;stroke-dashoffset:${n3(1 - a.p)}"/><circle cx="${n3(a.tip.x)}" cy="${n3(a.tip.y)}" r="${n3(dot)}" fill="#e8462a"/><text x="${n3(a.tip.x + dot * 2)}" y="${n3(a.tip.y - dot * 2)}" font-size="${n3(dot * 4)}" font-family="system-ui" font-weight="700" fill="#fff">${m} m</text>`,
+          )
+        );
+      },
+      value: (t, r) => P.along(t, 0, 1.2, route, r.o).length,
+      valueLabel: "drawn (px)",
+    });
+  }
   return list;
 }
 
@@ -1840,7 +2151,7 @@ function chosen(all: Block[], names?: string[]): Block[] {
     // "cut" with nothing drawn for it is said in the gallery itself (see filmGallery)
     if (!hit.length && n !== "cut")
       throw new Error(
-        `film gallery: no block named ${n} — there are: ${all.map((b) => b.name).join(", ")} (or a group: motion, camera${all.some((b) => b.group === "cut") ? ", cut" : ""})`,
+        `film gallery: no block named ${n} — there are: ${all.map((b) => b.name).join(", ")} (or a group: ${[...new Set(all.map((b) => b.group))].join(", ")})`,
       );
     for (const b of hit) out.add(b);
   }
@@ -1918,6 +2229,8 @@ export async function filmGallery(opts: FilmGalleryOptions): Promise<FilmGallery
         motion: kit.motion,
         camera: kit.camera,
         cut: kit.cut ?? {},
+        draw: kit.draw ?? {},
+        map: kit.map ?? {},
       };
       for (const b of picked) {
         const entry: GalleryEntry = {
@@ -1938,8 +2251,7 @@ export async function filmGallery(opts: FilmGalleryOptions): Promise<FilmGallery
           entry.error = `the kit has no ${missing.join(", ")}`;
           continue;
         }
-        const focus =
-          b.name === "type" || b.name === "untype" ? textFocus(material) : material.subject;
+        const focus = TEXT_BLOCKS.has(b.name) ? textFocus(material) : material.subject;
         const page = blockPage(b, material, focus);
         entry.rows = page.rows;
         const failed = page.rows.filter((r) => r.error);
@@ -1974,6 +2286,9 @@ export async function filmGallery(opts: FilmGalleryOptions): Promise<FilmGallery
 }
 
 /** where type/untype's text box sits (the same sum as in blocks()) */
+/** the blocks drawn on a line of text, framed round it rather than the subject */
+const TEXT_BLOCKS = new Set(["type", "untype", "scramble", "odometer", "flap"]);
+
 function textFocus(mat: GalleryMaterial): GalleryBox {
   const S = mat.subject;
   const fs = Math.max(18, Math.min(64, S.height * 0.5));
