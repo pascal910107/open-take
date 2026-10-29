@@ -372,6 +372,8 @@ test("listen's text: nothing about earlier films, and that timbre is not measure
     onsets: { how: "not detected", times: [], perS: 0 },
     tempo: { how: "not detected", value: null },
     sections: { how: "estimated", list: [] },
+    changes: { how: "not detected", list: [] },
+    tuning: { reference: null, registers: [] },
     bars: { how: "not measured", value: null },
     silences: { how: "measured", list: [] },
     dips: { how: "measured", list: [] },

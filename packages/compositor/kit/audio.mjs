@@ -18,7 +18,11 @@
 //     cutoff and was found by ear, as two pops;
 //   - `diagnose`, which checks one stem at a time for what a mix hides: NaN,
 //     clipping, clicks (a note cut short, a release from the wrong level,
-//     saws started in phase), DC.
+//     saws started in phase), DC;
+//   - `osc`, a saw, square or pulse that does not alias. Written as
+//     `2 * (phase % 1) - 1` or `sin(x) > 0 ? 1 : -1`, as films wrote theirs,
+//     the harmonics above 24 kHz fold back down as tones that are not in the
+//     note — the buzz and grit under a bass or a chord stab.
 //
 // Sound is Float32Array channels, −1..1 full scale, 48 kHz unless you say
 // otherwise. A bus is a buffer you mix into. Times are seconds.
@@ -125,6 +129,76 @@ export function rng(seed) {
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
+}
+
+// ---------------------------------------------------------------- sources
+
+/** the polyBLEP correction for a step at phase 0, `dt` the phase advanced a sample
+ *  @param {number} t phase 0..1 @param {number} dt */
+function blep(t, dt) {
+  if (t < dt) {
+    const u = t / dt;
+    return u + u - u * u - 1;
+  }
+  if (t > 1 - dt) {
+    const u = (t - 1) / dt;
+    return u * u + u + u + 1;
+  }
+  return 0;
+}
+
+/**
+ * One oscillator, mono: "sine", "triangle", or a "saw", "square" or "pulse"
+ * whose jumps are smoothed by polyBLEP, so its harmonics stop at Nyquist
+ * instead of folding back as tones that are not in the note. `freq` is Hz,
+ * or a function of the note's time for a glide or vibrato; the phase is
+ * carried sample to sample, so a moving pitch stays continuous and a fixed
+ * one stays exactly in tune. Start copies that sound together (a detuned
+ * pair, a chord of saws) at different `phase`s: saws started together make a
+ * click as they line up.
+ *
+ *   const n = osc("saw", 110, 0.4);                  // A2, 0.4 s (Hz: 440 * 2 ** ((midi - 69) / 12))
+ *   const glide = osc("square", (t) => 220 * 2 ** (t / 0.5), 0.5, { width: 0.3 });
+ *
+ * @param {"sine" | "triangle" | "saw" | "square" | "pulse"} wave
+ * @param {number | ((t: number) => number)} freq Hz, or Hz at t s into the note
+ * @param {number} seconds
+ * @param {{ width?: number, phase?: number, sampleRate?: number }} [o] width: the pulse's high part, 0..1 (a square is 0.5); phase: where in its cycle it starts, 0..1
+ * @returns {Float32Array}
+ */
+export function osc(wave, freq, seconds, { width = 0.5, phase = 0, sampleRate = RATE } = {}) {
+  if (!["sine", "triangle", "saw", "square", "pulse"].includes(wave))
+    throw new Error(`osc: wave is sine, triangle, saw, square or pulse (got ${wave})`);
+  if (!(seconds >= 0) || !Number.isFinite(seconds))
+    throw new Error(`osc: seconds must be a number ≥ 0 (got ${seconds})`);
+  if (!Number.isFinite(width) || !Number.isFinite(phase))
+    throw new Error(`osc: width and phase are numbers (got ${width}, ${phase})`);
+  const w = wave === "square" ? 0.5 : Math.min(0.99, Math.max(0.01, width));
+  const n = Math.round(seconds * sampleRate);
+  const out = new Float32Array(n);
+  const f = typeof freq === "function" ? freq : () => freq;
+  let ph = ((phase % 1) + 1) % 1;
+  for (let i = 0; i < n; i++) {
+    const hz = f(i / sampleRate);
+    if (!Number.isFinite(hz))
+      throw new Error(`osc: the frequency at ${i / sampleRate} s is not a number`);
+    const dt = Math.min(0.5, Math.abs(hz) / sampleRate);
+    let v;
+    if (wave === "sine") v = Math.sin(2 * Math.PI * ph);
+    else if (wave === "triangle") v = 1 - 4 * Math.abs(ph - 0.5);
+    else if (wave === "saw") v = 2 * ph - 1 - blep(ph, dt);
+    else {
+      v = ph < w ? 1 : -1;
+      v += blep(ph, dt);
+      v -= blep((ph + 1 - w) % 1, dt);
+      // a pulse narrower than a square sits off centre; take its mean out
+      v -= 2 * w - 1;
+    }
+    out[i] = v;
+    ph += hz / sampleRate;
+    ph -= Math.floor(ph);
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------- shaping
@@ -1242,6 +1316,8 @@ export function readEvents(path) {
  *
  *   gain: curveOf(ev, "camSpeed", (v) => 0.2 + v / 4000)            // split at the film's cuts
  *   gain: curveOf(ev, "camSpeed", { map: (v) => v / 4000, cuts: [] }) // straight across
+ *   // "picture.energy", when the render could read it: how much the picture changes into each frame (0..1)
+ *   gain: curveOf(ev, "picture.energy", { map: (e) => 0.5 + Math.min(0.5, e * 40), cuts: [] })
  *
  * @param {FilmEvents} ev
  * @param {string} name

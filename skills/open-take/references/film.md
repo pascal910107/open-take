@@ -333,10 +333,10 @@ only `time.js` and lists the rest; its length is a placeholder.
   how big a size reads on a phone, the product's colours by role.
 - `audio.mjs` — for the score's Node script: buffers and a mix, an envelope
   that releases from the level it reached (one that releases from the
-  sustain level clicks), filters that stop and name their track when they
-  blow up, a reverb, a sidechain, seeded numbers, a WAV writer; `normalize`
-  lands the mix on −16 LUFS with its true peak under −1 dBTP, measured as
-  BS.1770 measures it (films that guessed from peaks shipped at −12.2 and
+  sustain level clicks), `osc` (a saw or square that does not alias),
+  filters that stop and name their track when they blow up, a reverb, a
+  sidechain, seeded numbers, a WAV writer; `normalize` lands the mix on
+  −16 LUFS with its true peak under −1 dBTP, measured as BS.1770 measures it (films that guessed from peaks shipped at −12.2 and
   −17.8); `diagnose` checks each stem for NaN, clipping, clicks and DC. For
   sound that is not synthesized — a recording, the product's own sounds, a
   track — `load` decodes any file ffmpeg reads, `slice`/`fade`/`varispeed`

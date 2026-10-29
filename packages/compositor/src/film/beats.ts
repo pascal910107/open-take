@@ -88,7 +88,7 @@ export function spectrum(pcm: Float32Array, rate = LISTEN_RATE): Spectrum {
 }
 
 /** in-place radix-2 FFT of a fixed size */
-function makeFft(size: number): (re: Float64Array, im: Float64Array) => void {
+export function makeFft(size: number): (re: Float64Array, im: Float64Array) => void {
   const bits = Math.log2(size);
   const rev = new Uint32Array(size);
   for (let i = 0; i < size; i++) {

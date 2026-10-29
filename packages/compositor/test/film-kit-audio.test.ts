@@ -1030,3 +1030,62 @@ test("readEvents reads what `film render` writes, and says when a file is not th
   assert.throws(() => readEvents(bad), /not an events file/);
   assert.throws(() => readEvents(join(dir, "none.json")), /none\.json/);
 });
+
+test("osc: a saw or square without aliasing — its energy on the note's harmonics, in tune, a glide continuous", async () => {
+  const { osc } = await import("../kit/audio.mjs");
+  const { makeFft } = await import("../src/film/beats");
+  const SR = 48000;
+  const N = 65536;
+  /** the share of a sound's energy away from the harmonics of f (folded-back tones) */
+  const offHarmonic = (x: Float32Array, f: number) => {
+    const fft = makeFft(N);
+    const re = new Float64Array(N);
+    const im = new Float64Array(N);
+    for (let i = 0; i < Math.min(N, x.length); i++)
+      re[i] = x[i]! * (0.5 - 0.5 * Math.cos((2 * Math.PI * i) / Math.min(N, x.length)));
+    fft(re, im);
+    let on = 0;
+    let all = 0;
+    for (let k = 1; k < N / 2; k++) {
+      const e = re[k]! ** 2 + im[k]! ** 2;
+      all += e;
+      const hz = (k * SR) / N;
+      const h = Math.round(hz / f);
+      if (h >= 1 && Math.abs(hz - h * f) <= (4 * SR) / N) on += e;
+    }
+    return 1 - on / all;
+  };
+  const f = 587.33; // D5, a chord stab's top note
+  const naiveSquare = new Float32Array(SR).map((_, i) =>
+    Math.sin((2 * Math.PI * f * i) / SR) > 0 ? 1 : -1,
+  );
+  const naiveSaw = new Float32Array(SR).map((_, i) => 2 * (((f * i) / SR) % 1) - 1);
+  const sq = offHarmonic(osc("square", f, 1), f);
+  const saw = offHarmonic(osc("saw", f, 1), f);
+  const nsq = offHarmonic(naiveSquare, f);
+  const nsaw = offHarmonic(naiveSaw, f);
+  assert.ok(
+    sq < nsq / 10,
+    `square: ${(sq * 100).toFixed(3)}% off the harmonics, naive ${(nsq * 100).toFixed(3)}%`,
+  );
+  assert.ok(
+    saw < nsaw / 10,
+    `saw: ${(saw * 100).toFixed(3)}% off the harmonics, naive ${(nsaw * 100).toFixed(3)}%`,
+  );
+  // in tune: rising zero crossings a period apart
+  const x = osc("sine", 440, 1);
+  const ups: number[] = [];
+  for (let i = 1; i < x.length; i++)
+    if (x[i - 1]! < 0 && x[i]! >= 0) ups.push(i - x[i]! / (x[i]! - x[i - 1]!));
+  assert.ok(Math.abs((ups.at(-1)! - ups[0]!) / (ups.length - 1) - SR / 440) < 0.01);
+  // a glide has no jump from sample to sample beyond the wave's own
+  const g = osc("sine", (t) => 200 * 2 ** (t / 0.25), 0.5);
+  let jump = 0;
+  for (let i = 1; i < g.length; i++) jump = Math.max(jump, Math.abs(g[i]! - g[i - 1]!));
+  assert.ok(jump < (2 * Math.PI * 800) / SR + 1e-3, `largest step ${jump}`);
+  // a pulse is centred; phases differ where asked
+  const p = osc("pulse", 100, 1, { width: 0.2 });
+  assert.ok(Math.abs(p.reduce((a, v) => a + v, 0) / p.length) < 0.01);
+  assert.notEqual(osc("saw", 100, 0.01, { phase: 0.25 })[0], osc("saw", 100, 0.01)[0]);
+  assert.throws(() => osc("buzz" as never, 100, 1), /wave is sine/);
+});

@@ -64,7 +64,11 @@ tempo with its alternatives — and that grid as the page can have it,
 `grid({ bpm, offset })` in kit/cut.js (beat 0 is the first beat found, not
 necessarily a bar's first; where the tempo is not steady an even pulse
 departs from the beats, which `film beats` keeps in a file `grid()` takes) —
-sections, bars that repeat an earlier one
+sections, where several things in the sound change at once against the 3 s
+before (each band's hits, a sound coming in or going, the harmony, the
+level, the low pulse halving or doubling) and what led into it if anything,
+how much of each register's pitched sound sits within 15 cents of the
+piece's own tuning, bars that repeat an earlier one
 verbatim, silences, which events have no sound within 40 ms (next to how
 often chance would), and each cut's offset to the nearest onset. Under the
 loudness it draws how much the picture changes (the events file's

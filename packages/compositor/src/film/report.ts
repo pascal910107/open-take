@@ -28,7 +28,9 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { resolveFfmpeg, runTool } from "../ffmpeg";
+import { decodeMono } from "./beats";
 import { type BoundaryCarry, boundaryCarries, CARRY_FILL, carryChange } from "./carry";
+import { type SoundChange, soundChanges } from "./changes";
 import {
   halfSeconds,
   momentaryLoudness,
@@ -67,6 +69,7 @@ import {
   probeFilm,
   type TurnBack,
 } from "./render";
+import { type Tuning, tuning } from "./tuning";
 
 export type ReportJump = {
   t: number;
@@ -176,6 +179,11 @@ export type FilmReport = {
     note?: string;
     list: PictureAgainstSound["opposite"];
   };
+  /** the sound on its own: where several things in it change at once (the
+   *  sharpest first), and how in tune it is, by register — `film listen`'s readings */
+  sound?:
+    | { how: "estimated"; changes: SoundChange[] | null; tuning: Tuning }
+    | { how: "not measured"; note: string };
   /** wall time of the report, ms */
   ms: number;
 };
@@ -704,6 +712,8 @@ export async function filmReport(opts: FilmReportOptions): Promise<FilmReport> {
   const times: number[] = [];
   for (let k = 0; k * every < duration - 0.5 / fps; k++) times.push(round3(k * every));
   const ffmpeg = await resolveFfmpeg();
+  // the film's sound, decoded while the picture is read
+  const soundPcm = decodeMono(ffmpeg, opts.film).catch((e: Error) => e);
   const gh = Math.max(8, Math.round((PROBE_W * info.height) / info.width / 2) * 2);
   let pageNote: string | undefined;
   const [grey, pageRead] = await Promise.all([
@@ -897,6 +907,25 @@ export async function filmReport(opts: FilmReportOptions): Promise<FilmReport> {
       });
     seams = { how: "measured", ...(note ? { note } : {}), list, strip };
   }
+  // the sound on its own
+  let sound: FilmReport["sound"];
+  const pcm = await soundPcm;
+  if (pcm instanceof Error)
+    sound = {
+      how: "not measured",
+      // a render with no soundtrack has no audio stream to decode
+      note: /does not contain any stream|matches no streams|no sound/i.test(pcm.message)
+        ? "the film has no sound"
+        : (pcm.message.split("\n")[0] ?? ""),
+    };
+  else
+    sound = pcm.length
+      ? {
+          how: "estimated",
+          changes: soundChanges(pcm, { max: SOUND_CHANGES }),
+          tuning: tuning(pcm),
+        }
+      : { how: "not measured", note: "the film has no sound" };
   // the picture against the sound
   let against: FilmReport["against"];
   let picEnergy: ReturnType<typeof pictureEnergyOf> = null;
@@ -955,6 +984,7 @@ export async function filmReport(opts: FilmReportOptions): Promise<FilmReport> {
     slowText,
     seams,
     against,
+    sound,
     ms: Date.now() - start,
   };
 }
@@ -1335,6 +1365,31 @@ export function formatFilmReport(r: FilmReport, o: { probe: string }): string[] 
       }`,
     );
 
+  // the sound on its own
+  const so = r.sound;
+  if (so?.how === "not measured") L.push(`  sound: not measured — ${so.note}`);
+  else if (so) {
+    L.push(
+      `  sound, where several things change at once (against the 3 s before; sharpest first): ${
+        !so.changes
+          ? "too short to set 3 s either side of a moment against each other"
+          : so.changes.length
+            ? so.changes
+                .map(
+                  (c) =>
+                    `${fmt(c.t)} ${c.parts.join(", ")} — ${c.leadIn ?? "nothing leads into it"}`,
+                )
+                .join("; ")
+            : "nowhere stands out"
+      } (${so.changes ? "estimated" : "not measured"})`,
+    );
+    const reg = so.tuning.registers.filter((x) => x.frames >= 20);
+    if (so.tuning.reference != null && reg.length)
+      L.push(
+        `  sound, in tune: ${reg.map((x) => `${x.name} register ${Math.round(x.inTune * 100)}% of its pitched frames within 15 cents of the piece's tuning`).join(", ")} (estimated)`,
+      );
+  }
+
   L.push(
     `full report (text in pictures, camera, sound, beat sheet): ${o.probe} — measured in ${(r.ms / 1000).toFixed(1)} s; --no-report leaves this out`,
   );
@@ -1343,6 +1398,8 @@ export function formatFilmReport(r: FilmReport, o: { probe: string }): string[] 
 
 /** uses of parts listed at most, one line each */
 const PART_LINES = 8;
+/** the sound's sharpest changes listed at the end of a render */
+const SOUND_CHANGES = 3;
 /** boundaries listed at most, one line each */
 const BOUNDARY_LINES = 12;
 /** stretches where picture and sound run opposite, listed at most (the longest) */

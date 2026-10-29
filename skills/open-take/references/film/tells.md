@@ -188,3 +188,11 @@ result, a whoosh on every move — the picture's every change answered.
 
 **The same sign-off.** Drums drop out, one long chord, a bell on the logo,
 fade.
+
+**Notes between the notes.** A register whose pitched sound sits more than
+15 cents off the piece's own tuning for more than 30% of its time: a bass
+bent down through every note as a pun on the product's name, a bell built
+from ratios that are not the scale's, a glide on each note. Every note is
+written right and the whole still sounds out of tune. It came back in 21 of
+145 agent-made films (`film listen`, "Pitch"). Fine for a single gesture —
+a riser, a siren, a slide into the drop — not as the instrument.

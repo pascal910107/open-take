@@ -35,8 +35,10 @@ import {
   type Tempo,
   WIN,
 } from "./beats";
+import { formatSoundChanges, type SoundChange, soundChanges } from "./changes";
 import { fileEnergy } from "./probe";
 import { PICTURE_ENERGY } from "./render";
+import { formatTuning, type Tuning, tuning } from "./tuning";
 
 // the analysis lives in ./beats (shared with `film beats` and `film probe`);
 // what this module has always exported is still exported from here
@@ -404,6 +406,10 @@ export type FilmListen = {
   onsets: { how: How; times: number[]; perS: number };
   tempo: { how: How; value: Tempo | null };
   sections: { how: How; list: Section[] };
+  /** where several things in the sound change at once, and whether anything led into it */
+  changes: { how: How; list: SoundChange[] };
+  /** how in tune the pitched sound is, by register */
+  tuning: Tuning;
   bars: { how: How; value: BarRepeats | null; note?: string };
   silences: { how: How; list: { start: number; end: number }[] };
   dips: { how: How; list: { start: number; end: number; belowLu: number }[] };
@@ -621,6 +627,8 @@ export async function filmListen(opts: FilmListenOptions): Promise<{
     const onsets = pickOnsets(s, env, pcm).map(round3);
     const tempo = estimateTempo(s, env, onsets, duration);
     const sections = findSections(s, onsets, duration);
+    const changes = soundChanges(pcm);
+    const pitch = tuning(pcm);
     const bars = tempo && tempo.beats.length >= 8 ? repeatedBars(s, tempo.beats) : null;
 
     const events = (ev?.events ?? []).map((e) => ({
@@ -669,6 +677,11 @@ export async function filmListen(opts: FilmListenOptions): Promise<{
       },
       tempo: { how: tempo ? "estimated" : "not detected", value: tempo },
       sections: { how: "estimated", list: sections },
+      changes: {
+        how: !changes ? "not measured" : changes.length ? "estimated" : "not detected",
+        list: changes ?? [],
+      },
+      tuning: pitch,
       bars: bars
         ? { how: "estimated", value: bars }
         : { how: "not measured", value: null, note: "no beat grid to count bars on" },
@@ -1494,6 +1507,19 @@ export function formatFilmListen(l: FilmListen): string {
     L.push(
       `- ${i + 1}. ${fmtS(s.start)}–${fmtS(s.end)}: ${s.levelDb > -120 ? `level ${s.levelDb} dBFS, ${s.onsetsPerS} onsets/s, centroid ${s.centroidHz} Hz` : "silent"}${i ? `, change at start ${s.change} (1 = the sharpest in this film)` : ""} ${tag(l.sections.how)}`,
     );
+  // a listen read back from before these were measured has neither
+  if (l.changes) {
+    L.push("", "## Changes in the sound (what changed at once, against the 3 s before)", "");
+    const nearCut = (t: number) => l.cuts.list.find((c) => Math.abs(c.t - t) <= 0.25);
+    for (const [i, x] of formatSoundChanges(
+      l.changes.how === "not measured" ? null : l.changes.list,
+    ).entries()) {
+      const c = l.changes.list[i];
+      const cut = c && nearCut(c.t);
+      L.push(cut ? x.replace(/ \(estimated\)$/, ` — a cut at ${fmtS(cut.t)} (estimated)`) : x);
+    }
+  }
+  if (l.tuning) L.push("", "## Pitch", "", ...formatTuning(l.tuning));
   L.push("", "## Pauses", "");
   if (l.silences.list.length)
     L.push(
