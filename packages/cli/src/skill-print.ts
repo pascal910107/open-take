@@ -13,6 +13,7 @@ import type { SkillBundle } from "./init";
 export const FILM_TOPICS = [
   "story",
   "craft",
+  "tells",
   "material",
   "page",
   "cutting",
@@ -91,7 +92,5 @@ export function skillPrint(bundle: SkillBundle, dir: string, req: SkillPrintRequ
     ].join("\n");
   }
 
-  throw new Error(
-    "skill: expected motion, film [<topic> | --all] or install [--force]",
-  );
+  throw new Error("skill: expected motion, film [<topic> | --all] or install [--force]");
 }

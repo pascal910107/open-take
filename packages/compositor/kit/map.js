@@ -145,15 +145,21 @@ export function pathOf(points) {
 export function along(t, start, end, points, opts = {}) {
   if (points.length < 2) throw new Error("along: needs two points or more");
   const { ease = smooth } = opts;
-  const seg = points.slice(1).map((b, i) => Math.hypot(b.x - points[i].x, b.y - points[i].y));
+  const seg = points
+    .slice(1)
+    .map((b, i) =>
+      Math.hypot(b.x - /** @type {Pt} */ (points[i]).x, b.y - /** @type {Pt} */ (points[i]).y),
+    );
   const total = seg.reduce((a, b) => a + b, 0);
   const p = end > start ? ease(clamp01((t - start) / (end - start))) : t >= end ? 1 : 0;
   let left = p * total;
   let i = 0;
-  while (i < seg.length - 1 && left > seg[i]) left -= seg[i++];
-  const a = points[i];
-  const b = points[i + 1];
-  const k = seg[i] > 0 ? Math.min(1, left / seg[i]) : 1;
+  while (i < seg.length - 1 && left > /** @type {number} */ (seg[i]))
+    left -= /** @type {number} */ (seg[i++]);
+  const a = /** @type {Pt} */ (points[i]);
+  const b = /** @type {Pt} */ (points[i + 1]);
+  const si = /** @type {number} */ (seg[i]);
+  const k = si > 0 ? Math.min(1, left / si) : 1;
   return {
     tip: { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k },
     angle: Math.atan2(b.y - a.y, b.x - a.x),

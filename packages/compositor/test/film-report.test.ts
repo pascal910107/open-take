@@ -544,7 +544,10 @@ window.__render = (t) => {
   assert.equal(r.moving.how, "measured");
   assert.deepEqual(r.parts, { how: "measured", named: 0, uses: [] });
   const L = formatFilmReport(r, { probe: "probe" });
-  assert.ok(L.length <= 10);
+  // a few lines: one per thing measured (the boundaries and the picture
+  // against the sound among them)
+  assert.ok(L.length <= 12, L.join("\n"));
+  assert.match(L.join("\n"), /boundaries: /);
   assert.match(L.join("\n"), /parts: none named through product\(\)/);
 });
 

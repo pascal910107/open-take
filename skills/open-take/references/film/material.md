@@ -58,7 +58,9 @@ How to draw it and where its data comes from are two questions. Drawn any
 of the three ways, a number or a string on screen can be one the product
 showed (a part's values in `components.json`), one its live page shows (a
 URL), one it works out from inputs the film states, or data you made up —
-then say so on screen, so a viewer can tell it is a demo. Where the real
+then a viewer should be able to tell it is a demo: content that is plainly an
+example by what it is (a sketch drawn live, a sample name), or a line said
+once where the number matters, rather than a badge that stays on screen. Where the real
 data is empty (nothing there yet), the film can show that honestly, or show
 another feature. `tl.source` records which, and `film probe` sets the
 film's numbers beside it (below).

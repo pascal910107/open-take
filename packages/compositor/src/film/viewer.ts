@@ -6,7 +6,8 @@
 // the round up: a copy of the film and a brief in <film>.viewer/<n>/. Who
 // watches is the author's to start — an agent given that brief and nothing
 // else. The brief names no faults to look for: what the viewer notices on its
-// own is the point.
+// own is the point. Only once that is written does it read what makes films
+// look machine-made (`skill film tells`) and say which of those this one has.
 
 import { existsSync } from "node:fs";
 import { copyFile, mkdir, readdir, stat, writeFile } from "node:fs/promises";
@@ -64,6 +65,8 @@ The film: ${filmCopy}
 Watch it closely. You cannot see moving pictures, so take frames with ffmpeg / ffprobe — as dense as you can, denser where the picture moves — lay them out on sheets, read the words on screen, and look at how the sound changes. \`${invoke} film listen <film>\` lays the sound out against time (its beats, sections, loudness, and how far each cut sits from a sound) and \`${invoke} film probe <film>\` the picture (every cut, how much each frame changes, the zoom and travel); both describe, neither judges. Install whatever else you need.
 
 Then write ${notes} for the person who made the film, in the language of the film's own words. Write what you honestly felt watching it: at which second, and why, you would scroll on or keep watching; what you did not understand, what bored you, what felt uncomfortable or forced; what was good. Most important first.
+
+When that is written — not before — run \`${invoke} skill film tells\`: choices that make films look machine-made, each with when it is fine. Add a last section to ${notes}, "Looks machine-made", naming each one this film has, at which second and what is on screen, and whether it has a reason here. Leave out the ones it does not have, and leave what you wrote above as it was.
 
 Work only in ${resolve(filmCopy, "..")}. Do not read anything else about how the film was made, and do not look the product up.
 `;

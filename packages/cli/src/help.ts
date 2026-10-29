@@ -220,12 +220,12 @@ The kit's look.js fits text to a box, measures contrast and how big a size
 reads on a phone.`,
   gallery: `Draw each block of the kit (the film folder's own kit/ when given, else the
 kit this package ships) — motion, camera options, cut helpers, marks and
-light, places — at six
+light, places, slabs in depth — at six
 instants with its value and speed over time, its default beside three other
 settings: a PNG per block, index.md and gallery.json into --out (default
 gallery/), every number measured on the function, none a target.
   --blocks rise,camera.shake,…  names, or groups (motion, camera, cut,
-                                draw, map)
+                                draw, map, stage)
   --with <picture|state|take>   draw on the product's own picture, saved screen
                                 or take instead of a neutral stand-in
   --subject <id|text|x,y,w,h>   the element of it the blocks move (default:

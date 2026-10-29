@@ -10,7 +10,10 @@
 //   - contrast: the WCAG contrast ratio of a colour on a ground;
 //   - readable: how big a size in the 1920-wide frame shows on a phone, a
 //     timeline, a laptop — information, not a rule;
-//   - palette: look.json's colours and fonts by role, ready for CSS.
+//   - palette: look.json's colours and fonts by role, ready for CSS;
+//   - frame: the product's own surface for a picture of it — the corner and
+//     shadow its cards have (look.json), a margin of its own ground — for a
+//     screenshot shown as an object rather than cut flush; only where called.
 //
 //   import { fitText, contrast, readable, palette, loadLook, fontsReady } from "./kit/look.js";
 //   const look = palette(await loadLook("look/look.json"));
@@ -20,6 +23,7 @@
 //   title.innerHTML = f.lines.join("<br>");          // its own line breaks
 //   contrast(look.text, look.bg)                    // 13.1
 //   readable(f.size).on[0]                          // { screen: "phone, upright…", px: 34.4, mm: 5.7 }
+//   Object.assign(shot.style, frame(lookJson).style); // its corner, shadow, margin, ground
 //
 // fitText measures with the browser's own text engine (a canvas), so the font
 // must have loaded before it is asked — `fontsReady` loads it; the film clock
@@ -534,4 +538,52 @@ export function palette(look) {
         .map(([k, v]) => `${prefix}${k.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}: ${v};`)
         .join(" "),
   };
+}
+
+/** the largest blur in a box-shadow list (px), to rank shadows by @param {string} v */
+function shadowBlur(v) {
+  let most = 0;
+  for (const layer of v.split(/,(?![^(]*\))/)) {
+    const px = [...layer.matchAll(/(-?[\d.]+)px/g)].map((m) => Number(m[1]));
+    if (px.length >= 3) most = Math.max(most, px[2] ?? 0);
+  }
+  return most;
+}
+
+/**
+ * The product's own surface, for a picture of it shown as an object: the
+ * corner of its roundest card (look.json `radii`, pills and circles aside),
+ * its softest shadow (`shadows`, by blur), and a margin of its own ground
+ * (`roles.surface`, else `bg`) — so a screenshot reads as the product's
+ * card, not a sheet cut flush. Each is null when the product has none; the
+ * margin is the corner's size unless `pad` says. Nothing is applied: put
+ * `style` on the picture (or its wrapper) where the film wants it.
+ * @param {any} look a look.json
+ * @param {{ pad?: number }} [o]
+ * @returns {{ radius: number | null, shadow: string | null, ground: string | null, pad: number,
+ *   style: Record<string, string> }}
+ */
+export function frame(look, o = {}) {
+  const radii = (look?.radii ?? []).filter(
+    (/** @type {any} */ r) => Number.isFinite(r?.px) && r.value !== "pill" && r.value !== "circle",
+  );
+  const radius = radii.length ? Math.max(...radii.map((/** @type {any} */ r) => r.px)) : null;
+  const shadows = (look?.shadows ?? []).filter(
+    (/** @type {any} */ x) => typeof x?.value === "string",
+  );
+  const shadow = shadows.length
+    ? shadows.reduce((/** @type {any} */ a, /** @type {any} */ b) =>
+        shadowBlur(b.value) > shadowBlur(a.value) ? b : a,
+      ).value
+    : null;
+  const ground = look?.roles?.surface?.hex ?? look?.roles?.bg?.hex ?? null;
+  const pad = o.pad ?? radius ?? 0;
+  /** @type {Record<string, string>} */
+  const style = {};
+  if (radius != null) style.borderRadius = `${radius}px`;
+  if (shadow) style.boxShadow = shadow;
+  if (pad) style.padding = `${pad}px`;
+  if (ground) style.background = ground;
+  if (radius != null || pad) style.overflow = "hidden";
+  return { radius, shadow, ground, pad, style };
 }

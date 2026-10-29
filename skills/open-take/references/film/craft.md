@@ -93,6 +93,34 @@ Worlds rarely crossfaded into each other; where a plain dissolve was used
 the ground stayed and only what was on it changed (out: blur ≈8 px and fade
 in 0.13–0.2 s; in: sharpen in 0.13 s).
 
+The same seams, as HyperFrames measured them on its own launch films and
+as kit/seams.js gives them (`film gallery --blocks seams` draws each on
+your material):
+
+- **Cut on the curve** (`curve`, `waterfall`): out on an ease-in, in on its
+  mirror, the cut at the fastest frame — 230 px over 0.30 s each side,
+  ≈ 3070 px/s across the cut; word by word, 0.022 s apart out, gaps from
+  0.05 s shrinking ×0.84 in. HyperFrames' own default seam.
+- **One strip** (`whip`): the next scene docked a frame beyond, the strip
+  whipped one frame in ≈ 0.55 s, 3·W/dur at the middle; its films smeared
+  for 0.13–0.3 s.
+- **Into the lens** (`depth`): out to ×1.2 with blur to 10 px in 0.2 s, in
+  from ×0.75 out of the same blur in 0.5 s; inverse for a payoff.
+- **One line, one curve** (`matchText`): cubic-bezier(.85, 0, .15, 1) over
+  the whole move, the words swapped at its middle.
+- **Card into panel** (`morph`): the panel shrunk onto the card and grown
+  back in 0.6–1.2 s, the parts both hold moving at their own size.
+- **A tile becomes the scene** (`parallax`): the rest of the grid pushed
+  outward ≈ 900 px a tile, to 0.6 and gone, over ≈ 2.4 s; reversed, a
+  dolly-out in ≈ 1.2 s.
+- **A cut on purpose** (`pushCut`, `dipCut`): both sides pushing in
+  (1 → 1.04, then on to 1) under a 0.2 flash; or the last 3 frames ≈ 40 %
+  darker.
+
+The first six by name on a beat sheet — `tl.segment(from, to, { handoff:
+"depth" })` with `scenes(…, { tl, seams })` — are handed over between the two
+scenes that meet there (`skill film`, step 6).
+
 ### The camera
 
 - **One camera that never stops dead.** Each move adds its own displacement
@@ -134,6 +162,20 @@ in 0.13–0.2 s; in: sharpen in 0.13 s).
   rotates ≈40° into a table of objects with shadows, and back to flat later;
   layers at heights that slide at different rates as the camera moves, the
   ones nearer the lens softer.
+- **Its parts as slabs in space.** Each part a flat slab of its own, no
+  bigger than what it shows, turned and moved in depth: a card tilted into
+  space while its content keeps working; a screen coming apart into its
+  parts, layer above layer, and back together; cards lowered onto the stage
+  like prints, panels landing on a pile; a card turning over to show the
+  next scene on its back; a layout turning into a table; the lens travelling
+  past one slab into what lies behind it. `stage` (kit/stage.js):
+  `slab.to({ rx, ry, z })`, `explode` / `together`, `drop` / `stack`,
+  `flip`, `st.turn`, `st.dolly` — a part of a saved screen through a window
+  its size stays live DOM; with the film's camera, the stage follows it.
+  A picture, a player of frames or a video the page already shows becomes a
+  slab where it is with `st.adopt(el)`, untouched until it moves.
+  `film gallery --blocks stage --with <saved screen>` draws each move on the
+  product's own screen.
 
 ### The product on screen
 
@@ -289,8 +331,10 @@ with the product's input inside it; a clock already running.
 - **The system becomes the mark.** The route, the pins, the loop collapse
   into the logo's shape; the wordmark writes on letter by letter, the line
   under it word by word, a link pill pops last.
-- **The promise list ticked.** The 3–4 things promised at the start return
-  and each gets a tick.
+- **Claims along the way, the mark at the end.** None of these films closed
+  on a list of what the product does: each claim had landed earlier, one at
+  a time, on the shot that showed it, and the end held the mark, one line
+  and where to go.
 - Then the frame holds 2–3 s with one small motion (a ×1.06 push, a glint).
   The failures were both ways: a film that just stopped, and one with 13 s
   of alternating logo cards.

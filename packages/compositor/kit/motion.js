@@ -1009,7 +1009,7 @@ export function flap(t, start, from, to, opts = {}) {
   while (a.length < n) a.unshift(" ");
   while (b.length < n) b.unshift(" ");
   const tiles = b.map((now, i) => {
-    const old = a[i];
+    const old = a[i] ?? " ";
     if (old === now) return { old, now, top: 0, bottom: 1, p: 1 };
     const p = dur > 0 ? clamp01((t - (start + i * each)) / dur) : t >= start + i * each ? 1 : 0;
     // gravity on the fold: it leaves slowly and slaps down

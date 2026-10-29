@@ -24,9 +24,19 @@
 // Facts only, each line saying what it covered: no grade, no target.
 
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
-import { resolveFfmpeg } from "../ffmpeg";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { resolveFfmpeg, runTool } from "../ffmpeg";
+import { type BoundaryCarry, boundaryCarries, CARRY_FILL, carryChange } from "./carry";
+import {
+  halfSeconds,
+  momentaryLoudness,
+  type PictureAgainstSound,
+  parseFilmEvents,
+  pictureAgainstSound,
+  pictureEnergyOf,
+} from "./listen";
 import { type MovingMaterial, readMovingMaterial } from "./moving";
 import {
   decodeGrey,
@@ -50,7 +60,13 @@ import {
   readPageText,
   runOcr,
 } from "./probe-text";
-import { eventsPathFor, FINE_SUPERSAMPLE, probeFilm, type TurnBack } from "./render";
+import {
+  eventsPathFor,
+  FINE_SUPERSAMPLE,
+  type FilmEvents,
+  probeFilm,
+  type TurnBack,
+} from "./render";
 
 export type ReportJump = {
   t: number;
@@ -141,6 +157,24 @@ export type FilmReport = {
     note?: string;
     named: number;
     uses: ReportPartUse[];
+  };
+  /** each boundary of the beat sheet (a segment's end inside the film) and
+   *  what crossed it: the thing its segment named to `carry`, followed by the
+   *  render (src/film/carry.ts), or what the segment says instead; `strip`
+   *  a picture beside the film, one row per boundary: 0.3 s before, the
+   *  boundary, 0.3 s after */
+  seams: {
+    how: "measured" | "not measured";
+    note?: string;
+    list: BoundaryCarry[];
+    strip: string | null;
+  };
+  /** where the picture and the sound run opposite, half a second at a time
+   *  (`film listen`'s own reading, from the events file's picture.energy) */
+  against: {
+    how: "measured" | "not measured";
+    note?: string;
+    list: PictureAgainstSound["opposite"];
   };
   /** wall time of the report, ms */
   ms: number;
@@ -840,6 +874,51 @@ export async function filmReport(opts: FilmReportOptions): Promise<FilmReport> {
     };
   }
 
+  // what crossed each boundary, and a strip of it to look at
+  const ev = rawEvents as unknown as FilmEvents;
+  let seams: FilmReport["seams"];
+  if (!Array.isArray(rawEvents.segments) || !rawEvents.curves)
+    seams = {
+      how: "not measured",
+      note: "no beat sheet in the events file",
+      list: [],
+      strip: null,
+    };
+  else {
+    const list = boundaryCarries(ev, info.from).filter(
+      (b) => b.at > 0 && b.at < duration - 0.5 / fps,
+    );
+    let strip: string | null = null;
+    let note: string | undefined;
+    if (list.length)
+      strip = await seamStrip(ffmpeg, opts.film, list, fps, duration).catch((e: Error) => {
+        note = `no strip: ${e.message.split("\n")[0]}`;
+        return null;
+      });
+    seams = { how: "measured", ...(note ? { note } : {}), list, strip };
+  }
+  // the picture against the sound
+  let against: FilmReport["against"];
+  let picEnergy: ReturnType<typeof pictureEnergyOf> = null;
+  try {
+    // on this film's clock: parseFilmEvents moves a range's curve to start at its own 0
+    picEnergy = rawEvents.curves ? pictureEnergyOf(parseFilmEvents(rawEvents)) : null;
+  } catch {
+    // an events file listen cannot read: the line says not measured
+  }
+  if (!picEnergy)
+    against = { how: "not measured", note: "no picture.energy in the events file", list: [] };
+  else {
+    const loud = await momentaryLoudness(ffmpeg, opts.film, duration).catch(() => []);
+    if (!loud.length) against = { how: "not measured", note: "the film has no sound", list: [] };
+    else {
+      against = {
+        how: "measured",
+        list: pictureAgainstSound(halfSeconds(loud, picEnergy, duration)).opposite,
+      };
+    }
+  }
+
   return {
     film: opts.film,
     duration: round3(duration),
@@ -874,8 +953,73 @@ export async function filmReport(opts: FilmReportOptions): Promise<FilmReport> {
     jumps: { how: "measured", declared: declared.length, list: jumps },
     moving,
     slowText,
+    seams,
+    against,
     ms: Date.now() - start,
   };
+}
+
+/** where a film's strip of boundaries goes: `film.mp4` → `film.seams.jpg` */
+export function seamStripPathFor(film: string): string {
+  return eventsPathFor(film).replace(/\.events\.json$/, ".seams.jpg");
+}
+
+/** one row per boundary, 0.3 s before it, on it, 0.3 s after: a picture of
+ *  what each boundary looks like, to open beside the numbers */
+async function seamStrip(
+  ffmpeg: string,
+  film: string,
+  list: readonly BoundaryCarry[],
+  fps: number,
+  duration: number,
+): Promise<string> {
+  const last = Math.max(0, Math.round(duration * fps) - 1);
+  const frames = list.flatMap((b) =>
+    [-0.3, 0, 0.3].map((d) => Math.min(last, Math.max(0, Math.round((b.at + d) * fps)))),
+  );
+  // each frame decoded once, in film order; laid out row by row as the
+  // boundaries ask, a frame two boundaries share drawn in both rows
+  const pick = [...new Set(frames)].sort((a, b) => a - b);
+  const out = seamStripPathFor(film);
+  await rm(out, { force: true });
+  const tmp = await mkdtemp(join(tmpdir(), "open-take-seams-"));
+  try {
+    await runTool(ffmpeg, [
+      "-v",
+      "error",
+      "-i",
+      film,
+      "-vf",
+      `select='${pick.map((n) => `eq(n,${n})`).join("+")}',scale=480:-2`,
+      "-fps_mode",
+      "passthrough",
+      join(tmp, "f%05d.png"),
+    ]);
+    const file = (n: number) => join(tmp, `f${String(pick.indexOf(n) + 1).padStart(5, "0")}.png`);
+    const listFile = join(tmp, "rows.txt");
+    await writeFile(listFile, frames.map((n) => `file '${file(n)}'\n`).join(""));
+    await runTool(ffmpeg, [
+      "-v",
+      "error",
+      "-f",
+      "concat",
+      "-safe",
+      "0",
+      "-i",
+      listFile,
+      "-vf",
+      `tile=3x${Math.ceil(frames.length / 3)}:padding=4:color=white`,
+      "-frames:v",
+      "1",
+      "-q:v",
+      "3",
+      "-y",
+      out,
+    ]);
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+  return out;
 }
 
 const fmt = (t: number) => `${t.toFixed(2)} s`;
@@ -1120,6 +1264,77 @@ export function formatFilmReport(r: FilmReport, o: { probe: string }): string[] 
     if (pa.uses.length > PART_LINES) L.push(`    … ${pa.uses.length - PART_LINES} more use(s)`);
   }
 
+  // the boundaries, and what crossed each
+  const sm = r.seams;
+  if (!sm) {
+    // a report made before boundaries were read
+  } else if (sm.how === "not measured") L.push(`  boundaries: not measured — ${sm.note}`);
+  else if (!sm.list.length)
+    L.push(
+      "  boundaries: none — the beat sheet has no segment ending inside the film (kit/time.js `tl.segment`)",
+    );
+  else {
+    const count = (k: string) => sm.list.filter((b) => b.how.kind === k).length;
+    const tally = ["carried", "anchored", "bare", "cut", "words", "unwritten", "not rendered"]
+      .map((k) => [k, count(k)] as const)
+      .filter(([, n]) => n)
+      .map(([k, n]) => `${n} ${k}`)
+      .join(", ");
+    L.push(
+      `  boundaries (segment ends; a segment's \`carry\` followed from 1 s before to 0.4 s after — carried: still there 0.25 s past it, or grown to fill the frame, and moved or resized; anchored: there unchanged, or only fading out across it; bare: gone by then): ${tally}${sm.strip ? `; each one as a row (−0.3 s, the boundary, +0.3 s): ${sm.strip}` : ""}${sm.note ? ` (${sm.note})` : ""}`,
+    );
+    for (const b of sm.list.slice(0, BOUNDARY_LINES)) {
+      const said = b.handoff ? ` "${b.handoff}"` : "";
+      const what = b.carry ? ` ${b.carry}` : "";
+      const h = b.how;
+      const line = h.measured
+        ? `${h.kind}${carryChange(b) ? ` (${carryChange(b)})` : ""}${h.note ? ` — ${h.note}` : ""}`
+        : h.kind === "cut"
+          ? "a hard cut, on purpose"
+          : h.kind === "words"
+            ? "nothing named to follow (`carry`)"
+            : h.kind === "unwritten"
+              ? "nothing written"
+              : "outside what was rendered";
+      L.push(`    ${fmt(b.at)}${said}${what}: ${line}`);
+    }
+    if (sm.list.length > BOUNDARY_LINES)
+      L.push(`    … ${sm.list.length - BOUNDARY_LINES} more boundary(ies)`);
+    // the same change at every carried boundary is easy to miss from inside
+    const carried = sm.list.filter((b) => b.how.measured && b.how.kind === "carried");
+    const filled = carried.filter((b) => b.how.measured && b.how.fill >= CARRY_FILL).length;
+    if (carried.length >= 2 && filled >= 2)
+      L.push(`    ${filled} of the ${carried.length} carried thing(s) grew to fill the frame`);
+  }
+
+  // the picture against the sound
+  const ag = r.against;
+  if (!ag) {
+    // a report made before the picture was set against the sound
+  } else if (ag.how === "not measured")
+    L.push(`  picture against sound: not measured — ${ag.note}`);
+  else
+    L.push(
+      `  picture against sound (half seconds; one above this film's median, the other below, reaching its top and bottom thirds): ${
+        ag.list.length
+          ? [...ag.list]
+              .sort((a, b) => b.to - b.from - (a.to - a.from) || a.from - b.from)
+              .slice(0, AGAINST_LINES)
+              .sort((a, b) => a.from - b.from)
+              .map(
+                (x) =>
+                  `${fmt(x.from)}–${fmt(x.to)} ${x.kind === "busy-quiet" ? "the picture busy while the sound is quiet" : "the picture still while the sound is loud"}`,
+              )
+              .join("; ") +
+            (
+              ag.list.length > AGAINST_LINES
+                ? `; ${ag.list.length - AGAINST_LINES} shorter one(s) — \`film listen\` lays them all out`
+                : ""
+            )
+          : "nowhere"
+      }`,
+    );
+
   L.push(
     `full report (text in pictures, camera, sound, beat sheet): ${o.probe} — measured in ${(r.ms / 1000).toFixed(1)} s; --no-report leaves this out`,
   );
@@ -1128,6 +1343,10 @@ export function formatFilmReport(r: FilmReport, o: { probe: string }): string[] 
 
 /** uses of parts listed at most, one line each */
 const PART_LINES = 8;
+/** boundaries listed at most, one line each */
+const BOUNDARY_LINES = 12;
+/** stretches where picture and sound run opposite, listed at most (the longest) */
+const AGAINST_LINES = 5;
 
 const USED: Record<string, string> = {
   frame: "framed",

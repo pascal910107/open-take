@@ -18,9 +18,11 @@ import {
   eventsPathFor,
   type FilmEvents,
   filmEvents,
+  PICTURE_ENERGY,
   patchEvents,
   patchFilm,
   renderFilm,
+  withPictureEnergy,
 } from "../src/film/render";
 import { findChrome } from "./fixtures/find-chrome";
 
@@ -302,14 +304,23 @@ test("a render writes the page's events, its curves once a frame and the cuts be
   // the blur probe saw the picture change in the first half of frame 15's shutter
   assert.deepEqual(ev.detectedCuts, [0.5]);
   assert.deepEqual(ev.cuts, [0.5]);
-  assert.deepEqual(ev.curves.names, ["v"]);
+  assert.deepEqual(ev.curves.names, ["v", PICTURE_ENERGY]);
   assert.equal(ev.curves.rows.length, 30, "one row a frame");
   for (const [i, row] of ev.curves.rows.entries())
     assert.ok(Math.abs(row[0]! - i / 30) < 1e-9, `frame ${i}`);
   const v = curveOf(ev, "v", (x) => x * 2);
   assert.ok(Math.abs(v(0.25) - 0.5) < 1e-9, "linear between frames");
   assert.equal(v(5), (29 / 30) * 2, "held past the end");
-  assert.throws(() => curveOf(ev, "nope"), /has no curve "nope" \(it has: v\)/);
+  assert.throws(() => curveOf(ev, "nope"), /has no curve "nope" \(it has: v, picture\.energy\)/);
+  // the picture's own change: still but for the cut, red square to blue
+  const energy = ev.curves.rows.map((row) => row[1]!);
+  assert.equal(energy[0], 0, "frame 0 changes from nothing");
+  assert.ok(energy[15]! > 0.02, `the cut: ${energy[15]}`);
+  for (const [i, e] of energy.entries())
+    if (i !== 15) assert.ok(e < 0.005, `frame ${i} is still: ${e}`);
+  // the score follows it like any curve
+  const busy = curveOf(ev, PICTURE_ENERGY, { map: (e) => e * 10, cuts: [] });
+  assert.ok(busy(0.5) > 0.2 && busy(0.2) < 0.05);
   assert.deepEqual((await read(r.events!)).segments, [
     { from: 0, to: 0.5, label: "red", hold: true, handoff: "cut", subject: "#a" },
   ]);
@@ -329,7 +340,10 @@ test("without the hooks the file is still written, with nothing in it but the cu
   assert.deepEqual(ev.events, []);
   assert.deepEqual(ev.declaredCuts, []);
   assert.deepEqual(ev.cuts, [0.5], "the clock's own cut");
-  assert.deepEqual(ev.curves, { names: [], t0: 0, dt: 1 / 30, rows: [] });
+  // no curves from the page: only the picture's own
+  assert.deepEqual(ev.curves.names, [PICTURE_ENERGY]);
+  assert.equal(ev.curves.rows.length, 30);
+  assert.ok(ev.curves.rows[15]![0]! > 0.02);
   assert.deepEqual(ev.segments, []);
   assert.deepEqual(ev.credits, [], "no credits: an empty list, not a missing field");
   // a draft probes nothing: no cut is found
@@ -340,7 +354,27 @@ test("without the hooks the file is still written, with nothing in it but the cu
     draft: true,
     audio: null,
   });
-  assert.deepEqual((await read(d.events!)).cuts, []);
+  const de = await read(d.events!);
+  assert.deepEqual(de.cuts, []);
+  // a draft has the picture's change too
+  assert.ok(de.curves.rows[15]![0]! > 0.02);
+  // a range starts with nothing before it: its first frame's change is not known
+  const ranged = await read(
+    (
+      await renderFilm({
+        page,
+        out: join(dir, "bare-range.mp4"),
+        chromePath: chrome!,
+        draft: true,
+        from: 0.4,
+        to: 0.7,
+        audio: null,
+      })
+    ).events!,
+  );
+  assert.equal(ranged.curves.t0, 0.4);
+  assert.equal(ranged.curves.rows[0]![0], null);
+  assert.ok(ranged.curves.rows[3]![0]! > 0.02, "frame 15 is the range's fourth");
 });
 
 test("hooks that throw or are not functions cost the film nothing: said, and left out", {
@@ -421,6 +455,53 @@ test("a range rendered into a master puts its curves into the master's events fi
   assert.ok(Math.abs(v[6]! - (100 + 6 / 30)) < 1e-9, "the range: new");
   assert.ok(Math.abs(v[11]! - (100 + 11 / 30)) < 1e-9, "its last frame: new");
   assert.ok(Math.abs(v[12]! - 12 / 30) < 1e-9, "after it: as it was");
+  // the picture's change, read again from the patched master: known on every
+  // frame, the range's first included
+  const j = ev.curves.names.indexOf(PICTURE_ENERGY);
+  const e = ev.curves.rows.map((row) => row[j]);
+  assert.ok(
+    e.every((x) => typeof x === "number"),
+    JSON.stringify(e),
+  );
+  assert.ok(e[15]! > 0.02, "the cut is still where it was");
+});
+
+test("the picture's change goes into the curves: a column of its own, a range of rows set", () => {
+  const ev = filmEvents(
+    { fps: 10, f0: 0, f1: 4, total: 4 },
+    [],
+    [0, 0, 0, 0],
+    Array.from({ length: 4 }, (_, i) => ({ v: i })),
+    false,
+  );
+  const a = withPictureEnergy(ev, [0, 0.123456789, Number.NaN, 0.5]);
+  assert.deepEqual(a.curves.names, ["v", PICTURE_ENERGY]);
+  assert.deepEqual(a.curves.rows, [
+    [0, 0],
+    [1, 0.12346],
+    [2, null],
+    [3, 0.5],
+  ]);
+  // only rows [1, 3) set again; the rest kept
+  const b = withPictureEnergy(a, [9, 9, 9, 9], 1, 3);
+  assert.deepEqual(
+    b.curves.rows.map((r) => r[1]),
+    [0, 9, 9, 0.5],
+  );
+  // no curves from the page: rows made, one a value
+  const bare = filmEvents(
+    { fps: 10, f0: 0, f1: 3, total: 3 },
+    [],
+    [0, 0, 0],
+    [null, null, null],
+    false,
+  );
+  assert.deepEqual(withPictureEnergy(bare, [0, 0.1, 0.2], 1).curves, {
+    names: [PICTURE_ENERGY],
+    t0: 0,
+    dt: 0.1,
+    rows: [[null], [0.1], [0.2]],
+  });
 });
 
 test("speed at a hard cut: each shot measured on its own, no spike between the framings", () => {

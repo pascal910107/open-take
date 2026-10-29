@@ -16,7 +16,8 @@
 // The defaults are measured (in 0.73 s, out 1.34 s; what is framed fills 60 %
 // of the picture). Every move can set its own duration and curve — a fast
 // push, a whip, a slow drift are yours to choose. One flat layer, seen through
-// a 2D camera: for 3D, read at(t) and project it yourself.
+// a 2D camera: for 3D, kit/stage.js takes this camera (its view frames the
+// stage), or read at(t) and project it yourself.
 //
 // More is there when you ask for it, all of it off until you do: a camera
 // that gets there early (`lead`), a hand holding it (`handheld`), a jolt on

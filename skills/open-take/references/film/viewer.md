@@ -19,7 +19,9 @@ and why, what it did not follow, what bored it or felt forced, what was good.
 
 Give it nothing of your own: not the plan, not your notes, not the product's
 pitch, not what to look for. What it notices without them is what a stranger
-notices. Its brief names no faults on purpose.
+notices. Its brief names no faults on purpose. Only after it has written
+that does it read `skill film tells` — choices that make films look
+machine-made — and add which of them this film has, at which second.
 
 Then it is your film again. Read `VIEWER.md`, decide what to change, and say
 in your notes what you took, what you did not and why — a viewer can be

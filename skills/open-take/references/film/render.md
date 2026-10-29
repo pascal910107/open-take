@@ -99,6 +99,17 @@ than the part it shows: an `overflow: hidden` window around the card, or the
 card alone. The render's report names such layers among the pictures drawn
 past their own pixels ("under a perspective").
 
+Measured on stills of a page drawn in the film's own DOM, its 706×203 card
+turned rotateX 8°, rotateY −18° under the camera at 2.3× (edge energy of the
+card's text, higher is sharper): the whole page as one layer under the
+perspective 25.6k; the card alone as a slab of `kit/stage.js` 42.8k; the
+same view flat, no tilt, 50.1k, and the stage's slab square on 50.1k too.
+The stage keeps each slab the size of its part, writes a slab square on to
+the lens as a plain 2D transform (so a push or the lens travelling up to it
+is drawn at its final scale), and its `warnings()` name a tilted slab drawn
+bigger than the frame, and when. A saved screen shown through an iframe
+measured the same whole or cropped to the card (17.4k each) in these stills.
+
 A `<canvas>` is drawn at its own `width` × `height`. On one film a grain laid
 over the whole frame from a 480×270 canvas (4× stretched, 7 %, overlay)
 looked yellowish and smeared at full screen; the same grain from a

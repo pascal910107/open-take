@@ -93,6 +93,19 @@ export function frameEnergy(g: GreyFrames): Float32Array {
   return e;
 }
 
+/** frameEnergy of a film file, read as `film probe` reads it (a PROBE_W-wide
+ *  grey copy): one value per frame, frame 0's is 0 */
+export async function fileEnergy(
+  ffmpeg: string,
+  file: string,
+  width: number,
+  height: number,
+  fps: number,
+): Promise<Float32Array> {
+  const gh = Math.max(BLOCK, Math.round((PROBE_W * height) / width / 2) * 2);
+  return frameEnergy(await decodeGrey(ffmpeg, file, PROBE_W, gh, fps));
+}
+
 type Blocks = { bx: number; by: number };
 const blocksOf = (g: GreyFrames): Blocks => ({
   bx: Math.floor(g.w / BLOCK),
@@ -289,6 +302,65 @@ export function findStills(
   }
   return out;
 }
+
+/** a handoff that names one of kit/seams.js's kinds, or a name it goes by
+ *  (its KINDS and ALIASES; a test holds the two lists together) */
+export const SEAM_KINDS =
+  /^(curve|whip|depth|inverse|push|dip|cut|pushcut|dipcut|cut on the curve|whip[ -]pan|into the lens|hard cut)$/i;
+
+/** at each hard cut, whether each side moves in the `around` s next to it
+ *  (the mean change a frame over the shot's own frames, against `under`)
+ *  and what crosses it — so a cut where nothing moves and nothing is
+ *  carried can be named. `declared` gives each cut the label the page
+ *  declared it with (kit/seams.js labels its own "seam: <kind>"), when one
+ *  was declared within `tol` s. */
+export function seamsAtCuts(
+  cuts: readonly { frame: number; t: number; across: CarryKind }[],
+  energy: Float32Array,
+  fps: number,
+  declared: readonly { t: number; label: string }[] = [],
+  { around = 0.15, under = 0.0015, tol = 1.5 / fps } = {},
+): SeamSeen[] {
+  const k = Math.max(1, Math.round(around * fps));
+  const mean = (a: number, b: number) => {
+    let s = 0;
+    let n = 0;
+    for (let i = Math.max(1, a); i <= Math.min(energy.length - 1, b); i++) {
+      s += energy[i]!;
+      n++;
+    }
+    return n ? s / n : 0;
+  };
+  return cuts.map((c) => {
+    // energy[i] is the change from frame i − 1 to i: the outgoing shot's own
+    // frames are c − k … c − 1, the incoming's c … c + k
+    const before = mean(c.frame - k + 1, c.frame - 1) >= under ? "moving" : "still";
+    const after = mean(c.frame + 1, c.frame + k) >= under ? "moving" : "still";
+    const d = declared
+      .filter((x) => Math.abs(x.t - c.t) <= tol)
+      .sort((p, q) => Math.abs(p.t - c.t) - Math.abs(q.t - c.t))[0];
+    return {
+      t: round3(c.t),
+      before,
+      after,
+      across: c.across,
+      declared: d ? d.label : null,
+      nothing: before === "still" && after === "still" && c.across === "nothing carried",
+    };
+  });
+}
+
+export type SeamSeen = {
+  t: number;
+  /** the outgoing shot in its last 0.15 s, the incoming in its first */
+  before: "moving" | "still";
+  after: "moving" | "still";
+  across: CarryKind;
+  /** the label of the cut the page declared there, if it declared one */
+  declared: string | null;
+  /** neither side moves and nothing crosses */
+  nothing: boolean;
+};
 
 /** cuts per bin of `binS` seconds over the film */
 export function cutDensity(cuts: readonly number[], duration: number, binS = 5): number[] {
@@ -1193,6 +1265,8 @@ export type SheetSegment = {
   label?: string;
   hold?: boolean;
   handoff?: string;
+  /** what the page named to follow across the boundary at `to` */
+  carry?: string;
   subject?: string;
   sound?: string;
 };
@@ -1206,7 +1280,7 @@ export function sheetSegments(raw: unknown): SheetSegment[] {
     if (!e || typeof e.from !== "number" || typeof e.to !== "number") continue;
     if (!Number.isFinite(e.from) || !Number.isFinite(e.to) || !(e.to > e.from)) continue;
     const s: SheetSegment = { from: e.from, to: e.to };
-    for (const k of ["label", "handoff", "subject", "sound"] as const)
+    for (const k of ["label", "handoff", "carry", "subject", "sound"] as const)
       if (typeof e[k] === "string" && e[k]) s[k] = e[k] as string;
     if (typeof e.hold === "boolean") s.hold = e.hold;
     out.push(s);
@@ -1778,6 +1852,8 @@ export type FilmProbe = {
     chance80: number;
     medianAbsOffset: number | null;
   };
+  /** at each hard cut: does either side move next to it, does anything cross */
+  seams: { how: How; list: SeamSeen[] };
   declaredCuts: {
     how: How;
     file: string | null;
@@ -2008,6 +2084,15 @@ export async function filmProbe(opts: FilmProbeOptions): Promise<{
     .filter((v): v is number => typeof v === "number" && Number.isFinite(v))
     .sort((a, b) => a - b);
   const tol = 1.5 / fps;
+  // each hard cut: does either side move next to it, does anything cross
+  const seamList = seamsAtCuts(
+    changes.filter((c) => c.kind === "hard cut"),
+    energy,
+    fps,
+    (ev?.events ?? [])
+      .filter((e) => e.kind === "cut")
+      .map((e) => ({ t: e.t, label: e.label ?? "" })),
+  );
   // the events file is on the page's clock; the film starts at `from` on it
   const tracks = (rawEvents ? subjectTracks(rawEvents) : []).map((tr) => ({
     ...tr,
@@ -2200,6 +2285,7 @@ export async function filmProbe(opts: FilmProbeOptions): Promise<{
       chance80: chanceWithin(onsets, duration, 0.08),
       medianAbsOffset: offs.length ? round3(median(offs.map(Math.abs))) : null,
     },
+    seams: { how: seamList.length ? "estimated" : "not detected", list: seamList },
     declaredCuts: {
       how: !rawEvents ? "not measured" : declared.length ? "measured" : "not detected",
       file: eventsPath,
@@ -2505,6 +2591,15 @@ export function formatFilmProbe(p: FilmProbe): string {
         : "[not detected] the events file declares no cuts",
     );
   }
+  if (p.seams.list.length) {
+    const none = p.seams.list.filter((x) => x.nothing);
+    const named = (x: SeamSeen) => `${fmtT(x.t)}${x.declared ? ` (declared "${x.declared}")` : ""}`;
+    L.push(
+      none.length
+        ? `[estimated] nothing carried at ${none.map(named).join(", ")} — ${none.length} of ${p.seams.list.length} hard cut(s) where neither side moves in the 0.15 s next to the cut and no part of the picture crosses it (no textured region followed, no shared ground). Launch films people shared kept such cuts for punctuation; most of their seams were carried by a thing or a move (\`skill film craft\`: getting from one scene to the next; \`film gallery --blocks seams\`). To have one followed across, say on the segment that ends there what lives on and name it — \`tl.segment(from, to, { handoff: "…", carry: "#…" })\` — and \`film render\` says whether it was carried (kit/time.js).`
+        : `[estimated] at every one of the ${p.seams.list.length} hard cut(s) one side moves next to the cut or something of the picture crosses it`,
+    );
+  }
   L.push("");
   L.push("## Camera");
   const cam = p.camera;
@@ -2700,6 +2795,10 @@ function formatSegment(s: SegmentReading, p: FilmProbe): string[] {
     L.push(
       `  handoff written: ${s.handoff} · seen at ${fmtT(s.to)} [${h.how}]: ${h.kind}${h.at != null ? ` at ${fmtT(h.at)}` : ""}${h.across ? `, across it: ${h.across}` : ""}${h.nearestOnset != null ? `; nearest onset ${ms(h.nearestOnset)}` : ""}`,
     );
+    if (h.kind === "hard cut" && !SEAM_KINDS.test(s.handoff.trim()))
+      L.push(
+        `    (written in words, so nothing performs it: a seam's kind — curve, whip, depth, inverse, push, dip — on this handoff is performed by \`scenes(…, { tl, seams })\`, kit/time.js; \`film gallery --blocks seams\` draws each)`,
+      );
   }
   return L;
 }

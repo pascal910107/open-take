@@ -42,9 +42,32 @@
 //   tl.segment("hook", "search", { label: "the problem", hold: true, sound: "one low hit" });
 //   tl.segment("search", "result", {
 //     subject: "#search",        // a CSS selector (or a subject's name in the curves)
-//     handoff: "matchcut",       // how it hands over to the next: carry | cut | matchcut | sound | your words
+//     handoff: "whip",           // how it hands over to the next, at "result"
 //   });
-//   tl.segments()               // [{ from, to, label?, hold?, handoff?, subject?, sound? }], by from
+//   tl.segment("result", "end", { handoff: { kind: "depth", outDur: 0.25 } });  // with its options
+//   tl.segments()               // [{ from, to, label?, hold?, handoff?, seam?, carry?, subject?, sound? }], by from
+//
+// What crosses a boundary, if you say: `carry` names the one thing that lives
+// through the cut at the segment's end — a CSS selector, or a function of t
+// giving its box ({ x, y, width, height, opacity? }, frame px) for what is
+// drawn on a canvas. `film render` then follows that thing frame by frame,
+// from 1 s before the boundary to 0.4 s after, and says what it did:
+// carried (it was still there 0.25 s past the boundary, or filled the frame,
+// and moved or changed size on the way), anchored (it stayed, unchanged), or
+// bare (gone, or fading out, by then) — facts, not a grade. Its box is what
+// is drawn of it: a clip-path inset() or circle() counts.
+//
+//   tl.segment(0, 7.05, { handoff: "the pressed button grows into the next scene's ground", carry: "#cta" });
+//   tl.segment(7.05, 9, { handoff: "cut" });   // a hard cut, on purpose
+//
+// A handoff is your own words, or a seam's kind from kit/seams.js — "curve",
+// "whip", "depth", "inverse", "push", "dip", or "cut" for a hard cut on
+// purpose (and the names they go by: "pushCut", "into the lens"). Given the
+// seams module, `scenes(…, { tl, seams })` below performs a kind at the
+// boundary between the two scenes that meet there; words stay words, for you
+// to build.
+// A boundary whose segment names no kind is left as it is: nothing is added
+// that the film did not ask for.
 //
 // What the film uses that someone else made — a track, a sound, a font, a
 // photo — and on what terms, if you keep a record of it. Nothing checks it or
@@ -82,6 +105,20 @@
 //
 //   const sc = scenes({ result: [7.2, 16.8], search: [21.6, 31.2] }, { tl });  // ids of elements
 //   sc.show(t);                 // in __render(t): "result" shown 7.2–16.8 s, hidden otherwise
+//
+// Given kit/seams.js, a boundary whose segment names a seam's kind is handed
+// over that way — the scene ending there is one side, the one starting the
+// other — and show(t) writes both sides while the seam is open:
+//
+//   import * as seams from "./kit/seams.js";
+//   const sc = scenes({ rows: [0, 4], map: [4, 10.6], hex: [10.6, 15] }, { tl, seams });
+//   tl.segment(0, 4, { handoff: "depth" });          // 4.0 s: the rows into the lens, the map out of it
+//   tl.segment(4, 10.6, { handoff: "the panel slides away" });   // words: yours to build
+//   tl.segment(10.6, 15, { handoff: { kind: "whip", dir: "up" } });
+//   window.__render = (t) => { sc.show(t); /* the rest */ };
+//
+// A curve or a whip with no `dir` travels so the incoming scene arrives from
+// the side its subject is on (the segment's `subject`), else to the left.
 
 /**
  * One thing that happens in the film, in seconds; where on the stage (CSS px)
@@ -104,10 +141,104 @@
  * @property {number} to
  * @property {string} [label]
  * @property {boolean} [hold] the picture is meant to hold still here
- * @property {"carry" | "cut" | "matchcut" | "sound" | string} [handoff]
+ * @property {string} [handoff] a seam's kind (kit/seams.js), or your own words
+ * @property {Record<string, number | string>} [seam] the seam's options, when the handoff was
+ *   given as { kind, …options }
+ * @property {string} [carry] what lives through the boundary at `to`: a CSS selector, or
+ *   "(a function)" when it was given as one — `film render` follows it across
  * @property {string} [subject] what the eye should be on: a CSS selector, or a name
  * @property {string} [sound]
  */
+
+/** how long before a boundary a carry is followed (s): a thing becoming the
+ *  next scene mostly does it on the way in */
+export const CARRY_BEFORE = 1;
+/** …and after it */
+export const CARRY_AFTER = 0.4;
+
+/** the curves a carry is written as, in the events file: `carry@<boundary s>:<field>`
+ *  @param {number} at @param {"x" | "y" | "w" | "h" | "o" | "fw" | "fh"} field */
+export const carryCurve = (at, field) => `carry@${+at.toFixed(3)}:${field}`;
+
+/**
+ * The part of a box a clip-path inset() or circle() leaves drawn (px of the
+ * box as laid out, scaled to the box as drawn); the box as it is otherwise.
+ * @param {Element} el @param {DOMRect} r
+ */
+function clipped(el, r) {
+  const clip = getComputedStyle(el).clipPath;
+  const lw = /** @type {HTMLElement} */ (el).offsetWidth || r.width;
+  const lh = /** @type {HTMLElement} */ (el).offsetHeight || r.height;
+  const kx = lw ? r.width / lw : 1;
+  const ky = lh ? r.height / lh : 1;
+  /** @param {string} v @param {number} of */
+  const len = (v, of) =>
+    v.endsWith("%") ? (Number.parseFloat(v) / 100) * of : Number.parseFloat(v) || 0;
+  const inset = /^inset\(([^)]*?)(?:\s+round\b[^)]*)?\)/.exec(clip);
+  if (inset) {
+    const v = (inset[1] ?? "").trim().split(/\s+/);
+    const [t = "0", rt = t, b = t, l = rt] = v;
+    const T = len(t, lh),
+      R = len(rt, lw),
+      B = len(b, lh),
+      L = len(l, lw);
+    return {
+      left: r.left + L * kx,
+      top: r.top + T * ky,
+      width: Math.max(0, (lw - L - R) * kx),
+      height: Math.max(0, (lh - T - B) * ky),
+    };
+  }
+  const circle =
+    /^circle\(\s*([\d.]+(?:px|%))(?:\s+at\s+([\d.]+(?:px|%))\s+([\d.]+(?:px|%)))?/.exec(clip);
+  if (circle) {
+    const rad = len(circle[1] ?? "0", Math.hypot(lw, lh) / Math.SQRT2);
+    const cx = circle[2] ? len(circle[2], lw) : lw / 2;
+    const cy = circle[3] ? len(circle[3], lh) : lh / 2;
+    return {
+      left: r.left + (cx - rad) * kx,
+      top: r.top + (cy - rad) * ky,
+      width: 2 * rad * kx,
+      height: 2 * rad * ky,
+    };
+  }
+  return r;
+}
+
+/**
+ * Where a carry is at this instant, in frame px, and how visible: its box
+ * (after every transform), the opacity it is drawn at (its own and every
+ * ancestor's multiplied; 0 when it or one of them is hidden or not shown),
+ * and the frame's size. Null outside a page.
+ * @param {string | ((t: number) => unknown)} what
+ * @param {number} t
+ */
+function carryBox(what, t) {
+  if (typeof document === "undefined" || typeof window === "undefined") return null;
+  const fw = window.innerWidth;
+  const fh = window.innerHeight;
+  if (typeof what === "function") {
+    const b =
+      /** @type {{ x?: number, y?: number, w?: number, h?: number, width?: number, height?: number, opacity?: number } | null} */ (
+        what(t)
+      );
+    if (!b || typeof b !== "object") return { x: 0, y: 0, w: 0, h: 0, o: 0, fw, fh };
+    const w = b.width ?? b.w ?? 0;
+    const h = b.height ?? b.h ?? 0;
+    return { x: b.x ?? 0, y: b.y ?? 0, w, h, o: b.opacity ?? 1, fw, fh };
+  }
+  const el = document.querySelector(what);
+  if (!el) return { x: 0, y: 0, w: 0, h: 0, o: 0, fw, fh };
+  const r = clipped(el, el.getBoundingClientRect());
+  let o = 1;
+  for (let n = /** @type {Element | null} */ (el); n && o > 0; n = n.parentElement) {
+    const cs = getComputedStyle(n);
+    if (cs.display === "none") o = 0;
+    else o *= Number.parseFloat(cs.opacity) || 0;
+    if (n === el && cs.visibility !== "visible") o = 0;
+  }
+  return { x: r.left, y: r.top, w: r.width, h: r.height, o, fw, fh };
+}
 
 /**
  * Something the film uses that someone else made, and on what terms — every
@@ -191,6 +322,9 @@ export function timeline({ at = {}, bpm, offset = 0 } = {}) {
   const curves = new Map();
   /** @type {FilmSegment[]} */
   const sheet = [];
+  /** what each carry follows, at the boundary it crosses
+   *  @type {{ at: number, what: string | ((t: number) => unknown) }[]} */
+  const carriers = [];
   /** @type {FilmCredit[]} */
   const credited = [];
   const credits = () => credited.map((c) => ({ ...c }));
@@ -203,13 +337,23 @@ export function timeline({ at = {}, bpm, offset = 0 } = {}) {
     sheet
       .map((s, i) => /** @type {const} */ ([s, i]))
       .sort((a, b) => a[0].from - b[0].from || a[1] - b[1])
-      .map(([s]) => ({ ...s }));
+      .map(([s]) => (s.seam ? { ...s, seam: { ...s.seam } } : { ...s }));
+
+  /** events whose label is known only once the film is written — a cut
+   *  `scenes` declared, labelled by the seam performed there */
+  /** @type {WeakMap<FilmEvent, () => string>} */
+  const lateLabels = new WeakMap();
+  /** @param {FilmEvent} e */
+  const labelled = (e) => {
+    const late = lateLabels.get(e);
+    return late ? { ...e, label: late() } : { ...e };
+  };
 
   /** every named moment and declared event, in time order (same time: as declared) */
   const events = () =>
     /** @type {FilmEvent[]} */ ([
       ...Object.entries(at).map(([id, s]) => ({ t: s, kind: "mark", label: id, id })),
-      ...declared.map((e) => ({ ...e })),
+      ...declared.map(labelled),
     ])
       .map((e, i) => /** @type {const} */ ([e, i]))
       .sort((a, b) => a[0].t - b[0].t || a[1] - b[1])
@@ -221,6 +365,20 @@ export function timeline({ at = {}, bpm, offset = 0 } = {}) {
     for (const [name, fn] of curves) {
       const v = fn(now);
       if (Number.isFinite(v)) out[name] = v;
+    }
+    for (const c of carriers) {
+      if (now < c.at - CARRY_BEFORE - 1e-6 || now > c.at + CARRY_AFTER + 1e-6) continue;
+      /** @type {ReturnType<typeof carryBox>} */
+      let b = null;
+      try {
+        b = carryBox(c.what, now);
+      } catch {
+        // a selector the page cannot read, or a box function that threw: this
+        // carry is left out here, the film's other curves are not
+      }
+      if (!b) continue;
+      for (const [k, v] of Object.entries(b))
+        if (Number.isFinite(v)) out[carryCurve(c.at, /** @type {"x"} */ (k))] = v;
     }
     return out;
   };
@@ -251,7 +409,9 @@ export function timeline({ at = {}, bpm, offset = 0 } = {}) {
      * you name. Returns its time, so a page can use it too.
      * @param {string | number} at
      * @param {string} kind
-     * @param {{ x?: number, y?: number, force?: number, label?: string }} [o]
+     * @param {{ x?: number, y?: number, force?: number, label?: string, labelOf?: () => string }} [o]
+     *   labelOf: the label, asked each time the events are read (a cut `scenes` declares,
+     *   named after the seam performed there)
      */
     event: (at, kind, o = {}) => {
       const s = when(at);
@@ -268,6 +428,7 @@ export function timeline({ at = {}, bpm, offset = 0 } = {}) {
         e[k] = k === "force" ? Math.max(0, Math.min(1, v)) : v;
       }
       if (o.label != null) e.label = String(o.label);
+      if (typeof o.labelOf === "function") lateLabels.set(e, o.labelOf);
       declared.push(e);
       return s;
     },
@@ -294,7 +455,12 @@ export function timeline({ at = {}, bpm, offset = 0 } = {}) {
      * moments' names or seconds. Returns the segment.
      * @param {string | number} from
      * @param {string | number} to
-     * @param {{ label?: string, hold?: boolean, handoff?: string, subject?: string, sound?: string }} [o]
+     * @param {{ label?: string, hold?: boolean, handoff?: string | { kind: string, [k: string]: unknown },
+     *   carry?: string | ((t: number) => { x: number, y: number, width: number, height: number, opacity?: number } | null),
+     *   subject?: string, sound?: string }} [o]
+     *   carry: what lives through the boundary at `to` — a CSS selector, or a
+     *   function of t giving its box in frame px (a canvas's own drawing);
+     *   `film render` follows it 0.4 s each side and says what it did
      */
     segment: (from, to, o = {}) => {
       const a = when(from);
@@ -304,8 +470,34 @@ export function timeline({ at = {}, bpm, offset = 0 } = {}) {
       if (!(b > a)) throw new Error(`timeline: segment ${from}–${to} ends before it starts`);
       /** @type {FilmSegment} */
       const seg = { from: a, to: b };
-      for (const k of /** @type {const} */ (["label", "handoff", "subject", "sound"]))
+      const h = o.handoff;
+      if (h != null && typeof h === "object") {
+        const { kind, ...opts } = /** @type {{ kind?: unknown, [k: string]: unknown }} */ (h);
+        if (typeof kind !== "string" || !kind)
+          throw new Error(
+            `timeline: segment ${from}–${to}: a handoff given as an object needs its kind`,
+          );
+        seg.handoff = kind;
+        /** @type {Record<string, number | string>} */
+        const seam = {};
+        for (const [k, v] of Object.entries(opts))
+          if ((typeof v === "number" && Number.isFinite(v)) || typeof v === "string") seam[k] = v;
+        if (Object.keys(seam).length) seg.seam = seam;
+      } else if (h != null) seg.handoff = String(h);
+      for (const k of /** @type {const} */ (["label", "subject", "sound"]))
         if (o[k] != null) seg[k] = String(o[k]);
+      if (o.carry != null) {
+        if (typeof o.carry === "function") seg.carry = "(a function)";
+        else if (typeof o.carry === "string" && o.carry.trim()) seg.carry = o.carry.trim();
+        else
+          throw new Error(
+            `timeline: segment ${from}–${to}: carry is a CSS selector, or a function of t giving a box`,
+          );
+        // two segments ending together name one boundary: the first carry is the one followed
+        // (the report reads the same one), a second would only overwrite its curves
+        if (!carriers.some((c) => Math.abs(c.at - b) < 1e-6))
+          carriers.push({ at: b, what: typeof o.carry === "function" ? o.carry : seg.carry });
+      }
       if (o.hold != null) seg.hold = !!o.hold;
       sheet.push(seg);
       return { ...seg };
@@ -444,10 +636,17 @@ export function speed(fn, h = 1 / 240, { cuts } = {}) {
  * — never display, so what is inside keeps its layout. Scenes may overlap.
  * With `tl`, each start after 0 is declared a "cut" there (labelled with the
  * scene's name). `el`: how a name finds its element (default by id, or by
- * selector when it looks like one).
+ * selector when it looks like one). `seams`, the kit/seams.js module (with a
+ * `tl` that keeps a beat sheet): each boundary whose segment ending there
+ * names a seam's kind (its `kindOf`) is performed by show(t), and its cut is
+ * labelled "seam: <kind>"; `view`, the picture's size for a whip (default
+ * 1920×1080).
  * @param {Record<string, [number, number] | [number, number][]>} map
- * @param {{ tl?: { event: (at: number, kind: string, o?: { label?: string }) => number },
- *   el?: (name: string) => { style: { visibility: string } } | null }} [o]
+ * @param {{ tl?: { event: (at: number, kind: string, o?: { label?: string, labelOf?: () => string }) => number,
+ *     segments?: () => FilmSegment[] },
+ *   el?: (name: string) => { style: { visibility: string } } | null,
+ *   seams?: { seams: typeof import("./seams.js").seams, kindOf: (name: unknown) => string | null },
+ *   view?: { width: number, height: number } }} [o]
  */
 export function scenes(map, o = {}) {
   /** @type {{ name: string, spans: [number, number][] }[]} */
@@ -465,9 +664,20 @@ export function scenes(map, o = {}) {
     }
     return { name, spans: spans.map(([a, b]) => /** @type {[number, number]} */ ([a, b])) };
   });
+  const kit = o.seams ?? null;
+  if (kit && (typeof kit.seams !== "function" || typeof kit.kindOf !== "function"))
+    throw new Error(
+      'scenes: seams is the kit/seams.js module — import * as seams from "./kit/seams.js"',
+    );
+  const withSeams = !!kit && !!o.tl && typeof o.tl.segments === "function";
   if (o.tl)
     for (const sc of list)
-      for (const [a] of sc.spans) if (a > 0) o.tl.event(a, "cut", { label: sc.name });
+      for (const [a] of sc.spans)
+        if (a > 0)
+          o.tl.event(a, "cut", {
+            label: sc.name,
+            ...(withSeams ? { labelOf: () => seamAt(a) ?? sc.name } : {}),
+          });
   /** @type {Map<string, { style: { visibility: string } }>} */
   const found = new Map();
   /** @param {string} name */
@@ -485,16 +695,105 @@ export function scenes(map, o = {}) {
   /** the scenes on at t, by name @param {number} t */
   const at = (t) =>
     list.filter((sc) => sc.spans.some(([a, b]) => t >= a && t < b)).map((sc) => sc.name);
+  const view = o.view ?? { width: 1920, height: 1080 };
+  /** @type {ReturnType<typeof import("./seams.js").seams> | null} */
+  let performed = null;
+  /** how many segments the sheet held when the seams were built */
+  let builtFrom = -1;
+  /** the boundaries the beat sheet names a kind at, as seams() takes them —
+   *  read when first needed and again whenever the sheet has grown since (it
+   *  may be written after the scenes, or after a first show(t)) */
+  const boundaryList = () => {
+    if (!withSeams) return [];
+    const sheet = o.tl?.segments ? o.tl.segments() : [];
+    /** @type {{ at: number, from: string, to: string, kind: string, [k: string]: unknown }[]} */
+    const out = [];
+    for (const sc of list)
+      for (const [a] of sc.spans) {
+        if (!(a > 0)) continue;
+        const seg = sheet.find((x) => Math.abs(x.to - a) < 1e-6 && kit?.kindOf(x.handoff));
+        if (!seg) continue;
+        const from =
+          list.find((x) => x !== sc && x.spans.some(([, b]) => Math.abs(b - a) < 1e-6)) ??
+          list.find(
+            (x) =>
+              x !== sc &&
+              x.spans.some(([p, q]) => a - 1e-6 >= p && a - 1e-6 < q) &&
+              !x.spans.some(([p, q]) => a >= p && a < q),
+          );
+        if (!from) continue;
+        const kind = /** @type {string} */ (kit?.kindOf(seg.handoff));
+        const opts = { ...(seg.seam ?? {}) };
+        if (!("dir" in opts) && (kind === "curve" || kind === "whip")) {
+          const next = sheet.find((x) => Math.abs(x.from - a) < 1e-6 && x.subject);
+          const d = dirToward(next?.subject ?? seg.subject, view);
+          if (d) opts.dir = d;
+        }
+        out.push({ ...opts, at: a, from: from.name, to: sc.name, kind });
+      }
+    return out;
+  };
+  const seamsHere = () => {
+    const n = o.tl?.segments ? o.tl.segments().length : 0;
+    if (!performed || n !== builtFrom) {
+      performed = /** @type {NonNullable<typeof kit>} */ (kit).seams(null, boundaryList(), {
+        view,
+        // the same element show(t) finds for the scene
+        el: (name) => /** @type {Element} */ (/** @type {unknown} */ (elOf(String(name)))),
+      });
+      builtFrom = n;
+    }
+    return performed;
+  };
+  /** the label of the seam performed at a boundary, if one is @param {number} a */
+  const seamAt = (a) => {
+    const s = seamsHere()
+      .list()
+      .find((x) => Math.abs(x.at - a) < 1e-6);
+    return s ? `seam: ${s.kind}` : null;
+  };
   return {
     /** every scene and its spans, as given */
     list: () => list.map((sc) => ({ name: sc.name, spans: sc.spans.map((sp) => [...sp]) })),
     at,
-    /** show the scenes on at t and hide the rest; returns the names shown @param {number} t */
+    /** the seams performed at the boundaries, given the seams module: [{ at, kind, from, to, span }] */
+    seams: () => (withSeams ? seamsHere().list() : []),
+    /** show the scenes on at t and hide the rest — and, given the seams module,
+     *  write both sides of every seam open at t; returns the names shown
+     *  @param {number} t */
     show(t) {
       const on = at(t);
       for (const sc of list)
         elOf(sc.name).style.visibility = on.includes(sc.name) ? "inherit" : "hidden";
+      if (withSeams) seamsHere().apply(t);
       return on;
     },
   };
+}
+
+/**
+ * The way a cut on the curve or a whip travels so the incoming scene arrives
+ * from the side its subject is on — a subject right of the middle comes in
+ * from the right, so the strip travels left. Null when the subject is not
+ * found or sits in the middle.
+ * @param {string | undefined} subject a CSS selector
+ * @param {{ width: number, height: number }} view
+ * @returns {"left" | "right" | "up" | "down" | null}
+ */
+function dirToward(subject, view) {
+  if (!subject || typeof document === "undefined") return null;
+  let el = null;
+  try {
+    el = document.querySelector(subject);
+  } catch {
+    return null;
+  }
+  if (!el) return null;
+  const r = clipped(el, el.getBoundingClientRect());
+  if (!(r.width > 0 && r.height > 0)) return null;
+  const dx = (r.left + r.width / 2 - view.width / 2) / view.width;
+  const dy = (r.top + r.height / 2 - view.height / 2) / view.height;
+  if (Math.max(Math.abs(dx), Math.abs(dy)) < 0.08) return null;
+  if (Math.abs(dx) >= Math.abs(dy)) return dx > 0 ? "left" : "right";
+  return dy > 0 ? "up" : "down";
 }

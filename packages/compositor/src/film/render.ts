@@ -20,7 +20,9 @@
 // Beside the film goes <film>.events.json (see FilmEvents): what the page says
 // happens when (window.__film.events), its curves sampled once per frame in
 // the render loop itself (window.__film.curves), and the cuts — for the score,
-// which places its sounds from it.
+// which places its sounds from it. One curve is the picture's own:
+// "picture.energy", how much the picture changes into each frame, read from
+// the master once it is encoded (as `film probe` reads it).
 
 import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
@@ -33,6 +35,7 @@ import { serveDirectory } from "../html/server";
 import { jpegDimensions, matroskaCluster, matroskaHead } from "../mjpeg-matroska";
 import { type FilmMark, type FilmPageInfo, filmClockSource, filmMarks } from "./clock";
 import { frameStore, type VideoFrames } from "./frames";
+import { fileEnergy } from "./probe";
 
 /** the shutter is open for this fraction of the frame interval (180°) */
 const SHUTTER_FRACTION = 0.5;
@@ -145,6 +148,9 @@ export type FilmSegment = {
   label?: string;
   hold?: boolean;
   handoff?: string;
+  /** what lives through the boundary at `to`: a CSS selector, or "(a
+   *  function)" — followed across it as the curves `carry@<to>:…` */
+  carry?: string;
   /** a CSS selector, or a subject's name in the curves */
   subject?: string;
   sound?: string;
@@ -204,7 +210,10 @@ export type FilmEvents = {
    *  time), and not at all in a render without blur (a draft) */
   detectedCuts: number[];
   /** window.__film.curves(t) once per output frame: rows[i][j] is names[j] at
-   *  t0 + i·dt; null where the page gave no number */
+   *  t0 + i·dt; null where the page gave no number. Beside the page's own,
+   *  "picture.energy" (PICTURE_ENERGY): how much the picture changes into the
+   *  frame — the mean grey difference from the frame before, 0..1, as `film
+   *  probe` measures it; null on a range's first frame (nothing before it) */
   curves: { names: string[]; t0: number; dt: number; rows: (number | null)[][] };
   /** window.__film.segments(), by `from` — the page's beat sheet; [] when it has none */
   segments: FilmSegment[];
@@ -325,6 +334,7 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
     const { browser: first, info, width, height } = await page.openDeclared(opts);
     page.checkFiles();
     const film = describe(opts, info, { pageFile: page.pageFile, width, height, scale, draft });
+    await first.evaluate(`window.__filmFps = ${film.fps}`);
     const frames = film.f1 - film.f0;
     const workers = Math.max(1, Math.min(opts.workers ?? defaultWorkers(), frames));
     // what the page says happens, asked once; its curves are asked in the render loop
@@ -348,7 +358,7 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
       if (info.mode === "render")
         while (pool.length < workers) {
           const b = await page.open(width, height);
-          await prepare(b);
+          await prepare(b, film.fps);
           pool.push(b);
         }
       const p = await probe(pool, film, opts.onProgress);
@@ -424,7 +434,7 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
                 if (!browser) {
                   drawn = density[a]!;
                   browser = await page.open(width, height, scale * drawn);
-                  await prepare(browser);
+                  await prepare(browser, film.fps);
                 }
                 const sink = new ShutterSink(
                   ffmpeg,
@@ -483,9 +493,26 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
       );
     await deliver(ffmpeg, chunks, film, opts.out, tmp);
     const events = eventsPathFor(opts.out);
+    let evs = filmEvents(film, declared, sides, curveRows, film.blur, segments, credits, sources);
+    // the picture's own change, read back from what was encoded: information
+    // for the score, so a film that cannot be read has the curve left out
+    try {
+      const { width: ew, height: eh } = outSize(film);
+      const energy = await fileEnergy(ffmpeg, resolve(opts.out), ew, eh, film.fps);
+      if (evs.curves.names.includes(PICTURE_ENERGY))
+        film.warnings.push(
+          `the page has a curve named "${PICTURE_ENERGY}" — the events file has the picture's own in its place`,
+        );
+      // a range's first frame has nothing before it to change from
+      evs = withPictureEnergy(evs, energy, film.f0 > 0 ? 1 : 0, frames);
+    } catch (e) {
+      film.warnings.push(
+        `the picture's change per frame was not read (${(e as Error).message.split("\n")[0]}) — the events file has no "${PICTURE_ENERGY}"`,
+      );
+    }
     await writeFile(
       events,
-      `${JSON.stringify({ ...filmEvents(film, declared, sides, curveRows, film.blur, segments, credits, sources), ...(turns ? { turnsBack: turns } : {}) })}\n`,
+      `${JSON.stringify({ ...evs, ...(turns ? { turnsBack: turns } : {}) })}\n`,
     );
     const { width: w, height: h } = outSize(film);
     const fine: { from: number; to: number }[] = [];
@@ -627,7 +654,7 @@ export function checkSegments(raw: unknown, warnings: string[] = []): FilmSegmen
       continue;
     }
     const seg: FilmSegment = { from: e.from, to: e.to };
-    for (const k of ["label", "handoff", "subject", "sound"] as const)
+    for (const k of ["label", "handoff", "carry", "subject", "sound"] as const)
       if (typeof e[k] === "string" && e[k]) seg[k] = e[k] as string;
     if (typeof e.hold === "boolean") seg.hold = e.hold;
     out.push(seg);
@@ -844,6 +871,35 @@ export function filmEvents(
   };
 }
 
+/** the name of the picture's own curve in the events file (see FilmEvents.curves) */
+export const PICTURE_ENERGY = "picture.energy";
+
+/** `ev` with its rows [from, to) of the PICTURE_ENERGY column set from
+ *  `energy` (one value per row; rounded, null where it is not a number). The
+ *  column is added when the events have none, null outside [from, to); rows
+ *  are added when the page gave no curves */
+export function withPictureEnergy(
+  ev: FilmEvents,
+  energy: ArrayLike<number | null>,
+  from = 0,
+  to: number = energy.length,
+): FilmEvents {
+  const names = ev.curves.names.includes(PICTURE_ENERGY)
+    ? [...ev.curves.names]
+    : [...ev.curves.names, PICTURE_ENERGY];
+  const j = names.indexOf(PICTURE_ENERGY);
+  const n = Math.max(ev.curves.rows.length, Math.min(to, energy.length));
+  const rows = Array.from({ length: n }, (_, i) => {
+    const row = names.map((_, k) => ev.curves.rows[i]?.[k] ?? null);
+    if (i >= from && i < to) {
+      const v = energy[i];
+      row[j] = typeof v === "number" && Number.isFinite(v) ? Math.round(v * 1e5) / 1e5 : null;
+    }
+    return row;
+  });
+  return { ...ev, curves: { ...ev.curves, names, rows } };
+}
+
 /** the events file of a master after `patch` — a render of part of it — went
  *  into it: the page's events as they are now, the curves and the detected
  *  cuts of the range in place of the master's own there */
@@ -1017,7 +1073,29 @@ export async function patchFilm(
     await moveFile(out, resolve(opts.out));
     const warnings = r.warnings.filter((w) => !w.startsWith("no soundtrack"));
     // the master's events file, with the range's curves and cuts in place of its own
-    const events = await patchedEventsFile(into, r.events, resolve(opts.out), warnings);
+    // and the picture's change read again where the patched master changed:
+    // the range and the frame after it (it now follows a new frame)
+    let energy: Float32Array | null = null;
+    try {
+      energy = await fileEnergy(ffmpeg, resolve(opts.out), r.width, r.height, r.fps);
+    } catch (e) {
+      warnings.push(
+        `the picture's change per frame was not read again (${(e as Error).message.split("\n")[0]}) — "${PICTURE_ENERGY}" in the events file is the range render's`,
+      );
+    }
+    const events = await patchedEventsFile(
+      into,
+      r.events,
+      resolve(opts.out),
+      warnings,
+      (merged, own) =>
+        !energy
+          ? merged
+          : own.curves.names.includes(PICTURE_ENERGY)
+            ? withPictureEnergy(merged, energy, a, b + 1)
+            : // a master whose events file has no such curve gets it whole
+              withPictureEnergy(merged, energy),
+    );
     return {
       ...r,
       out: resolve(opts.out),
@@ -1082,6 +1160,7 @@ async function patchedEventsFile(
   rangeEvents: string | undefined,
   out: string,
   warnings: string[],
+  then: (merged: FilmEvents, master: FilmEvents) => FilmEvents = (m) => m,
 ): Promise<string | undefined> {
   const read = async (file: string | undefined): Promise<FilmEvents | null> => {
     if (!file || !existsSync(file)) return null;
@@ -1100,7 +1179,7 @@ async function patchedEventsFile(
     return undefined;
   }
   const file = eventsPathFor(out);
-  await writeFile(file, `${JSON.stringify(merged)}\n`);
+  await writeFile(file, `${JSON.stringify(then(merged, master!))}\n`);
   return file;
 }
 
@@ -1451,9 +1530,13 @@ async function servePage(
 
 // --- the page ---------------------------------------------------------------------
 
-async function prepare(b: HtmlBrowser): Promise<FilmPageInfo> {
+/** the film clock ready to seek; with `fps`, the page is told the rate it is
+ *  drawn at (window.__filmFps), for what the kit counts in frames — a dip
+ *  cut's dark frames, a push cut's flash */
+async function prepare(b: HtmlBrowser, fps?: number): Promise<FilmPageInfo> {
   const has = await b.evaluate<boolean>(`typeof window.__ot === "object"`);
   if (!has) throw new Error("film: the film clock did not install in the page");
+  if (fps) await b.evaluate(`window.__filmFps = ${fps}`);
   return b.evaluate<FilmPageInfo>("window.__ot.prepare()", { timeoutMs: 120_000 });
 }
 

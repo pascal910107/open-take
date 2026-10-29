@@ -160,6 +160,39 @@ test("the gallery reads the film's own kit when given its folder, else the kit t
     assert.ok(names.includes(n), `${n} is drawn`);
   for (const n of ["camera.lead", "camera.handheld", "camera.shake", "camera.depth", "camera.zoom"])
     assert.ok(names.includes(n), `the camera option ${n} is drawn`);
+  for (const n of ["tilt", "explode", "drop", "stack", "flip", "turn", "dolly"])
+    assert.ok(names.includes(`stage.${n}`), `the stage's ${n} is drawn`);
+});
+
+test("kit/stage.js is drawn: every move a PNG, with its numbers, under its own heading", {
+  skip,
+}, async () => {
+  const r = await filmGallery({ chromePath: chrome!, out: join(dir, "stage"), blocks: ["stage"] });
+  assert.deepEqual(
+    r.entries.map((e) => e.name),
+    [
+      "stage.tilt",
+      "stage.explode",
+      "stage.drop",
+      "stage.stack",
+      "stage.flip",
+      "stage.turn",
+      "stage.dolly",
+    ],
+  );
+  for (const e of r.entries) {
+    assert.ok(e.png, `${e.name} drawn`);
+    for (const row of e.rows) assert.ok(row.stats, `${e.name} / ${row.label} measured`);
+  }
+  // the tilt lands on the angle asked: rx 20, ry −28
+  near(r.entries[0]!.rows[0]!.stats!.to, Math.hypot(20, 28), 0.05, "the tilt's angle");
+  // the drop starts 400 px up and comes to rest
+  const fall = r.entries[2]!.rows[0]!.stats!;
+  near(fall.from, 400, 1e-6, "from 400 px");
+  assert.ok(fall.swing! > 0.1, "a bounce past its rest");
+  const md = await readFile(r.index, "utf8");
+  assert.match(md, /## kit\/stage\.js/);
+  assert.match(md, /!\[stage\.flip\]\(stage\.flip\.png\)/);
 });
 
 test("film gallery draws each block on a stand-in: a PNG per block, index.md and gallery.json", {
@@ -374,4 +407,38 @@ test("film init's page renders as it is, and writes an events file", { skip }, a
   assert.equal(r.durationS, 1);
   const ev = JSON.parse(await readFile(r.events!, "utf8"));
   assert.deepEqual(ev.events, []);
+});
+
+test("kit/seams.js is drawn: every seam a PNG, the cut on the curve one travel through it", {
+  skip,
+}, async () => {
+  const names = await galleryBlockNames();
+  for (const n of [
+    "curve",
+    "waterfall",
+    "whip",
+    "depth",
+    "matchText",
+    "morph",
+    "parallax",
+    "pushCut",
+    "dipCut",
+  ])
+    assert.ok(names.includes(`seams.${n}`), `the seam ${n} is drawn`);
+  const r = await filmGallery({
+    chromePath: chrome!,
+    out: join(dir, "seams"),
+    blocks: ["curve", "whip"],
+  });
+  assert.deepEqual(
+    r.entries.map((e) => e.name),
+    ["seams.curve", "seams.whip"],
+  );
+  for (const e of r.entries) assert.ok(e.png, `${e.name} drawn`);
+  // the curve's travel runs through the cut without a jump: 0 → −460 px
+  const c = r.entries[0]!.rows[0]!.stats!;
+  near(c.from, 0, 1e-6, "from its place");
+  near(c.to, -460, 1e-6, "both distances travelled");
+  const md = await readFile(r.index, "utf8");
+  assert.match(md, /## kit\/seams\.js/);
 });

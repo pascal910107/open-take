@@ -130,9 +130,11 @@ export function scribble(box, opts = {}) {
     for (let s = 0; s < 4; s++)
       for (let i = s ? 1 : 0; i <= 12; i++) {
         const u = i / 12;
+        const c0 = /** @type {{ x: number, y: number }} */ (c[s]);
+        const c1 = /** @type {{ x: number, y: number }} */ (c[s + 1]);
         pts.push({
-          x: lerp(c[s].x, c[s + 1].x, u) + wobble(s * 3 + u * 2, seed) * wob,
-          y: lerp(c[s].y, c[s + 1].y, u) + wobble(s * 3 + u * 2, seed + 7) * wob,
+          x: lerp(c0.x, c1.x, u) + wobble(s * 3 + u * 2, seed) * wob,
+          y: lerp(c0.y, c1.y, u) + wobble(s * 3 + u * 2, seed + 7) * wob,
         });
       }
   } else if (kind === "arrow") {
@@ -155,8 +157,8 @@ export function scribble(box, opts = {}) {
       pts.push({ x: from.x + dx * u + nx * off, y: from.y + dy * u + ny * off });
     }
     // the head: two short strokes back from the tip, along the last direction
-    const a = pts[pts.length - 1];
-    const p = pts[pts.length - 3];
+    const a = /** @type {{ x: number, y: number }} */ (pts[pts.length - 1]);
+    const p = /** @type {{ x: number, y: number }} */ (pts[pts.length - 3]);
     const ang = Math.atan2(a.y - p.y, a.x - p.x);
     const h = opts.head ?? Math.max(10, Math.min(28, len * 0.12));
     const d = `M${pts.map((q) => `${f2(q.x)} ${f2(q.y)}`).join(" L")}`;

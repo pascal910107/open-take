@@ -2,8 +2,10 @@
 // drawn — so a film's author can see a block before choosing it, and see it
 // on its own product rather than on a grey box.
 //
-// Every block of kit/motion.js, every camera option of kit/camera.js and the
-// helpers of kit/cut.js (when the kit has one) gets one PNG: the block at six
+// Every block of kit/motion.js, every camera option of kit/camera.js, the
+// helpers of kit/cut.js, the marks and light of kit/draw.js, the places of
+// kit/map.js, the moves of kit/stage.js and the seams of kit/seams.js (each
+// when the kit has it) gets one PNG: the block at six
 // instants, its value over time and its speed, with the default and three
 // other settings side by side — defaults are one choice among many, and seeing
 // them next to others keeps them from becoming every film's look. The blocks
@@ -28,8 +30,9 @@ import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { resolveFfmpeg, resolveFfprobe, runTool } from "../ffmpeg";
 import { launchHtmlBrowser } from "../html/cdp";
+import { serveDirectory } from "../html/server";
 import { readStateIndex, type StateElement, type StateIndex } from "../state-index";
-import { filmKitDir } from "./kit";
+import { filmKitDir, THREE_FILES, threeBuildDir } from "./kit";
 import { filmPicture } from "./picture";
 
 // --- what comes back ------------------------------------------------------------------
@@ -96,7 +99,7 @@ export type GalleryRow = {
 
 export type GalleryEntry = {
   name: string;
-  group: "motion" | "camera" | "cut" | "draw" | "map";
+  group: "motion" | "camera" | "cut" | "draw" | "map" | "stage" | "seams" | "world";
   /** the call, as the film writes it */
   signature: string;
   /** where its defaults come from */
@@ -147,6 +150,9 @@ type Kit = {
   cut: Mod | null;
   draw: Mod | null;
   map: Mod | null;
+  stage: Mod | null;
+  seams: Mod | null;
+  world: Mod | null;
 };
 
 /** the kit folder a --kit names: a film's kit/, or a kit folder itself */
@@ -177,6 +183,9 @@ async function loadKit(dir: string): Promise<Kit> {
     cut: await load("cut.js"),
     draw: await load("draw.js"),
     map: await load("map.js"),
+    stage: await load("stage.js"),
+    seams: await load("seams.js"),
+    world: await load("world.js"),
   };
 }
 
@@ -543,6 +552,8 @@ type Block = {
   frames?: number[] | ((row: Row) => number[]);
   /** what each cell shows: a window around the subject, or the whole stage */
   view: "subject" | "full";
+  /** what the window is around, when not the subject (or its line of text) */
+  focus?: GalleryBox;
   rows: Row[];
   /** the stage at t for one setting: HTML in stage px */
   draw: (t: number, row: Row) => string;
@@ -1797,6 +1808,852 @@ function blocks(kit: Kit, mat: GalleryMaterial, img: string, beats?: unknown): B
       valueLabel: "drawn (px)",
     });
   }
+
+  // kit/stage.js: parts of the picture as slabs in depth
+  const ST = kit.stage;
+  if (ST && typeof ST.stage === "function") {
+    // a card: the subject with room round it, at least about a third of the
+    // picture, inside it; the regions of the same size round the other
+    // element and the picture's far corner are what other slabs show
+    const cw = Math.min(W, Math.max(S.width * 1.6, W * 0.36));
+    const ch = Math.min(H, Math.max(S.height * 1.6, H * 0.3));
+    const around = (cx: number, cy: number): GalleryBox => ({
+      x: Math.max(0, Math.min(W - cw, cx - cw / 2)),
+      y: Math.max(0, Math.min(H - ch, cy - ch / 2)),
+      width: cw,
+      height: ch,
+    });
+    const O = mat.other;
+    const card = around(sc.x, sc.y);
+    const second = around(O.x + O.width / 2, O.y + O.height / 2);
+    const third = around(sc.x < W / 2 ? W - cw / 2 : cw / 2, sc.y < H / 2 ? H - ch / 2 : ch / 2);
+    // the picture in tiles, 3 × 2: a layout of parts, none bigger than a sixth
+    const tiles: GalleryBox[] = [];
+    for (let j = 0; j < 2; j++)
+      for (let i = 0; i < 3; i++)
+        tiles.push({ x: (i * W) / 3, y: (j * H) / 2, width: W / 3, height: H / 2 });
+    // biome-ignore lint/suspicious/noExplicitAny: a stage of the film's kit
+    type Built = { st: any; slabs: { sl: any; crop: GalleryBox }[] };
+    const built = new Map<Row, Built>();
+    const stageOf = (row: Row, make: (o: Record<string, unknown>) => Built) => {
+      let b = built.get(row);
+      if (!b) {
+        b = make(row.o);
+        built.set(row, b);
+      }
+      return b;
+    };
+    /** a stage with slabs on given boxes, each showing a crop of the picture */
+    const build = (
+      parts: { box: GalleryBox; crop?: GalleryBox; o?: Record<string, unknown> }[],
+    ) => {
+      const st = ST.stage({ width: W, height: H });
+      const slabs = parts.map((p, i) => ({
+        sl: st.slab(null, { box: p.box, name: `slab ${i + 1}`, ...(p.o ?? {}) }),
+        crop: p.crop ?? p.box,
+      }));
+      return { st, slabs };
+    };
+    const drawStage = (b: Built, t: number, backdrop = pic("opacity:0.32")) => {
+      const states = b.st.at(t) as {
+        style: Record<string, string>;
+        sheen: { background: string; opacity: number } | null;
+      }[];
+      return (
+        backdrop +
+        states
+          .map((s, i) => {
+            const { sl, crop } = b.slabs[i]!;
+            const box = sl.box as { w: number; h: number };
+            const st = s.style;
+            return `<div style="position:absolute;left:0;top:0;width:${n3(box.w)}px;height:${n3(box.h)}px;overflow:hidden;transform-origin:0 0;backface-visibility:hidden;transform:${st.transform};opacity:${st.opacity};visibility:${st.visibility};z-index:${st.zIndex};filter:${st.filter};box-shadow:${st.boxShadow};outline:var(--px) solid rgba(255,255,255,0.35)">${pic(`left:${-crop.x}px;top:${-crop.y}px`)}${s.sheen ? `<div style="position:absolute;inset:0;background:${s.sheen.background};opacity:${s.sheen.opacity}"></div>` : ""}</div>`;
+          })
+          .join("")
+      );
+    };
+    const stageBlock = (
+      b: Omit<Block, "group" | "draw" | "value" | "view"> & {
+        view?: Block["view"];
+        make: (o: Record<string, unknown>) => Built;
+        value: (t: number, b: Built, row: Row) => number;
+        backdrop?: string;
+      },
+    ) =>
+      add({
+        focus: card,
+        ...b,
+        group: "stage",
+        view: b.view ?? "subject",
+        draw: (t, r) => drawStage(stageOf(r, b.make), t, b.backdrop),
+        value: (t, r) => b.value(t, stageOf(r, b.make), r),
+      });
+    const angle = (p: { rx: number; ry: number }) => Math.hypot(p.rx, p.ry);
+    stageBlock({
+      name: "stage.tilt",
+      signature:
+        "stage({ el, camera, perspective }) · st.slab(node, { crop | box }) · slab.to({ rx, ry, rz, z, scale }, { start | arrive, dur, ease | spring })",
+      note: "one part as a slab turning into depth, its content live; a lens 2000 px away (the middle of 1600–2800 px measured); no default angle — these are the films' (rx ≈20°, ry −20…−35°; a table ≈40°)",
+      needs: ["stage.stage"],
+      t0: 0,
+      t1: 1.2,
+      rows: [
+        { label: "rx: 20, ry: -28", o: { rx: 20, ry: -28 } },
+        { label: "ry: -35", o: { ry: -35 } },
+        { label: "rx: 40 (a table)", o: { rx: 40 } },
+        {
+          label: "rx: 20, ry: -28, spring overshoot 0.2",
+          o: { rx: 20, ry: -28, spring: { overshoot: 0.2 } },
+        },
+      ],
+      make: (o) => {
+        const b = build([{ box: card, o: { sheen: 0.6, shadow: 1 } }]);
+        const { spring: sp, ...pose } = o as { spring?: unknown };
+        b.slabs[0]!.sl.to(pose, sp ? { start: 0, spring: sp } : { start: 0 });
+        return b;
+      },
+      value: (t, b) => angle(b.slabs[0]!.sl.pose(t)),
+      valueLabel: "its angle (degrees)",
+    });
+    stageBlock({
+      name: "stage.explode",
+      view: "full",
+      signature:
+        "explode(slabs, { start | arrive, gap, spread, every }) · together(slabs, when) · st.turn({ rx, ry }, when)",
+      note: "three parts lifting apart, 120 px a layer (about a sixteenth of the lens's distance), as the stage turns rx 24°, ry −18°",
+      needs: ["stage.stage", "stage.explode"],
+      t0: 0,
+      t1: 1.4,
+      rows: [
+        { label: "default", o: {} },
+        { label: "gap: 260", o: { gap: 260 } },
+        { label: "spread: 0.3", o: { spread: 0.3 } },
+        { label: "every: 0.12, then together", o: { every: 0.12, back: true } },
+      ],
+      make: (o) => {
+        const b = build([{ box: third }, { box: second }, { box: card }]);
+        const { back, ...e } = o as { back?: boolean };
+        b.st.turn({ rx: 24, ry: -18 }, { start: 0, dur: 0.9 });
+        ST.explode(
+          b.slabs.map((x) => x.sl),
+          { start: 0.1, ...e },
+        );
+        if (back)
+          ST.together(
+            b.slabs.map((x) => x.sl),
+            { start: 0.85, dur: 0.45 },
+          );
+        return b;
+      },
+      value: (t, b) => b.slabs[2]!.sl.pose(t).z,
+      valueLabel: "the front layer's height (px toward the lens)",
+    });
+    stageBlock({
+      name: "stage.drop",
+      signature: "drop(slab, { start | arrive, from, z, tilt, spring | ease })",
+      note: "lowered like a print: from 400 px up (1.25× under the 2000 px lens), a 2 Hz spring swinging 12 % of its fall (a 3 % bounce), its shadow tightening",
+      needs: ["stage.stage", "stage.drop"],
+      t0: 0,
+      t1: 1,
+      rows: [
+        { label: "default", o: {} },
+        { label: "from: 900", o: { from: 900 } },
+        { label: "tilt: { rz: -8, rx: 12 }", o: { tilt: { rz: -8, rx: 12 } } },
+        {
+          label: "spring: { freq: 1.2, overshoot: 0.3 }",
+          o: { spring: { freq: 1.2, overshoot: 0.3 } },
+        },
+      ],
+      make: (o) => {
+        const b = build([{ box: card, o: { shadow: 1 } }]);
+        ST.drop(b.slabs[0]!.sl, { start: 0, ...o });
+        return b;
+      },
+      value: (t, b) => b.slabs[0]!.sl.pose(t).z,
+      valueLabel: "height (px toward the lens)",
+    });
+    stageBlock({
+      name: "stage.stack",
+      view: "full",
+      signature: "stack(slabs, { start | arrive, every, gap, from, rz })",
+      note: "three cards dropped in turn on one place, 0.16 s apart (labels in those films stacked one every ≈0.16 s), 6 px a sheet; the stage turned 30° so the pile has thickness",
+      needs: ["stage.stage", "stage.stack"],
+      t0: 0,
+      t1: 1.4,
+      rows: [
+        { label: "default", o: {} },
+        { label: "rz: [-5, 4, -1]", o: { rz: [-5, 4, -1] } },
+        { label: "every: 0.32", o: { every: 0.32 } },
+        { label: "gap: 40", o: { gap: 40 } },
+      ],
+      make: (o) => {
+        const b = build([
+          { box: card, crop: third, o: { shadow: 1 } },
+          { box: card, crop: second, o: { shadow: 1 } },
+          { box: card, crop: card, o: { shadow: 1 } },
+        ]);
+        b.st.turn({ rx: 30 }, { start: 0, dur: 0.01 });
+        ST.stack(
+          b.slabs.map((x) => x.sl),
+          { start: 0, ...o },
+        );
+        return b;
+      },
+      value: (t, b) => b.slabs[2]!.sl.pose(t).z,
+      valueLabel: "the last card's height (px)",
+    });
+    stageBlock({
+      name: "stage.flip",
+      signature: "flip(front, back, { start | arrive, dur, axis, dir, lift })",
+      note: "the card turns over to the other region on its back, 0.73 s with the camera's settle; each side hidden while it faces away",
+      needs: ["stage.stage", "stage.flip"],
+      t0: 0,
+      t1: 1.1,
+      rows: [
+        { label: "default (axis y)", o: {} },
+        { label: 'axis: "x"', o: { axis: "x" } },
+        { label: "lift: 300", o: { lift: 300 } },
+        { label: "dur: 0.4, ease: linear", o: { dur: 0.4, ease: (p: number) => p } },
+      ],
+      make: (o) => {
+        const b = build([
+          { box: card, crop: card, o: { sheen: 0.6 } },
+          { box: card, crop: second, o: { sheen: 0.6 } },
+        ]);
+        ST.flip(b.slabs[0]!.sl, b.slabs[1]!.sl, { start: 0, ...o });
+        return b;
+      },
+      value: (t, b, r) => {
+        const p = b.slabs[0]!.sl.pose(t);
+        return (r.o as { axis?: string }).axis === "x" ? p.rx : p.ry;
+      },
+      valueLabel: "the front's turn (degrees)",
+    });
+    stageBlock({
+      name: "stage.turn",
+      view: "full",
+      signature:
+        "st.turn({ rx, ry, rz }, { start | arrive, dur, ease | spring }) — the whole stage about its pivot",
+      note: "the picture as six tiles (none bigger than a sixth of it) turning into a table — the films turned a layout ≈40°, then back to flat",
+      needs: ["stage.stage"],
+      t0: 0,
+      t1: 1.2,
+      rows: [
+        { label: "rx: 40", o: { rx: 40 } },
+        { label: "rx: 40, ry: -20", o: { rx: 40, ry: -20 } },
+        { label: "rx: 30, rz: 12", o: { rx: 30, rz: 12 } },
+        { label: "rx: 40, tiles lifted 60 px apart", o: { rx: 40, lift: 60 } },
+      ],
+      backdrop: "",
+      make: (o) => {
+        const b = build(tiles.map((box) => ({ box, o: { shadow: 0.8 } })));
+        const { lift, ...w } = o as { lift?: number };
+        b.st.turn(w, { start: 0 });
+        if (lift)
+          ST.explode(
+            b.slabs.map((x) => x.sl),
+            { start: 0.2, gap: lift },
+          );
+        return b;
+      },
+      value: (t, b) => angle(b.st.world(t)),
+      valueLabel: "the stage's angle (degrees)",
+    });
+    stageBlock({
+      name: "stage.dolly",
+      view: "full",
+      signature: "st.dolly(z, { start | arrive, dur, ease | spring })",
+      note: "the lens travels 2200 px past the card into the tiles 1600 px behind it; a slab fades over the last quarter of the way to the lens; square on, it is drawn in 2D at any size",
+      needs: ["stage.stage"],
+      t0: 0,
+      t1: 1.4,
+      rows: [
+        { label: "default (0.73 s)", o: {} },
+        { label: "dur: 1.2", o: { dur: 1.2 } },
+        { label: "z: 1500 (stops at the card)", o: { z: 1500 } },
+        { label: "ease: linear", o: { ease: (p: number) => p } },
+      ],
+      backdrop: "",
+      make: (o) => {
+        const b = build([
+          ...tiles.map((box) => ({ box, o: { rest: { z: -1600 } } })),
+          { box: card, o: { shadow: 1 } },
+        ]);
+        const { z = 2200, ...w } = o as { z?: number };
+        b.st.dolly(z, { start: 0, ...w });
+        return b;
+      },
+      value: (t, b) => b.st.world(t).z,
+      valueLabel: "the lens's travel (px)",
+    });
+  }
+
+  // kit/seams.js: one scene handing over to the next — the picture as the
+  // outgoing scene, the other element's region of it, filling the frame, as
+  // the incoming one
+  const SE = kit.seams;
+  if (SE && typeof SE.curve === "function") {
+    const O = mat.other;
+    // the incoming scene: the other region, scaled to cover the frame
+    const k = Math.max(W / Math.max(1, O.width), H / Math.max(1, O.height));
+    const sceneB = `<img class="m" src="${img}" style="transform-origin:0 0;transform:translate(${n3(W / 2 - (O.x + O.width / 2) * k)}px,${n3(H / 2 - (O.y + O.height / 2) * k)}px) scale(${n3(k)})">`;
+    let blurId = 0;
+    /** one side of a seam as a full-frame layer; an axis blur as an SVG filter of its own */
+    const sideDiv = (
+      sd: {
+        visible: boolean;
+        opacity: number;
+        transform: string;
+        filter: string;
+        blur: number;
+        blurAxis: "x" | "y" | null;
+      },
+      inner: string,
+      z = 0,
+    ) => {
+      if (!sd.visible) return "";
+      let filter = sd.filter === "none" ? "" : sd.filter;
+      let defs = "";
+      if (sd.blurAxis && sd.blur > 0) {
+        const id = `sb${++blurId}`;
+        defs = `<svg width="0" height="0" style="position:absolute"><filter id="${id}" x="-20%" width="140%" y="-20%" height="140%"><feGaussianBlur stdDeviation="${sd.blurAxis === "x" ? `${n3(sd.blur)} 0` : `0 ${n3(sd.blur)}`}"/></filter></svg>`;
+        filter = `url(#${id})${filter ? ` ${filter}` : ""}`;
+      }
+      return `${defs}<div style="position:absolute;left:0;top:0;width:${W}px;height:${H}px;overflow:hidden;background:#f2f2ef;z-index:${z};transform-origin:50% 50%;transform:${sd.transform};opacity:${n3(sd.opacity)};filter:${filter || "none"}">${inner}</div>`;
+    };
+    const AT = 0.4;
+    /** the six instants round a cut: before, on its way, its last frame, its first, after */
+    const round = [AT - 0.3, AT - 0.12, AT - 1 / 60, AT, AT + 0.12, AT + 0.35];
+    const pair = (r: { a: Parameters<typeof sideDiv>[0]; b: Parameters<typeof sideDiv>[0] }) =>
+      `<div style="position:absolute;inset:0;background:#e9e9e4"></div>${sideDiv(r.a, pic())}${sideDiv(r.b, sceneB, 1)}`;
+    const along = (r: {
+      a: { visible: boolean; x: number; y: number };
+      b: { x: number; y: number };
+    }) => (r.a.visible ? r.a.x + r.a.y : r.b.x + r.b.y);
+    add({
+      name: "seams.curve",
+      group: "seams",
+      signature: "curve(t, at, { dir, dist, dur, fade, enter }) → { a, b, speed }",
+      note: "the cut at the fastest frame: out on p⁴, in on its mirror, 4·dist/dur both sides (230 px, 0.30 s → ≈ 3070 px/s; HyperFrames' cut catalog)",
+      needs: ["seams.curve"],
+      t0: 0,
+      t1: 0.8,
+      frames: round,
+      view: "full",
+      rows: [
+        { label: "default (left)", o: {} },
+        { label: 'dir: "up"', o: { dir: "up" } },
+        { label: "dist: 460", o: { dist: 460 } },
+        { label: "dur: 0.2", o: { dur: 0.2 } },
+      ],
+      draw: (t, r) => pair(SE.curve(t, AT, r.o)),
+      // the travel of the one move: the outgoing's offset, then the incoming's
+      // plus both distances — one line through the cut, its speed the same on both sides
+      value: (t, r) => {
+        const c = SE.curve(t, AT, r.o);
+        const d = (r.o.dist as number | undefined) ?? 230;
+        const sgn = r.o.dir === "up" || r.o.dir === undefined || r.o.dir === "left" ? -1 : 1;
+        return c.a.visible ? along(c) : along(c) + sgn * 2 * d;
+      },
+      valueLabel: "travel of the move (px)",
+    });
+    const words = (mat.text || DEFAULT_TEXT).split(/\s+/).filter(Boolean).slice(0, 6);
+    const next = ["the", "next", "line", "arrives"];
+    const fs = Math.round(H * 0.12);
+    const line = (
+      ws: string[],
+      sides: { visible: boolean; transform: string; opacity: number }[],
+    ) => {
+      let x = W * 0.08;
+      return ws
+        .map((w, i) => {
+          const sd = sides[i]!;
+          const left = x;
+          x += (w.length + 1) * fs * 0.56;
+          return sd.visible
+            ? `<span style="position:absolute;left:${n3(left)}px;top:${n3(H * 0.42)}px;font:700 ${fs}px/1 system-ui,sans-serif;color:#111;white-space:pre;transform:${sd.transform === "none" ? "none" : sd.transform};opacity:${n3(sd.opacity)}">${esc(w)}</span>`
+            : "";
+        })
+        .join("");
+    };
+    add({
+      name: "seams.waterfall",
+      group: "seams",
+      signature:
+        "waterfall(t, at, nOut, nIn, { dir, dist, outDur, inDur, fade, stagger, gap, shrink }) → { out, in, end }",
+      note: "word by word: out 0.34 s each, 0.022 s apart, the last gone at the cut; in 0.30 s each, gaps from 0.05 s shrinking ×0.84 (HyperFrames' waterfall)",
+      needs: ["seams.waterfall"],
+      t0: 0,
+      t1: 0.9,
+      frames: [AT - 0.3, AT - 0.15, AT - 0.05, AT + 0.05, AT + 0.15, AT + 0.45],
+      view: "full",
+      rows: [
+        { label: "default", o: {} },
+        { label: "stagger: 0.05", o: { stagger: 0.05 } },
+        { label: "gap: 0.1", o: { gap: 0.1 } },
+        { label: 'dir: "up", dist: 120', o: { dir: "up", dist: 120 } },
+      ],
+      draw: (t, r) => {
+        const w = SE.waterfall(t, AT, words.length, next.length, r.o);
+        return `<div style="position:absolute;inset:0;background:#f7f7f4"></div>${line(words, w.out)}${line(next, w.in)}`;
+      },
+      // the last word out, then the first word in, as one travel
+      value: (t, r) => {
+        const w = SE.waterfall(t, AT, words.length, next.length, r.o);
+        const last = (w.out as { x: number; y: number }[])[words.length - 1]!;
+        const first = (w.in as { x: number; y: number }[])[0]!;
+        const d = (r.o.dist as number | undefined) ?? 230;
+        return t < AT ? last.x + last.y : first.x + first.y - 2 * d;
+      },
+      valueLabel: "travel of the last word out, then the first in (px)",
+    });
+    add({
+      name: "seams.whip",
+      group: "seams",
+      signature: "whip(t, at, view, { dir, dur, blur, power }) → { a, b, speed, edge }",
+      note: "one strip, the next scene a frame beyond: 3·W/dur at the middle (0.55 s → ≈ 10 500 px/s at 1920); the master's shutter smears it, `blur` adds one along the path (HyperFrames' whip-pan)",
+      needs: ["seams.whip"],
+      t0: 0,
+      t1: 0.8,
+      frames: [AT - 0.3, AT - 0.15, AT - 0.05, AT + 0.05, AT + 0.15, AT + 0.3],
+      view: "full",
+      rows: [
+        { label: "default (left)", o: {} },
+        { label: "blur: 16", o: { blur: 16 } },
+        { label: 'dir: "up"', o: { dir: "up" } },
+        { label: "dur: 0.3", o: { dur: 0.3 } },
+      ],
+      draw: (t, r) => pair(SE.whip(t, AT, { width: W, height: H }, r.o)),
+      value: (t, r) => {
+        const w = SE.whip(t, AT, { width: W, height: H }, r.o);
+        const size = r.o.dir === "up" || r.o.dir === "down" ? H : W;
+        return -size * w.p;
+      },
+      valueLabel: "the strip's offset (px)",
+    });
+    add({
+      name: "seams.depth",
+      group: "seams",
+      signature:
+        "depth(t, at, { inverse, outDur, inDur, outScale, inScale, blur, dim }) → { a, b }",
+      note: "into the lens and out of the same blur: out 0.2 s to ×1.2, blur 10; in 0.5 s from ×0.75 (HyperFrames' zoom-through); 10 px for text, 18–20 for a full frame",
+      needs: ["seams.depth"],
+      t0: 0,
+      t1: 1,
+      frames: [AT - 0.3, AT - 0.1, AT - 1 / 60, AT, AT + 0.12, AT + 0.5],
+      view: "full",
+      rows: [
+        { label: "default", o: {} },
+        { label: "inverse: true", o: { inverse: true } },
+        { label: "blur: 18", o: { blur: 18 } },
+        { label: "inDur: 0.3", o: { inDur: 0.3 } },
+      ],
+      draw: (t, r) => pair(SE.depth(t, AT, r.o)),
+      value: (t, r) => {
+        const d = SE.depth(t, AT, r.o);
+        return d.a.visible ? d.a.blur : d.b.blur;
+      },
+      valueLabel: "blur (px)",
+    });
+    const big = Math.round(H * 0.13);
+    const word = (
+      txt: string,
+      sd: { visible: boolean; transform: string; opacity: number },
+      sp: number | null,
+    ) =>
+      sd.visible
+        ? `<div style="position:absolute;left:0;top:0;width:${W}px;height:${H}px;display:flex;align-items:center;justify-content:center;transform-origin:50% 50%;transform:${sd.transform};opacity:${n3(sd.opacity)}"><span style="font:800 ${big}px/1 system-ui,sans-serif;color:#111;white-space:pre;letter-spacing:${sp == null ? "normal" : `${n3(sp)}em`}">${esc(txt)}</span></div>`
+        : "";
+    const firstWord = words[0] ?? "before";
+    add({
+      name: "seams.matchText",
+      group: "seams",
+      signature:
+        "matchText(t, start, end, { mode, k, dir, dist, from, to, ease }) → { a, b, cut, spacing }",
+      note: "one line becomes another on one curve, cubic-bezier(.85, 0, .15, 1), swapped at its fastest middle (HyperFrames' text-match-cut); 2 s here",
+      needs: ["seams.matchText"],
+      t0: 0,
+      t1: 2,
+      frames: [0.2, 0.7, 0.98, 1.02, 1.3, 1.9],
+      view: "full",
+      rows: [
+        { label: 'mode: "zoom" (k 1.7)', o: {} },
+        { label: "k: 0.6", o: { k: 0.6 } },
+        { label: 'mode: "slide"', o: { mode: "slide" } },
+        { label: 'mode: "track"', o: { mode: "track" } },
+      ],
+      draw: (t, r) => {
+        const m = SE.matchText(t, 0, 2, r.o);
+        return `<div style="position:absolute;inset:0;background:#f7f7f4"></div>${word(firstWord, m.a, m.spacing)}${word("after", m.b, m.spacing)}`;
+      },
+      value: (t, r) => SE.matchText(t, 0, 2, r.o).p,
+      valueLabel: "the one curve, 0 → 1 (the swap at its fastest)",
+    });
+    // a card (the subject) growing into a panel; the subject's own picture is the part both hold
+    const panel = { x: W * 0.15, y: H * 0.12, w: W * 0.7, h: H * 0.76, r: 24 };
+    const cardR = { x: S.x, y: S.y, w: S.width, h: S.height, r: 12 };
+    const partIn = { x: panel.x + panel.w * 0.06, y: panel.y + panel.h * 0.08, w: panel.w * 0.4 };
+    const partInPanel = { ...partIn, h: (partIn.w * S.height) / Math.max(1, S.width) };
+    add({
+      name: "seams.morph",
+      group: "seams",
+      signature:
+        "morph(t, start, end, card, panel, { snappy, ease, aOut, bIn }) → { container, a, b, part(inCard, inPanel) }",
+      note: "the panel at full size shrunk onto the card and grown back; a part both hold moves at its own size, not stretched (HyperFrames' modal-morph); 0.6–1.2 s in the films",
+      needs: ["seams.morph"],
+      t0: 0,
+      t1: 1,
+      view: "full",
+      rows: [
+        { label: "default (smooth)", o: {} },
+        { label: "snappy: true", o: { snappy: true } },
+        { label: "aOut: 0.5, bIn: 0.5", o: { aOut: 0.5, bIn: 0.5 } },
+        { label: "ease: easeOut", o: { ease: M.easeOut } },
+      ],
+      draw: (t, r) => {
+        const m = SE.morph(t, 0, 0.8, cardR, panel, r.o);
+        const pt = m.part(cardR, partInPanel);
+        const own = `<div style="position:absolute;left:0;top:0;width:${n3(panel.w)}px;height:${n3(panel.h)}px;overflow:hidden;opacity:${n3(m.b.opacity)}"><div style="position:absolute;left:${n3(-panel.x)}px;top:${n3(-panel.y)}px;width:${W}px;height:${H}px">${sceneB}</div></div>`;
+        const shared = `<div style="position:absolute;left:${n3(partInPanel.x - panel.x)}px;top:${n3(partInPanel.y - panel.y)}px;width:${n3(partInPanel.w)}px;height:${n3(partInPanel.h)}px;overflow:hidden;transform-origin:0 0;transform:${pt.transform};outline:var(--px) solid rgba(194,65,12,0.9)"><img class="m" src="${img}" style="transform-origin:0 0;transform:scale(${n3(partInPanel.w / Math.max(1, S.width))}) translate(${-S.x}px,${-S.y}px)"></div>`;
+        return `${pic("opacity:0.32")}<div style="position:absolute;left:${n3(panel.x)}px;top:${n3(panel.y)}px;width:${n3(panel.w)}px;height:${n3(panel.h)}px;overflow:hidden;background:#fff;transform-origin:0 0;transform:${m.container.transform};border-radius:${m.container.radius};box-shadow:0 20px 60px rgba(0,0,0,0.25)">${own}${shared}</div>`;
+      },
+      value: (t, r) => SE.morph(t, 0, 0.8, cardR, panel, r.o).container.box.w,
+      valueLabel: "the card's width (px)",
+    });
+    // the picture in a 3 × 3 grid; the middle tile becomes the incoming scene
+    const gap = Math.round(W * 0.012);
+    const tw = (W - 4 * gap) / 3;
+    const th = (H - 4 * gap) / 3;
+    const grid: GalleryBox[] = [];
+    for (let j = 0; j < 3; j++)
+      for (let i = 0; i < 3; i++)
+        grid.push({ x: gap + i * (tw + gap), y: gap + j * (th + gap), width: tw, height: th });
+    const mid = grid[4]!;
+    const rest = grid.filter((_, i) => i !== 4);
+    add({
+      name: "seams.parallax",
+      group: "seams",
+      signature:
+        "parallax(t, start, end, card, others, view, { reverse, push, shrink, radius, ease }) → { scene, focal, others, radius }",
+      note: "one tile becomes the scene, built at full size and shrunk onto it; the rest pushed 900 px a tile outward, to 0.6 and gone (HyperFrames' parallax-zoom); reverse: a dolly-out",
+      needs: ["seams.parallax"],
+      t0: 0,
+      t1: 1.4,
+      view: "full",
+      rows: [
+        { label: "default", o: {} },
+        { label: "reverse: true", o: { reverse: true } },
+        { label: "push: 400", o: { push: 400 } },
+        { label: "ease: easeIn", o: { ease: M.easeIn } },
+      ],
+      draw: (t, r) => {
+        const p = SE.parallax(t, 0, 1.2, mid, rest, { width: W, height: H }, r.o);
+        const others = rest
+          .map((b, i) => {
+            const sd = p.others[i] as { visible: boolean; transform: string; opacity: number };
+            return sd.visible
+              ? `<div style="position:absolute;left:${n3(b.x)}px;top:${n3(b.y)}px;width:${n3(b.width)}px;height:${n3(b.height)}px;overflow:hidden;border-radius:16px;transform-origin:50% 50%;transform:${sd.transform};opacity:${n3(sd.opacity)}">${pic(`left:${n3(-b.x)}px;top:${n3(-b.y)}px`)}</div>`
+              : "";
+          })
+          .join("");
+        return `<div style="position:absolute;inset:0;background:#e9e9e4"></div>${others}<div style="position:absolute;left:0;top:0;width:${W}px;height:${H}px;overflow:hidden;transform-origin:0 0;transform:${p.scene.transform};border-radius:${p.scene.radius}">${sceneB}</div>`;
+      },
+      value: (t, r) => SE.parallax(t, 0, 1.2, mid, rest, { width: W, height: H }, r.o).scene.scale,
+      valueLabel: "the scene's scale",
+    });
+    add({
+      name: "seams.pushCut",
+      group: "seams",
+      signature: "pushCut(t, at, { dur, push, flash, colour, fps }) → { a, b, flash }",
+      note: "a hard cut that reads as meant: both sides keep pushing in (1 → 1.04, then from 1.04/1.07 to 1), a 0.2 flash over the cut's frames (Remotion's pushCut numbers)",
+      needs: ["seams.pushCut"],
+      t0: 0,
+      t1: 0.8,
+      frames: [AT - 0.15, AT - 0.05, AT - 1 / 60, AT, AT + 1 / 60, AT + 0.2],
+      view: "full",
+      rows: [
+        { label: "default", o: {} },
+        { label: "push: 1.08", o: { push: 1.08 } },
+        { label: "flash: 0.5", o: { flash: 0.5 } },
+        { label: 'colour: "#000"', o: { colour: "#000" } },
+      ],
+      draw: (t, r) => {
+        const p = SE.pushCut(t, AT, r.o);
+        return `${pair(p)}<div style="position:absolute;inset:0;z-index:3;background:${p.flash.colour};opacity:${n3(p.flash.opacity)}"></div>`;
+      },
+      value: (t, r) => {
+        const p = SE.pushCut(t, AT, r.o);
+        return p.a.visible ? p.a.scale : p.b.scale;
+      },
+      valueLabel: "scale",
+    });
+    add({
+      name: "seams.dipCut",
+      group: "seams",
+      signature: "dipCut(t, at, { frames, level, settle, settleDur, fps }) → { a, b }",
+      note: "the outgoing frame ≈ 40 % darker for its last 3 frames, then the cut (HyperFrames' motion notes); settle: the incoming lands from a little large",
+      needs: ["seams.dipCut"],
+      t0: 0,
+      t1: 0.8,
+      frames: [AT - 0.1, AT - 3 / 60, AT - 1 / 60, AT, AT + 0.08, AT + 0.3],
+      view: "full",
+      rows: [
+        { label: "default", o: {} },
+        { label: "settle: 1.03", o: { settle: 1.03 } },
+        { label: "level: 0.3", o: { level: 0.3 } },
+        { label: "frames: 6", o: { frames: 6 } },
+      ],
+      draw: (t, r) => pair(SE.dipCut(t, AT, r.o)),
+      value: (t, r) => {
+        const d = SE.dipCut(t, AT, r.o);
+        return d.a.visible ? d.a.brightness : d.b.scale;
+      },
+      valueLabel: "brightness · scale",
+    });
+  }
+
+  // kit/world.js: stage.js's slabs drawn in WebGL — the picture on slabs and
+  // in devices. Each cell is a WebGL frame: its numbers (world.frame(t)) are
+  // worked out here, and the page draws them with the kit's world.js and
+  // three.js (paintWorlds)
+  const WO = kit.world;
+  if (WO && typeof WO.world === "function") {
+    type Def = {
+      box: GalleryBox;
+      crop: GalleryBox;
+      name: string;
+      o?: Record<string, unknown>;
+      device?: { kind: string; o?: Record<string, unknown> };
+    };
+    // biome-ignore lint/suspicious/noExplicitAny: a world of the film's kit
+    type WBuilt = { w: any; defs: Def[]; slabs: any[] };
+    const wbuilt = new Map<Row, WBuilt>();
+    const worldOf = (row: Row, make: (o: Record<string, unknown>) => WBuilt) => {
+      let b = wbuilt.get(row);
+      if (!b) {
+        b = make(row.o);
+        wbuilt.set(row, b);
+      }
+      return b;
+    };
+    const asBox = (b: GalleryBox) => ({ x: b.x, y: b.y, w: b.width, h: b.height });
+    /** a world with slabs on given boxes, each a crop of the picture, some in a device */
+    const wbuild = (parts: Omit<Def, "name">[]): WBuilt => {
+      const w = WO.world({ width: W, height: H });
+      const defs = parts.map((p, i) => ({ ...p, name: `slab ${i + 1}` }));
+      const slabs = defs.map((d) => {
+        const sl = w.slab(img, {
+          box: asBox(d.box),
+          crop: asBox(d.crop),
+          name: d.name,
+          source: { file: mat.source ?? img },
+          ...(d.o ?? {}),
+        });
+        if (d.device) w.device(d.device.kind, sl, d.device.o ?? {});
+        return sl;
+      });
+      return { w, defs, slabs };
+    };
+    // the card stage.js's blocks lift: the subject with room round it
+    const cw = Math.min(W, Math.max(S.width * 1.6, W * 0.36));
+    const ch = Math.min(H, Math.max(S.height * 1.6, H * 0.3));
+    const card: GalleryBox = {
+      x: Math.max(0, Math.min(W - cw, sc.x - cw / 2)),
+      y: Math.max(0, Math.min(H - ch, sc.y - ch / 2)),
+      width: cw,
+      height: ch,
+    };
+    const whole: GalleryBox = { x: 0, y: 0, width: W, height: H };
+    // a phone's screen: a tall region round the subject, 9:19.5 as phones are
+    const phH = H * 0.86;
+    const phW = Math.min(W, (phH * 9) / 19.5);
+    const phone: GalleryBox = {
+      x: Math.max(0, Math.min(W - phW, sc.x - phW / 2)),
+      y: (H - phH) / 2,
+      width: phW,
+      height: phH,
+    };
+    const drawWorld = (b: WBuilt, t: number, backdrop: string) => {
+      const data = { defs: b.defs, frame: b.w.frame(t), width: W, height: H };
+      return `${backdrop}<canvas class="wgl" data-world="${esc(JSON.stringify(data))}" style="position:absolute;left:0;top:0;width:${W}px;height:${H}px"></canvas>`;
+    };
+    const worldBlock = (
+      b: Omit<Block, "group" | "draw" | "value" | "view"> & {
+        view?: Block["view"];
+        make: (o: Record<string, unknown>) => WBuilt;
+        value: (t: number, b: WBuilt, row: Row) => number;
+        backdrop?: string;
+      },
+    ) =>
+      add({
+        ...b,
+        group: "world",
+        view: b.view ?? "full",
+        draw: (t, r) => drawWorld(worldOf(r, b.make), t, b.backdrop ?? '<div class="void"></div>'),
+        value: (t, r) => b.value(t, worldOf(r, b.make), r),
+      });
+    const angle = (p: { rx: number; ry: number }) => Math.hypot(p.rx, p.ry);
+    /** from a pose to square on, a cut then a move */
+    const fromPose = (
+      sl: { set: (to: object, at: number) => unknown; to: (to: object, when: object) => unknown },
+      o: Record<string, unknown>,
+      start = 0.1,
+    ) => {
+      const { spring: sp, dur, ...pose } = o as { spring?: unknown; dur?: number };
+      sl.set(pose, Number.NEGATIVE_INFINITY);
+      const back = Object.fromEntries(
+        Object.keys(pose)
+          .filter((k) => k !== "scale" && k !== "y" && k !== "x")
+          .map((k) => [k, 0]),
+      );
+      sl.to(back, sp ? { start, spring: sp } : { start, ...(dur ? { dur } : {}) });
+    };
+    worldBlock({
+      name: "world.tilt",
+      view: "subject",
+      focus: card,
+      signature:
+        "world({ three, el, camera, perspective }) · w.slab(picture, { box, crop, source }) · slab.to({ rx, ry, rz, z, scale }, when)",
+      note: "stage.tilt drawn in WebGL: a picture, not live DOM — mipmaps and 16× anisotropy keep a tilted picture clean; the same lens (2000 px) and moves as stage.js; every slab names its source",
+      needs: ["world.world"],
+      t0: 0,
+      t1: 1.2,
+      backdrop: pic("opacity:0.32"),
+      rows: [
+        { label: "rx: 20, ry: -28", o: { rx: 20, ry: -28 } },
+        { label: "ry: -35", o: { ry: -35 } },
+        { label: "rx: 40 (a table)", o: { rx: 40 } },
+        {
+          label: "rx: 20, ry: -28, spring overshoot 0.2",
+          o: { rx: 20, ry: -28, spring: { overshoot: 0.2 } },
+        },
+      ],
+      make: (o) => {
+        const b = wbuild([{ box: card, crop: card }]);
+        const { spring: sp, ...pose } = o as { spring?: unknown };
+        b.slabs[0].to(pose, sp ? { start: 0, spring: sp } : { start: 0 });
+        return b;
+      },
+      value: (t, b) => angle(b.slabs[0].pose(t)),
+      valueLabel: "its angle (degrees)",
+    });
+    worldBlock({
+      name: "world.laptop",
+      signature: 'w.device("laptop", slab, { open, color }) — moves with its slab',
+      note: "the whole picture as a laptop's screen, at half size, turning to square on in 0.73 s; the lid open 100° from the keys; a plain shape, no logo — the most common launch-film picture: fine when the product lives on a laptop",
+      needs: ["world.world"],
+      t0: 0,
+      t1: 1.2,
+      rows: [
+        { label: "ry: 40 → 0", o: { ry: 40 } },
+        { label: "ry: -30, rx: -15 → 0", o: { ry: -30, rx: -15 } },
+        { label: "ry: 40 → 0, open: 125", o: { ry: 40, open: 125 } },
+        { label: "rx: -30 → 0 (seen from above), dur 1", o: { rx: -30, dur: 1 } },
+      ],
+      make: (o) => {
+        const { open, ...pose } = o as { open?: number };
+        const b = wbuild([
+          {
+            box: whole,
+            crop: whole,
+            device: { kind: "laptop", o: open ? { open } : {} },
+            o: { rest: { scale: 0.5, y: -0.1 * H } },
+          },
+        ]);
+        fromPose(b.slabs[0], pose);
+        return b;
+      },
+      value: (t, b) => angle(b.slabs[0].pose(t)),
+      valueLabel: "its angle (degrees)",
+    });
+    worldBlock({
+      name: "world.phone",
+      signature: 'w.device("phone", slab, { color }) — its screen gets round corners',
+      note: "a tall region round the subject as a phone's screen (9:19.5), border 4.5 % and 10 % thick of its width; no notch, no logo",
+      needs: ["world.world"],
+      t0: 0,
+      t1: 1.2,
+      rows: [
+        { label: "ry: -30 → 0", o: { ry: -30 } },
+        { label: "ry: 35, rz: 8 → 0", o: { ry: 35, rz: 8 } },
+        { label: "rx: -25, ry: 20 → 0", o: { rx: -25, ry: 20 } },
+        { label: "ry: 180 → 0 (turned round), dur 1", o: { ry: 180, dur: 1 } },
+      ],
+      make: (o) => {
+        const b = wbuild([
+          {
+            box: phone,
+            crop: phone,
+            device: { kind: "phone" },
+            o: { rest: { scale: 0.85 }, backface: "visible" },
+          },
+        ]);
+        fromPose(b.slabs[0], o);
+        return b;
+      },
+      value: (t, b) => angle(b.slabs[0].pose(t)),
+      valueLabel: "its angle (degrees)",
+    });
+    worldBlock({
+      name: "world.browser",
+      signature: 'w.device("browser", slab, { tone, color }) — a bar above the slab',
+      note: "the picture in a plain browser window — three grey dots and an address field, no browser's own look — swinging square on",
+      needs: ["world.world"],
+      t0: 0,
+      t1: 1.2,
+      rows: [
+        { label: "ry: -25, rx: 10 → 0", o: { ry: -25, rx: 10 } },
+        { label: "rx: 35 → 0", o: { rx: 35 } },
+        { label: 'tone: "dark", ry: 25 → 0', o: { ry: 25, tone: "dark" } },
+        { label: "z: -1200 → 0, ry: -20", o: { ry: -20, z: -1200 } },
+      ],
+      make: (o) => {
+        const { tone, ...pose } = o as { tone?: string };
+        const b = wbuild([
+          {
+            box: whole,
+            crop: whole,
+            device: { kind: "browser", o: tone ? { tone } : {} },
+            o: { rest: { scale: 0.72, y: 0.03 * H } },
+          },
+        ]);
+        fromPose(b.slabs[0], pose);
+        return b;
+      },
+      value: (t, b) => angle(b.slabs[0].pose(t)),
+      valueLabel: "its angle (degrees)",
+    });
+    worldBlock({
+      name: "world.dolly",
+      signature:
+        "w.dolly(z, { start | arrive, dur, ease | spring }) · w.turn({ rx, ry, rz }, when)",
+      note: "stage.dolly in WebGL: the lens travels 2200 px past the card into the tiles 1600 px behind it, the stage turned 20° so the tiles recede; a slab fades over the last quarter of the way to the lens",
+      needs: ["world.world"],
+      t0: 0,
+      t1: 1.4,
+      rows: [
+        { label: "default (0.73 s)", o: {} },
+        { label: "dur: 1.2", o: { dur: 1.2 } },
+        { label: "z: 1500 (stops at the card)", o: { z: 1500 } },
+        { label: "ease: linear", o: { ease: (p: number) => p } },
+      ],
+      make: (o) => {
+        const tiles: GalleryBox[] = [];
+        for (let j = 0; j < 2; j++)
+          for (let i = 0; i < 3; i++)
+            tiles.push({ x: (i * W) / 3, y: (j * H) / 2, width: W / 3, height: H / 2 });
+        const b = wbuild([
+          ...tiles.map((box) => ({ box, crop: box, o: { rest: { z: -1600 } } })),
+          { box: card, crop: card },
+        ]);
+        b.w.turn({ ry: -20 }, { start: 0, dur: 0.01 });
+        const { z = 2200, ...w } = o as { z?: number };
+        b.w.dolly(z, { start: 0, ...w });
+        return b;
+      },
+      value: (t, b) => b.w.world(t).z,
+      valueLabel: "the lens's travel (px)",
+    });
+  }
   return list;
 }
 
@@ -2140,7 +2997,7 @@ export async function galleryBlockNames(kit?: string): Promise<string[]> {
   return blocks(k, mat, "").map((b) => b.name);
 }
 
-/** the blocks a --blocks list names: a name, or a group (motion, camera, cut) */
+/** the blocks a --blocks list names: a name, or a group (motion, camera, cut, draw, map, stage) */
 function chosen(all: Block[], names?: string[]): Block[] {
   if (!names?.length) return all;
   const out = new Set<Block>();
@@ -2148,6 +3005,8 @@ function chosen(all: Block[], names?: string[]): Block[] {
     let hit = all.filter((b) => b.name === n || b.group === n);
     // a camera option by its own name: shake for camera.shake
     if (!hit.length) hit = all.filter((b) => b.name === `camera.${n}`);
+    // a seam by its own name: whip for seams.whip
+    if (!hit.length) hit = all.filter((b) => b.name === `seams.${n}`);
     // "cut" with nothing drawn for it is said in the gallery itself (see filmGallery)
     if (!hit.length && n !== "cut")
       throw new Error(
@@ -2173,13 +3032,26 @@ export async function filmGallery(opts: FilmGalleryOptions): Promise<FilmGallery
       join(tmp, "gallery.html"),
       `<!doctype html><meta charset="utf-8"><style>${CSS}</style><body></body>`,
     );
+    // kit/world.js's cells are drawn in the page by the kit's own world.js and
+    // three.js, which load as modules: the page is served, not a file
+    if (kit.world) {
+      await mkdir(join(tmp, "kit"), { recursive: true });
+      for (const f of ["world.js", "stage.js"])
+        await copyFile(join(kitDir, f), join(tmp, "kit", f));
+      const three = existsSync(join(kitDir, THREE_FILES[0])) ? kitDir : threeBuildDir();
+      for (const f of THREE_FILES) await copyFile(join(three, f), join(tmp, "kit", f));
+    }
+    const server = await serveDirectory(tmp);
     // one Chrome for every page
     const browser = await launchHtmlBrowser({
       chromePath: opts.chromePath,
-      url: pathToFileURL(join(tmp, "gallery.html")).href,
+      url: `${server.url}/gallery.html`,
       width: PAGE_W,
       height: PAGE_H,
       profilePrefix: "open-take-gallery-",
+    }).catch(async (e) => {
+      await server.close();
+      throw e;
     });
     const entries: GalleryEntry[] = [];
     try {
@@ -2231,6 +3103,9 @@ export async function filmGallery(opts: FilmGalleryOptions): Promise<FilmGallery
         cut: kit.cut ?? {},
         draw: kit.draw ?? {},
         map: kit.map ?? {},
+        stage: kit.stage ?? {},
+        seams: kit.seams ?? {},
+        world: kit.world ?? {},
       };
       for (const b of picked) {
         const entry: GalleryEntry = {
@@ -2251,7 +3126,7 @@ export async function filmGallery(opts: FilmGalleryOptions): Promise<FilmGallery
           entry.error = `the kit has no ${missing.join(", ")}`;
           continue;
         }
-        const focus = TEXT_BLOCKS.has(b.name) ? textFocus(material) : material.subject;
+        const focus = b.focus ?? (TEXT_BLOCKS.has(b.name) ? textFocus(material) : material.subject);
         const page = blockPage(b, material, focus);
         entry.rows = page.rows;
         const failed = page.rows.filter((r) => r.error);
@@ -2259,17 +3134,25 @@ export async function filmGallery(opts: FilmGalleryOptions): Promise<FilmGallery
           entry.error = failed[0]!.error;
           continue;
         }
-        await browser.evaluate(
-          `(async () => { document.body.innerHTML = ${JSON.stringify(page.html)};
+        try {
+          await browser.evaluate(
+            `(async () => { document.body.innerHTML = ${JSON.stringify(page.html)};
             await Promise.all([...document.images].map((i) => i.decode().catch(() => {})));
+            ${paintWorlds(img)}
             await new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok))); })()`,
-        );
+          );
+        } catch (e) {
+          // one block that cannot draw here (no WebGL for a world) is that block's failure, not the gallery's
+          entry.error = `it could not be drawn here: ${String((e as Error).message ?? e).split("\n")[0]}`;
+          continue;
+        }
         const png = join(out, fileName(b.name));
         await writeFile(png, await browser.screenshot({ format: "png" }));
         entry.png = png;
       }
     } finally {
       await browser.close();
+      await server.close();
     }
     const { file: _file, ...mat } = material;
     const index = join(out, "index.md");
@@ -2283,6 +3166,40 @@ export async function filmGallery(opts: FilmGalleryOptions): Promise<FilmGallery
   } finally {
     await rm(tmp, { recursive: true, force: true });
   }
+}
+
+/** The page's half of kit/world.js's cells: each <canvas class="wgl"> holds a
+ *  world's slabs and one frame of it (worked out by the kit in Node); the
+ *  kit's world.js, with three.js, draws the frame and the cell keeps a copy.
+ *  One world per setting, its WebGL context let go once its cells are drawn. */
+function paintWorlds(img: string): string {
+  return `{
+    const cells = [...document.querySelectorAll("canvas.wgl")];
+    if (cells.length) {
+      const [THREE, K] = await Promise.all([import("/kit/three.module.min.js"), import("/kit/world.js")]);
+      const worlds = new Map();
+      for (const c of cells) {
+        const d = JSON.parse(c.dataset.world);
+        const key = JSON.stringify(d.defs);
+        let w = worlds.get(key);
+        if (!w) {
+          w = K.world({ three: THREE, width: d.width, height: d.height, pixelRatio: 1 });
+          for (const s of d.defs) {
+            const sl = w.slab(${JSON.stringify(img)}, { box: s.box, crop: s.crop, name: s.name, source: { file: ${JSON.stringify(img)} }, ...(s.o || {}) });
+            if (s.device) w.device(s.device.kind, sl, s.device.o || {});
+          }
+          await w.ready();
+          worlds.set(key, w);
+        }
+        w.draw(d.frame);
+        const k = Math.min(1, 1920 / d.width);
+        c.width = Math.round(d.width * k);
+        c.height = Math.round(d.height * k);
+        c.getContext("2d").drawImage(w.canvas, 0, 0, c.width, c.height);
+      }
+      for (const w of worlds.values()) { w.renderer.dispose(); w.renderer.forceContextLoss(); }
+    }
+  }`;
 }
 
 /** where type/untype's text box sits (the same sum as in blocks()) */
@@ -2318,13 +3235,19 @@ function galleryIndex(
     "Each picture: the block at six instants (time since it starts under each cell), for its default and three other settings, then the value each setting gives over time and its speed. Dashed outline: where the subject sits in the picture. Every number is measured on the function's output, sampled every millisecond; a settle that never happens in the window is *not detected*. These say what a block does — none of them is a target, and the defaults are one choice among many: change any setting, or write the move yourself.",
     "",
   ];
-  for (const group of ["motion", "camera", "cut"] as const) {
+  for (const group of [
+    "motion",
+    "camera",
+    "cut",
+    "draw",
+    "map",
+    "stage",
+    "seams",
+    "world",
+  ] as const) {
     const es = entries.filter((e) => e.group === group);
     if (!es.length) continue;
-    lines.push(
-      `## ${group === "motion" ? "kit/motion.js" : group === "camera" ? "kit/camera.js" : "kit/cut.js"}`,
-      "",
-    );
+    lines.push(`## kit/${group}.js`, "");
     for (const e of es) {
       lines.push(
         `### ${e.name}`,

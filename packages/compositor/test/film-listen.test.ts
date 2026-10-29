@@ -16,11 +16,15 @@ import {
   estimateTempo,
   filmListen,
   findSections,
+  formatPictureAgainst,
+  halfSeconds,
   LISTEN_RATE,
   nearestOffset,
   onsetStrength,
   parseFilmEvents,
   pickOnsets,
+  pictureAgainstSound,
+  pictureEnergyOf,
   repeatedBars,
   spectrum,
   spectrumDiff,
@@ -162,6 +166,26 @@ test("offsets, chance, the events file read leniently", () => {
   assert.equal(ev.curves.dt, 1 / 30);
   assert.ok(Number.isNaN(ev.curves.rows[1]![0]!));
   assert.deepEqual(parseFilmEvents(null).events, []);
+  // a render of 4–6 s of the page: its own clock starts at 4 s
+  const part = parseFilmEvents({
+    duration: 10,
+    range: [4, 6],
+    fps: 30,
+    events: [
+      { t: 3, kind: "before" },
+      { t: 4.5, kind: "in" },
+      { t: 7, kind: "after" },
+    ],
+    cuts: [2, 5, 9],
+    curves: { names: ["picture.energy"], t0: 4, dt: 1 / 30, rows: [[0.1]] },
+  });
+  assert.deepEqual(
+    part.events.map((e) => [e.t, e.kind]),
+    [[0.5, "in"]],
+  );
+  assert.deepEqual(part.cuts, [1]);
+  assert.equal(part.curves.t0, 0);
+  assert.equal(part.duration, 2);
 });
 
 // --- the command on files ------------------------------------------------------------
@@ -328,9 +352,15 @@ test("film listen on a film whose sound ends before its picture: silence to the 
     JSON.stringify(l.silences.list),
   );
   assert.ok(l.silences.list.every((s) => s.end <= l.duration));
+  // a grey picture that never changes, read from the film (no events file)
+  assert.equal(l.picture.source, "picture");
+  assert.equal(l.picture.energy!.values.length, 240);
+  assert.ok(l.picture.energy!.values.every((v) => v === 0));
+  assert.equal(l.picture.halves.length, 16);
   if (chrome && r.png) {
-    // the sections row (the fifth, with no events, stems or curves) is drawn
-    // where it belongs, not left showing tiles of the rows above it
+    // the sections row (the sixth, under the picture's change, with no events,
+    // stems or curves) is drawn where it belongs, not left showing tiles of
+    // the rows above it
     const ppm = join(dir, "px.ppm");
     await runTool(ffmpeg, [
       "-v",
@@ -338,7 +368,7 @@ test("film listen on a film whose sound ends before its picture: silence to the 
       "-i",
       r.png,
       "-vf",
-      "crop=1:1:130:540",
+      "crop=1:1:130:604",
       "-pix_fmt",
       "rgb24",
       "-y",
@@ -479,5 +509,109 @@ test("film listen --vs: what changed against the previous version, with A/B clip
   await assert.rejects(
     filmListen({ input: join(sub, "film.wav"), vs: join(sub, "nope.wav"), out: join(sub, "x") }),
     /no file at .*--vs/,
+  );
+});
+
+test("the picture's change against the sound: half-seconds, the top five, where they run opposite", () => {
+  // the curve from the events file, by name, wherever it is among the page's
+  const ev = parseFilmEvents({
+    fps: 2,
+    duration: 2,
+    curves: {
+      names: ["v", "picture.energy"],
+      t0: 0,
+      dt: 0.5,
+      rows: [
+        [1, 0],
+        [1, 0.2],
+        [1, null],
+      ],
+    },
+  });
+  assert.deepEqual(pictureEnergyOf(ev), { t0: 0, dt: 0.5, values: [0, 0.2, Number.NaN] });
+  assert.equal(pictureEnergyOf(parseFilmEvents({ curves: { names: ["v"], rows: [[1]] } })), null);
+  assert.equal(pictureEnergyOf(null), null);
+
+  // 10 s: the sound loud in the middle and down at 8 s, the picture busy at the
+  // start and at 8 s; elsewhere both at their usual level
+  const momentary = Array.from({ length: 100 }, (_, i) => {
+    const t = (i + 1) / 10;
+    const c = t - 0.2;
+    return { t, lufs: c >= 4 && c < 7 ? -12 : c < 1 ? -120 : c >= 8 && c < 8.5 ? -40 : -30 };
+  });
+  const fps = 10;
+  const values = Array.from({ length: 100 }, (_, i) => {
+    const t = i / fps;
+    return t < 2 ? 0.02 : t >= 8 && t < 8.5 ? 0.05 : t >= 4 && t < 7 ? 0.001 : 0.005;
+  });
+  const halves = halfSeconds(momentary, { t0: 0, dt: 1 / fps, values }, 10);
+  assert.equal(halves.length, 20);
+  assert.deepEqual(halves[0], { t: 0, lufs: -120, energy: 0.02 });
+  assert.deepEqual(halves[10], { t: 5, lufs: -12, energy: 0.001 });
+  assert.deepEqual(halves[16], { t: 8, lufs: -40, energy: 0.05 });
+  const a = pictureAgainstSound(halves);
+  assert.equal(a.top, 5);
+  assert.deepEqual(a.loudest, [4, 4.5, 5, 5.5, 6]);
+  assert.deepEqual(a.busiest, [8, 0, 0.5, 1, 1.5]);
+  assert.equal(a.shared, 0);
+  assert.deepEqual(
+    a.opposite.map((o) => [o.from, o.to, o.kind]),
+    // a stretch runs on through the pieces at the usual level (here just over
+    // the picture's median, just under the sound's) next to where they are opposite
+    [
+      [0, 4, "busy-quiet"],
+      [4, 7, "still-loud"],
+      [7, 10, "busy-quiet"],
+    ],
+  );
+  assert.equal(a.opposite[1]!.lufs, -12);
+  const lines = formatPictureAgainst({
+    picture: {
+      how: "measured",
+      source: "events",
+      energy: { t0: 0, dt: 0.1, values },
+      halves,
+      against: a,
+    },
+  });
+  assert.match(
+    lines[0]!,
+    /the events file's "picture\.energy"\): per half-second, median .* most 0\.050 at 8\.0s–8\.5s/,
+  );
+  assert.match(
+    lines[1]!,
+    /^- the 5 loudest half-seconds vs the 5 busiest half-seconds of picture: 0 shared; loudest at 4\.0s/,
+  );
+  assert.match(
+    lines[2]!,
+    /0\.0s–4\.0s the picture busy \(0\.01\d\) while the sound is quiet .*; 4\.0s–7\.0s the picture still \(0\.0010\) while the sound is loud \(-12 LUFS\); 7\.0s–10\.0s/,
+  );
+  // the two together: nothing opposite
+  const same = halfSeconds(
+    momentary,
+    { t0: 0, dt: 1 / fps, values: values.map((_, i) => (i >= 40 && i < 70 ? 0.05 : 0.001)) },
+    10,
+  );
+  const b = pictureAgainstSound(same);
+  assert.equal(b.shared, 5);
+  assert.deepEqual(b.opposite, []);
+  assert.match(
+    formatPictureAgainst({
+      picture: {
+        how: "measured",
+        source: "picture",
+        energy: { t0: 0, dt: 0.1, values },
+        halves: same,
+        against: b,
+      },
+    })[2]!,
+    /nowhere \(not detected\)/,
+  );
+  // no picture: said
+  assert.match(
+    formatPictureAgainst({
+      picture: { how: "not measured", source: "none", energy: null, halves: [], against: null },
+    })[0]!,
+    /no picture and no "picture\.energy" curve \(not measured\)/,
   );
 });

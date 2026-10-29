@@ -379,6 +379,7 @@ test("listen's text: nothing about earlier films, and that timbre is not measure
     cuts: { how: "not measured", source: "none", list: [] },
     stems: { how: "not measured", dir: null, list: [], laneS: 0.05, eventWindows: [] },
     curves: { names: [], t0: 0, dt: 1 / 60, rows: [] },
+    picture: { how: "not measured", source: "none", energy: null, halves: [], against: null },
     clips: [],
     timbre: { how: "not measured" },
   });

@@ -9,6 +9,7 @@
 
 import { existsSync } from "node:fs";
 import { copyFile, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -20,6 +21,20 @@ export function filmKitDir(): string {
   for (const dir of [join(PKG_ROOT, "kit"), join(PKG_ROOT, "..", "kit")])
     if (existsSync(join(dir, "camera.js"))) return dir;
   throw new Error("film init: the film kit is missing from @open-take/compositor — reinstall it");
+}
+
+/** three.js's two files a film page imports for kit/world.js (three is a
+ *  dependency of this package; its build/ holds them) */
+export const THREE_FILES = ["three.module.min.js", "three.core.min.js"] as const;
+
+/** where this package's three.js build is */
+export function threeBuildDir(): string {
+  // "three" resolves to build/three.cjs (its exports do not list the .min files)
+  const dir = dirname(createRequire(import.meta.url).resolve("three"));
+  for (const f of THREE_FILES)
+    if (!existsSync(join(dir, f)))
+      throw new Error(`film init: three.js's ${f} is missing from ${dir} — reinstall open-take`);
+  return dir;
 }
 
 export type FilmInitResult = {
@@ -136,6 +151,27 @@ export async function initFilm(opts: { dir: string; force?: boolean }): Promise<
       }
     }
     await copyFile(join(kit, name), to);
+    written.push(to);
+  }
+  // three.js (MIT), for kit/world.js: the page imports it from kit/ itself
+  const three = threeBuildDir();
+  for (const name of THREE_FILES) {
+    roles.push({
+      name,
+      role:
+        name === "three.module.min.js"
+          ? 'three.js, for kit/world.js — import * as THREE from "./kit/three.module.min.js"'
+          : "three.js's core, which three.module.min.js loads",
+    });
+    const to = join(dir, "kit", name);
+    if (existsSync(to) && !opts.force) {
+      const [mine, theirs] = await Promise.all([readFile(join(three, name)), readFile(to)]);
+      if (!mine.equals(theirs)) {
+        kept.push(to);
+        continue;
+      }
+    }
+    await copyFile(join(three, name), to);
     written.push(to);
   }
   const page = join(dir, "index.html");

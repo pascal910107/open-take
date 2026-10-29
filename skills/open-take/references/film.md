@@ -21,16 +21,45 @@ reordered or done another way; nothing checks that it was followed.
    reason to care and the proof of it; a walkthrough teaches a task. Both
    are films you can write; they need different things on screen.
 2. **The main line** — what someone who has never seen it should come away
-   with, in one sentence.
-3. **A rough film you can look at, before the long capture.** The key
+   with, in one sentence. And what in the film makes things change — the
+   viewer's kind of data, the product's own core object, a cursor whose
+   every click leaves a result — and what it has built by the last frame.
+   Films people shared had one such thing carried through, and ended on
+   what it had made. Then one move only this product can make: what of its
+   own — its data, its core object, its mark — could become the next
+   picture in a way no other product's could? Two or three, a line each;
+   keep one, for the film's turn or its ending.
+3. **How it could look and move, before you plan it.** Launch films people
+   shared widely, taken apart frame by frame, had this in common, set
+   against films that read as flat (a screen laid flat with a pan or zoom
+   over it, many words, a hard cut to an unrelated picture):
+   - a scene left through something in it — the thing clicked, circled or
+     counted became the next scene;
+   - one camera that kept moving, its moves overlapping, never stopping dead;
+   - something changing every 0.25–0.5 s: an action and, on screen, what it
+     changed — change density, not cut density;
+   - the product's own things taken out of the screen and moved as objects;
+     the full screen shown for one proof, and then staged — tilted into
+     depth, lit, pushed in on the part being used — not laid flat;
+   - few words, landing one at a time;
+   - an ending that closed the film.
+
+   How they did each — the camera and depth, the product on screen, the
+   cursor, words, numbers, maps, openings, endings, rhythm — with the
+   numbers measured and how to build it: `skill film craft`. The kit has
+   depth (`stage.js`, `stage.adopt` for what the page already has) and
+   measured seams (`seams.js`); `film gallery --with` draws each on this
+   product's own screen. It is worth
+   reading whole before the rough film; this product's own things decide
+   which few a film uses.
+4. **A rough film you can look at, before the long capture.** The key
    moment of each stretch as a still, in the product's own fonts, colours
    and words, with plain blocks where the material is not there yet; then
    `film sheet` on it. The capture then gets what the rough film asks for.
    The first thing that can be run tends to become the film — a capture
    script written first usually turns into a film of its steps
-   (`skill film story`). How each stretch could move and hand over —
-   the ways widely shared launch films used, measured — `skill film craft`.
-4. **What shows it.** For each thing the film says, what on screen makes it
+   (`skill film story`).
+5. **What shows it.** For each thing the film says, what on screen makes it
    believable: what the product made, at a size that reads; one of its parts
    doing something; a real action and the result it gives; its own words and
    pictures. The interface is material for this step: what can be recorded
@@ -38,23 +67,39 @@ reordered or done another way; nothing checks that it was followed.
    screen holds with its values and what an action changed
    (`components.json`). In earlier films the pace often followed the
    material more than the plan (`skill film material`).
-5. **A beat sheet**, if you keep one: `tl.segment` in `time.js` — what each
-   stretch is meant to do, what moves, what holds, how it hands over to the
-   next, what is heard. Free words; nothing grades them.
-6. **A draft** — `film render --draft`, `film still`, `film sheet`. A render
+6. **A beat sheet**, if you keep one: `tl.segment` in `time.js` — what each
+   stretch is meant to do, what moves, what holds, what is heard, and what
+   crosses into the next: a sentence on what of this scene lives on and
+   what it becomes there, or "cut" for a hard cut on purpose. `carry` names
+   that thing (a selector; for a canvas, a function of t giving its box):
+   the render follows it across and says what it did, with a strip of
+   every boundary. Free words; nothing grades them.
+
+   ```js
+   tl.segment(0, 6.2, { label: "…", handoff: "<what lives on, what it becomes>", carry: "#…" });
+   tl.segment(6.2, 9, { label: "…", handoff: "cut" });   // a hard cut, on purpose
+   ```
+7. **A draft** — `film render --draft`, `film still`, `film sheet`. A render
    ends with a few lines measured on the film (`--no-report` leaves them out).
-7. **Look and listen** — `film probe`, `film listen`, `film check`: what the
+8. **Look and listen** — `film probe`, `film listen`, `film check`: what the
    picture and the sound did, beside what the page declared, each line
    measured, estimated or not detected (`skill film checking`).
-8. **The seconds that matter, as the master will show them** — a handoff, a
+9. **The seconds that matter, as the master will show them** — a handoff, a
    whip, a burst of cuts: `film render --from --to`, blurred, alone.
-9. **A first-time viewer** — `film viewer film.mp4`: an agent that has
+10. **A first-time viewer** — `film viewer film.mp4`: an agent that has
    seen nothing of how the film was made watches it and says where it would
-   scroll on, and why (`skill film viewer`).
-10. **Change what you decide to change**, and go round 6–9 as often as it
+   scroll on, and why (`skill film viewer`). A draft is enough for it; the
+   first full render is a prototype, not the film.
+11. **Change what you decide to change**, and go round 7–10 as often as it
    helps, a new viewer for each new cut. The reports and the viewer are
-   there to see by, not to satisfy.
-11. **The master.**
+   there to see by, not to satisfy. A note names seconds: change those and
+   render only them into the film — `film render --from 12 --to 16 --into
+   film.mp4` (`skill film render`); the whole master again only when the
+   structure moved. Full masters in earlier films took 4 to 68 minutes
+   each; films that drew the whole master after every note left the notes
+   that would have changed most — a hard cut, a flat scene — undone for
+   want of time.
+12. **The master.**
 
 ## What's there for…
 
@@ -132,6 +177,9 @@ Capabilities and where each is described; none of them is a step.
   product's own things moved as objects, words that land, numbers and maps
   that earn their figures, a first second and an ending that closes — as
   widely shared launch films did them, with their numbers → `skill film craft`
+- what makes a film look machine-made — choices that came back across many
+  agent-made films and rarely in launch films people shared, each with when
+  it is fine → `skill film tells`
 - how the film lands on someone who has never seen it → `film viewer` —
   `skill film viewer`
 - a few seconds as the master shows them, a patch into the master, slow
@@ -221,28 +269,19 @@ only `time.js` and lists the rest; its length is a placeholder.
   card.place(cardRect(t));
   ```
 - `time.js` — named moments and an optional pulse in one module that the
-  page and the score both import; no tempo unless you give one. What happens
-  in the picture and how fast it moves can be said there too, for the score:
-  `tl.event(at, kind, { x, y, force, label })`, `tl.curve(name, (t) => n)`
-  (`speed(fn)` turns a position — `cam.at` too — into px a second; with
-  `{ cuts: tl.events }` — or `cam.moves` for the camera's own `cam.cut`s —
-  each shot is measured on its own, so a hard cut is not read as a jump of
-  thousands of px a second), and
-  `window.__film = { …, ...tl.hooks() }` hands both to the renderer.
-  `scenes({ result: [7.2, 16.8] }, { tl })` shows each scene in its span by
-  visibility (so what is in it keeps its layout) and declares its cuts. A beat
-  sheet can live there too: `tl.segment(from, to, { label, hold, handoff,
-  subject, sound })` (moments' names or seconds; `handoff` is how it hands
-  over at `to` — `"carry"`, `"cut"`, `"matchcut"`, `"sound"` or your own
-  words; `subject` a CSS selector or a subject's name). Every field is
-  optional; `film render` writes the sheet into the events file and `film
-  probe` sets it beside what the picture did. What the film uses that
-  someone else made can be kept there as well: `tl.credit({ what, by,
-  licence, url, text })` (or a plain `window.__film.credits` list) goes into
-  the events file as `credits` — a record for whoever publishes the film,
-  nothing checks it. Where a value on screen comes from, the same way:
-  `tl.source(label, { ref, field, url, note, text, selector })` → `sources`
-  (`skill film material`).
+  page and the score both import; no tempo unless you give one. For the
+  score: `tl.event(at, kind, { x, y, force, label })`, `tl.curve(name,
+  (t) => n)` (`speed(fn)` turns a position into px a second, each shot on
+  its own with `{ cuts: tl.events }`); `window.__film = { …,
+  ...tl.hooks() }` hands them to the renderer, which adds the picture's own
+  change a frame as the curve `picture.energy`. `scenes({ result: [7.2,
+  16.8] }, { tl, seams })` shows each scene in its span by visibility and
+  declares its cuts; `tl.segment(from, to, { label, hold, handoff, carry,
+  subject, sound })` is the beat sheet (step 6), written into the events
+  file and read back by `film render` and `film probe`. `tl.credit({ what, by,
+  licence, url, text })` keeps what the film uses that someone else made;
+  `tl.source(label, { ref, field, url, note, text, selector })` where a
+  value on screen comes from (`skill film material`).
 - `media.js` — a saved screen's parts measured where they are now
   (`screen(iframe).box("#search")`), shot stills played by film time, their
   boxes and cursor read from the shoot's log; a take's recording mapped onto
@@ -266,6 +305,29 @@ only `time.js` and lists the rest; its length is a placeholder.
 - `cut.js` — cutting on the music (`skill film cutting`): the
   music's grid, a match cut's framing, cuts declared for the score. Nothing
   in it cuts on its own.
+- `seams.js` — one scene handing over to the next, measured on launch films
+  (numbers in `skill film craft`): by name `"curve"`, `"whip"`, `"depth"`,
+  `"inverse"`, `"push"`, `"dip"`, `"cut"` (a hard cut on purpose) — or a
+  name they go by (`"pushCut"`, `"into the lens"`) — as a segment's handoff
+  with `scenes(…, { tl, seams })`, or in one list, `seams(tl, [{ at, from,
+  to, kind }])`;
+  `waterfall`, `matchText`, `morph`, `parallax` are calls of their own. A
+  side at rest is left with no transform or filter. `film probe` names a
+  hard cut where neither side moves and nothing crosses.
+- `stage.js` — the product's parts as slabs in depth, each the size of its
+  part with its own perspective, so tilted text stays sharp: tilted with
+  its content live (`slab.to`), lifted apart and back (`explode`,
+  `together`), dropped or piled (`drop`, `stack`), turned over (`flip`),
+  the layout turned into a table (`st.turn`), the lens past one slab
+  (`st.dolly`); it can follow the camera. `st.adopt(el)` makes a slab of
+  what the page already has — a picture, a player, a video — where it is,
+  untouched until it moves. No angle unless a film sets one.
+- `world.js` — the same slabs and moves in WebGL (three.js, beside the kit):
+  pictures, not live DOM, for a cleaner tilt, light, and a laptop, phone or
+  browser window round a picture (`w.device`); each slab names its source.
+  `window.__render = (t) => w.apply(t)`, returned (a video's frame is
+  waited for). `film gallery --blocks seams,stage,world` draws them on your
+  material.
 - `look.js` — type and colour at film scale (`skill film look`):
   the biggest size a text fits a box at and where its lines break, contrast,
   how big a size reads on a phone, the product's colours by role.
@@ -290,7 +352,8 @@ only `time.js` and lists the rest; its length is a placeholder.
 
 It is the film's code from then on: read it, change it, drop it for any
 scene. The renderer only ever reads `__film` and `__render`. One flat layer
-per camera; for 3D, read `cam.at(t)` and project it yourself.
+per camera; depth with `stage.js`, or read `cam.at(t)` and project it
+yourself.
 
 ## The rest of this guide
 
@@ -302,6 +365,8 @@ order. The files are under `film/` beside this one.
 - `skill film craft` — how launch films were shot: getting from one
   scene to the next, the camera, the product on screen, words, numbers,
   maps, openings, endings, rhythm — the moves, measured, and how to build them
+- `skill film tells` — what makes a film look machine-made: the choices
+  that came back across agent-made films, and when each is fine
 - `skill film material` — material from the real product: one part shown
   three ways, saved screens, recordings, `shoot`, `components.json`,
   `kit/media.js` (`lift`, `isolate`, `seam`, `clipEvents`, `readValues`),

@@ -35,6 +35,8 @@ import {
   type Tempo,
   WIN,
 } from "./beats";
+import { fileEnergy } from "./probe";
+import { PICTURE_ENERGY } from "./render";
 
 // the analysis lives in ./beats (shared with `film beats` and `film probe`);
 // what this module has always exported is still exported from here
@@ -81,14 +83,23 @@ export type FilmEvents = {
 
 const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 
-/** `<film>.events.json` read leniently: what is malformed is left out, never fatal */
+/** `<film>.events.json` read leniently: what is malformed is left out, never
+ *  fatal — on the film's own clock: a render of part of the page (`range`
+ *  [a, b]) starts at a, so its times move back by a and what falls outside
+ *  [0, b − a] is left out */
 export function parseFilmEvents(raw: unknown): FilmEvents {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const range =
+    Array.isArray(r.range) && finite(r.range[0]) && finite(r.range[1]) && r.range[1] > r.range[0]
+      ? ([r.range[0], r.range[1]] as [number, number])
+      : null;
+  const from = range ? range[0] : 0;
+  const inside = (t: number) => !range || (t >= -1e-6 && t <= range[1] - range[0] + 1e-6);
   const events = (Array.isArray(r.events) ? r.events : [])
     .filter((e): e is Record<string, unknown> => !!e && typeof e === "object" && finite(e.t))
     .map((e) => {
       const ev: FilmEvent = {
-        t: e.t as number,
+        t: (e.t as number) - from,
         kind: typeof e.kind === "string" ? e.kind : "event",
       };
       if (finite(e.x)) ev.x = e.x;
@@ -97,8 +108,13 @@ export function parseFilmEvents(raw: unknown): FilmEvents {
       if (typeof e.label === "string") ev.label = e.label;
       return ev;
     })
+    .filter((e) => inside(e.t))
     .sort((a, b) => a.t - b.t);
-  const cuts = (Array.isArray(r.cuts) ? r.cuts : []).filter(finite).sort((a, b) => a - b);
+  const cuts = (Array.isArray(r.cuts) ? r.cuts : [])
+    .filter(finite)
+    .map((t) => t - from)
+    .filter(inside)
+    .sort((a, b) => a - b);
   const c = (r.curves && typeof r.curves === "object" ? r.curves : {}) as Record<string, unknown>;
   const names = (Array.isArray(c.names) ? c.names : []).map(String);
   const rows = (Array.isArray(c.rows) ? c.rows : [])
@@ -107,13 +123,13 @@ export function parseFilmEvents(raw: unknown): FilmEvents {
   const fps = finite(r.fps) && r.fps > 0 ? r.fps : 60;
   return {
     version: 1,
-    duration: finite(r.duration) ? r.duration : 0,
+    duration: range ? range[1] - range[0] : finite(r.duration) ? r.duration : 0,
     fps,
     events,
     cuts,
     curves: {
       names,
-      t0: finite(c.t0) ? c.t0 : 0,
+      t0: (finite(c.t0) ? c.t0 : 0) - from,
       dt: finite(c.dt) && c.dt > 0 ? c.dt : 1 / fps,
       rows,
     },
@@ -215,6 +231,163 @@ export function repeatedBars(s: Spectrum, beats: readonly number[], beatsPerBar 
 
 type How = "measured" | "estimated" | "not detected" | "not measured";
 
+// --- the picture's change beside the sound ------------------------------------------
+
+/** how much the picture changes into each frame (mean grey difference from
+ *  the frame before, 0..1): values[i] at t0 + i·dt; NaN where unknown */
+export type PictureEnergy = { t0: number; dt: number; values: number[] };
+
+/** the events file's picture.energy curve (`film render` writes it); null when it has none */
+export function pictureEnergyOf(ev: FilmEvents | null): PictureEnergy | null {
+  const j = ev?.curves.names.indexOf(PICTURE_ENERGY) ?? -1;
+  if (!ev || j < 0) return null;
+  const values = ev.curves.rows.map((r) => r[j] ?? Number.NaN);
+  if (!values.some(Number.isFinite)) return null;
+  return { t0: ev.curves.t0, dt: ev.curves.dt, values };
+}
+
+export type HalfSecond = {
+  /** start (s) */
+  t: number;
+  /** loudness (LUFS) of the momentary readings centred in it, power mean; −120 for silence */
+  lufs: number;
+  /** mean picture change of the frames in it; NaN when none is known */
+  energy: number;
+};
+
+/** the film cut into `binS` pieces, each with its loudness and picture change.
+ *  A momentary reading (400 ms, stamped at its end) counts where its middle is. */
+export function halfSeconds(
+  momentary: readonly { t: number; lufs: number }[],
+  picture: PictureEnergy,
+  duration: number,
+  binS = 0.5,
+): HalfSecond[] {
+  const n = Math.max(1, Math.ceil(duration / binS - 1e-6));
+  const pow = new Float64Array(n);
+  const cnt = new Uint32Array(n);
+  for (const m of momentary) {
+    const k = Math.floor((m.t - 0.2) / binS);
+    if (k < 0 || k >= n) continue;
+    pow[k]! += 10 ** (Math.max(-120, m.lufs) / 10);
+    cnt[k]!++;
+  }
+  const es = new Float64Array(n);
+  const ec = new Uint32Array(n);
+  picture.values.forEach((v, i) => {
+    const k = Math.floor((picture.t0 + i * picture.dt + 1e-9) / binS);
+    if (!Number.isFinite(v) || k < 0 || k >= n) return;
+    es[k]! += v;
+    ec[k]!++;
+  });
+  return Array.from({ length: n }, (_, k) => ({
+    t: round2(k * binS),
+    lufs: cnt[k] ? round1(Math.max(-120, 10 * Math.log10(pow[k]! / cnt[k]!))) : -120,
+    energy: ec[k] ? Math.round((es[k]! / ec[k]!) * 1e5) / 1e5 : Number.NaN,
+  }));
+}
+
+export type PictureAgainstSound = {
+  binS: number;
+  /** how many of the loudest and of the busiest pieces each list holds */
+  top: number;
+  /** start times of the loudest pieces, loudest first */
+  loudest: number[];
+  /** start times of the pieces where the picture changes most, busiest first */
+  busiest: number[];
+  /** how many pieces are in both */
+  shared: number;
+  /** stretches where one is over this film's median while the other is under
+   *  it, holding at least one piece where one is in the film's top third while
+   *  the other is in its bottom third: "busy-quiet" the picture busy, the sound
+   *  quiet; "still-loud" the other way. Mean picture change and loudness over it */
+  opposite: {
+    from: number;
+    to: number;
+    kind: "busy-quiet" | "still-loud";
+    energy: number;
+    lufs: number;
+  }[];
+};
+
+/** each piece's place in the film from 0 (the lowest) to 1 (the highest); ties share the mean place */
+function places(v: readonly number[]): number[] {
+  const order = v.map((x, i) => [x, i] as const).sort((a, b) => a[0] - b[0]);
+  const out = new Array<number>(v.length).fill(0.5);
+  for (let i = 0; i < order.length; ) {
+    let j = i;
+    while (j + 1 < order.length && order[j + 1]![0] === order[i]![0]) j++;
+    const p = order.length > 1 ? (i + j) / 2 / (order.length - 1) : 0.5;
+    for (let k = i; k <= j; k++) out[order[k]![1]] = p;
+    i = j + 1;
+  }
+  return out;
+}
+
+/** the picture's change against the loudness, piece by piece: where the
+ *  loudest and the busiest pieces are, and where they run opposite. Pieces
+ *  without a picture reading are left out. Information, not a grade */
+export function pictureAgainstSound(halves: readonly HalfSecond[], top = 5): PictureAgainstSound {
+  const known = halves.filter((h) => Number.isFinite(h.energy));
+  const binS = halves.length > 1 ? round2(halves[1]!.t - halves[0]!.t) : 0.5;
+  const k = Math.min(top, known.length);
+  const by = (f: (h: HalfSecond) => number) =>
+    [...known]
+      .sort((a, b) => f(b) - f(a) || a.t - b.t)
+      .slice(0, k)
+      .map((h) => h.t);
+  const loudest = by((h) => h.lufs);
+  const busiest = by((h) => h.energy);
+  const pe = places(known.map((h) => h.energy));
+  const pl = places(known.map((h) => h.lufs));
+  const opposite: PictureAgainstSound["opposite"] = [];
+  // a stretch runs while one is over the film's middle and the other under it,
+  // and is kept when one of its pieces is in a top third against a bottom one
+  const side = (i: number) =>
+    pe[i]! > 0.5 && pl[i]! < 0.5
+      ? "busy-quiet"
+      : pe[i]! < 0.5 && pl[i]! > 0.5
+        ? "still-loud"
+        : null;
+  const strong = (i: number) =>
+    (pe[i]! >= 2 / 3 && pl[i]! <= 1 / 3) || (pe[i]! <= 1 / 3 && pl[i]! >= 2 / 3);
+  for (let i = 0; i < known.length; ) {
+    const kind = side(i);
+    if (!kind) {
+      i++;
+      continue;
+    }
+    let j = i;
+    while (
+      j + 1 < known.length &&
+      side(j + 1) === kind &&
+      Math.abs(known[j + 1]!.t - known[j]!.t - binS) < 1e-6
+    )
+      j++;
+    const idx = Array.from({ length: j - i + 1 }, (_, k) => i + k);
+    if (idx.some(strong)) {
+      const hs = idx.map((k) => known[k]!);
+      const pw = hs.reduce((s, h) => s + 10 ** (h.lufs / 10), 0) / hs.length;
+      opposite.push({
+        from: hs[0]!.t,
+        to: round2(hs.at(-1)!.t + binS),
+        kind,
+        energy: Math.round((hs.reduce((s, h) => s + h.energy, 0) / hs.length) * 1e5) / 1e5,
+        lufs: round1(Math.max(-120, 10 * Math.log10(pw))),
+      });
+    }
+    i = j + 1;
+  }
+  return {
+    binS,
+    top: k,
+    loudest,
+    busiest,
+    shared: loudest.filter((t) => busiest.includes(t)).length,
+    opposite,
+  };
+}
+
 export type FilmListen = {
   input: string;
   duration: number;
@@ -256,6 +429,17 @@ export type FilmListen = {
     eventWindows: { t: number; kind: string; stem: string; overRestDb: number }[];
   };
   curves: FilmEvents["curves"];
+  /** how much the picture changes, beside the sound */
+  picture: {
+    how: How;
+    /** the events file's "picture.energy" curve, or measured from the film's picture */
+    source: "events" | "picture" | "none";
+    /** per frame (see PictureEnergy); null without a picture */
+    energy: PictureEnergy | null;
+    /** the film in half-seconds: mean picture change and loudness in each */
+    halves: HalfSecond[];
+    against: PictureAgainstSound | null;
+  };
   clips: string[];
   /** what the sound is like — instruments, synthesized or recorded — is not measured */
   timbre: { how: "not measured" };
@@ -367,6 +551,13 @@ export async function filmListen(opts: FilmListenOptions): Promise<{
   const tmp = await mkdtemp(join(tmpdir(), "open-take-listen-"));
   try {
     const wantCuts = !ev?.cuts.length && !!video;
+    // the picture's change: the events file's curve, else read from the picture
+    const evEnergy = pictureEnergyOf(ev);
+    const pictureFps = frameRate(video?.r_frame_rate);
+    const measuredEnergy =
+      !evEnergy && video?.width && video.height
+        ? fileEnergy(ffmpeg, input, video.width, video.height, pictureFps).catch(() => null)
+        : Promise.resolve(null);
     const [loudLog, pcm, stemPcm, pictureCuts] = await Promise.all([
       runTool(
         ffmpeg,
@@ -411,12 +602,7 @@ export async function filmListen(opts: FilmListenOptions): Promise<{
       const m = re.exec(summary);
       return m ? Number(m[1]) : null;
     };
-    const momentary: { t: number; lufs: number }[] = [];
-    for (const m of loudLog.matchAll(/t:\s*([\d.]+)\s+TARGET:\S+ LUFS\s+M:\s*(-?[\d.]+|-?inf)/g))
-      momentary.push({
-        t: Number(m[1]),
-        lufs: Number.isFinite(Number(m[2])) ? Number(m[2]) : -120,
-      });
+    const momentary = momentaryOf(loudLog);
     const silences: { start: number; end: number }[] = [];
     let open: number | null = null;
     for (const m of loudLog.matchAll(/silence_(start|end): (-?[\d.]+)/g)) {
@@ -456,6 +642,12 @@ export async function filmListen(opts: FilmListenOptions): Promise<{
               : [];
           })
         : [];
+
+    const measured = await measuredEnergy;
+    const energy: PictureEnergy | null =
+      evEnergy ??
+      (measured ? { t0: 0, dt: 1 / pictureFps, values: Array.from(measured, round5) } : null);
+    const halves = energy ? halfSeconds(momentary, energy, duration) : [];
 
     const listen: FilmListen = {
       input,
@@ -502,6 +694,13 @@ export async function filmListen(opts: FilmListenOptions): Promise<{
         eventWindows,
       },
       curves: ev?.curves ?? { names: [], t0: 0, dt: 1 / 60, rows: [] },
+      picture: {
+        how: energy ? "measured" : "not measured",
+        source: evEnergy ? "events" : energy ? "picture" : "none",
+        energy,
+        halves,
+        against: halves.length ? pictureAgainstSound(halves) : null,
+      },
       clips: [],
       timbre: { how: "not measured" },
     };
@@ -758,6 +957,31 @@ export type ListenVs = {
    *  1 s either side), aba.m4a (this, previous, this at the first moment) */
   clips: string[];
 };
+
+/** a film's momentary loudness (400 ms windows, stamped at their end), as
+ *  `film listen` reads it; [] when it has no sound */
+export async function momentaryLoudness(
+  ffmpeg: string,
+  file: string,
+  duration?: number,
+): Promise<{ t: number; lufs: number }[]> {
+  // padded to the film's end as `film listen` pads it, so the two read the same bins
+  const af = duration ? `apad=whole_dur=${duration},ebur128` : "ebur128";
+  const log = await runTool(
+    ffmpeg,
+    ["-nostats", "-v", "info", "-i", file, "-vn", "-af", af, "-f", "null", "-"],
+    { stderr: true },
+  );
+  return momentaryOf(log);
+}
+
+/** ebur128's momentary readings (400 ms, stamped at their end) from its log; −120 for silence */
+function momentaryOf(log: string): { t: number; lufs: number }[] {
+  const out: { t: number; lufs: number }[] = [];
+  for (const m of log.matchAll(/t:\s*([\d.]+)\s+TARGET:\S+ LUFS\s+M:\s*(-?[\d.]+|-?inf)/g))
+    out.push({ t: Number(m[1]), lufs: Number.isFinite(Number(m[2])) ? Number(m[2]) : -120 });
+  return out;
+}
 
 async function loudnessOf(ffmpeg: string, file: string): Promise<Loud> {
   const log = await runTool(
@@ -1285,6 +1509,9 @@ export function formatFilmListen(l: FilmListen): string {
       `- quiet dips (15 LU or more under the median momentary loudness): none ${tag("not detected")}`,
     );
 
+  L.push("", "## The picture's change against the sound", "");
+  L.push(...formatPictureAgainst(l));
+
   L.push("", "## Picture events against the sound", "");
   const e = l.events;
   if (!e.file)
@@ -1368,13 +1595,9 @@ export function formatFilmListen(l: FilmListen): string {
         `- ${s.name}: sounding ${s.activeS}s of ${l.duration.toFixed(1)}s, peak ${s.peakDb} dBFS RMS (50 ms) ${tag("measured")}`,
       );
   }
-  if (l.curves.names.length)
-    L.push(
-      "",
-      "## Curves from the page",
-      "",
-      `- ${l.curves.names.join(", ")} — drawn in listen.png`,
-    );
+  const pageCurves = l.curves.names.filter((n) => n !== PICTURE_ENERGY);
+  if (pageCurves.length)
+    L.push("", "## Curves from the page", "", `- ${pageCurves.join(", ")} — drawn in listen.png`);
   L.push(
     "",
     "## What it sounds like",
@@ -1392,6 +1615,37 @@ export function formatFilmListen(l: FilmListen): string {
 }
 
 const fmtDb = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(1)} dB`;
+
+/** the lines of "The picture's change against the sound" */
+export function formatPictureAgainst(l: Pick<FilmListen, "picture">): string[] {
+  const p = l.picture;
+  const a = p.against;
+  const tag = (h: How) => `(${h})`;
+  const fmtS = (t: number) => `${t.toFixed(1)}s`;
+  if (!p.energy || !a?.top)
+    return [
+      `- the picture's change: no picture and no "${PICTURE_ENERGY}" curve ${tag("not measured")}`,
+    ];
+  const known = p.halves.filter((h) => Number.isFinite(h.energy));
+  const peak = known.reduce((m, h) => (h.energy > m.energy ? h : m), known[0]!);
+  const half = a.binS === 0.5 ? "half-second" : `${a.binS} s piece`;
+  const L = [
+    `- how much the picture changes (mean grey difference from the frame before, 0..1, as \`film probe\` reads it; ${p.source === "events" ? `the events file's "${PICTURE_ENERGY}"` : "read from the picture"}): per ${half}, median ${fmtE(median(known.map((h) => h.energy)))}, most ${fmtE(peak.energy)} at ${fmtS(peak.t)}–${fmtS(peak.t + a.binS)} — drawn under the loudness in listen.png ${tag("measured")}`,
+    `- the ${a.top} loudest ${half}s vs the ${a.top} busiest ${half}s of picture: ${a.shared} shared; loudest at ${a.loudest.map(fmtS).join(", ")}; busiest at ${a.busiest.map(fmtS).join(", ")} ${tag("measured")}`,
+  ];
+  const what = (o: PictureAgainstSound["opposite"][number]) =>
+    o.kind === "busy-quiet"
+      ? `the picture busy (${fmtE(o.energy)}) while the sound is quiet (${o.lufs} LUFS)`
+      : `the picture still (${fmtE(o.energy)}) while the sound is loud (${o.lufs} LUFS)`;
+  L.push(
+    a.opposite.length
+      ? `- where they run opposite (one above this film's median, the other below, reaching its top and bottom thirds): ${a.opposite.map((o) => `${fmtS(o.from)}–${fmtS(o.to)} ${what(o)}`).join("; ")} ${tag("measured")}`
+      : `- where they run opposite (one above this film's median, the other below, reaching its top and bottom thirds): nowhere ${tag("not detected")}`,
+  );
+  return L;
+}
+
+const fmtE = (v: number) => (v >= 0.01 ? v.toFixed(3) : v.toFixed(4));
 
 // --- the picture -------------------------------------------------------------------------
 
@@ -1506,6 +1760,35 @@ async function drawListen(
         `<polyline points="${pts}" fill="none" stroke="#222" stroke-width="1.5"/>`,
     });
   }
+  // the picture's change: the max of each column, on a square-root scale so
+  // small motion shows (as film probe draws it); behind it, where it runs
+  // opposite to the loudness
+  if (l.picture.energy) {
+    const H = 60;
+    const pe = l.picture.energy;
+    const peak = Math.max(1e-6, ...pe.values.filter(Number.isFinite));
+    const cols = Math.max(1, Math.round(W / 2));
+    let pts = "";
+    for (let c = 0; c < cols; c++) {
+      const a = ((c / cols) * D - pe.t0) / pe.dt;
+      const b = (((c + 1) / cols) * D - pe.t0) / pe.dt;
+      let v = 0;
+      for (let i = Math.max(0, Math.floor(a)); i < Math.min(pe.values.length, Math.ceil(b)); i++)
+        if (Number.isFinite(pe.values[i]!)) v = Math.max(v, pe.values[i]!);
+      pts += `${x(((c + 0.5) / cols) * D)},${round1(H - 2 - Math.sqrt(v / peak) * (H - 6))} `;
+    }
+    const opp = (l.picture.against?.opposite ?? [])
+      .map(
+        (o) =>
+          `<rect x="${x(o.from)}" y="0" width="${Math.max(1, x(o.to) - x(o.from))}" height="${H}" fill="${o.kind === "busy-quiet" ? "#ffd8a8" : "#a5d8ff"}"/>`,
+      )
+      .join("");
+    rows.push({
+      label: `picture<br><small>change/frame, √<br>${l.picture.source === "events" ? "events file" : "read from picture"}</small>`,
+      h: H,
+      svg: `${opp}<polyline points="${pts}" fill="none" stroke="#2b8a3e" stroke-width="1.2"/>`,
+    });
+  }
   // onset strength, onsets, beat grid
   {
     const H = 70;
@@ -1577,6 +1860,7 @@ async function drawListen(
   // curves, each scaled to its own range
   const cv = l.curves;
   for (const [j, name] of cv.names.entries()) {
+    if (name === PICTURE_ENERGY) continue; // drawn under the loudness
     const vals = cv.rows.map((r) => r[j]!).filter(Number.isFinite);
     if (!vals.length) continue;
     const lo = Math.min(...vals);
@@ -1618,7 +1902,7 @@ async function drawListen(
         `<line x1="${x(c.t)}" x2="${x(c.t)}" y1="0" y2="100%" stroke="#e03131" stroke-width="1" opacity="0.55"/>`,
     )
     .join("")}</svg>`;
-  const legend = `<div class="legend" style="top:${top}px">red lines: cuts (${l.cuts.source === "events" ? "events file" : l.cuts.source === "picture" ? "read from the picture" : "none"}) · grey: silence · onsets: orange ticks, beat grid blue (tall = every 4th) · events: solid = an onset within 40 ms, dashed = none · ${esc(basename(l.input))} ${l.duration.toFixed(2)}s</div>`;
+  const legend = `<div class="legend" style="top:${top}px">red lines: cuts (${l.cuts.source === "events" ? "events file" : l.cuts.source === "picture" ? "read from the picture" : "none"}) · grey: silence · onsets: orange ticks, beat grid blue (tall = every 4th) · events: solid = an onset within 40 ms, dashed = none${l.picture.against?.opposite.length ? " · picture lane: orange = picture busy while the sound is quiet, light blue = picture still while the sound is loud" : ""} · ${esc(basename(l.input))} ${l.duration.toFixed(2)}s</div>`;
   await writeFile(
     join(o.tmp, "listen.html"),
     `<!doctype html><meta charset="utf-8"><style>
@@ -1666,3 +1950,4 @@ function median(xs: readonly number[]): number {
 const round1 = (v: number) => Math.round(v * 10) / 10;
 const round2 = (v: number) => Math.round(v * 100) / 100;
 const round3 = (v: number) => Math.round(v * 1000) / 1000;
+const round5 = (v: number) => Math.round(v * 1e5) / 1e5;
