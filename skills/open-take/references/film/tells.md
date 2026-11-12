@@ -90,11 +90,12 @@ required fine print appears once, small.
 
 ### Structure
 
-**A tour.** After the hook, four to eight features in the order a user would
-click them, each with its own caption, often numbered ("01 Paste… 02 Pick…
-03 Export"). Shared launch films that are about features still tell one idea
-through the product's objects — many notes, one click, every note answered —
-setup, proof, payoff, in a few seconds each.
+**A tour.** After the hook, a card per thing the product does or claims, in
+the order of its page or a user's clicks, often numbered ("01 Paste… 02 Pick…
+03 Export"), with nothing in one card still there in the next, even where a
+seam flies a shape across (`skill film story`). Shared launch films about
+features still tell one idea through the product's objects — many notes,
+one click, every note answered — setup, proof, payoff, in a few seconds each.
 *Fine when* the film is a how-to.
 
 **The logo twice.** A title card with the logo and a tagline in the first

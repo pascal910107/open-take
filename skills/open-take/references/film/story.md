@@ -17,6 +17,45 @@ A website is laid out to be read in any order; a film is a sequence that is
 felt in one order. What the page lists, a film can reorder, merge or leave
 out.
 
+## What the film follows
+
+The film that comes to mind first is often the product's page in order — a
+picture, a claim, a feature, another, a word on trust, the logo — a card
+each. Write it down, a line a card, and beside each line what of the card
+before is still on screen. Where that is nothing, the viewer starts over; a
+number flown into the next card does not make it about the same thing.
+
+The same lines can be told another way: one thing from the product's world
+that a viewer could point at — a file, a figure, a message, someone's week —
+followed from the first frame to the last through a change the product
+makes to it. What the product does becomes what happens to that thing, in
+the order the thing needs it. The film opens on it before the change, in a
+view the viewer will see again, and comes back to that view after: the
+difference is seen, not claimed. Each stretch is brought in by something
+of the one before, most often the thing itself, and the closing image is
+made of what was on screen (`skill film craft`: the ending).
+
+Two shapes, of many. A menu on a café table abroad, unreadable; a phone held
+over it, its lines turning into words, a dish picked; the same table, the
+plate set down — out of the viewer's world and back. Or one question typed
+into a form and sent: it lands on phones and comes back as answers that
+fill the editor it left — sent out, and what returns changes the view. The
+change need not be a repair, and the first change that comes to mind is
+usually one most products could claim (`skill film tells`: the first hook
+that comes to mind).
+
+With several products, one object may not pass through them all. One launch
+film people shared, for three office products, told them as one invented
+company's project — planned on a board, forecast in a sheet, shown on a
+dashboard: its figures turned up in all three, the first request was still
+in the second's chat, one named cursor did the work from the title to the
+closing line, and that line ran through the three chapter verbs. What
+carried was the project; it never came back to a first view.
+
+The film of cards turned up again and again in agent-made films. Following
+one thing rests on far fewer: two films of one product made from the same
+material, one each way, and the shared film above.
+
 ## A rough film first, then the material it needs
 
 1. **Look around.** Use the product, try what it does, read what it says
@@ -25,7 +64,9 @@ out.
    The order you tried things in is how you learned the product; it is not
    yet the order in which someone else comes to care about it.
 2. **The reason to watch** — what someone who has never seen it should come
-   away with, in one sentence.
+   away with, in one sentence about the thing followed: what it was, what
+   the product did to it, where it ends. One that lists what the product
+   does tends to come out as cards.
 3. **A rough film you can look at.** On the page `film init` starts from,
    make the key moment of each stretch as a still picture, in the product's
    own fonts, colours and words (`look/`, `materials.json`, the saved home
@@ -34,6 +75,8 @@ out.
    moves first, and what it changes. Then look at it: `film sheet` or
    `film still` on the rough page.
 4. **Ask of the rough film**, as information for yourself:
+   - what does the viewer follow from the first cell to the last, and what
+     of each brings in the next? Does the last show the first view changed?
    - what change does the viewer see in each stretch — something appears,
      grows, is made, is sorted, is answered?
    - what shape, result or relation only this product has would show that

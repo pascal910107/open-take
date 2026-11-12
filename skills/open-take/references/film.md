@@ -21,14 +21,14 @@ reordered or done another way; nothing checks that it was followed.
    reason to care and the proof of it; a walkthrough teaches a task. Both
    are films you can write; they need different things on screen.
 2. **The main line** — what someone who has never seen it should come away
-   with, in one sentence. And what in the film makes things change — the
-   viewer's kind of data, the product's own core object, a cursor whose
-   every click leaves a result — and what it has built by the last frame.
-   Films people shared had one such thing carried through, and ended on
-   what it had made. Then one move only this product can make: what of its
-   own — its data, its core object, its mark — could become the next
-   picture in a way no other product's could? Two or three, a line each;
-   keep one, for the film's turn or its ending.
+   with, in one sentence, and the thing it follows: the viewer's kind of
+   data, the product's own core object, a cursor whose every click leaves a
+   result. Films people shared carried one such thing through and ended on
+   what it had made. What the product does can happen to it, from a first
+   view to the same view, changed. Then one move only this product can make:
+   what of its own — its data, its core object, its mark — could become the
+   next picture in a way no other product's could? Two or three, a line
+   each; keep one, for the film's turn or its ending.
 3. **How it could look and move, before you plan it.** Launch films people
    shared widely, taken apart frame by frame, had this in common, set
    against films that read as flat (a screen laid flat with a pan or zoom
@@ -54,10 +54,10 @@ reordered or done another way; nothing checks that it was followed.
    which few a film uses.
 4. **A rough film you can look at, before the long capture.** The key
    moment of each stretch as a still, in the product's own fonts, colours
-   and words, with plain blocks where the material is not there yet; then
-   `film sheet` on it. The capture then gets what the rough film asks for.
-   The first thing that can be run tends to become the film — a capture
-   script written first usually turns into a film of its steps
+   and words, plain blocks where the material is not there yet; then
+   `film sheet` on it. The capture gets what it asks for. What comes first
+   tends to become the film: a capture script, a film of its steps; the
+   first idea, the product page as cards, nothing carried between them
    (`skill film story`).
 5. **What shows it.** For each thing the film says, what on screen makes it
    believable: what the product made, at a size that reads; one of its parts
@@ -360,8 +360,8 @@ yourself.
 Each prints on its own; `skill film --all` prints the whole guide in this
 order. The files are under `film/` beside this one.
 
-- `skill film story` — the film before its material: a rough film you
-  can look at first, then the capture it asks for
+- `skill film story` — what the film follows; a rough film of it, then the
+  capture it asks for
 - `skill film craft` — how launch films were shot: getting from one
   scene to the next, the camera, the product on screen, words, numbers,
   maps, openings, endings, rhythm — the moves, measured, and how to build them
