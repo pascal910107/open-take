@@ -89,7 +89,14 @@ export {
   type GalleryMaterial,
   type GalleryStats,
 } from "./film/gallery";
-export { type FilmInitResult, filmKitDir, initFilm } from "./film/kit";
+export {
+  type FilmFiles,
+  type FilmInitResult,
+  filmInitLines,
+  filmKitDir,
+  filmStarterDir,
+  initFilm,
+} from "./film/kit";
 export {
   type FilmEvent,
   type FilmEvents,

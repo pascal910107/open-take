@@ -6,7 +6,8 @@
     "noEmit": true,
     "declaration": false,
     "declarationMap": false,
-    "sourceMap": false
+    "sourceMap": false,
+    "rootDirs": [".", "starter"]
   },
-  "include": ["kit/**/*.js", "kit/**/*.mjs"]
+  "include": ["kit/**/*.js", "kit/**/*.mjs", "starter/lib/*.js", "starter/lib/*.mjs"]
 }

@@ -119,7 +119,7 @@ punctuation.
 scenes change.
 *In the kit:* say on each segment what crosses and name it with `carry`;
 `film render` says boundary by boundary whether it was carried, and draws a
-strip of them (`skill film`, step 6).
+strip of them (`skill film`, step 4).
 
 **The same carry at every boundary.** Each scene leaves the same way — the
 thing pressed grows until it fills the frame and becomes the next scene's
@@ -188,7 +188,9 @@ four-chord loop at 96–120 BPM, whatever the product.
 result, a whoosh on every move — the picture's every change answered.
 
 **The same sign-off.** Drums drop out, one long chord, a bell on the logo,
-fade.
+fade. *Fine* where the drums leave on the story's last turn and the chord
+lands on the mark: the launch film measured in `reference/` ends this way,
+and so do the films a viewer preferred (`START.md`).
 
 **Notes between the notes.** A register whose pitched sound sits more than
 15 cents off the piece's own tuning for more than 30% of its time: a bass

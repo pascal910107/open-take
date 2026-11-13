@@ -13,6 +13,7 @@
   "files": [
     "dist",
     "kit",
+    "starter",
     "src/**/*.ts",
     "src/**/*.tsx",
     "src/scene/tsconfig.json"

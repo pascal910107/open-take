@@ -24,7 +24,7 @@ before(async () => {
   dir = await mkdtemp(join(tmpdir(), "open-take-parts-page-test-"));
   writePartsShoot(dir);
   writeComponents(gatherComponents(readComponentSource(dir)), dir);
-  await initFilm({ dir: join(dir, "film") });
+  await initFilm({ dir: join(dir, "film"), starter: false });
 });
 after(async () => {
   await rm(dir, { recursive: true, force: true });

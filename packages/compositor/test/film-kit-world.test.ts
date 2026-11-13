@@ -223,7 +223,7 @@ test("devices: plain shapes round the screen, their bounds where the parts are",
 
 test("film init puts three.js beside the kit, as the page imports it", async () => {
   const film = join(dir, "init");
-  const r = await initFilm({ dir: film });
+  const r = await initFilm({ dir: film, starter: false });
   for (const f of THREE_FILES) {
     const to = join(film, "kit", f);
     assert.ok(r.written.includes(to), `${f} written`);

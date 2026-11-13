@@ -38,7 +38,7 @@ test("hold keeps a part in place across screens, and moves points with it", { sk
     await writeFile(join(dir, "states", `s${i}`, "state.html"), step([0, 1, 3][i]!));
   }
   const film = join(dir, "film");
-  await initFilm({ dir: film });
+  await initFilm({ dir: film, starter: false });
   await writeFile(
     join(film, "hold.html"),
     `<!doctype html><html><head><meta charset="utf-8"><style>

@@ -384,18 +384,35 @@ test("film init's page holds only wiring: no story, no look, no length, only the
   assert.equal(css, "html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; }");
   assert.match(page, /duration: 1, \/\/ s — a placeholder/);
   assert.match(page, /\.\.\.tl\.hooks\(\)/);
+  // with the starter in the folder, the comment opens on START.md and names
+  // lib/ and samples/ — still nothing imported from them
+  assert.doesNotMatch(page, /START\.md/);
+  const withStarter = starterPage(
+    [{ name: "time.js", role: "one timeline for the picture and the sound" }],
+    { starter: true },
+  );
+  const script = withStarter.split('<script type="module">\n')[1]!;
+  assert.match(script, /^ {2}\/\/ START\.md in this folder is what to read first\./);
+  const said = script.replace(/\n\s*\/\/ /g, " ");
+  assert.match(said, /lib\/anim\.js \(motion helpers\)/);
+  assert.match(said, /lib\/sampler\.mjs with samples\/ \(recorded instruments for the score\)/);
+  assert.deepEqual(
+    [...withStarter.matchAll(/^\s*import .* from "(.+)";$/gm)].map((m) => m[1]),
+    ["./kit/time.js"],
+  );
   // init lists every kit file it copies
   const film = join(dir, "starter");
-  const r = await initFilm({ dir: film });
+  const r = await initFilm({ dir: film, starter: false });
   const written = await readFile(join(film, "index.html"), "utf8");
   for (const f of r.written.filter((w) => w.includes("/kit/")))
     assert.ok(written.includes(`kit/${f.split("/").pop()}`), `${f} listed`);
   assert.match(written, /kit\/audio\.mjs\s+sound for a film, for a Node script/);
+  assert.doesNotMatch(written, /START\.md/, "no starter, none named");
 });
 
 test("film init's page renders as it is, and writes an events file", { skip }, async () => {
   const film = join(dir, "starter-render");
-  await initFilm({ dir: film });
+  await initFilm({ dir: film, starter: false });
   const r = await renderFilm({
     page: film,
     out: join(dir, "starter.mp4"),

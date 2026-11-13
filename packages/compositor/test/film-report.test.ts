@@ -559,7 +559,7 @@ test("the report on a film naming parts: a part under an overlay, one framed whi
   await mkdir(shoot, { recursive: true });
   writePartsShoot(shoot);
   writeComponents(gatherComponents(readComponentSource(shoot)), shoot);
-  await initFilm({ dir: join(shoot, "film") });
+  await initFilm({ dir: join(shoot, "film"), starter: false });
   // a picture and a video 64×36, both drawn 160×90
   const ffmpeg = await resolveFfmpeg();
   const color = ["-f", "lavfi", "-i", "color=c=0x336699:s=64x36:r=10:d=4"];

@@ -1634,6 +1634,21 @@ function installFilmClock(opts: FilmClockOptions): void {
 
   // --- ready -----------------------------------------------------------------
   async function prepare(): Promise<unknown> {
+    // a module page still in a top-level await (a fetch, a font) has declared
+    // nothing yet: its length and soundtrack would be read as missing. Wait
+    // for it, up to 5 s; a page that declares nothing goes on as before.
+    const declared = () =>
+      w.__film != null || typeof w.__render === "function" || w.__duration != null;
+    if (!declared() && document.querySelector('script[type="module"]')) {
+      const began = RealDate.now();
+      await pump(
+        new Promise<void>((done) => {
+          const look = () =>
+            declared() || RealDate.now() - began > 5_000 ? done() : w.setTimeout(look, 16);
+          look();
+        }),
+      );
+    }
     const film = w.__film ?? {};
     const ready = film.ready ?? w.__ready;
     if (ready) await pump(typeof ready === "function" ? ready() : ready);

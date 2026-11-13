@@ -53,6 +53,7 @@ export {
   exampleSource,
   filmBeats,
   filmGallery,
+  filmInitLines,
   filmListen,
   filmLook,
   filmPicture,

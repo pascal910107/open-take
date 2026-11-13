@@ -1,0 +1,55 @@
+Recorded instruments in this folder: where each comes from, its licence, and
+whether a film that uses it must credit it. manifest.json says the same per
+instrument ("license", "credit"); lib/sampler.mjs credits() lists the ones a
+score used, for tl.credit on the page. All were trimmed, resampled and
+re-encoded (opus/flac) from the sources below.
+
+MUST BE CREDITED (CC BY 3.0)
+
+  piano       grand piano, A0–C8, 4 velocity layers
+              Salamander Grand Piano V3 by Alexander Holm — CC BY 3.0
+              Credit it in the film's credits, naming the licence and that it
+              was changed, e.g.:
+              "Piano: Salamander Grand Piano V3 by Alexander Holm (CC BY 3.0), trimmed, resampled and re-encoded"
+              On the page:
+              tl.credit({ what: "piano samples", by: "Salamander Grand Piano V3, Alexander Holm",
+                licence: "CC BY 3.0", text: "trimmed, resampled and re-encoded" })
+
+NO CREDIT REQUIRED (CC0 1.0, public domain dedication)
+
+  violins     section, sustained, G3–D6, 2 layers    Versilian Studios / Sam Gossner — VSCO 2 Community Edition
+  violas      section, sustained, C3–D6, 2 layers    Versilian Studios / Sam Gossner — VSCO 2 Community Edition
+  celli       section, sustained, C2–F5, 2 layers    Versilian Studios / Sam Gossner — VSCO 2 Community Edition
+  pizz        strings pizzicato, C2–D6               Versilian Studios / Sam Gossner — VSCO 2 Community Edition
+  harp        E1–F7, 3 layers (mp, mf, f)            Versilian Studios / Sam Gossner — VSCO 2 Community Edition
+  glock       glockenspiel, G5–C8                    Versilian Studios / Sam Gossner — VSCO 2 Community Edition
+  marimba     F2–C7                                  Versilian Studios / Sam Gossner — VSCO 2 Community Edition
+  vibes       vibraphone, F3–E6, 2 layers            Versilian Studios — Versilian Community Sample Library
+  tom         drum, 2 layers                         Versilian Studios — Versilian Community Sample Library
+  crash       cymbal, 2 layers (f, fff)              Versilian Studios — Versilian Community Sample Library
+  shaker      drum, 2 layers                         Versilian Studios — Versilian Community Sample Library
+  woodblock   drum, 2 round robins                   Versilian Studios — Versilian Community Sample Library
+  ebass       finger bass, recorded E1–D#2           FreePats — Finger Bass YR (Andrea Biasior)
+  snap        finger snaps, 6 round robins           Karoryfer Samples — body percussion
+  pk_kick     acoustic kit kick, 2 layers            Karoryfer Samples — Unruly Drums
+  pk_snare    acoustic kit snare, 2 layers           Karoryfer Samples — Unruly Drums
+  pk_rim      acoustic kit rim, 2 layers             Karoryfer Samples — Unruly Drums
+  pk_hat      acoustic kit closed hi-hat, 2 layers   Karoryfer Samples — Unruly Drums
+  pk_ohat     acoustic kit open hi-hat, 2 layers     Karoryfer Samples — Unruly Drums
+  ek_kick     electronic kick                        FreePats — Synthesizer Percussion (Roberto, zenvoid.org)
+  ek_hat      electronic hi-hat                      FreePats — Synthesizer Percussion (Roberto, zenvoid.org)
+  ek_clap     electronic clap                        FreePats — Synthesizer Percussion (Roberto, zenvoid.org)
+
+  Versilian Studios asks, without requiring it, that its libraries be
+  credited and that the samples are not sold on their own. A credit for the
+  CC0 sources is welcome and costs nothing:
+  "Samples: Versilian Studios (VSCO 2 CE, VCSL), Karoryfer Samples, FreePats — CC0"
+
+Sources
+  Salamander Grand Piano V3      github.com/sfzinstruments/SalamanderGrandPiano
+  VSCO 2 Community Edition       github.com/sgossner/VSCO-2-CE
+  Versilian Community Sample Library  github.com/sgossner/VCSL
+  Karoryfer body percussion      github.com/sfzinstruments/body_percussion
+  Karoryfer Unruly Drums         github.com/sfzinstruments/karoryfer.unruly-drums
+  FreePats Finger Bass YR        freepats.zenvoid.org
+  FreePats Synthesizer Percussion  github.com/freepats/synthesizer-percussion

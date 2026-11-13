@@ -38,6 +38,7 @@ import {
   exampleSource,
   filmBeats,
   filmGallery,
+  filmInitLines,
   filmListen,
   filmLook,
   filmPicture,
@@ -634,7 +635,9 @@ Usage:
           it. \`film init\` copies the film kit into a folder (kit/: a camera
           with the take camera's motion, a cursor, one timeline for picture
           and sound, saved screens and shot stills as material, the sound's
-          plumbing) and a page to start from; the kit is the film's own code
+          plumbing), a page to start from, and the starter: START.md (what to
+          read first), PLAN.md, reference/, lib/ (motion helpers, a sampler)
+          and samples/ (recorded instruments); all of it is the film's own
           from then on. \`film render\` plays the page on film time (window.__render(t),
           or its own CSS/WAAPI/rAF/GSAP/video animation, frame-exact) in
           headless Chrome and writes an H.264 master with measured motion blur
@@ -2487,9 +2490,8 @@ async function main() {
           );
       }
       const r = await initFilm({ dir: target, force: has("--force") });
-      for (const f of r.written) process.stdout.write(`wrote ${f}\n`);
-      for (const f of r.kept)
-        process.stdout.write(`kept ${f} — yours differs from the kit's (--force replaces it)\n`);
+      // a line a file, samples/ as one line; the last one points at START.md
+      for (const line of filmInitLines(r, shown)) process.stdout.write(`${line}\n`);
       return;
     }
     if (action === "picture") {

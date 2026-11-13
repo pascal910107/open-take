@@ -81,31 +81,34 @@ const isMagenta = ([r, g, b]: readonly number[]) => r! > 180 && g! < 80 && b! > 
 
 test("film init copies the kit and a page to start from, and keeps what the author changed", async () => {
   const film = join(dir, "init");
-  const first = await initFilm({ dir: film });
+  const first = await initFilm({ dir: film, starter: false });
   const names = first.written.map((f) => f.slice(film.length + 1)).sort();
   for (const n of ["index.html", "kit/camera.js", "kit/cursor.js", "kit/media.js", "kit/time.js"])
     assert.ok(names.includes(n), `${n} written`);
   // the author changes the camera and the page
   await writeFile(join(film, "kit", "camera.js"), "// mine\n");
   await writeFile(join(film, "index.html"), "<!-- mine -->");
-  const again = await initFilm({ dir: film });
+  const again = await initFilm({ dir: film, starter: false });
   assert.deepEqual(
     again.kept.map((f) => f.slice(film.length + 1)),
     ["kit/camera.js"],
   );
+  // a kit file already the same is left as it is, not written again
+  assert.deepEqual(again.written, []);
+  assert.ok(again.same.some((f) => f.endsWith("kit/time.js")));
   assert.equal(
     await readFile(join(film, "index.html"), "utf8"),
     "<!-- mine -->",
     "the page is never replaced",
   );
-  const forced = await initFilm({ dir: film, force: true });
+  const forced = await initFilm({ dir: film, force: true, starter: false });
   assert.ok(forced.written.some((f) => f.endsWith("kit/camera.js")));
   assert.notEqual(await readFile(join(film, "kit", "camera.js"), "utf8"), "// mine\n");
 });
 
 test("film init names the product's saved screen and look when the folder has them (--url)", async () => {
   const bare = join(dir, "init-bare");
-  await initFilm({ dir: bare });
+  await initFilm({ dir: bare, starter: false });
   const plain = await readFile(join(bare, "index.html"), "utf8");
   assert.doesNotMatch(plain, /states\/home/, "nothing named that is not there");
   const film = join(dir, "init-url");
@@ -113,7 +116,7 @@ test("film init names the product's saved screen and look when the folder has th
   await writeFile(join(film, "states", "home", "state.html"), "<!doctype html>");
   await mkdir(join(film, "look"), { recursive: true });
   await writeFile(join(film, "look", "look.json"), "{}");
-  await initFilm({ dir: film });
+  await initFilm({ dir: film, starter: false });
   const page = await readFile(join(film, "index.html"), "utf8");
   assert.match(page, /screen\(iframe, "states\/home\/state\.html"\)/);
   assert.match(page, /lift\(home, /);
@@ -125,26 +128,34 @@ test("film init names the product's saved screen and look when the folder has th
   assert.doesNotMatch(plain, /product\(/, "nothing named that is not there");
   assert.doesNotMatch(page, /partFiles/, "no parts/index.json, no part files named");
   assert.match(page, /look\/look\.json/);
-  // what it says and what it makes stand beside its interface, none the default
+  // what it says and what it makes stand beside its interface; a live part
+  // that acts is named first, the whole screen kept for the proof
   assert.match(page, /what it says: states\/home\/materials\.json/);
   assert.doesNotMatch(plain, /materials\.json/, "nothing named that is not there");
   for (const p of [page, plain]) {
-    assert.match(p, /none of these is the default/);
+    assert.match(p, /start from one of its parts, live, acting/);
     assert.match(p, /what it makes: a shoot's s\.save\(name, target\)/);
     assert.match(p, /rebuilt: the film's own HTML at film size/);
+    assert.match(p, /the whole screen, as a screenshot or a recording, for the moment it is the proof/);
+    assert.ok(p.indexOf("rebuilt:") < p.indexOf("the whole screen"), "live parts before the screen");
+    assert.ok(p.indexOf("the whole screen") < p.indexOf("what it makes:"));
   }
+  assert.ok(page.indexOf("lifted out: lift(home") < page.indexOf("in place: cam.frame"));
   // its parts as files, when film init --url wrote them: one more route, beside
   const withParts = join(dir, "init-url-parts");
   await mkdir(join(withParts, "parts"), { recursive: true });
   await writeFile(join(withParts, "parts", "index.json"), "{}");
-  await initFilm({ dir: withParts });
+  await initFilm({ dir: withParts, starter: false });
   const partsPage = await readFile(join(withParts, "index.html"), "utf8");
   assert.match(
     partsPage,
     /its parts as files: parts\/index\.json — each part's own HTML, its styles inlined, in its fonts/,
   );
   assert.match(partsPage, /\(await partFiles\("parts\/"\)\)\.node\("<ref>"\)/);
-  assert.match(partsPage, /none of these is the default/);
+  assert.ok(
+    partsPage.indexOf("its parts as files") < partsPage.indexOf("rebuilt:"),
+    "the part files first",
+  );
   // listed in a comment, like the kit: the page imports only the timeline
   assert.deepEqual(
     page.match(/^\s*import .*$/gm)?.map((l) => l.trim()),
@@ -156,7 +167,7 @@ test("a saved screen's parts are where the camera puts them: live by selector, a
   skip,
 }, async () => {
   const film = join(dir, "screen");
-  await initFilm({ dir: film });
+  await initFilm({ dir: film, starter: false });
   await writeFile(
     join(film, "index.html"),
     `<!doctype html><html><head><style>html,body{margin:0;width:320px;height:180px;overflow:hidden;background:#000}
@@ -208,7 +219,7 @@ test("a screen measured inside a layer: its offset counted, a transform in betwe
   skip,
 }, async () => {
   const film = join(dir, "inside");
-  await initFilm({ dir: film });
+  await initFilm({ dir: film, starter: false });
   const page = (
     wrap: string,
   ) => `<!doctype html><html><head><style>html,body{margin:0;width:400px;height:240px;overflow:hidden;background:#000}
@@ -298,7 +309,7 @@ test("shot stills play by film time, decoded before the frame, a bounded few hel
   skip,
 }, async () => {
   const film = join(dir, "stills");
-  await initFilm({ dir: film });
+  await initFilm({ dir: film, starter: false });
   const shots = join(film, "shots");
   await mkdir(shots, { recursive: true });
   const ffmpeg = await resolveFfmpeg();
@@ -369,7 +380,7 @@ test("a shoot's still that kept a saved screen is a screen: shown by its URL, a 
   skip,
 }, async () => {
   const film = join(dir, "shot-state");
-  await initFilm({ dir: film });
+  await initFilm({ dir: film, starter: false });
   const shots = join(film, "shots");
   const home = join(shots, "states", "home");
   await mkdir(home, { recursive: true });

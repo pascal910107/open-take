@@ -149,6 +149,34 @@ test("packed release artifacts form a browser-download-free dependency chain", a
     entryText(entries.compositor, `package/${path}`);
   }
 
+  // `film init` copies kit/ and starter/ out of the installed package into a
+  // film's folder; a file missing from the tarball is missing from every film.
+  for (const path of [
+    "kit/camera.js",
+    "kit/audio.mjs",
+    "starter/START.md",
+    "starter/PLAN.md",
+    "starter/reference/structure.md",
+    "starter/reference/motion.md",
+    "starter/lib/anim.js",
+    "starter/lib/sampler.mjs",
+    "starter/samples/NOTICE.txt",
+  ]) {
+    entryText(entries.compositor, `package/${path}`);
+  }
+  // every recording the sampler's manifest names, beside it
+  const samples = JSON.parse(
+    entryText(entries.compositor, "package/starter/samples/manifest.json"),
+  );
+  for (const [name, instrument] of Object.entries(samples.instruments)) {
+    assert.ok(instrument.samples.length, `${name} has samples`);
+    for (const s of instrument.samples)
+      assert.ok(
+        entries.compositor.has(`package/starter/samples/${s.file}`),
+        `starter/samples/${s.file} (${name}) must be present in the packed artifact`,
+      );
+  }
+
   const readme = entryText(entries.cli, "package/README.md");
   entryText(entries.cli, "package/skill/SKILL.md");
   entryText(entries.cli, "package/skill/references/motion-composition.md");

@@ -1,7 +1,10 @@
 # The film before its material
 
 One way to start a film, there when it helps. It can be skipped, reordered
-or done another way; nothing checks that it was followed.
+or done another way; nothing checks that it was followed. `START.md` in
+the film's folder (`film init`) says what liked and disliked films made
+with this tool shared, and `PLAN.md` beside it is the plan to fill before
+building; this page covers the same ground with the tool's verbs.
 
 ## The first thing that can be run
 
@@ -11,7 +14,11 @@ this — the film usually turns out to be that list of steps, in that order,
 with titles and music added. A walkthrough is made that way, and it is a
 film you can write. A launch film gives someone who has never heard of the
 product a reason to care, and its order comes from that reason rather than
-from the order a user clicks in.
+from the order a user clicks in. A rough film of stills, plain blocks where
+the material was missing, was tried as that first thing; the films made
+after it were still a card each, screenshots under captions — a still is
+already a card. So the first thing to run here is the thing the film
+follows, acting.
 
 A website is laid out to be read in any order; a film is a sequence that is
 felt in one order. What the page lists, a film can reorder, merge or leave
@@ -53,10 +60,15 @@ closing line, and that line ran through the three chapter verbs. What
 carried was the project; it never came back to a first view.
 
 The film of cards turned up again and again in agent-made films. Following
-one thing rests on far fewer: two films of one product made from the same
-material, one each way, and the shared film above.
+one thing rests on fewer: films of three products that one viewer preferred
+to the tours of the same products, and the shared film above. Of those,
+the ones he liked opened on the thing in trouble with a number on it — a
+2.79 MB photo a page waits for, ten months left on a contract — put
+three to five of the product's functions to it, and ended on that number
+changed; one that followed the product's own small sample through a single
+function he called thin (`START.md`).
 
-## A rough film first, then the material it needs
+## The thing followed, acting, then the material it needs
 
 1. **Look around.** Use the product, try what it does, read what it says
    about itself (`materials.json`, its About page, repository, changelog).
@@ -65,39 +77,49 @@ material, one each way, and the shared film above.
    yet the order in which someone else comes to care about it.
 2. **The reason to watch** — what someone who has never seen it should come
    away with, in one sentence about the thing followed: what it was, what
-   the product did to it, where it ends. One that lists what the product
-   does tends to come out as cards.
-3. **A rough film you can look at.** On the page `film init` starts from,
-   make the key moment of each stretch as a still picture, in the product's
-   own fonts, colours and words (`look/`, `materials.json`, the saved home
-   screen in `states/home/`). Where the material is not there yet, a plain
-   block with a word on it stands in for it. Beside each, one line: what
-   moves first, and what it changes. Then look at it: `film sheet` or
-   `film still` on the rough page.
-4. **Ask of the rough film**, as information for yourself:
-   - what does the viewer follow from the first cell to the last, and what
-     of each brings in the next? Does the last show the first view changed?
-   - what change does the viewer see in each stretch — something appears,
-     grows, is made, is sorted, is answered?
-   - what shape, result or relation only this product has would show that
+   the product did to it, where it ends. Write two or three that differ in
+   what is followed and where it ends, and keep one. One that lists what
+   the product does tends to come out as cards.
+3. **The thing followed, acting.** Before stills or a capture of the whole
+   film, on the page `film init` starts from: one live element of what the
+   film follows — a part from `parts/` (`partFiles`), one lifted from a
+   saved screen (`lift`: the home screen in `states/home/`, or a short
+   `shoot` of that one action), or rebuilt as the film's own HTML in the
+   product's look (`look/`) with its real values (`readValues`). The
+   cursor does one real thing to it — a click, a drag, a few keys — and the
+   result shows in it: a value changes, a list opens, a picture changes as
+   a slider moves. A few seconds; `film render --draft`, and watch it
+   (`skill film material`: start from a part that acts).
+4. **Ask of it**, as information for yourself:
+   - does the picture change because the part acted, or only because the
+     camera moved over it?
+   - is the part big enough to read, and does its result show where the
+     eye already is?
+   - what of it could bring in the next stretch — the part itself carried
+     on, grown into what it opens, folded into something else?
+   - what shape, result or relation only this product has would show the
      change? A prop that could stand unchanged in another product's film
      did not come from this one.
+5. **Grow the film from it**, a stretch at a time, each brought in by
+   something of the one before, made the same way and drafted as it is
+   added. Where the material is not there yet, a plain block stands in,
+   inside a stretch that already moves. Then ask of the whole:
+   - what does the viewer follow from the first frame to the last? Does the
+     last show the first view changed?
    - take out the stretches that say why it matters: if the film still
      seems to work, it is a tour of features. Take out the evidence: what is
      left should still say why it matters.
-   - which of its cells are worth real material, and which are better made
-     as the film's own pictures?
-5. **Get the material the rough film asks for** — a recording of one action
-   (`make`), a saved screen or a still (`shoot`, `make --states`), a part as
-   a file (`parts/`), what the product made (`s.save`), its own words and
-   pictures (`materials.json`) — `skill film material`. A capture planned
-   this way serves a cell of the rough film; it is not the film's order.
-6. **Replace the blocks with the real thing**, and change the rough film
-   wherever the material showed something better than you had planned.
+6. **Get the material it asks for** — a recording of one action (`make`),
+   a saved screen or a still (`shoot`, `make --states`), a part as a file
+   (`parts/`), what the product made (`s.save`), its own words and pictures
+   (`materials.json`) — `skill film material`. A capture planned this way
+   serves a stretch of the film; it is not the film's order.
+7. **Replace the blocks with the real thing**, and change the film wherever
+   the material showed something better than you had planned.
 
-Looking at the rough film often changes it: a cell that reads as a list
-item, a stretch with nothing moving, two stretches that say the same thing.
-That is cheaper to see now than after the capture and the render.
+Watching the first few seconds often changes the film: a part too small to
+read, a result that shows away from where the eye is, an action that leads
+nowhere. That is cheaper to see now than after the capture and the render.
 
 ## What it does not say
 

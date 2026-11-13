@@ -58,6 +58,13 @@ test("film init --from: the shoot's parts by product() at the URL film render se
     r.out,
     /^parts: product\("\/shots\/"\) in kit\/media\.js — each part by ref or track as one reference/m,
   );
+  // what init wrote: the kit a line a file, the samples as one line, START.md last
+  assert.match(r.out, /^wrote film\/kit\/time\.js$/m);
+  assert.match(
+    r.out,
+    /^wrote film\/samples\/ \(\d+ files — recorded instruments; NOTICE\.txt has their licences\)$/m,
+  );
+  assert.match(r.out, /\nRead film\/START\.md first\.\n$/);
   // run from inside the shoot, the shoot is the served folder itself
   const inside = await run(["film", "init", "film", "--from", "."], join(dir, "shots"));
   assert.equal(inside.code, 0, inside.err);

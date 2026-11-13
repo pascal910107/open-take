@@ -51,10 +51,12 @@ works.
 
 A launch film is a different thing: a film you write yourself as a web page —
 what the product makes and says, its own type, colours and parts, motion and
-sound, with real footage only where it is the proof. open-take copies in a kit
-(camera, cursor, one timeline for picture and sound, the product's saved
-screens and parts as material) and renders the page frame-exactly with motion
-blur and its soundtrack.
+sound, with real footage only where it is the proof. open-take copies in a
+starter (`START.md`: what films made this way were liked and disliked for, a
+plan to fill, measurements of one launch film, recorded instruments for the
+score) and a kit (camera, cursor, one timeline for picture and sound, the
+product's saved screens and parts as material), and renders the page
+frame-exactly with motion blur and its soundtrack.
 
 ```sh
 npx open-take film init demos/launch-film --url https://myapp.example/

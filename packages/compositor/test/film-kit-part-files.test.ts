@@ -30,7 +30,7 @@ before(async () => {
   const file = gatherComponents(source);
   writeComponents(file, dir);
   writePartFiles(file, source, join(dir, "parts"));
-  await initFilm({ dir: join(dir, "film") });
+  await initFilm({ dir: join(dir, "film"), starter: false });
 });
 after(async () => {
   await rm(dir, { recursive: true, force: true });

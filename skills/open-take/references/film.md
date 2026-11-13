@@ -10,113 +10,94 @@ motion and the music are the film's author's, and so is how good the film is.
 
 ## One way to work
 
-A path through a film, there when it helps. Any step can be skipped,
-reordered or done another way; nothing checks that it was followed.
+`film init` writes `START.md` into the film's folder: what films made with
+this tool were liked and disliked for — a tour of cards, against one thing
+followed out of trouble to a number that changed — and the order the liked
+ones were made in, with a plan to fill (`PLAN.md`), measurements of one
+launch film (`reference/`), motion helpers and recorded instruments (`lib/`,
+`samples/`). Read it first: on what the film is and how it is worked on, it
+holds over this guide. The steps below are its order with the tool's verbs
+beside them; any of them can be done another way, and nothing checks that
+it was followed.
 
-1. **What the product is, and for whom.** What it makes — a file, a
-   picture, a page, a number it works out, a sound — and what it says about
-   itself: its headline and copy (`materials.json` from `film init --url`),
-   its About page, repository, store listing, changelog, the people who use
-   it. A launch film gives someone who has never heard of the product a
-   reason to care and the proof of it; a walkthrough teaches a task. Both
-   are films you can write; they need different things on screen.
-2. **The main line** — what someone who has never seen it should come away
-   with, in one sentence, and the thing it follows: the viewer's kind of
-   data, the product's own core object, a cursor whose every click leaves a
-   result. Films people shared carried one such thing through and ended on
-   what it had made. What the product does can happen to it, from a first
-   view to the same view, changed. Then one move only this product can make:
-   what of its own — its data, its core object, its mark — could become the
-   next picture in a way no other product's could? Two or three, a line
-   each; keep one, for the film's turn or its ending.
-3. **How it could look and move, before you plan it.** Launch films people
-   shared widely, taken apart frame by frame, had this in common, set
-   against films that read as flat (a screen laid flat with a pan or zoom
-   over it, many words, a hard cut to an unrelated picture):
-   - a scene left through something in it — the thing clicked, circled or
-     counted became the next scene;
-   - one camera that kept moving, its moves overlapping, never stopping dead;
-   - something changing every 0.25–0.5 s: an action and, on screen, what it
-     changed — change density, not cut density;
-   - the product's own things taken out of the screen and moved as objects;
-     the full screen shown for one proof, and then staged — tilted into
-     depth, lit, pushed in on the part being used — not laid flat;
-   - few words, landing one at a time;
-   - an ending that closed the film.
-
-   How they did each — the camera and depth, the product on screen, the
-   cursor, words, numbers, maps, openings, endings, rhythm — with the
-   numbers measured and how to build it: `skill film craft`. The kit has
-   depth (`stage.js`, `stage.adopt` for what the page already has) and
-   measured seams (`seams.js`); `film gallery --with` draws each on this
-   product's own screen. It is worth
-   reading whole before the rough film; this product's own things decide
-   which few a film uses.
-4. **A rough film you can look at, before the long capture.** The key
-   moment of each stretch as a still, in the product's own fonts, colours
-   and words, plain blocks where the material is not there yet; then
-   `film sheet` on it. The capture gets what it asks for. What comes first
-   tends to become the film: a capture script, a film of its steps; the
-   first idea, the product page as cards, nothing carried between them
-   (`skill film story`).
-5. **What shows it.** For each thing the film says, what on screen makes it
-   believable: what the product made, at a size that reads; one of its parts
-   doing something; a real action and the result it gives; its own words and
-   pictures. The interface is material for this step: what can be recorded
-   (`make`), saved as a screen (`make --states`, `shoot`), each part a saved
-   screen holds with its values and what an action changed
-   (`components.json`). In earlier films the pace often followed the
-   material more than the plan (`skill film material`).
-6. **A beat sheet**, if you keep one: `tl.segment` in `time.js` — what each
-   stretch is meant to do, what moves, what holds, what is heard, and what
-   crosses into the next: a sentence on what of this scene lives on and
-   what it becomes there, or "cut" for a hard cut on purpose. `carry` names
-   that thing (a selector; for a canvas, a function of t giving its box):
-   the render follows it across and says what it did, with a strip of
-   every boundary. Free words; nothing grades them.
+1. **Use the product.** Something of your own put through it, every menu
+   opened, each thing it does run once, the numbers it gives kept. What it
+   says about itself — headline, copy, images, the pages it links to — is
+   in `materials.json` (`film init --url`); a capture script of your own
+   that keeps stills, boxes and saved screens is `shoot`; a recording of
+   one action is `make` (`skill film material`).
+2. **`PLAN.md`, before building**: everything the product does; the film
+   that comes to mind first; then the film to make — the thing followed,
+   its trouble and its number, which of the product's functions happen to
+   it — and a table of stretches (`skill film story`).
+3. **The thing followed, acting, first.** What comes first tends to become
+   the film: a capture script, a film of its steps; stills, a film of
+   cards. So one live element of what the film follows — rebuilt as the
+   film's own HTML in the product's fonts and colours (`film look`) with
+   its real values, a part from `parts/`, or one lifted from a saved screen
+   (`lift`) — the cursor doing one real thing to it, the result showing: a
+   few seconds, `film render --draft`, watched. The rest grows from it, a
+   stretch at a time, each brought in by something of the one before.
+4. **A beat sheet**, if you keep one beside the plan: `tl.segment` in
+   `time.js` — what each stretch is meant to do, what moves, what holds,
+   what is heard, and what crosses into the next: a sentence on what of
+   this scene lives on and what it becomes there, or "cut" for a hard cut
+   on purpose. `carry` names that thing (a selector; for a canvas, a
+   function of t giving its box): the render follows it across and says
+   what it did, with a strip of every boundary. Free words; nothing grades
+   them.
 
    ```js
    tl.segment(0, 6.2, { label: "…", handoff: "<what lives on, what it becomes>", carry: "#…" });
    tl.segment(6.2, 9, { label: "…", handoff: "cut" });   // a hard cut, on purpose
    ```
-7. **A draft** — `film render --draft`, `film still`, `film sheet`. A render
-   ends with a few lines measured on the film (`--no-report` leaves them out).
-8. **Look and listen** — `film probe`, `film listen`, `film check`: what the
+5. **Drafts** — `film render --draft` (half size, no blur, about half a
+   minute), then `film sheet` and `film still`: look at every one before
+   going on. A render ends with a few lines measured on the film
+   (`--no-report` leaves them out).
+6. **Look and listen** — `film probe`, `film listen`, `film check`: what the
    picture and the sound did, beside what the page declared, each line
    measured, estimated or not detected (`skill film checking`).
-9. **The seconds that matter, as the master will show them** — a handoff, a
-   whip, a burst of cuts: `film render --from --to`, blurred, alone.
-10. **A first-time viewer** — `film viewer film.mp4`: an agent that has
+7. **A first-time viewer** — `film viewer film.mp4`: an agent that has
    seen nothing of how the film was made watches it and says where it would
-   scroll on, and why (`skill film viewer`). A draft is enough for it; the
-   first full render is a prototype, not the film.
-11. **Change what you decide to change**, and go round 7–10 as often as it
-   helps, a new viewer for each new cut. The reports and the viewer are
-   there to see by, not to satisfy. A note names seconds: change those and
-   render only them into the film — `film render --from 12 --to 16 --into
-   film.mp4` (`skill film render`); the whole master again only when the
-   structure moved. Full masters in earlier films took 4 to 68 minutes
-   each; films that drew the whole master after every note left the notes
-   that would have changed most — a hard cut, a flat scene — undone for
-   want of time.
-12. **The master.**
+   scroll on, and why (`skill film viewer`). A draft is enough for it.
+8. **Change it**, and go round 5–7 again, a new viewer for each new cut:
+   the liked films took 3 to 8 drafts and 2 to 4 complete rounds. The
+   reports and the viewer are there to see by, not to satisfy. Where a
+   stretch is called slow, cutting it is one answer; the other is the next
+   thing the product does, happening there.
+9. **Before the master, the seconds that matter as it will show them** — a
+   fast move, a handoff, anything much larger than the frame: `film still
+   --at`, or `film render --from --to`, blurred, at full size. A draft
+   shows neither blur nor a very large element the full render fails to
+   draw.
+10. **The master**, started in the background and waited for (earlier ones
+   took 3 to 68 minutes), then looked at like a draft. A note names
+   seconds: change those and render only them into the film — `film render
+   --from 12 --to 16 --into film.mp4` (`skill film render`); the whole
+   master again only when the structure moved.
+
+How launch films people shared got from one scene to the next, moved the
+camera, landed words and numbers, opened and ended — measured, with how to
+build each — is `skill film craft`; `film gallery --with` draws the kit's
+blocks on this product's own screen.
 
 ## What's there for…
 
 Capabilities and where each is described; none of them is a step.
 
-- a screen with more text than a viewer reads → one real part on its own:
-  as a layer (`lift`), with the rest faded (`isolate`), or the camera on one
-  box (`cam.frame`) — the three ways just below — `skill film material`
+- a screen with more text than a viewer reads → one real part on its own,
+  as just below — `skill film material`
 - one thing of the product's on its own — a button, a number, a card, a tab,
   a line of its text — big enough to read, with something happening to it →
-  three ways, none of them the default: **in place** on the real screen,
-  with what acts on it and what it changes (a tab and its panel), the camera
-  on it (`cam.frame`), the rest faded (`isolate`); **lifted out** as a layer
-  of its own, live (`lift`, `group`, `arrange`, `carry`, and inside it
-  `count`, `assemble`); **rebuilt** as the film's own HTML at film size, in
-  the product's fonts and colours (`film look`) with its real values
-  (`readValues`) — `skill film material`
+  start from it live and acting: a file from `parts/`, **lifted out** as a
+  layer (`lift`, `group`, `arrange`, `carry`; inside it `count`,
+  `assemble`), or **rebuilt** as the film's own HTML in the product's fonts
+  and colours (`film look`) with its real values (`readValues`). Screens
+  shown as pictures under a caption read as flat; parts that act, as alive.
+  **In place** (`cam.frame`, `isolate`) when the screen round it matters; a
+  full screenshot for the moment the whole screen is the proof — `skill
+  film material`
 - what parts each saved screen holds, their values in full, what an action
   changed → `components.json` (`shoot` and `make --states` write it;
   `open-take components <dir>`; `film init --from <dir>`); it lists, it does
@@ -177,9 +158,8 @@ Capabilities and where each is described; none of them is a step.
   product's own things moved as objects, words that land, numbers and maps
   that earn their figures, a first second and an ending that closes — as
   widely shared launch films did them, with their numbers → `skill film craft`
-- what makes a film look machine-made — choices that came back across many
-  agent-made films and rarely in launch films people shared, each with when
-  it is fine → `skill film tells`
+- what makes a film look machine-made — choices that came back across
+  agent-made films, each with when it is fine → `skill film tells`
 - how the film lands on someone who has never seen it → `film viewer` —
   `skill film viewer`
 - a few seconds as the master shows them, a patch into the master, slow
@@ -187,12 +167,13 @@ Capabilities and where each is described; none of them is a step.
   `--supersample`) → `skill film render`
 - how the renderer plays a page (`__film`, `__render`, clocks) → `skill film
   page`
-- the product's own sound from a take, a soundtrack → `skill film sound`
+- a soundtrack, written or a finished track whose licence allows it, and
+  the product's own sound from a take → `skill film sound`
 
 ## Start
 
 ```sh
-npx open-take film init film/     # kit/ and a page to start from
+npx open-take film init film/     # START.md, PLAN.md, reference/, lib/, samples/, kit/ and a page to start from
 npx open-take film init film/ --url https://the.product/   # also its page as a saved screen and its look
 npx open-take film init film/ --from shots                  # also a shoot's or a take's components.json
 ```
@@ -212,7 +193,9 @@ its usage and the flags it takes.
 
 `kit/` holds plain functions — much of it what twelve films without it each
 wrote again, and often got wrong. The page `film init` starts from imports
-only `time.js` and lists the rest; its length is a placeholder.
+only `time.js` and lists the rest; its length is a placeholder. The liked
+films used `time.js` and `audio.mjs` and wrote their own motion; `lib/` has
+that kind of helper, gathered.
 
 - `camera.js` — say when to see what (`cam.frame(box, { arrive: 12 })`); the
   path is open-take's take camera, tuned by eye on recordings: the view itself
@@ -277,7 +260,7 @@ only `time.js` and lists the rest; its length is a placeholder.
   change a frame as the curve `picture.energy`. `scenes({ result: [7.2,
   16.8] }, { tl, seams })` shows each scene in its span by visibility and
   declares its cuts; `tl.segment(from, to, { label, hold, handoff, carry,
-  subject, sound })` is the beat sheet (step 6), written into the events
+  subject, sound })` is the beat sheet (step 4), written into the events
   file and read back by `film render` and `film probe`. `tl.credit({ what, by,
   licence, url, text })` keeps what the film uses that someone else made;
   `tl.source(label, { ref, field, url, note, text, selector })` where a
@@ -348,7 +331,15 @@ only `time.js` and lists the rest; its length is a placeholder.
   splits a curve at the film's cuts — each shot held to its cut, the next
   from its own first value; `{ cuts: [] }` draws straight across); `cutToBars`
   and `landOn` edit a track by whole bars (`skill film cutting`).
-  The music itself is yours: no melodies, instruments or samples.
+- `lib/anim.js` (beside `kit/`) — the motion the liked films wrote for
+  themselves: keyframes (`keys`, `track`), the measured film's curves
+  (`ease.*`, `bezier`), `stamp`, `spring`, `fling`, `rise`/`exit`,
+  `typeOn`, `count`, a cursor's path and press (`pointer`, `press`), a 2D
+  camera (`cam2d`).
+- `lib/sampler.mjs`, `samples/` — recorded instruments for the score's Node
+  script: `S.note(bus, "piano", n("C4"), at, { vel, dur })`, `S.hit(bus,
+  "pk_kick", at)`, `S.credits()`; 23 instruments, CC0 except the piano
+  (CC BY 3.0, credited with `tl.credit`) — `skill film sound`.
 
 It is the film's code from then on: read it, change it, drop it for any
 scene. The renderer only ever reads `__film` and `__render`. One flat layer
@@ -360,15 +351,15 @@ yourself.
 Each prints on its own; `skill film --all` prints the whole guide in this
 order. The files are under `film/` beside this one.
 
-- `skill film story` — what the film follows; a rough film of it, then the
-  capture it asks for
+- `skill film story` — what the film follows; that thing acting first,
+  then the capture it asks for
 - `skill film craft` — how launch films were shot: getting from one
   scene to the next, the camera, the product on screen, words, numbers,
   maps, openings, endings, rhythm — the moves, measured, and how to build them
 - `skill film tells` — what makes a film look machine-made: the choices
   that came back across agent-made films, and when each is fine
-- `skill film material` — material from the real product: one part shown
-  three ways, saved screens, recordings, `shoot`, `components.json`,
+- `skill film material` — material from the real product: a part that
+  acts, saved screens, recordings, `shoot`, `components.json`,
   `kit/media.js` (`lift`, `isolate`, `seam`, `clipEvents`, `readValues`),
   where values come from (`tl.source`)
 - `skill film page` — the page: `__film`, `__render`, clocks, size

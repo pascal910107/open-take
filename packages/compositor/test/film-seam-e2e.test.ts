@@ -45,12 +45,12 @@ let older = "";
 before(async () => {
   dir = await mkdtemp(join(tmpdir(), "open-take-seam-e2e-"));
   await cp(FIXTURE, dir, { recursive: true });
-  await initFilm({ dir: join(dir, "film") });
+  await initFilm({ dir: join(dir, "film"), starter: false });
   older = join(dir, "older");
   await cp(FIXTURE, older, { recursive: true });
   await rm(join(older, "take"), { recursive: true });
   await cp(join(FIXTURE, "take-bt709"), join(older, "take"), { recursive: true });
-  await initFilm({ dir: join(older, "film") });
+  await initFilm({ dir: join(older, "film"), starter: false });
 });
 after(async () => {
   if (!process.env.KEEP_FILM_TEST) await rm(dir, { recursive: true, force: true });

@@ -1,7 +1,6 @@
 ## Material from the real product
 
-The product gives a film several kinds of material, side by side; none is
-the default:
+The product gives a film several kinds of material, side by side:
 
 - **What it says** — its headline, copy, numbers and pictures, and the pages
   it links to (About, docs, repository): `materials.json`, from
@@ -16,6 +15,41 @@ the default:
   lifted out, the result where it is used — as one continuous shot or as
   cuts on the music.
 
+### Start from a part that acts
+
+One part of the product, big enough to read, with something happening to
+it, is where to start. This rests on few films: in those, the ones that
+read as alive had the interface as live elements whose parts acted — a
+panel slid in, a list opened, a result stamped down, a slider was dragged
+and the picture changed. Screens shown as pictures, the camera moving over
+them, a caption on each, read as flat.
+
+- **The part, live**: a file from `parts/` (below) in the page —
+  `(await partFiles("parts/")).node(ref)`, its elements in an open shadow
+  root; or lifted from a saved screen with `lift`, a live copy where it
+  sat, moved at any size (`place`, `group`, `arrange`), its own elements
+  acting inside it (`find`, `parts`, `text`); or rebuilt as the film's own
+  HTML, CSS, SVG or canvas at the size shown, in the product's fonts and
+  colours (`film look`) with its real values (`readValues`), where its
+  markup will not do what the film needs.
+- **Acting**: the cursor does one real thing to it (`cur.click`,
+  `cur.drag`, `cur.type`; a `product()` part is acted on where the capture
+  acted) and the result shows in the part — a value counting in the
+  product's format (`count`), rows arriving (`assemble`), a press (`press`,
+  `impact`), the next saved screen swapped in as the cursor reaches it
+  (`P.drag`, `P.play`). What an action changed: `st.changes`,
+  `components.json`.
+- **Leaving through it**: the part acted on takes the film on — handed to
+  its place in the next screen (`carry`), grown into what it opens
+  (`morphRect`, `zoomThrough`, `morph`), thrown into what comes next
+  (`hop`, `gather`), opening as a circle (`iris`), folded into the mark.
+
+Ways out, where they fit: **in place** on the real screen — the recording
+or a saved screen, the camera on the part (`cam.frame`), the rest faded
+(`isolate`), what is pressed and what it changes both in frame — when the
+page round it makes it believable; the whole screen, for the moment it is
+the proof.
+
 Its parts also come as files: `film init --url`, `shoot` and `make --states`
 write each part `components.json` lists as `parts/<state>-<el>-<kind>.html`
 (the film's `parts/` beside its `states/`; `<out>/parts/` for a shoot,
@@ -27,35 +61,10 @@ URL, state, selector, kind, label and values; `parts/index.json` lists every
 file with its ref, kind, label, values, natural size and picture, and each
 part that is not a file with the reason (a frame from another site). An
 iframe of its size shows one (`transform: scale(k)` for any other size), or
-`(await partFiles("parts/")).node(ref)` in kit/media.js puts it into the
-page in a shadow root of its own. One more route beside the others; none is
-the default.
+`partFiles` (kit/media.js) puts it into the page, as above.
 
-### One thing of the product's on its own
-
-A button, a number, a card, a tab, a line of its text — shown on its own,
-big enough to read, with something happening to it: pressed, typing itself,
-a number working out, a page switching, rows arriving. Often a control and
-what it changes go together (a tab and the panel it switches). There are
-three ways to draw it, side by side; none is the default, a film can use
-any of them for any moment, and how good it looks is the film's:
-
-- **In place**, on the real screen — the recording, or a saved screen in an
-  iframe: the camera on it (`cam.frame`), the rest faded (`isolate`), what
-  is pressed and what it changes both in frame. The viewer sees the real
-  page do it.
-- **Lifted out** — `lift` makes one part (or several, as one layer) a live
-  copy of its own, sitting where it was: it moves anywhere at any size
-  (`place`, `group`, `arrange`, `carry`), and inside it the product's own
-  elements move (`find`, `parts`, `text` with motion.js's `count` and
-  `assemble`). Below, and in `components.json`.
-- **Rebuilt** as the film's own HTML, CSS, SVG or canvas, laid out at the
-  size it is shown, in the product's fonts and colours (`film look`) — the
-  shape is yours, its values can be the product's own (`readValues`,
-  below).
-
-How to draw it and where its data comes from are two questions. Drawn any
-of the three ways, a number or a string on screen can be one the product
+How to draw a part and where its data comes from are two questions. Drawn
+any of these ways, a number or a string on screen can be one the product
 showed (a part's values in `components.json`), one its live page shows (a
 URL), one it works out from inputs the film states, or data you made up —
 then a viewer should be able to tell it is a demo: content that is plainly an

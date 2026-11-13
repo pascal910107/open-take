@@ -400,7 +400,7 @@ ${script}
 
 test("a lifted part sits exactly where it was until it moves", { skip }, async () => {
   const film = join(dir, "rest");
-  await initFilm({ dir: film });
+  await initFilm({ dir: film, starter: false });
   await writeFile(
     join(film, "plain.html"),
     filmPage(`import { screen } from "./kit/media.js";
@@ -483,7 +483,7 @@ html,body{margin:0;background:#f4f1ea;font:14px sans-serif}
     JSON.stringify({ version: 1, id: "s4", viewport: { w: 520, h: 280, dpr: 1 }, elements: [] }),
   );
   const film = join(dir, "rest2");
-  await initFilm({ dir: film });
+  await initFilm({ dir: film, starter: false });
   const page = (lifted: boolean) => `<!doctype html><html><head><style>
 html,body{margin:0;width:640px;height:360px;overflow:hidden;background:#000}
 #layer{position:relative;left:3px;top:2px;width:600px;height:330px;border:3px solid #333;padding:5px 4px}
@@ -535,7 +535,7 @@ test("carried to fill the frame, it stays sharp; cleared, only the part itself c
   skip,
 }, async () => {
   const film = join(dir, "carry");
-  await initFilm({ dir: film });
+  await initFilm({ dir: film, starter: false });
   await writeFile(
     join(film, "index.html"),
     filmPage(
@@ -592,7 +592,7 @@ window.__render = (t) => {
 
 test("isolate fades everything but the chosen parts into the page", { skip }, async () => {
   const film = join(dir, "isolate");
-  await initFilm({ dir: film });
+  await initFilm({ dir: film, starter: false });
   await writeFile(
     join(film, "index.html"),
     filmPage(`import { screen, isolate } from "./kit/media.js";
@@ -641,7 +641,7 @@ test("the real result becomes the next subject: lifted when it showed, carried t
   // frame, the page fading away round it: the product's own output becomes
   // the next shot's subject. Here the saved state stands in for the video.
   const film = join(dir, "subject");
-  await initFilm({ dir: film });
+  await initFilm({ dir: film, starter: false });
   await writeFile(join(film, "capture.json"), JSON.stringify(LOG));
   await writeFile(
     join(film, "index.html"),
@@ -714,7 +714,7 @@ html,body{margin:0;width:640px;height:360px;overflow:hidden;background:#f4f1ea;f
     JSON.stringify({ version: 1, id: "s5", viewport: { w: 640, h: 360, dpr: 1 }, elements: [] }),
   );
   const film = join(dir, "fixes");
-  await initFilm({ dir: film });
+  await initFilm({ dir: film, starter: false });
   const src = "../states/s5/state.html";
   await writeFile(
     join(film, "fixes.html"),

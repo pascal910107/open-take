@@ -15,7 +15,10 @@ end that just stops):
 
 - a scene left through something in it — the thing clicked, circled or
   counted became the next scene;
-- one camera that kept moving, its moves overlapping, never stopping dead;
+- a picture that never sat still: in most, one camera that kept moving, its
+  moves overlapping; in the one measured most closely (`reference/` in the
+  film's folder), a camera at rest for half its frames while things on
+  screen were made one at a time;
 - the product's own things — its cards, pins, prices, badges — taken out of
   the screen and moved as objects; the full screen shown for one proof, and
   then staged (tilted, lit, focused on one part), not laid flat;
@@ -119,19 +122,28 @@ your material):
 
 The first six by name on a beat sheet — `tl.segment(from, to, { handoff:
 "depth" })` with `scenes(…, { tl, seams })` — are handed over between the two
-scenes that meet there (`skill film`, step 6).
+scenes that meet there (`skill film`, step 4).
 
 ### The camera
 
+- **A camera that holds while the picture is made.** In the film measured
+  in `reference/` the camera was at rest for 48.5 % of its frames and the
+  picture unchanged for about 10 %: panels, strokes, rows and numbers
+  arrived one at a time under a still camera, the longest dead stretch
+  0.4–0.7 s. The films a viewer of agent-made films preferred worked this
+  way (`START.md`).
 - **One camera that never stops dead.** Each move adds its own displacement
   onto where the camera is, eased so it starts quickly and settles long; a
   new move begins before the last has settled. Zoom is moved in log space,
   so ×1→×2 takes as long as ×2→×4 and a long zoom does not rush its end.
   `camera()` with `zoom: "log"`; a move is `cam.frame(box, { arrive, dur,
   ease })`.
-- **Holds keep moving.** A slow 2–5 % push or a ≈0.2 rad orbit across
+- **A hold that drifts.** A slow 2–5 % push or a ≈0.2 rad orbit across
   a hold, and a hand underneath: a sum of slow sines, ≤3 px and ≤0.1° roll,
-  too small to read as a wobble. `handheld`.
+  too small to read as a wobble. `handheld`. One way to keep a hold alive,
+  not the default: shown a locked hold and a drifting one, a viewer could
+  not say which was better, and films that pushed in on every hold were
+  called rigid.
 - **Start on the part being used.** 1.5–2.5× on the control, the action
   happens there, then a fast blurred pull-out (≈0.35 s) shows where we are,
   then a push to the next part. Long holds on a whole screen were rare. At 3–5×
@@ -353,6 +365,9 @@ with the product's input inside it; a clock already running.
 - Each kind of thing arriving its own way — files drop, photos fling,
   notifications slide, windows pop — 0.2–0.3 s each; in these films only
   captions simply faded.
-- Where the films had a pulse, every landing sat on it (`skill film
-  cutting`); where real material had its own events — a click, a page
-  load — the change sat there instead.
+- Where the films had a pulse, landings sat on it (`skill film cutting`).
+  In the one measured against its own grid (`reference/`), only the three
+  or four turns of the story sat on bar lines; small events — a pop, a
+  word swapped, a click — fell on the grid 31 % of the time, 26 % by
+  chance. Where real material had its own events — a click, a page load —
+  the change sat there instead.

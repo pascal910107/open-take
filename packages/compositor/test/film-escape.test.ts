@@ -34,7 +34,7 @@ before(async () => {
   film = join(dir, "film");
   await cp(join(import.meta.dirname, "fixtures", "escape-film"), film, { recursive: true });
   // the kit goes in beside the page, as `film init` puts it; the page is kept
-  const init = await initFilm({ dir: film });
+  const init = await initFilm({ dir: film, starter: false });
   assert.ok(!init.written.some((f) => f.endsWith("index.html")), "the film's own page is kept");
   // a 1 kHz click every half second from 0.5 s: where the sound is, exactly
   await exec(await resolveFfmpeg(), [
