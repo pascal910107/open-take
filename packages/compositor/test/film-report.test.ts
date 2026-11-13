@@ -22,6 +22,7 @@ import {
   inFrameOf,
   partUses,
   pastPixels,
+  type ReportJump,
   slowTextSpans,
 } from "../src/film/report";
 import { findChrome } from "./fixtures/find-chrome";
@@ -182,6 +183,35 @@ const REPORT: FilmReport = {
   slowText: { how: "measured", spans: [{ from: 15.5, to: 19, speed: 0.19, fastest: 0.59 }] },
   ms: 3000,
 };
+
+test("a word rewritten in place, its neighbours shifted along, is not said to have moved; a part that jumps whole is", () => {
+  const line = (list: ReportJump[]) =>
+    formatFilmReport(
+      { ...REPORT, jumps: { how: "measured", declared: 0, list } },
+      { probe: "p" },
+    ).find((l) => l.includes("one-frame jumps")) ?? "";
+  // 26.9 s in a film: "還剩 14 個月" rewritten "接手 · 14 個月" — 30 % of what
+  // changed found again 52 px right, the rest changed where it stood
+  const rewrite = line([
+    { t: 26.9, kind: "swap", changed: 0.03, px: 52, dx: 52, dy: 0, movedShare: 0.3 },
+  ]);
+  assert.doesNotMatch(rewrite, /content moved/);
+  assert.doesNotMatch(rewrite, /hold\(\)/);
+  assert.match(
+    rewrite,
+    /changed in place with part of it shifted along .* 26\.90 s 3% of the frame changed, 30% of that found 52 px right/,
+  );
+  const jump = line([
+    { t: 1, kind: "swap", changed: 0.05, px: 20, dx: 20, dy: 0, movedShare: 0.9 },
+  ]);
+  assert.match(jump, /content moved — 1\.00 s 20 px right/);
+  assert.match(jump, /hold\(\)/);
+  // a report made before the share was kept reads as it did
+  assert.match(
+    line([{ t: 1, kind: "swap", changed: 0.05, px: 20, dx: 20, dy: 0 }]),
+    /content moved/,
+  );
+});
 
 test("the lines: what was measured, where, how much — and where the full report is", () => {
   const L = formatFilmReport(REPORT, { probe: "open-take film probe film.mp4 --page film" });

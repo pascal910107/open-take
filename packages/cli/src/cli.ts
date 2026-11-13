@@ -2530,6 +2530,7 @@ async function main() {
         supersample: num("--supersample"),
         keepLayers: has("--keep-layers"),
         onConsole,
+        onWarning: (w: string) => process.stdout.write(`warn: ${w}\n`),
       });
       process.stdout.write(`${files.join("\n")}\n`);
       const material = await readPageMaterial(target, flag("--root")).catch(() => null);

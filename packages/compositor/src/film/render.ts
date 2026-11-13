@@ -35,7 +35,7 @@ import { serveDirectory } from "../html/server";
 import { jpegDimensions, matroskaCluster, matroskaHead } from "../mjpeg-matroska";
 import { type FilmMark, type FilmPageInfo, filmClockSource, filmMarks } from "./clock";
 import { frameStore, type VideoFrames } from "./frames";
-import { fileEnergy } from "./probe";
+import { fileEnergy, fileGrey, findCuts, frameEnergy } from "./probe";
 
 /** the shutter is open for this fraction of the frame interval (180°) */
 const SHUTTER_FRACTION = 0.5;
@@ -205,10 +205,20 @@ export type FilmEvents = {
   /** the page's events of kind "cut" */
   declaredCuts: number[];
   /** the first frame of a new picture, where the blur probe found one half of a
-   *  frame's shutter changed and the other did not — a jump of the picture, which
-   *  is most often a cut. Found only inside a shutter (half of each frame's
+   *  frame's shutter changed and the other did not, and the encoded picture
+   *  jumps there as a cut does (≥ 12 % of the frame changed at once, standing
+   *  far over the frames around it — `film probe`'s hard cut); the other
+   *  splits are `switches`. Found only inside a shutter (half of each frame's
    *  time), and not at all in a render without blur (a draft) */
   detectedCuts: number[];
+  /** the instants the blur probe split a frame's shutter at that the picture
+   *  does not show as a cut: less than a cut's share of the frame changed at
+   *  once, or the change did not stand out from the frames around it (a word,
+   *  a number or one part swapped; something switched inside a fast push). The
+   *  frame is still exposed on one side there; nothing reads them as cuts.
+   *  Absent in files written before it, and where the picture was not read
+   *  (every split is then in detectedCuts) */
+  switches?: number[];
   /** window.__film.curves(t) once per output frame: rows[i][j] is names[j] at
    *  t0 + i·dt; null where the page gave no number. Beside the page's own,
    *  "picture.energy" (PICTURE_ENERGY): how much the picture changes into the
@@ -487,6 +497,7 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
     });
     await page.closeAll();
     page.checkFiles();
+    film.warnings.push(...(await page.styleWarnings()));
     for (const v of page.unframed())
       film.warnings.push(
         `a video was shown by seeking it, not as its frames: ${v} — under a slow push it can shimmer, and it renders slower`,
@@ -498,7 +509,17 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
     // for the score, so a film that cannot be read has the curve left out
     try {
       const { width: ew, height: eh } = outSize(film);
-      const energy = await fileEnergy(ffmpeg, resolve(opts.out), ew, eh, film.fps);
+      const grey = await fileGrey(ffmpeg, resolve(opts.out), ew, eh, film.fps);
+      const energy = frameEnergy(grey);
+      // what the shutter split at is a cut only where the picture jumps as a
+      // cut does (findCuts); a word or one part swapped, or a switch inside a
+      // fast push, is kept apart from the cuts (see FilmEvents.switches)
+      if (evs.detectedCuts.length)
+        evs = confirmCuts(
+          evs,
+          findCuts(grey, energy).map((i) => secs6((film.f0 + i) / film.fps)),
+          film.f0 > 0 ? secs6(film.f0 / film.fps) : null,
+        );
       if (evs.curves.names.includes(PICTURE_ENERGY))
         film.warnings.push(
           `the page has a curve named "${PICTURE_ENERGY}" — the events file has the picture's own in its place`,
@@ -900,6 +921,34 @@ export function withPictureEnergy(
   return { ...ev, curves: { ...ev.curves, names, rows } };
 }
 
+/** the shutter's splits (detectedCuts) sorted against the cuts the picture
+ *  shows (`pictureCuts`, the first frame of each new picture, s): a split
+ *  within 1.5 frames of one stays a cut, the rest become `switches`. A split
+ *  on `first` — a range's first frame, which has nothing before it in the
+ *  file to compare — stays as it was. */
+export function confirmCuts(
+  ev: FilmEvents,
+  pictureCuts: readonly number[],
+  first: number | null = null,
+): FilmEvents {
+  const tol = 1.5 / ev.fps;
+  const kept: number[] = [];
+  const switches: number[] = [];
+  for (const t of ev.detectedCuts)
+    if (
+      (first != null && Math.abs(t - first) < 0.5 / ev.fps) ||
+      pictureCuts.some((c) => Math.abs(c - t) <= tol)
+    )
+      kept.push(t);
+    else switches.push(t);
+  return {
+    ...ev,
+    cuts: mergeTimes([...ev.declaredCuts, ...kept], 0.5 / ev.fps),
+    detectedCuts: kept,
+    switches,
+  };
+}
+
 /** the events file of a master after `patch` — a render of part of it — went
  *  into it: the page's events as they are now, the curves and the detected
  *  cuts of the range in place of the master's own there */
@@ -921,6 +970,13 @@ export function patchEvents(master: FilmEvents, patch: FilmEvents): FilmEvents |
     [...master.detectedCuts.filter((t) => !inRange(t)), ...patch.detectedCuts],
     1e-9,
   );
+  const switches =
+    master.switches || patch.switches
+      ? mergeTimes(
+          [...(master.switches ?? []).filter((t) => !inRange(t)), ...(patch.switches ?? [])],
+          1e-9,
+        )
+      : undefined;
   // the curves: names from both, the master's rows outside the range
   const names = [...master.curves.names];
   for (const n of patch.curves.names) if (!names.includes(n)) names.push(n);
@@ -944,6 +1000,7 @@ export function patchEvents(master: FilmEvents, patch: FilmEvents): FilmEvents |
     cuts: mergeTimes([...patch.declaredCuts, ...detectedCuts], 0.5 / master.fps),
     declaredCuts: patch.declaredCuts,
     detectedCuts,
+    ...(switches ? { switches } : {}),
     curves: { names, t0: 0, dt: 1 / master.fps, rows },
     // the beat sheet as the page says it now, like its events
     segments: patch.segments ?? master.segments ?? [],
@@ -970,6 +1027,9 @@ export type FilmStillsOptions = {
   /** see FilmRenderOptions.keepLayers */
   keepLayers?: boolean;
   onConsole?: (level: string, text: string) => void;
+  /** what the stills found wrong on the page (an inline style that did not
+   *  take), once each */
+  onWarning?: (text: string) => void;
 };
 
 /** Render only [from, to) of the film, at master quality, into `into` — a
@@ -1397,10 +1457,42 @@ export async function filmStills(opts: FilmStillsOptions): Promise<string[]> {
       files.push(file);
     }
     page.checkFiles();
+    for (const w of await page.styleWarnings()) opts.onWarning?.(w);
     return files;
   } finally {
     await page.shut();
   }
+}
+
+/** An inline style the page set that did not take, as the film clock keeps
+ *  it: the element (or rule), the CSS property, what was set, what the
+ *  property kept, and the film time (s; null before the film starts). */
+export type StyleReject = {
+  el: string;
+  prop: string;
+  value: string;
+  kept: string;
+  how: "ignored" | "suspect";
+  t: number | null;
+};
+
+const MAX_STYLE_WARNINGS = 12;
+
+/** one warning per element and property, in film time order */
+export function styleWarnings(list: readonly StyleReject[]): string[] {
+  const sorted = [...list].sort((a, b) => (a.t ?? -1) - (b.t ?? -1));
+  const out = sorted.slice(0, MAX_STYLE_WARNINGS).map((r) => {
+    const when = r.t == null ? "before the film starts" : `at ${r.t.toFixed(3)}s`;
+    const value = JSON.stringify(r.value.length > 120 ? `${r.value.slice(0, 117)}…` : r.value);
+    return r.how === "suspect"
+      ? `the page set ${r.prop} on ${r.el} to ${value} ${when}: a custom property takes any text, but this reads NaN, undefined or [object …] — what uses it gets no value`
+      : `the page set ${r.prop} on ${r.el} to ${value} ${when} and the browser ignored it: the element kept ${r.kept ? JSON.stringify(r.kept) : `no ${r.prop} of its own`}${/NaN|undefined|\[object /.test(r.value) ? " (NaN, undefined or [object …] in a value is a number that was not computed — an argument missing, or an object where a number belongs)" : ""}`;
+  });
+  if (sorted.length > MAX_STYLE_WARNINGS)
+    out.push(
+      `${sorted.length - MAX_STYLE_WARNINGS} more inline style(s) the browser ignored, on other elements or properties`,
+    );
+  return out;
 }
 
 /** Drops every `will-change` hint once the page is parsed (see
@@ -1480,8 +1572,22 @@ async function servePage(
     browsers.add(b);
     return b;
   };
+  // inline styles the page set that did not take, by element and property,
+  // the earliest film time any Chrome saw it (see the film clock's StyleReject)
+  const rejects = new Map<string, StyleReject>();
+  const gather = async (b: HtmlBrowser) => {
+    const got = await b
+      .evaluate<StyleReject[]>("window.__ot?.styleRejects?.() ?? []")
+      .catch(() => [] as StyleReject[]);
+    for (const r of Array.isArray(got) ? got : []) {
+      const k = `${r.el}\n${r.prop}`;
+      const had = rejects.get(k);
+      if (!had || (r.t != null && (had.t == null || r.t < had.t))) rejects.set(k, r);
+    }
+  };
   const close = async (b: HtmlBrowser) => {
     browsers.delete(b);
+    await gather(b);
     await b.close();
   };
   return {
@@ -1520,6 +1626,12 @@ async function servePage(
     /** videos shown by seeking the element, because their frames could not
      *  be decoded — each with the reason */
     unframed: () => [...unframed],
+    /** what the Chromes opened so far saw of inline styles that did not
+     *  take, as warnings — read from the open ones too */
+    async styleWarnings(): Promise<string[]> {
+      for (const b of browsers) await gather(b);
+      return styleWarnings([...rejects.values()]);
+    },
     async shut() {
       await Promise.all([...browsers].map((b) => b.close()));
       await server.close();

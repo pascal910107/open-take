@@ -144,6 +144,232 @@ function installFilmClock(opts: FilmClockOptions): void {
   const gridAfter = (t: number) => Math.floor((t - base) / STEP_MS - 0.5 + 1e-9) + 1;
   let grid = gridAfter(now);
 
+  // --- inline styles the page sets that do not take ----------------------------
+  // `el.style.transform = \`scale(${x})\`` with x NaN, undefined or an object
+  // is not CSS: the browser ignores the assignment and the element keeps what
+  // it had, silently. Every inline-style setter is wrapped to notice an
+  // assignment after which the property does not hold what was set — the
+  // value is passed on unchanged, so the page draws exactly as it would — and
+  // the first such value for each element and property is kept, with the film
+  // time it was set at, for the renderer to name (styleRejects). Reading the
+  // property back costs two string reads a set; a value is only parsed again
+  // (on a detached declaration, cached) when the property reads the same
+  // before and after — set again unchanged, or ignored. cssText, the style
+  // attribute and the styles of CSS rules (but their setProperty) are not
+  // watched.
+  type StyleReject = {
+    el: string;
+    prop: string;
+    value: string;
+    kept: string;
+    /** "ignored": the property did not take it; "suspect": a custom property
+     *  took it as written, but it reads NaN, undefined or [object …] */
+    how: "ignored" | "suspect";
+    t: number | null;
+  };
+  let begun = false;
+  const rejected: StyleReject[] = [];
+  const rejectedSeen = new WeakMap<CSSStyleDeclaration, Set<string>>();
+  const SUSPECT = /\bNaN\b|\bundefined\b|\[object [A-Za-z]+\]/;
+  const filmT = (): number | null => {
+    if (holder) {
+      try {
+        return (holder.clock() - holder.origin()) / 1000;
+      } catch {
+        return null;
+      }
+    }
+    return begun ? (now - base) / 1000 : null;
+  };
+  const noteStyle = (r: StyleReject) => {
+    if (rejected.length < 200) rejected.push(r);
+  };
+  (() => {
+    const proto = w.CSSStyleDeclaration?.prototype as CSSStyleDeclaration | undefined;
+    if (!proto) return;
+    const realGet = proto.getPropertyValue;
+    const realSetProperty = proto.setProperty;
+    const realRemove = proto.removeProperty;
+    // a declaration of its own, taken before `style` hands out proxies
+    const scratch = document.createElement("div").style;
+    const takesCache = new Map<string, boolean>();
+    /** whether a fresh declaration holds `value` for `prop` once it is set */
+    const takes = (prop: string, value: string): boolean => {
+      const key = `${prop}\n${value}`;
+      const known = takesCache.get(key);
+      if (known !== undefined) return known;
+      realSetProperty.call(scratch, prop, value);
+      const ok = realGet.call(scratch, prop) !== "";
+      realRemove.call(scratch, prop);
+      if (takesCache.size > 4000) takesCache.clear();
+      takesCache.set(key, ok);
+      return ok;
+    };
+    // the element each inline declaration belongs to (see the style getter)
+    const owners = new WeakMap<CSSStyleDeclaration, Element>();
+    /** a short name for the element (or rule) a declaration belongs to */
+    const nameOf = (decl: CSSStyleDeclaration): string => {
+      const rule = decl.parentRule as CSSStyleRule | null;
+      if (rule) return `the rule ${rule.selectorText ?? rule.cssText.slice(0, 60)}`;
+      const el = owners.get(decl);
+      if (!el) return "an element";
+      const one = (e: Element) => {
+        let s = e.tagName.toLowerCase();
+        if (e.id) return `${s}#${e.id}`;
+        const cls = Array.from(e.classList).slice(0, 2);
+        if (cls.length) s += `.${cls.join(".")}`;
+        const p = e.parentElement;
+        if (p) {
+          const same = Array.from(p.children).filter((c) => c.tagName === e.tagName);
+          if (same.length > 1) s += `:nth-of-type(${same.indexOf(e) + 1})`;
+        }
+        return s;
+      };
+      const path: string[] = [];
+      for (let e: Element | null = el; e && path.length < 3; e = e.parentElement) {
+        if (e === document.body || e === document.documentElement) break;
+        path.unshift(one(e));
+        if (e.id) break;
+      }
+      return (
+        (path.join(" > ") || el.tagName.toLowerCase()) +
+        (el.isConnected ? "" : " (not on the page)")
+      );
+    };
+    const check = (
+      decl: CSSStyleDeclaration,
+      prop: string,
+      value: unknown,
+      before: string,
+      after: string,
+    ) => {
+      const custom = prop.startsWith("--");
+      if (!custom && after !== before) return;
+      let seen = rejectedSeen.get(decl);
+      if (seen?.has(prop)) return;
+      const str = String(value);
+      let how: StyleReject["how"];
+      if (custom) {
+        if (!SUSPECT.test(str)) return;
+        how = "suspect";
+      } else {
+        if (takes(prop, str)) return;
+        how = "ignored";
+      }
+      if (!seen) {
+        seen = new Set();
+        rejectedSeen.set(decl, seen);
+      }
+      seen.add(prop);
+      const r: StyleReject = { el: nameOf(decl), prop, value: str, kept: before, how, t: filmT() };
+      if (holder?.noteStyle) holder.noteStyle(r);
+      else noteStyle(r);
+    };
+    const kebab = (name: string) =>
+      name === "cssFloat"
+        ? "float"
+        : name.includes("-")
+          ? name
+          : name
+              .replace(/^webkit(?=[A-Z])/, "-webkit")
+              .replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`);
+    const kebabs = new Map<string, string>();
+    // the declaration behind a proxy (see the style getter below): a native
+    // method called on the proxy itself, `CSSStyleDeclaration.prototype
+    // .getPropertyValue.call(el.style, …)`, reaches the declaration
+    const targets = new WeakMap<object, CSSStyleDeclaration>();
+    const self = (o: CSSStyleDeclaration) => targets.get(o) ?? o;
+    for (const name of [
+      "getPropertyValue",
+      "getPropertyPriority",
+      "removeProperty",
+      "item",
+    ] as const) {
+      const real = proto[name] as (...a: unknown[]) => unknown;
+      if (typeof real !== "function") continue;
+      // biome-ignore lint/suspicious/noExplicitAny: the prototype's own methods
+      (proto as any)[name] = function (this: CSSStyleDeclaration, ...a: unknown[]) {
+        return real.apply(self(this), a);
+      };
+    }
+    // setProperty, on every declaration
+    proto.setProperty = function (
+      this: CSSStyleDeclaration,
+      ...args: [string, string | null, string?]
+    ) {
+      const d = self(this);
+      const [p, v] = args;
+      if (v == null || v === "" || typeof p !== "string") return realSetProperty.apply(d, args);
+      const prop = p.startsWith("--") ? p : p.toLowerCase();
+      const before = realGet.call(d, prop);
+      realSetProperty.apply(d, args);
+      const after = realGet.call(d, prop);
+      if (after === before || prop.startsWith("--")) check(d, prop, v, before, after);
+    };
+    // `el.style.transform = …`: Chrome keeps each property on the declaration
+    // itself, where no setter can be wrapped. An element's `style` is handed
+    // out as a proxy of its declaration — one per declaration, so it is the
+    // same object every time — whose set notices a property that did not take;
+    // everything else (reads, methods, `in`, keys) reaches the declaration as
+    // it is.
+    const proxies = new WeakMap<CSSStyleDeclaration, CSSStyleDeclaration>();
+    const proxyOf = (decl: CSSStyleDeclaration, el: Element): CSSStyleDeclaration => {
+      const had = proxies.get(decl);
+      if (had) return had;
+      owners.set(decl, el);
+      const methods = new Map<PropertyKey, unknown>();
+      const p = new Proxy(decl, {
+        get(t, k) {
+          const v = Reflect.get(t, k, t);
+          if (typeof v !== "function") return v;
+          let m = methods.get(k);
+          if (!m || (m as { real?: unknown }).real !== v) {
+            const bound = (...a: unknown[]) => (v as (...x: unknown[]) => unknown).apply(t, a);
+            (bound as unknown as { real: unknown }).real = v;
+            m = bound;
+            methods.set(k, bound);
+          }
+          return m;
+        },
+        set(t, k, v) {
+          if (
+            typeof k !== "string" ||
+            k === "cssText" ||
+            v == null ||
+            v === "" ||
+            typeof Reflect.get(t, k, t) !== "string"
+          )
+            return Reflect.set(t, k, v, t);
+          let prop = kebabs.get(k);
+          if (prop === undefined) {
+            prop = kebab(k);
+            kebabs.set(k, prop);
+          }
+          const before = realGet.call(t, prop);
+          const ok = Reflect.set(t, k, v, t);
+          const after = realGet.call(t, prop);
+          if (after === before) check(t, prop, v, before, after);
+          return ok;
+        },
+      });
+      proxies.set(decl, p);
+      targets.set(p, decl);
+      return p;
+    };
+    for (const C of [w.HTMLElement, w.SVGElement, w.MathMLElement]) {
+      const d = C && Object.getOwnPropertyDescriptor(C.prototype, "style");
+      if (!d?.get || !d.configurable) continue;
+      const get = d.get;
+      Object.defineProperty(C.prototype, "style", {
+        ...d,
+        get(this: Element) {
+          const decl = get.call(this) as CSSStyleDeclaration;
+          return decl ? proxyOf(decl, this) : decl;
+        },
+      });
+    }
+  })();
+
   // when each <iframe> and <video> was put on the page: it loads in real
   // time, after the clock has moved on, and must start where it was inserted.
   // Lazy loading waits for a viewport a film never scrolls into, so what is
@@ -1653,6 +1879,7 @@ function installFilmClock(opts: FilmClockOptions): void {
     const ready = film.ready ?? w.__ready;
     if (ready) await pump(typeof ready === "function" ? ready() : ready);
     base = now;
+    begun = true;
     grid = 0;
     mode = typeof w.__render === "function" ? "render" : "clock";
     if (mode === "clock") await firstFrame();
@@ -1701,6 +1928,10 @@ function installFilmClock(opts: FilmClockOptions): void {
     drawn,
     clock,
     origin: () => base,
+    // inline styles the page set that did not take (see StyleReject): kept
+    // here for the renderer, which drains them; a frame's go to its holder
+    noteStyle,
+    styleRejects: () => rejected.splice(0),
     // in a page that draws any moment on request, which moment put a frame on
     // the page first depends on the order they were drawn in: its frames
     // start at film time 0

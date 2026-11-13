@@ -81,7 +81,18 @@ export type ReportJump = {
   px: number | null;
   dx: number;
   dy: number;
+  /** of the changed blocks with texture, the share found moved together
+   *  (`px`): near 1 when a part jumps whole; low when most of what changed
+   *  changed where it stood and only some of it shifted along — a word
+   *  rewritten in place, the text after it reflowing. Absent in older reports */
+  movedShare?: number;
 };
+
+/** what this report calls content that moved: at least half of what changed
+ *  (its textured blocks) found again, moved together */
+export const MOVED_SHARE = 0.5;
+const movedWhole = (j: ReportJump) =>
+  j.px != null && (j.movedShare == null || j.movedShare >= MOVED_SHARE);
 
 export type ReportSlowText = {
   from: number;
@@ -757,6 +768,7 @@ export async function filmReport(opts: FilmReportOptions): Promise<FilmReport> {
         px: m.shift ? Math.round(Math.hypot(dx, dy)) : null,
         dx: Math.round(dx),
         dy: Math.round(dy),
+        movedShare: m.textured > 0 ? round2(m.moved / m.textured) : 0,
       };
     });
 
@@ -1066,7 +1078,7 @@ const direction = (dx: number, dy: number) => {
 
 /** jumps with moved content, close ones (under a second apart) as one run */
 function jumpRuns(list: readonly ReportJump[]): { big: number; t: number; text: string }[] {
-  const moved = list.filter((j) => j.px != null);
+  const moved = list.filter(movedWhole);
   const runs: ReportJump[][] = [];
   for (const j of moved) {
     const last = runs.at(-1);
@@ -1145,10 +1157,21 @@ export function formatFilmReport(r: FilmReport, o: { probe: string }): string[] 
   const inPlace = J.list.filter((j) => j.px == null);
   const newPictures = inPlace.filter((j) => j.kind === "cut" && j.changed >= 0.5).length;
   const swapped = inPlace.length - newPictures;
+  // most of what changed changed where it stood, some of it shifted along
+  const partly = J.list.filter((j) => j.px != null && !movedWhole(j));
   const rest = [
     newPictures ? `${newPictures} to a new picture` : "",
     swapped
       ? `${swapped} changed in place (a word, a number, a picture swapped where it stood)`
+      : "",
+    partly.length
+      ? `changed in place with part of it shifted along (a word rewritten and the text beside it reflowing reads this way) — ${partly
+          .slice(0, 4)
+          .map(
+            (j) =>
+              `${fmt(j.t)} ${pct(j.changed)} of the frame changed, ${pct(j.movedShare ?? 0)} of that found ${j.px} px ${direction(j.dx, j.dy)}`,
+          )
+          .join("; ")}${partly.length > 4 ? `; ${partly.length - 4} more` : ""}`
       : "",
   ].filter(Boolean);
   const scope = J.declared
@@ -1353,7 +1376,7 @@ export function formatFilmReport(r: FilmReport, o: { probe: string }): string[] 
               .sort((a, b) => a.from - b.from)
               .map(
                 (x) =>
-                  `${fmt(x.from)}–${fmt(x.to)} ${x.kind === "busy-quiet" ? "the picture busy while the sound is quiet" : "the picture still while the sound is loud"}`,
+                  `${fmt(x.from)}–${fmt(x.to)} ${x.kind === "busy-quiet" ? "the picture busy while the sound is quiet" : "the picture changing little frame to frame while the sound is loud"}`,
               )
               .join("; ") +
             (

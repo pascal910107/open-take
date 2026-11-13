@@ -1662,7 +1662,7 @@ export function formatPictureAgainst(l: Pick<FilmListen, "picture">): string[] {
   const what = (o: PictureAgainstSound["opposite"][number]) =>
     o.kind === "busy-quiet"
       ? `the picture busy (${fmtE(o.energy)}) while the sound is quiet (${o.lufs} LUFS)`
-      : `the picture still (${fmtE(o.energy)}) while the sound is loud (${o.lufs} LUFS)`;
+      : `the picture changing little frame to frame (${fmtE(o.energy)}) while the sound is loud (${o.lufs} LUFS)`;
   L.push(
     a.opposite.length
       ? `- where they run opposite (one above this film's median, the other below, reaching its top and bottom thirds): ${a.opposite.map((o) => `${fmtS(o.from)}–${fmtS(o.to)} ${what(o)}`).join("; ")} ${tag("measured")}`
@@ -1928,7 +1928,7 @@ async function drawListen(
         `<line x1="${x(c.t)}" x2="${x(c.t)}" y1="0" y2="100%" stroke="#e03131" stroke-width="1" opacity="0.55"/>`,
     )
     .join("")}</svg>`;
-  const legend = `<div class="legend" style="top:${top}px">red lines: cuts (${l.cuts.source === "events" ? "events file" : l.cuts.source === "picture" ? "read from the picture" : "none"}) · grey: silence · onsets: orange ticks, beat grid blue (tall = every 4th) · events: solid = an onset within 40 ms, dashed = none${l.picture.against?.opposite.length ? " · picture lane: orange = picture busy while the sound is quiet, light blue = picture still while the sound is loud" : ""} · ${esc(basename(l.input))} ${l.duration.toFixed(2)}s</div>`;
+  const legend = `<div class="legend" style="top:${top}px">red lines: cuts (${l.cuts.source === "events" ? "events file" : l.cuts.source === "picture" ? "read from the picture" : "none"}) · grey: silence · onsets: orange ticks, beat grid blue (tall = every 4th) · events: solid = an onset within 40 ms, dashed = none${l.picture.against?.opposite.length ? " · picture lane: orange = picture busy while the sound is quiet, light blue = picture changing little frame to frame while the sound is loud" : ""} · ${esc(basename(l.input))} ${l.duration.toFixed(2)}s</div>`;
   await writeFile(
     join(o.tmp, "listen.html"),
     `<!doctype html><meta charset="utf-8"><style>

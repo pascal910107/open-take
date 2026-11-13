@@ -584,7 +584,7 @@ test("the picture's change against the sound: half-seconds, the top five, where 
   );
   assert.match(
     lines[2]!,
-    /0\.0s–4\.0s the picture busy \(0\.01\d\) while the sound is quiet .*; 4\.0s–7\.0s the picture still \(0\.0010\) while the sound is loud \(-12 LUFS\); 7\.0s–10\.0s/,
+    /0\.0s–4\.0s the picture busy \(0\.01\d\) while the sound is quiet .*; 4\.0s–7\.0s the picture changing little frame to frame \(0\.0010\) while the sound is loud \(-12 LUFS\); 7\.0s–10\.0s/,
   );
   // the two together: nothing opposite
   const same = halfSeconds(

@@ -9,13 +9,17 @@
 //      live page: a page-side probe (`DOM_STATE_PROBE_JS`) reads structure,
 //      live input values, scroll offsets, canvas/video pixels and the current
 //      value of every animated property; a 1× screenshot is the fidelity
-//      reference; `Page.captureSnapshot` (MHTML) carries the markup, styles,
-//      images and fonts. Raw files land in `states/<id>/`.
+//      reference; `Page.captureSnapshot` (MHTML) carries the markup, styles
+//      and images — but no web-font file (see `fetchFontFiles`). Raw files
+//      land in `states/<id>/`.
 //   2. AFTER the screencast (`finalizeDomStates`) — the MHTML becomes a
 //      self-contained `state.html` (`convertMhtml`): parts are written once
 //      into a shared `states/assets/` (sha1-named), references are rewritten,
 //      every script is made inert IN PLACE (element indices survive), and a
-//      restore script re-applies what markup cannot carry. Then a FIDELITY
+//      restore script re-applies what markup cannot carry. The page's
+//      @font-face files, which the snapshot leaves out, are fetched once
+//      through the still-open browser and saved beside the other parts. Then
+//      a FIDELITY
 //      check re-opens the state in the same browser and compares it with the
 //      reference screenshot; a state that does not match stays on disk with
 //      `fidelity.ok: false` so the film falls back to the video.
@@ -362,7 +366,7 @@ const DOM_STATE_PROBE_JS = `(() => {
 
 // --- MHTML parsing ------------------------------------------------------------
 
-type MhtmlPart = {
+export type MhtmlPart = {
   /** media type, lowercased, parameters stripped ("text/html") */
   contentType: string;
   /** Content-Location as written (Chrome writes absolute URLs, or `cid:…`) */
@@ -475,6 +479,7 @@ const EXT_BY_TYPE: Record<string, string> = {
   "font/ttf": "ttf",
   "application/x-font-ttf": "ttf",
   "font/otf": "otf",
+  "font/collection": "ttc",
   "application/x-font-opentype": "otf",
   "video/mp4": "mp4",
   "video/webm": "webm",
@@ -908,7 +913,13 @@ type ConvertResult = {
 export function convertMhtml(
   raw: Buffer | string,
   probe: DomStateProbe,
-  opts: { assetsDir: string },
+  opts: {
+    assetsDir: string;
+    /** parts fetched apart from the snapshot (the web fonts it leaves out —
+     *  `fetchFontFiles`), found by their location like its own parts; a part
+     *  of the snapshot wins over one here */
+    extra?: MhtmlPart[];
+  },
 ): ConvertResult {
   const parts = parseMhtml(raw);
   const doc = parts.find((p) => p.contentType === "text/html");
@@ -924,6 +935,11 @@ export function convertMhtml(
       if (/^cid:/i.test(p.location)) byCid.set(p.location.slice(4), p);
       else byLocation.set(stripFragment(p.location), p);
     }
+  }
+  for (const p of opts.extra ?? []) {
+    if (!p.location || /^cid:/i.test(p.location)) continue;
+    const at = stripFragment(p.location);
+    if (!byLocation.has(at)) byLocation.set(at, p);
   }
   const assets = new Set<string>();
   const emitted = new Map<MhtmlPart, string | null>();
@@ -1029,6 +1045,201 @@ function withFreeze(html: string): string {
   const body = /<body[\s>]/i.exec(html);
   if (body) return `${html.slice(0, body.index)}${FREEZE_STYLE}${html.slice(body.index)}`;
   return `${FREEZE_STYLE}${html}`;
+}
+
+// --- web fonts --------------------------------------------------------------------
+//
+// `Page.captureSnapshot` carries a page's stylesheets but none of the font
+// files their @font-face rules name (measured: an inline face, a linked one
+// and a unicode-range subset, all three loaded, gave no font part; findgym.tw
+// gave 147 faces and no font part) — every face of a saved state pointed at
+// about:blank and fell back to a system font. So after the take, while the
+// browser is still open, each face's file is fetched through the page that
+// was recorded (`Network.loadNetworkResource`: the page's cookies, nothing run
+// in it) and saved with the other parts. The saved state itself still never
+// reaches the network.
+
+/** The most font bytes one take saves (all states together) — a CJK face cut
+ *  into ~100 unicode-range subsets is ~5–10 MB; faces the page loaded go
+ *  first, so what falls past the cap is a subset nothing on screen used. */
+export const FONT_BUDGET_BYTES = 48 * 1024 * 1024;
+/** One file larger than this is not saved (a whole CJK family in one file is
+ *  under it). */
+const FONT_FILE_MAX_BYTES = 12 * 1024 * 1024;
+
+const CSS_URL = /url\(\s*(?:"([^"]*)"|'([^']*)'|([^)\s"']*))\s*\)/g;
+
+/** The file each @font-face rule in the snapshot's stylesheets (linked,
+ *  inline, sub-frame) names — the first http(s) `url()` of its `src`, the one
+ *  Chrome tries first — absolute, in order, once each. */
+export function fontFaceSources(parts: MhtmlPart[], docUrl: string): string[] {
+  const out = new Set<string>();
+  const doc = parts.find((p) => p.contentType === "text/html");
+  const docBase = doc?.location && !/^cid:/i.test(doc.location) ? doc.location : docUrl;
+  for (const p of parts) {
+    if (p.contentType !== "text/css" && p.contentType !== "text/html") continue;
+    const base = p.location && !/^cid:/i.test(p.location) ? p.location : docBase;
+    for (const face of p.body.toString("utf8").matchAll(/@font-face\s*\{([^}]*)\}/gi)) {
+      const src = /(?:^|[;\s])src\s*:([^;]*)/i.exec(face[1]!)?.[1];
+      if (!src) continue;
+      for (const m of src.matchAll(CSS_URL)) {
+        const ref = m[1] ?? m[2] ?? m[3] ?? "";
+        try {
+          const u = new URL(ref, base);
+          if (u.protocol !== "http:" && u.protocol !== "https:") continue;
+          out.add(stripFragment(u.href));
+          break;
+        } catch {
+          /* not a URL */
+        }
+      }
+    }
+  }
+  return [...out];
+}
+
+/** a font file's media type from its first bytes, or null when it is not one
+ *  (an app that answers every path with its HTML shell) */
+export function fontType(bytes: Buffer): string | null {
+  const sig = bytes.subarray(0, 4).toString("latin1");
+  if (sig === "wOF2") return "font/woff2";
+  if (sig === "wOFF") return "font/woff";
+  if (sig === "OTTO") return "font/otf";
+  if (sig === "true" || sig === "\x00\x01\x00\x00") return "font/ttf";
+  if (sig === "ttcf") return "font/collection";
+  return null;
+}
+
+/** What `fetchFontFiles` has done in one take: each URL's part, or why it
+ *  has none; and the bytes the cap still allows. */
+export type FontFetchState = { done: Map<string, MhtmlPart | string>; left: number };
+
+/**
+ * Fetch font files through the recorded page (`Network.loadNetworkResource`
+ * on its main frame: its cookies and referrer, nothing run in the page), at
+ * most `concurrency` at a time, in the order given, until the cap in `state`
+ * runs out. Results land in `state.done`; a URL already there is skipped.
+ */
+export async function fetchFontFiles(
+  cdp: CDP,
+  urls: string[],
+  state: FontFetchState,
+  opts: { concurrency?: number } = {},
+): Promise<void> {
+  const todo = urls.filter((u) => !state.done.has(u));
+  if (!todo.length) return;
+  let frameId: string;
+  try {
+    const tree = await cdp.send<{ frameTree: { frame: { id: string } } }>("Page.getFrameTree");
+    frameId = tree.frameTree.frame.id;
+  } catch (e) {
+    for (const u of todo) state.done.set(u, `no page to fetch through (${(e as Error).message})`);
+    return;
+  }
+  const one = async (url: string): Promise<MhtmlPart | string> => {
+    if (state.left <= 0) return "over the cap";
+    const r = await cdp.send<{
+      resource: {
+        success: boolean;
+        httpStatusCode?: number;
+        netErrorName?: string;
+        stream?: string;
+      };
+    }>("Network.loadNetworkResource", {
+      frameId,
+      url,
+      options: { disableCache: false, includeCredentials: true },
+    });
+    const { stream } = r.resource;
+    try {
+      const status = r.resource.httpStatusCode ?? 0;
+      if (!r.resource.success || status < 200 || status > 299)
+        return r.resource.netErrorName ?? `HTTP ${status}`;
+      if (!stream) return "no body";
+      const chunks: Buffer[] = [];
+      let n = 0;
+      for (;;) {
+        const c = await cdp.send<{ data: string; base64Encoded?: boolean; eof: boolean }>(
+          "IO.read",
+          { handle: stream, size: 1 << 20 },
+        );
+        const b = Buffer.from(c.data, c.base64Encoded ? "base64" : "latin1");
+        chunks.push(b);
+        n += b.length;
+        if (n > FONT_FILE_MAX_BYTES) return `larger than ${FONT_FILE_MAX_BYTES >> 20} MB`;
+        if (n > state.left) return "over the cap";
+        if (c.eof) break;
+      }
+      const body = Buffer.concat(chunks);
+      const contentType = fontType(body);
+      if (!contentType) return "not a font file";
+      state.left -= body.length;
+      return { contentType, location: url, body };
+    } finally {
+      if (stream) await cdp.send("IO.close", { handle: stream }).catch(() => {});
+    }
+  };
+  let next = 0;
+  const worker = async () => {
+    while (next < todo.length) {
+      const url = todo[next++]!;
+      let got: MhtmlPart | string;
+      try {
+        got = await one(url);
+      } catch (e) {
+        got = (e as Error).message;
+      }
+      state.done.set(url, got);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, opts.concurrency ?? 6) }, worker));
+}
+
+/** The web-font files the states' snapshots name and do not carry, fetched
+ *  once for the whole take — the faces the page loaded first (any state),
+ *  then the rest — as parts `convertMhtml` resolves like its own. */
+async function fetchStateFonts(
+  cdp: CDP,
+  states: DomStateRaw[],
+  warn: (l: string) => void,
+): Promise<MhtmlPart[]> {
+  const loaded = new Set(states.flatMap((s) => (s.loadedFonts ?? []).map(stripFragment)));
+  const wanted: string[] = [];
+  for (const raw of states) {
+    try {
+      const parts = parseMhtml(await readFile(join(raw.dir, "page.mhtml"), "latin1"));
+      const carried = new Set(
+        parts.flatMap((p) => (p.location ? [stripFragment(p.location)] : [])),
+      );
+      for (const u of fontFaceSources(parts, raw.probe.url))
+        if (!carried.has(u) && !wanted.includes(u)) wanted.push(u);
+    } catch {
+      /* the conversion says what is wrong with this one */
+    }
+  }
+  if (!wanted.length) return [];
+  const order = [...wanted.filter((u) => loaded.has(u)), ...wanted.filter((u) => !loaded.has(u))];
+  const state: FontFetchState = { done: new Map(), left: FONT_BUDGET_BYTES };
+  const t0 = Date.now();
+  await fetchFontFiles(cdp, order, state);
+  const parts = order.flatMap((u) => {
+    const p = state.done.get(u);
+    return p && typeof p !== "string" ? [p] : [];
+  });
+  const bytes = parts.reduce((s, p) => s + p.body.length, 0);
+  const why = new Map<string, number>();
+  for (const v of state.done.values()) if (typeof v === "string") why.set(v, (why.get(v) ?? 0) + 1);
+  warn(
+    `dom-state: ${parts.length} of ${order.length} web-font file(s) the snapshot left out saved (${(bytes / 1048576).toFixed(1)} MB, ${Date.now() - t0} ms)${
+      why.size
+        ? ` — not saved: ${[...why]
+            .slice(0, 4)
+            .map(([w, n]) => `${n} ${w}`)
+            .join("; ")}`
+        : ""
+    }`,
+  );
+  return parts;
 }
 
 // --- fidelity -------------------------------------------------------------------
@@ -1195,6 +1406,9 @@ export type DomStateRaw = {
   /** `states/<id>/` */
   dir: string;
   probe: DomStateProbe;
+  /** files the page had fetched for its fonts by then (its resource timing)
+   *  — saved first when the snapshot's fonts are fetched */
+  loadedFonts?: string[];
   /** what reading it cost the take */
   ms: number;
 };
@@ -1384,6 +1598,19 @@ export async function captureDomState(
   const probe = JSON.parse(v) as DomStateProbe & { error?: string };
   if (probe.error) throw new Error(`dom-state probe failed in page: ${probe.error}`);
   const snap = await cdp.send<{ data: string }>("Page.captureSnapshot", { format: "mhtml" });
+  // which font files the page has loaded (read-only: its resource timing) —
+  // the snapshot carries none of them; they are fetched after the take
+  const loadedFonts = await cdp
+    .send<{ result?: { value?: unknown } }>("Runtime.evaluate", {
+      expression: `performance.getEntriesByType("resource").filter(function(e){return /\\.(woff2?|ttf|otf|ttc)(?:[?#]|$)/i.test(e.name)}).map(function(e){return e.name})`,
+      returnByValue: true,
+    })
+    .then((x) =>
+      Array.isArray(x.result?.value)
+        ? (x.result.value as unknown[]).filter((u): u is string => typeof u === "string")
+        : [],
+    )
+    .catch(() => [] as string[]);
   writeFileSync(join(dir, "live.png"), Buffer.from(shot.data, "base64"));
   writeFileSync(join(dir, "page.mhtml"), snap.data, "utf8");
   writeFileSync(join(dir, "probe.json"), v, "utf8");
@@ -1393,6 +1620,7 @@ export async function captureDomState(
     ...(args.step != null ? { step: args.step } : {}),
     dir,
     probe,
+    ...(loadedFonts.length ? { loadedFonts } : {}),
     ms: Date.now() - t0,
   };
 }
@@ -1448,6 +1676,12 @@ export async function finalizeDomStates(args: {
   } catch (e) {
     warn(`dom-state: no ffmpeg for the fidelity check (${(e as Error).message})`);
   }
+  let fonts: MhtmlPart[] = [];
+  try {
+    fonts = await fetchStateFonts(args.browser.cdp, args.states, warn);
+  } catch (e) {
+    warn(`dom-state: the page's web fonts were not fetched (${(e as Error).message})`);
+  }
   for (const raw of args.states) {
     const index = buildIndex(raw);
     // A canvas that copied out empty (WebGL that clears its buffer) would be a
@@ -1470,7 +1704,7 @@ export async function finalizeDomStates(args: {
       }
     try {
       const mhtml = await readFile(join(raw.dir, "page.mhtml"), "latin1");
-      const { html, unresolved } = convertMhtml(mhtml, raw.probe, { assetsDir });
+      const { html, unresolved } = convertMhtml(mhtml, raw.probe, { assetsDir, extra: fonts });
       await writeFile(join(raw.dir, "state.html"), html, "utf8");
       if (unresolved)
         warn(

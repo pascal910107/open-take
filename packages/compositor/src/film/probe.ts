@@ -102,8 +102,19 @@ export async function fileEnergy(
   height: number,
   fps: number,
 ): Promise<Float32Array> {
+  return frameEnergy(await fileGrey(ffmpeg, file, width, height, fps));
+}
+
+/** the film as the probe's small grey copy (PROBE_W wide) */
+export function fileGrey(
+  ffmpeg: string,
+  file: string,
+  width: number,
+  height: number,
+  fps: number,
+): Promise<GreyFrames> {
   const gh = Math.max(BLOCK, Math.round((PROBE_W * height) / width / 2) * 2);
-  return frameEnergy(await decodeGrey(ffmpeg, file, PROBE_W, gh, fps));
+  return decodeGrey(ffmpeg, file, PROBE_W, gh, fps);
 }
 
 type Blocks = { bx: number; by: number };
@@ -283,17 +294,32 @@ export function jumpMove(g: GreyFrames, i: number, radius = 16): JumpMove {
 }
 
 /** stretches where the picture does not change (every frame's change under
- *  `under`, 0..1) for at least `minS` seconds, as frame ranges [a, b) */
+ *  `under`, 0..1) for at least `minS` seconds, as frame ranges [a, b). With
+ *  the frames themselves (`g`), a frame is still only when it is also within
+ *  2·`under` of the frame a quarter second before it: a push or a drift too
+ *  slow to change one frame over the line adds up over a quarter second,
+ *  where a held picture's encoder noise does not. */
 export function findStills(
   energy: Float32Array,
   fps: number,
   minS = 0.5,
   under = 0.0015,
+  g?: GreyFrames,
 ): { a: number; b: number }[] {
   const out: { a: number; b: number }[] = [];
+  const lag = Math.max(1, Math.round(fps / 4));
+  const n = g ? g.w * g.h : 0;
+  const lagged = (i: number) => {
+    if (!g || i >= g.count) return true;
+    const x = frameAt(g, Math.max(0, i - lag));
+    const y = frameAt(g, i);
+    let s = 0;
+    for (let k = 0; k < n; k++) s += Math.abs(x[k]! - y[k]!);
+    return s / n / 255 < 2 * under;
+  };
   let a: number | null = null;
   for (let i = 1; i <= energy.length; i++) {
-    const still = i < energy.length && energy[i]! < under;
+    const still = i < energy.length && energy[i]! < under && lagged(i);
     if (still && a == null) a = i - 1;
     else if (!still && a != null) {
       if ((i - a) / fps >= minS) out.push({ a, b: i });
@@ -2030,7 +2056,7 @@ export async function filmProbe(opts: FilmProbeOptions): Promise<{
   const cutFrames = findCuts(grey, energy);
   const stillUnder = 0.0015;
   const stillMin = 0.5;
-  const stillRanges = findStills(energy, fps, stillMin, stillUnder);
+  const stillRanges = findStills(energy, fps, stillMin, stillUnder, grey);
   const changes = findChanges(grey, energy, cutFrames);
   const swaps = findSmallSwaps(grey, energy, cutFrames);
   const swapTimes = swaps.map((w) => round3(frameTime(grey, w.frame)));
@@ -2551,7 +2577,7 @@ export function formatFilmProbe(p: FilmProbe): string {
   L.push("## No change seen at 192 px");
   L.push(
     p.stills.list.length
-      ? `[measured] ${p.stills.list.length} stretch(es) of ≥ ${p.stills.minS} s where no frame changes by ${p.stills.under} or more on the ${p.read.width}-px grey copy, ${pct(p.stills.share)} of the film: ${p.stills.list.map((s) => `${fmtT(s.start)}–${fmtT(s.end)}`).join(", ")}. A slow cursor, a slow push or a sub-pixel shake can sit under this line — the camera section reads slow motion that this does not.`
+      ? `[measured] ${p.stills.list.length} stretch(es) of ≥ ${p.stills.minS} s where no frame changes by ${p.stills.under} or more on the ${p.read.width}-px grey copy, from the frame before or from the frame ¼ s before, ${pct(p.stills.share)} of the film: ${p.stills.list.map((s) => `${fmtT(s.start)}–${fmtT(s.end)}`).join(", ")}. Motion slower than that over ¼ s can still sit under this line — the camera section reads slow motion that this does not.`
       : `[not detected] no stretch of ≥ ${p.stills.minS} s without a change on the ${p.read.width}-px grey copy`,
   );
   L.push("");

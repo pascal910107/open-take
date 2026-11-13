@@ -56,8 +56,10 @@ export type FilmCheck = {
   } | null;
   /** seconds where one frame repeats inside motion */
   stalls: number[];
-  /** runs of alternating still/moving frames: where they start and how many frames */
-  cadence: { at: number; frames: number }[];
+  /** runs of alternating still/moving frames: where they start and how many
+   *  frames; with `every`, a frame held about every that many frames (held
+   *  frames a few apart, four or more, rather than alternating) */
+  cadence: { at: number; frames: number; every?: number }[];
   /** seconds of hard cuts */
   cuts: number[];
   /** frames unlike the frames on both sides: where they start and how many */
@@ -545,17 +547,10 @@ export function motionFindings(
   // frames are the same picture (encoder noise aside), above 0.4 something
   // visibly moved
   const still = (v: number) => v < 0.02;
-  const stalls: number[] = [];
-  for (let i = 2; i < diffs.length - 2; i++)
-    if (still(diffs[i]!) && diffs[i - 1]! > 0.4 && diffs[i + 1]! > 0.4) stalls.push(at(i));
-  // a cut: most of the picture changes at once (a mean change of 30 of 255),
-  // three times more than the frames on either side of it
-  const cuts: number[] = [];
-  for (let i = 1; i < diffs.length - 1; i++) {
-    const v = diffs[i]!;
-    if (v > 30 && v > 3 * Math.max(diffs[i - 1]!, diffs[i + 1]!, 0.5)) cuts.push(at(i));
-  }
-  const cadence: { at: number; frames: number }[] = [];
+  const cadence: { at: number; frames: number; every?: number }[] = [];
+  // moving and still frames taking turns for 8 frames and more: what changes
+  // updates at a lower rate than the film, not one repeated frame
+  const alternating: [number, number][] = [];
   let run = 0;
   for (let i = 1; i <= diffs.length; i++) {
     const flips =
@@ -564,12 +559,50 @@ export function motionFindings(
       Math.max(diffs[i]!, diffs[i - 1]!) > 0.3;
     if (flips) run++;
     else {
-      // moving and still frames taking turns for 8 frames and more: motion
-      // updating at a lower rate than the film, not one repeated frame
-      if (run >= 8) cadence.push({ at: at(i - run - 1), frames: run });
+      if (run >= 8) {
+        cadence.push({ at: at(i - run - 1), frames: run });
+        alternating.push([i - run - 1, i]);
+      }
       run = 0;
     }
   }
+  const held: number[] = [];
+  for (let i = 2; i < diffs.length - 2; i++)
+    if (
+      still(diffs[i]!) &&
+      diffs[i - 1]! > 0.4 &&
+      diffs[i + 1]! > 0.4 &&
+      !alternating.some(([a, b]) => i >= a && i <= b)
+    )
+      held.push(i);
+  // a held frame on its own inside motion is a hitch; held frames that keep
+  // coming back a few frames apart are the picture changing at a lower rate
+  // than the film — a number counting 40 a second holds every third frame —
+  // and are told as a cadence, not as so many hitches (the frame differences
+  // cannot tell motion from a number or a word changing)
+  const stalls: number[] = [];
+  for (let k = 0; k < held.length; ) {
+    let e = k;
+    while (e + 1 < held.length && held[e + 1]! - held[e]! <= 4) e++;
+    if (e - k + 1 >= 4) {
+      const gaps = held.slice(k + 1, e + 1).map((h, j) => h - held[k + j]!);
+      gaps.sort((a, b) => a - b);
+      cadence.push({
+        at: at(held[k]! - 1),
+        frames: held[e]! - held[k]! + 2,
+        every: gaps[Math.floor(gaps.length / 2)]!,
+      });
+    } else for (let j = k; j <= e; j++) stalls.push(at(held[j]!));
+    k = e + 1;
+  }
+  // a cut: most of the picture changes at once (a mean change of 30 of 255),
+  // three times more than the frames on either side of it
+  const cuts: number[] = [];
+  for (let i = 1; i < diffs.length - 1; i++) {
+    const v = diffs[i]!;
+    if (v > 30 && v > 3 * Math.max(diffs[i - 1]!, diffs[i + 1]!, 0.5)) cuts.push(at(i));
+  }
+  cadence.sort((a, b) => a.at - b.at);
   return { stalls, cadence, cuts };
 }
 
@@ -684,16 +717,25 @@ export function judgeFilm(c: FilmCheck, expect: FilmCheckExpect): FilmCheckIssue
       severity: "error",
       message: `a frame repeats inside motion (a hitch) at ${list(stalls)}s`,
     });
-  const cadence = unmarked(
-    c.cadence,
-    runOf,
-    (r) => `still/moving frames alternate for ${r.frames} frames from ${r.at}s`,
+  const cadence = unmarked(c.cadence, runOf, (r) =>
+    r.every
+      ? `a frame held about every ${r.every} frames for ${r.frames} frames from ${r.at}s`
+      : `still/moving frames alternate for ${r.frames} frames from ${r.at}s`,
   );
   for (const r of cadence)
-    issues.push({
-      severity: "error",
-      message: `still/moving frames alternate for ${r.frames} frames from ${r.at}s — motion is updating at a lower rate than the film`,
-    });
+    issues.push(
+      r.every
+        ? {
+            // the frame differences cannot tell what changes: a count of 40 a
+            // second holds one frame in 3 as a 40 fps move does
+            severity: "warn",
+            message: `a frame held about every ${r.every} frames for ${r.frames} frames from ${r.at}s — what changes there changes at a lower rate than the film: a move stepping, or a number or text updated that often (a count of 40 a second holds one frame in 3)`,
+          }
+        : {
+            severity: "error",
+            message: `still/moving frames alternate for ${r.frames} frames from ${r.at}s — what changes there (a move, or a number or text) is updating at a lower rate than the film`,
+          },
+    );
   const flashes = unmarked(c.flashes, runOf, (f) => `a flash at ${f.at}s (${frames(f.frames)})`);
   if (flashes.length)
     issues.push({

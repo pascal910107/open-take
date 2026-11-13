@@ -16,6 +16,8 @@ import {
   convertMhtml,
   type DomStateProbe,
   decodeQuotedPrintable,
+  fontFaceSources,
+  fontType,
   INERT_SCRIPT,
   matchTarget,
   parseMhtml,
@@ -412,4 +414,117 @@ test("comparePixels leaves out masked boxes; stillOutside ignores what moves on 
   for (const i of [8, 20, 16]) moved[i] = 200;
   assert.equal(stillOutside(img(base), img(moved), [], 3, 0), false);
   assert.equal(stillOutside(img(base), img(moved), [[1, 0, 2, 2]], 3, 0), true);
+});
+
+test("web fonts the snapshot leaves out: every @font-face src found, fetched parts resolve like the snapshot's own", async () => {
+  // Chrome's snapshot carries the stylesheets but no font file: a linked
+  // sheet's relative face, an inline <style> face, an adopted (cid:) sheet's
+  // face and a face that falls back to a second format
+  const doc = `<!DOCTYPE html><html><head><link rel="stylesheet" href="http://app.test/_next/static/chunks/a.css">
+<style>@font-face{font-family:Inline;src:local("Inline"),url(/fonts/inline.woff2) format("woff2")}</style></head>
+<body><p>x</p></body><link rel="stylesheet" type="text/css" href="cid:css-adopted@mhtml.blink" /></html>`;
+  const css = `@font-face{font-family:"Noto Sans TC";font-weight:400;src:url("../media/sub-1.woff2") format("woff2");unicode-range:U+4E00-4E7F}
+@font-face{font-family:"Noto Sans TC";font-weight:400;src:url("../media/sub-2.woff2") format("woff2");unicode-range:U+4E80-4EFF}
+@font-face{font-family:Data;src:url(data:font/woff2;base64,AAAA)}
+@font-face{font-family:Pair;src:url(https://cdn.test/pair.woff2?v=1#x) format("woff2"),url(https://cdn.test/pair.woff) format("woff")}
+p{background:url(/img.png)}`;
+  const raw =
+    [
+      "From: <Saved by Blink>",
+      "MIME-Version: 1.0",
+      `Content-Type: multipart/related; type="text/html"; boundary="${B}"`,
+      "",
+      "",
+    ].join(CRLF) +
+    part(
+      [
+        "Content-Type: text/html",
+        "Content-Transfer-Encoding: quoted-printable",
+        "Content-Location: http://app.test/",
+      ],
+      qp(doc),
+    ) +
+    part(
+      [
+        "Content-Type: text/css",
+        "Content-Transfer-Encoding: quoted-printable",
+        "Content-Location: http://app.test/_next/static/chunks/a.css",
+      ],
+      qp(css),
+    ) +
+    part(
+      [
+        "Content-Type: text/css",
+        "Content-Transfer-Encoding: quoted-printable",
+        "Content-Location: cid:css-adopted@mhtml.blink",
+      ],
+      qp("@font-face{font-family:Adopted;src:url(fonts/adopted.woff2)}"),
+    ) +
+    `--${B}--${CRLF}`;
+  const parts = parseMhtml(raw);
+  assert.ok(!parts.some((p) => p.contentType.startsWith("font/")), "no font part, like Chrome's");
+  assert.deepEqual(fontFaceSources(parts, "http://app.test/"), [
+    "http://app.test/fonts/inline.woff2",
+    "http://app.test/_next/static/media/sub-1.woff2",
+    "http://app.test/_next/static/media/sub-2.woff2",
+    "https://cdn.test/pair.woff2?v=1",
+    "http://app.test/fonts/adopted.woff2",
+  ]);
+
+  const woff2 = (tag: string) => Buffer.concat([Buffer.from("wOF2"), Buffer.from(tag)]);
+  assert.equal(fontType(woff2("a")), "font/woff2");
+  assert.equal(fontType(Buffer.from("wOFFxx")), "font/woff");
+  assert.equal(fontType(Buffer.from([0, 1, 0, 0, 9])), "font/ttf");
+  assert.equal(fontType(Buffer.from("OTTO..")), "font/otf");
+  assert.equal(fontType(Buffer.from("<!DOCTYPE html>")), null, "an app's HTML shell is not a font");
+
+  const dir = await mkdtemp(join(tmpdir(), "open-take-dom-state-fonts-"));
+  try {
+    const assetsDir = join(dir, "assets");
+    const extra = [
+      {
+        contentType: "font/woff2",
+        location: "http://app.test/_next/static/media/sub-1.woff2",
+        body: woff2("1"),
+      },
+      {
+        contentType: "font/woff2",
+        location: "http://app.test/fonts/inline.woff2",
+        body: woff2("i"),
+      },
+      { contentType: "font/woff2", location: "https://cdn.test/pair.woff2?v=1", body: woff2("p") },
+    ];
+    const { html, assets, unresolved } = convertMhtml(raw, probe, { assetsDir, extra });
+    const files = readdirSync(assetsDir);
+    for (const p of extra)
+      assert.ok(files.includes(`${sha1(p.body)}.woff2`), `${p.location} saved as a .woff2`);
+    assert.ok(html.includes(`url(/fonts/inline.woff2)`) === false, "the inline face is local");
+    assert.ok(html.includes(`../assets/${sha1(woff2("i"))}.woff2`));
+    const sheet = readFileSync(
+      join(
+        assetsDir,
+        assets.find(
+          (a) => a.endsWith(".css") && readFileSync(join(assetsDir, a), "utf8").includes("Noto"),
+        )!,
+      ),
+      "utf8",
+    );
+    assert.ok(
+      sheet.includes(`url("../assets/${sha1(woff2("1"))}.woff2")`),
+      "a fetched subset is local",
+    );
+    assert.ok(
+      sheet.includes(`url(../assets/${sha1(woff2("p"))}.woff2#x)`),
+      "the first format, fetched",
+    );
+    assert.ok(sheet.includes('url("about:blank")'), "a subset not fetched stays cut off");
+    assert.ok(
+      sheet.includes("url(https://cdn.test/pair.woff)") === false,
+      "nothing left on the network",
+    );
+    // sub-2, pair.woff, adopted.woff2, img.png
+    assert.equal(unresolved, 4);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
