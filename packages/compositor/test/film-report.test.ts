@@ -24,6 +24,7 @@ import {
   pastPixels,
   type ReportJump,
   slowTextSpans,
+  stretchCount,
 } from "../src/film/report";
 import { findChrome } from "./fixtures/find-chrome";
 import { writePartsShoot } from "./fixtures/parts-shoot";
@@ -283,6 +284,43 @@ test("the lines: what was measured, where, how much — and where the full repor
   assert.match(none, /one-frame jumps not declared as cuts: none \(the page declares no cuts/);
   assert.match(none, /pictures taken mid-change: not measured — the page was not played/);
   assert.match(none, /live text moving under a device pixel a frame for a second or more: none/);
+});
+
+test("the beat sheet's stretches, counted: how many, the median, the longest — no more", () => {
+  // the shape of a 31 s film that lost: six stretches, one nine seconds long
+  const sheet = [
+    { from: 0, to: 6 },
+    { from: 6, to: 10.5, label: "close the lid" },
+    { from: 10.5, to: 13 },
+    { from: 13, to: 22, label: "the phone" },
+    { from: 22, to: 28 },
+    { from: 28, to: 31 },
+  ];
+  const sc = stretchCount(sheet, 0, 31);
+  assert.deepEqual(sc, {
+    count: 6,
+    median: 5.25,
+    longest: { from: 13, to: 22, label: "the phone" },
+  });
+  // a render of part of the page: what is inside it, on the film's clock
+  assert.deepEqual(stretchCount(sheet, 10, 20), {
+    count: 3,
+    median: 2.5,
+    longest: { from: 3, to: 10, label: "the phone" },
+  });
+  assert.equal(stretchCount([], 0, 31), null);
+  const line = formatFilmReport({ ...REPORT, stretches: sc }, { probe: "p" }).find((l) =>
+    l.includes("stretches"),
+  );
+  assert.equal(
+    line,
+    '  stretches (the beat sheet\'s segments, `tl.segment`): 6, median 5.25 s, the longest 9.00 s (13.00 s–22.00 s, "the phone")',
+  );
+  assert.doesNotMatch(line ?? "", /too|short|long enough|should/);
+  assert.ok(
+    !formatFilmReport(REPORT, { probe: "p" }).some((l) => l.includes("stretches")),
+    "no beat sheet, no line",
+  );
 });
 
 test("the parts the film named: each use, where the part was at its times, facts only", () => {

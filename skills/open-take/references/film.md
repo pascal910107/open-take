@@ -28,8 +28,9 @@ it was followed.
    one action is `make` (`skill film material`).
 2. **`PLAN.md`, before building**: everything the product does; the film
    that comes to mind first; then the film to make — the thing followed,
-   its trouble and its number, which of the product's functions happen to
-   it — and a table of stretches (`skill film story`).
+   its trouble and its number, each function in (its stretch) or out (why
+   no viewer will miss it), a table of stretches (`skill film story`). Its
+   length follows from how much the product does, set beside the reference's.
 3. **The thing followed, acting, first.** What comes first tends to become
    the film: a capture script, a film of its steps; stills, a film of
    cards. So one live element of what the film follows — rebuilt as the
@@ -64,8 +65,8 @@ it was followed.
 8. **Change it**, and go round 5–7 again, a new viewer for each new cut:
    the liked films took 3 to 8 drafts and 2 to 4 complete rounds. The
    reports and the viewer are there to see by, not to satisfy. Where a
-   stretch is called slow, cutting it is one answer; the other is the next
-   thing the product does, happening there.
+   stretch is called slow, the first answer is the next thing the product
+   does, happening there; cutting is for what repeats.
 9. **Before the master, the seconds that matter as it will show them** — a
    fast move, a handoff, anything much larger than the frame: `film still
    --at`, or `film render --from --to`, blurred, at full size. A draft
@@ -336,6 +337,14 @@ that kind of helper, gathered.
   (`ease.*`, `bezier`), `stamp`, `spring`, `fling`, `rise`/`exit`,
   `typeOn`, `count`, a cursor's path and press (`pointer`, `press`), a 2D
   camera (`cam2d`).
+- `lib/devices.js` — `laptop`, `phone`, `computer` round a live screen
+  element, drawn from a pose each frame (`lap.draw({ x, y, rx, ry, scale,
+  open })`, `open` the lid's angle, 0 shut), lit, sharp; the screen stays
+  DOM. `at(pose).toFrame(x, y)`.
+- `lib/handoff.js` — changes of scene, one call each: `whip` with one thing
+  `carry`-ed to its place in the next scene, `panel` rising in, `through`
+  what was clicked into the view it opens; on `seams.js`, unblurred (the
+  master's shutter blurs).
 - `lib/sampler.mjs`, `samples/` — recorded instruments for the score's Node
   script: `S.note(bus, "piano", n("C4"), at, { vel, dur })`, `S.hit(bus,
   "pk_kick", at)`, `S.credits()`; 23 instruments, CC0 except the piano

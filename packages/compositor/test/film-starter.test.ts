@@ -2,7 +2,10 @@
 // beside the kit, at the paths lib/sampler.mjs reads them from (../kit,
 // ../samples). A file the author changed is kept, --force replaces it — PLAN.md
 // never, once written in. The sampler plays from an initialised folder through
-// the folder's own kit/audio.mjs (ffmpeg decodes), and lib/anim.js loads in Node.
+// the folder's own kit/audio.mjs (ffmpeg decodes); lib/anim.js loads in Node,
+// and so do lib/devices.js and lib/handoff.js through the folder's own kit.
+// START.md and PLAN.md say what the length and the functions shown follow
+// from, and name the devices and the handoffs.
 
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
@@ -48,6 +51,8 @@ test("film init writes the kit and the starter at the film's paths; a second run
     "reference/structure.md",
     "reference/motion.md",
     "lib/anim.js",
+    "lib/devices.js",
+    "lib/handoff.js",
     "lib/sampler.mjs",
     "samples/manifest.json",
     "samples/NOTICE.txt",
@@ -109,7 +114,7 @@ test("film init writes the kit and the starter at the film's paths; a second run
   assert.match(
     quiet[0]!,
     new RegExp(
-      `^already the same in film/: kit/ \\(\\d+ files\\), START\\.md, PLAN\\.md, reference/ \\(2 files\\), lib/ \\(2 files\\), samples/ \\(${samples.length} files\\)$`,
+      `^already the same in film/: kit/ \\(\\d+ files\\), START\\.md, PLAN\\.md, reference/ \\(2 files\\), lib/ \\(4 files\\), samples/ \\(${samples.length} files\\)$`,
     ),
   );
   assert.equal(quiet[1], "Read film/START.md first.");
@@ -256,6 +261,8 @@ console.log(JSON.stringify({
   keys: [A.keys(0, ks), A.keys(1, ks), A.keys(2, ks), A.keys(3, ks), A.keys(9, ks)],
   typeOn: A.typeOn(1.5, 1, "hello", 4),
   fmt: A.fmt(2576),
+  flingMistaken: (() => { try { A.fling(0.4); return ""; } catch (e) { return e.message; } })(),
+  flingEase: A.ease.fling(1),
 }));`,
     ],
     { cwd: film, env: { ...process.env, NODE_OPTIONS: "" } },
@@ -277,5 +284,54 @@ console.log(JSON.stringify({
   assert.equal(mid.x, 50);
   assert.ok(Math.abs(mid.s - 2) < 1e-9, "a zoom mixes in log space");
   assert.equal(A.typeOn, "he");
+  // fling(t, …) taken for ease.fling(u): an error that says which is which
+  assert.match(A.flingMistaken, /fling\(t, t0, from, to, tau\).*ease\.fling\(u, tau\)/);
+  assert.equal(A.flingEase, 1);
   assert.equal(A.fmt, "2,576");
+});
+
+test("lib/devices.js and lib/handoff.js load in Node through the folder's own kit, as numbers", async () => {
+  const { stdout } = await exec(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `const D = await import(${JSON.stringify(pathToFileURL(join(film, "lib", "devices.js")).href)});
+const H = await import(${JSON.stringify(pathToFileURL(join(film, "lib", "handoff.js")).href)});
+const lap = D.laptop(null, { w: 1440, h: 900 });
+const pose = { x: 960, y: 820, rx: -16, ry: -24, scale: 0.55 };
+console.log(JSON.stringify({
+  shut: lap.at({ ...pose, open: 0 }).facing,
+  open: lap.at({ ...pose, open: 105 }).facing,
+  kinds: [typeof D.phone, typeof D.computer, typeof H.whip, typeof H.panel, typeof H.through, typeof H.carry, typeof H.apply],
+  whip: H.whip(6, 6, { dir: "left" }).a.transform,
+}));`,
+    ],
+    { cwd: film, env: { ...process.env, NODE_OPTIONS: "" } },
+  );
+  const r = JSON.parse(stdout);
+  assert.equal(r.shut, false, "shut, the screen faces away");
+  assert.equal(r.open, true, "open, it faces the lens");
+  assert.deepEqual(r.kinds, Array(7).fill("function"));
+  assert.match(r.whip, /^translate\(-960px, 0px\)/);
+});
+
+test("START.md and PLAN.md: length and functions follow from the product; the devices and handoffs named", async () => {
+  const start = await readFile(join(filmStarterDir(), "START.md"), "utf8");
+  const plan = await readFile(join(filmStarterDir(), "PLAN.md"), "utf8");
+  // the three films' numbers are what they were, not a range to land in
+  assert.doesNotMatch(start, /^- 30 to 45 seconds/m);
+  assert.doesNotMatch(start, /under 30 s/);
+  assert.match(start, /not a\s+length to aim for/);
+  assert.match(start, /The first answer is the next of the product's\s+functions/);
+  assert.match(start, /cutting is for what repeats/);
+  // the film that lost the comparison is on the page, one viewer, one comparison
+  assert.match(start, /This is one viewer and one\s+comparison/);
+  assert.match(start, /one thing on screen through every stretch/);
+  for (const f of ["lib/devices.js", "lib/handoff.js", "seams.js", "stage.js", "world.js"])
+    assert.ok(start.includes(f), `START.md names ${f}`);
+  // every function in or out, the length beside the reference's, each draft counted
+  assert.match(plan, /in \(stretch\) \| out \(why a viewer will not miss it\)/);
+  assert.match(plan, /The reference: 57\.8 s in 23 stretches/);
+  assert.match(plan, /\| draft \| length \(s\) \| stretches \| functions shown/);
 });

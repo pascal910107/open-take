@@ -3,10 +3,10 @@
 // drops it — it is the film's own code from then on, not a dependency. Beside
 // it the starter (starter/ beside kit/): START.md, the page to read first;
 // PLAN.md, the plan to fill; reference/, measurements of one launch film;
-// lib/, motion helpers and a sampler; samples/, the sampler's recorded
-// instruments. A page to start from is written only where there is none; a
-// file the author has changed is kept unless asked to replace it, and PLAN.md,
-// once written in, is never replaced. With `--url` the CLI first keeps the
+// lib/, motion helpers, devices, changes of scene and a sampler; samples/,
+// the sampler's recorded instruments. A page to start from is written only
+// where there is none; a file the author has changed is kept unless asked to
+// replace it, and PLAN.md, once written in, is never replaced. With `--url` the CLI first keeps the
 // product's landing page as a saved screen in states/home/ (its parts as
 // files in parts/, its look in look/); the page to start from then names
 // them in a comment — listed, like the kit, not used.
@@ -187,7 +187,9 @@ export function starterPage(
   ];
   const starter = has.starter
     ? "  // START.md in this folder is what to read first. Beside the kit are lib/anim.js (motion\n" +
-      "  // helpers) and lib/sampler.mjs with samples/ (recorded instruments for the score).\n"
+      "  // helpers), lib/devices.js (a laptop, a phone, a box computer, the interface live on the\n" +
+      "  // screen), lib/handoff.js (changes of scene) and lib/sampler.mjs with samples/ (recorded\n" +
+      "  // instruments for the score).\n"
     : "";
   return `<!doctype html>
 <html>

@@ -63,10 +63,14 @@ The film of cards turned up again and again in agent-made films. Following
 one thing rests on fewer: films of three products that one viewer preferred
 to the tours of the same products, and the shared film above. Of those,
 the ones he liked opened on the thing in trouble with a number on it — a
-2.79 MB photo a page waits for, ten months left on a contract — put
-three to five of the product's functions to it, and ended on that number
-changed; one that followed the product's own small sample through a single
-function he called thin (`START.md`).
+2.79 MB photo a page waits for, ten months left on a contract — put most of
+what the product does to it (three to five functions, for small products),
+and ended on that number changed; one that followed the product's own small
+sample through a single function he called thin. A film of a product that
+does more, held to six of its thirteen functions and cut to 31 s, he found
+too short and less complete than the product's own 57.7 s film, which gave
+each function a stretch and kept one thing on screen through all of them
+(`START.md`).
 
 ## The thing followed, acting, then the material it needs
 

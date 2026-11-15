@@ -97,11 +97,12 @@ cursor, one timeline for picture and sound, saved screens and shot stills as
 material, the sound's plumbing) and a page to start from. Beside it the
 starter: START.md (what to read first), PLAN.md (the plan to fill),
 reference/ (measurements of one launch film), lib/anim.js (motion helpers),
-lib/sampler.mjs and samples/ (recorded instruments for the score;
-samples/NOTICE.txt has their licences). All of it is the film's own from
-then on. A file of yours that differs from the kit's or the starter's is
-kept and listed; --force replaces it — except PLAN.md, never replaced once
-written in.
+lib/devices.js (a laptop, a phone, a box computer round a live screen),
+lib/handoff.js (changes of scene), lib/sampler.mjs and samples/ (recorded
+instruments for the score; samples/NOTICE.txt has their licences). All of it
+is the film's own from then on. A file of yours that differs from the kit's
+or the starter's is kept and listed; --force replaces it — except PLAN.md,
+never replaced once written in.
   --url <url>        also open the product's page in open-take's Chrome and
                      keep it as a saved screen (states/home/ in <dir>), and
                      read its look into <dir>/look/; neither stops the init

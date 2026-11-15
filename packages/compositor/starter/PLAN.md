@@ -32,7 +32,15 @@ The trouble it is in at the start, and the number on it; that number at the end;
 
 The material — what it is, how big, where it comes from (real and public, the product's own sample, or written for the film and marked as a demo):
 
-Which lines of "everything it does" happen to the thing, in order — and which are left out:
+Every line of "everything it does", in or out — in: the stretch it happens to the thing in; out: why a viewer will not miss it:
+
+| # | what it does | in (stretch) | out (why a viewer will not miss it) |
+|---|---|---|---|
+| 1 | | | |
+| 2 | | | |
+| 3 | | | |
+
+Length: planned ___ s in ___ stretches, ___ of the ___ functions in. The reference: 57.8 s in 23 stretches (median 2.5 s). If yours is much shorter, which of the outs it is shorter by:
 
 How the product's interface is on screen (rebuilt live / a part / a screenshot as evidence), and what the cursor does to it:
 
@@ -44,4 +52,8 @@ Story turns, and the bar line each sits on:
 
 ## Changes
 
-Draft by draft: its length, what the sheet showed, what was changed (a stretch cut, or filled with what).
+Draft by draft. A stretch called still gets the next function happening to the thing first; a cut is for what repeats.
+
+| draft | length (s) | stretches | functions shown (of all listed) | what the sheet and the viewer showed | what was changed (a stretch cut, or filled with which function) |
+|---|---|---|---|---|---|
+| 1 | | | | | |

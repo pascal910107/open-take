@@ -66,10 +66,47 @@ import {
   eventsPathFor,
   FINE_SUPERSAMPLE,
   type FilmEvents,
+  type FilmSegment,
   probeFilm,
   type TurnBack,
 } from "./render";
 import { type Tuning, tuning } from "./tuning";
+
+/** the page's beat sheet counted: its stretches inside the film */
+export type StretchCount = {
+  count: number;
+  /** s */
+  median: number;
+  longest: { from: number; to: number; label?: string };
+};
+
+/** The stretches of a beat sheet inside [from, to] of the page's timeline,
+ *  times from the film's start; null when there are none. Facts: how many,
+ *  how long at the median, which is longest. */
+export function stretchCount(
+  segments: { from: number; to: number; label?: string }[],
+  from: number,
+  to: number,
+): StretchCount | null {
+  const inside = segments
+    .map((s) => ({ ...s, from: Math.max(s.from, from), to: Math.min(s.to, to) }))
+    .filter((s) => s.to - s.from > 1e-6)
+    .sort((a, b) => a.from - b.from);
+  if (!inside.length) return null;
+  const lens = inside.map((s) => s.to - s.from).sort((a, b) => a - b);
+  const m = lens.length >> 1;
+  const median = lens.length % 2 ? lens[m]! : (lens[m - 1]! + lens[m]!) / 2;
+  const long = inside.reduce((a, b) => (b.to - b.from > a.to - a.from ? b : a));
+  return {
+    count: inside.length,
+    median: round3(median),
+    longest: {
+      from: round3(long.from - from),
+      to: round3(long.to - from),
+      ...(long.label ? { label: long.label } : {}),
+    },
+  };
+}
 
 export type ReportJump = {
   t: number;
@@ -183,6 +220,10 @@ export type FilmReport = {
     list: BoundaryCarry[];
     strip: string | null;
   };
+  /** the beat sheet's stretches inside the film, as the page wrote them
+   *  (`tl.segment`): how many, the median length, the longest; absent when
+   *  the page wrote none */
+  stretches?: StretchCount | null;
   /** where the picture and the sound run opposite, half a second at a time
    *  (`film listen`'s own reading, from the events file's picture.energy) */
   against: {
@@ -919,6 +960,9 @@ export async function filmReport(opts: FilmReportOptions): Promise<FilmReport> {
       });
     seams = { how: "measured", ...(note ? { note } : {}), list, strip };
   }
+  const stretches = Array.isArray(rawEvents.segments)
+    ? stretchCount(rawEvents.segments as FilmSegment[], info.from, info.from + duration)
+    : null;
   // the sound on its own
   let sound: FilmReport["sound"];
   const pcm = await soundPcm;
@@ -995,6 +1039,7 @@ export async function filmReport(opts: FilmReportOptions): Promise<FilmReport> {
     moving,
     slowText,
     seams,
+    stretches,
     against,
     sound,
     ms: Date.now() - start,
@@ -1316,6 +1361,13 @@ export function formatFilmReport(r: FilmReport, o: { probe: string }): string[] 
     for (const u of pa.uses.slice(0, PART_LINES)) L.push(`    ${partLine(u)}`);
     if (pa.uses.length > PART_LINES) L.push(`    … ${pa.uses.length - PART_LINES} more use(s)`);
   }
+
+  // the stretches, counted
+  const sc = r.stretches;
+  if (sc)
+    L.push(
+      `  stretches (the beat sheet's segments, \`tl.segment\`): ${sc.count}, median ${fmt(sc.median)}, the longest ${fmt(sc.longest.to - sc.longest.from)} (${fmt(sc.longest.from)}–${fmt(sc.longest.to)}${sc.longest.label ? `, ${JSON.stringify(sc.longest.label)}` : ""})`,
+    );
 
   // the boundaries, and what crossed each
   const sm = r.seams;

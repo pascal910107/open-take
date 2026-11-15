@@ -18,7 +18,8 @@
 //   stamp(t, t0, o)                 → { scale, opacity } — an object landing: 1.19× → 1 in one 24 fps frame, no bounce
 //   spring(t, t0, o)                a damped spring 0 → 1
 //   swing(t, t0, o)                 a damped swing amp → 0 (a dragged thing's tilt)
-//   fling(t, t0, from, to, tau)     flung in: fastest at once, exponential arrival
+//   fling(t, t0, from, to, tau)     flung in: fastest at once, exponential arrival — a value;
+//                                   its ease, for keys or your own progress, is ease.fling(u, tau)
 //   rise(t, t0, o)                  a line rising into place
 //   exit(t, t0, o)                  leaving by accelerating until gone
 //   typeOn(t, t0, text, cps)        the part of a text typed so far
@@ -100,7 +101,9 @@ export const ease = {
   // a pull-back (2.7 s, close to out3)
   pull: bezier(0.25, 0.06, 0.1, 0.91),
   // flung in: fastest at once, exponential settle; tau as a share of the stretch
-  // (the reference's cursor: tau 0.14 s over 0.625 s ≈ 0.22). `(u) => ease.fling(u, 0.18)`
+  // (the reference's cursor: tau 0.14 s over 0.625 s ≈ 0.22). `(u) => ease.fling(u, 0.18)`.
+  // A progress, not a value: to move a value from one place to another over
+  // film time, fling(t, t0, from, to, tau) below (tau in seconds there)
   fling: (u, tau = 0.22) => (1 - Math.exp(-u / tau)) / (1 - Math.exp(-1 / tau)),
 };
 /** an ease, or one by its name @param {Ease | string | undefined} e @returns {Ease} */
@@ -110,6 +113,10 @@ const easeOf = (e) =>
 /** a mix of two values: numbers, arrays of numbers, or flat objects of numbers (a key `s` mixes in log space)
  *  @param {Value} a @param {Value} b @param {number} u @returns {Value} */
 function mixv(a, b, u) {
+  if (a == null || b == null)
+    throw new Error(
+      `anim: a value to move is missing (from ${JSON.stringify(a)} to ${JSON.stringify(b)}) — a number, an array of numbers or a flat object of numbers`,
+    );
   if (typeof a === "number") return lerp(a, b, u);
   if (Array.isArray(a)) return a.map((v, i) => lerp(v, b[i], u));
   /** @type {Record<string, number>} */
@@ -221,6 +228,11 @@ export function swing(t, t0, { amp = 10, freq = 1.1, zeta = 0.35 } = {}) {
  * @returns {Value}
  */
 export function fling(t, t0, from, to, tau = 0.14) {
+  if (from == null || to == null)
+    throw new Error(
+      "anim: fling(t, t0, from, to, tau) moves a value from `from` to `to` — given no from or to. " +
+        "The ease of the same shape, a progress 0..1 → 0..1 for keys or your own lerp, is ease.fling(u, tau)",
+    );
   if (t <= t0) return from;
   return mixv(from, to, 1 - Math.exp(-(t - t0) / tau));
 }
