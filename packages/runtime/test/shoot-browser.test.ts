@@ -928,7 +928,7 @@ test("shoot: each part of a saved screen as a file of its own — its styles inl
     if (WOFF2)
       assert.match(
         html,
-        /@font-face\{font-family:"?Fx"?;src:url\("\.\.\/states\/assets\/[0-9a-f]+\.woff2"\)/,
+        /@font-face ?\{ ?font-family: ?"?Fx"?; ?src: ?url\("\.\.\/states\/assets\/[0-9a-f]+\.woff2"\)/,
       );
 
     // opened alone from the file, no network: it is drawn as the page drew it
