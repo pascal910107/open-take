@@ -28,10 +28,11 @@
 // `const room = space(LEN)` from kit/audio.mjs, `send: { bus: room.send,
 // amount: 0.15 }`; mix `room.wet()` into the master once at the end.
 //
-// kit diagnose() on a bus can call the strike of a harp, marimba or vibes
-// note "a click" about 3 ms after the note's time: that is the instrument's
-// own attack against the silence before it, not a cut (attack: 0.01 softens
-// it, and the strike with it).
+// The strike of a harp, marimba, vibes or piano note is a jump in the
+// waveform, the instrument's own attack against the silence before it. note
+// and hit tell the kit each is a recording, so diagnose() on the bus, or on a
+// master the bus was mixed into, does not call it a click (S.sound() played
+// with kit play() needs `recorded: true` for the same).
 //
 // The smallest score — one bar: a chord and a drum pattern. Run from the film
 // folder: node score.mjs → score.wav
@@ -200,7 +201,7 @@ export function sampler(dir = fileURLToPath(new URL("../samples", import.meta.ur
    * @param {Channels} bus @param {string} name @param {number} midi @param {number} at @param {NoteOptions} [o]
    */
   function note(bus, name, midi, at, { vel, dur, release, attack, layer, rr, gain, pan, send, align } = {}) {
-    return play(bus, sound(name, midi, { vel, dur, release, attack, layer, rr }), at, { gain, pan, send, align });
+    return play(bus, sound(name, midi, { vel, dur, release, attack, layer, rr }), at, { gain, pan, send, align, recorded: true });
   }
 
   /**
@@ -209,7 +210,7 @@ export function sampler(dir = fileURLToPath(new URL("../samples", import.meta.ur
    * @param {Channels} bus @param {string} name @param {number} at @param {NoteOptions} [o]
    */
   function hit(bus, name, at, { vel, layer, rr, dur, release, gain, pan, send, align, semitones } = {}) {
-    return play(bus, sound(name, null, { vel, layer, rr, dur, release }), at, { gain, pan, send, align, semitones });
+    return play(bus, sound(name, null, { vel, layer, rr, dur, release }), at, { gain, pan, send, align, semitones, recorded: true });
   }
 
   /**

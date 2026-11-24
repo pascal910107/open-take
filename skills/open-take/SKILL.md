@@ -684,9 +684,10 @@ own look (`film look`) and the music's grid (`film beats`), and measures what yo
 or hear (`film probe`, `film listen`, `film check`; `film gallery` draws what each kit block
 does). Every report line is measured, estimated or not detected — information, not a grade.
 Start with `npx open-take film init <dir>` and read the `START.md` it writes there first — what
-films made with this tool were liked and disliked for, the order the liked ones were made in, and
-a plan to fill (`PLAN.md`) — then [film.md](references/film.md) (or `npx open-take skill film`)
-for the tool's verbs. Nothing in either is a template, and the kit, beat sheet and workflow are
+films made with this tool were liked and disliked for, what seven measured launch films do (each
+with its numbers, its call and what it looks like done badly), and an order to work in — then fill
+the `PLAN.md` beside it and read one of its two references; that is enough for a first draft.
+[film.md](references/film.md) (or `npx open-take skill film`) has the tool's verbs. Nothing in either is a template, and the kit, beat sheet and workflow are
 all optional. It is the guide's core —
 a way to work, an index of what is there and where, and the kit — and names its topics, each
 its own file under `references/film/` and its own print (`skill film material`, `cutting`,

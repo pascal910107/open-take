@@ -71,14 +71,14 @@ The exact set CI runs, in order:
 pnpm build
 pnpm typecheck
 pnpm lint
-pnpm -r test
+pnpm test
 pnpm test:package
 ```
 
-**`pnpm test` at the root runs nothing.** There is no root `test` script and
-turbo has no `test` task, so it prints nothing and exits 0. Tests live per
-package — `pnpm -r test` is the one that runs them, and the one CI runs. If you
-only ever ran `pnpm test`, you have not run the tests.
+Root `pnpm test` runs the workspace packages' test scripts. Browser tests in
+that suite can skip when Chrome is unavailable. Linux CI explicitly requires
+Chrome for the two rendering checks below. Put `ffmpeg` and `ffprobe` on
+`PATH` for the FFmpeg adapter tests.
 
 Formatting is `pnpm format` (Biome). CI lints but does not check formatting; run
 it anyway so diffs stay about the change.
@@ -101,6 +101,19 @@ OPEN_TAKE_E2E_CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chro
 
 CI runs it on Linux only. Worth running locally for anything that touches
 rendering.
+
+### Verify the transition from a recording to a saved screen
+
+Run `pnpm verify:film` after building. It uses the recorded `seam-film` fixture
+and requires FFmpeg and Chrome. It uses a cached Chrome for Testing or the
+binary specified by `OPEN_TAKE_E2E_CHROME`.
+
+The test checks when the result appears, how far the picture moves at the
+swap, and where the lifted card starts. It prints a temporary directory
+containing `seam.mp4`, `film-check.json`, and the four-frame `seam.png`.
+The sheet shows the wait after the click, the frames on both sides of the
+swap, and the card growing. Attach the sheet or clip when a change affects
+that behavior.
 
 ## The repo
 

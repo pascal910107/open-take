@@ -4,15 +4,69 @@
 // mistakes it exists to prevent.
 
 import assert from "node:assert/strict";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import { camera, settleDecay as kitDecay, linear } from "../kit/camera.js";
 import { cursor } from "../kit/cursor.js";
 import { stillCache } from "../kit/media.js";
 import { timeline } from "../kit/time.js";
+import { initFilm, moduleSpecifiers, THREE_FILES, threeBuildDir } from "../src/film/kit";
 import { type CamRect, type KF, settleDecay, settleRectAt } from "../src/math";
 
 const near = (a: number, b: number, tol: number, what: string) =>
   assert.ok(Math.abs(a - b) <= tol, `${what}: ${a} vs ${b} (±${tol})`);
+
+test("init copies the WebGPU and TSL builds with the gallery's existing three files", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "open-take-film-three-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  assert.deepEqual(THREE_FILES, ["three.module.min.js", "three.core.min.js"]);
+  const r = await initFilm({ dir, starter: false });
+  for (const name of [...THREE_FILES, "three.webgpu.min.js", "three.tsl.min.js"]) {
+    const file = join(dir, "kit", name);
+    assert.ok(r.written.includes(file), name);
+    assert.deepEqual(await readFile(file), await readFile(join(threeBuildDir(), name)));
+  }
+});
+
+test("addon imports inside strings are ignored and import options keep the specifier", () => {
+  const source = [
+    'const example = `import "three/addons/absent.js"`;',
+    'const other = \'from "three/addons/absent.js"\';',
+    'const obj = { from: 1 }; obj.import("three/addons/absent.js");',
+    'import("three/addons/math/SimplexNoise.js?v=1", { with: {} });',
+    'import { from as value } from "three/addons/math/ImprovedNoise.js";',
+  ].join("\n");
+  assert.deepEqual(moduleSpecifiers(source).sort(), [
+    "three/addons/math/ImprovedNoise.js", "three/addons/math/SimplexNoise.js?v=1",
+  ]);
+});
+
+test("a quote inside a regular expression opens no string", () => {
+  const source = [
+    'const r = /"/; import { A } from "three/addons/a.js";',
+    "const q = /['`]/g.test(s) ? 1 : 2; import 'three/addons/b.js';",
+    'const half = width / 2, ratio = a / b; import("three/addons/c.js");',
+    'function f(x) { return /[/"]+/.exec(x); }',
+    'export { B } from "three/addons/d.js";',
+  ].join("\n");
+  assert.deepEqual(moduleSpecifiers(source).sort(), [
+    "three/addons/a.js", "three/addons/b.js", "three/addons/c.js", "three/addons/d.js",
+  ]);
+});
+
+test("a missing starter addon stops init before it writes files", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "open-take-film-addon-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const starterDir = join(dir, "starter");
+  await mkdir(join(starterDir, "lib"), { recursive: true });
+  await writeFile(join(starterDir, "lib", "page.js"), 'import "three/addons/missing.js";');
+  const out = join(dir, "out");
+  await mkdir(out);
+  await assert.rejects(initFilm({ dir: out, starterDir }), /imports three\/addons\/missing\.js/);
+  assert.deepEqual(await readdir(out), []);
+});
 
 test("the kit camera settles exactly as the take camera does", () => {
   const a = kitDecay(0.04);

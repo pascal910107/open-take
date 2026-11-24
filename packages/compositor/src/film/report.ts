@@ -63,10 +63,15 @@ import {
   runOcr,
 } from "./probe-text";
 import {
+  checkEvents,
+  checkSegments,
   eventsPathFor,
   FINE_SUPERSAMPLE,
+  type FilmEvent,
   type FilmEvents,
   type FilmSegment,
+  hiddenCutTimes,
+  mergeTimes,
   probeFilm,
   type TurnBack,
 } from "./render";
@@ -125,6 +130,37 @@ export type ReportJump = {
   movedShare?: number;
 };
 
+type JumpIntent = "cut" | "hidden-cut" | "lift";
+
+/** Match observations to what the page declares. A cut can land within a
+ *  frame and a half of where it was written. A lift covers a turn when the
+ *  moment it was measured at is within that same margin of the lift's span. */
+export function reportIntent(
+  cuts: readonly number[],
+  events: readonly FilmEvent[],
+  segments: readonly FilmSegment[],
+  fps: number,
+) {
+  const hidden = hiddenCutTimes(events, segments);
+  const lifts = segments.filter((s) => s.handoff?.trim().toLowerCase() === "lift");
+  const margin = 1.5 / fps;
+  const near = (t: number, times: readonly number[]) => times.some((x) => Math.abs(x - t) <= margin);
+  const inLift = (t: number, tolerance: number) =>
+    lifts.some((s) => t >= s.from - tolerance && t <= s.to + tolerance);
+  return {
+    // merged as the events file merges them, so one cut written both ways counts once
+    declared: mergeTimes([...cuts, ...hidden], 1e-9).length,
+    jump(t: number): JumpIntent | null {
+      if (near(t, hidden)) return "hidden-cut";
+      if (near(t, cuts)) return "cut";
+      return inLift(t, 0.0005) ? "lift" : null;
+    },
+    turn(t: Pick<TurnBack, "at">): boolean {
+      return inLift(t.at, margin);
+    },
+  };
+}
+
 /** what this report calls content that moved: at least half of what changed
  *  (its textured blocks) found again, moved together */
 export const MOVED_SHARE = 0.5;
@@ -175,15 +211,16 @@ export type FilmReport = {
   /** one-frame jumps of the picture the page did not declare as cuts */
   jumps: {
     how: "measured";
-    /** whether the page declares any cut at all (kind "cut" events) */
+    /** how many cuts the page declared */
     declared: number;
     list: ReportJump[];
+    intended?: { t: number; kind: JumpIntent }[];
   };
   moving: MovingMaterial;
   slowText: { how: "measured" | "not measured"; note?: string; spans: ReportSlowText[] };
   /** moves of the picture where what it ends up framing does not head
    *  straight for its place (the render's probe, in the events file) */
-  turns: { how: "measured" | "not measured"; list: TurnBack[] };
+  turns: { how: "measured" | "not measured"; list: TurnBack[]; intended?: TurnBack[] };
   /** <img>, <video> and <canvas> drawn bigger than their own pixels, and
    *  layers under a perspective drawn bigger than Chrome draws them
    *  (`why` "tilt"), at the page samples: `ratio` the most frame px per px
@@ -758,8 +795,10 @@ export async function filmReport(opts: FilmReportOptions): Promise<FilmReport> {
     ? (JSON.parse(await readFile(eventsFile, "utf8")) as Record<string, unknown>)
     : {};
   const declared = (Array.isArray(rawEvents.declaredCuts) ? rawEvents.declaredCuts : [])
-    .filter((v): v is number => typeof v === "number" && Number.isFinite(v))
-    .map((v) => v - info.from);
+    .filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+  const intent = reportIntent(
+    declared, checkEvents(rawEvents.events), checkSegments(rawEvents.segments), fps,
+  );
 
   const times: number[] = [];
   for (let k = 0; k * every < duration - 0.5 / fps; k++) times.push(round3(k * every));
@@ -791,13 +830,17 @@ export async function filmReport(opts: FilmReportOptions): Promise<FilmReport> {
   const energy = frameEnergy(grey);
   const cuts = findCuts(grey, energy);
   const swaps = findSmallSwaps(grey, energy, cuts).map((s) => s.frame);
-  const tol = 1.5 / fps;
   const kx = layout.width / grey.w;
   const ky = layout.height / grey.h;
+  const intendedJumps: NonNullable<FilmReport["jumps"]["intended"]> = [];
   const jumps: ReportJump[] = [...cuts, ...swaps]
     .sort((a, b) => a - b)
     .map((f) => ({ f, t: frameTime(grey, f) }))
-    .filter(({ t }) => !declared.some((d) => Math.abs(d - t) <= tol))
+    .filter(({ t }) => {
+      const kind = intent.jump(t + info.from);
+      if (kind && kind !== "cut") intendedJumps.push({ t: round3(t), kind });
+      return !kind;
+    })
     .map(({ f, t }) => {
       const m = jumpMove(grey, f);
       const dx = m.shift ? m.shift.x * kx : 0;
@@ -1004,6 +1047,24 @@ export async function filmReport(opts: FilmReportOptions): Promise<FilmReport> {
     }
   }
 
+  const turns: FilmReport["turns"] = { how: "not measured", list: [] };
+  if (Array.isArray(rawEvents.turnsBack)) {
+    turns.how = "measured";
+    for (const x of rawEvents.turnsBack as TurnBack[]) {
+      const turn = {
+        ...x,
+        from: round3(x.from - info.from),
+        to: round3(x.to - info.from),
+        at: round3(x.at - info.from),
+      };
+      if (intent.turn(x)) {
+        turns.intended ??= [];
+        turns.intended.push(turn);
+      }
+      else turns.list.push(turn);
+    }
+  }
+
   return {
     film: opts.film,
     duration: round3(duration),
@@ -1018,24 +1079,19 @@ export async function filmReport(opts: FilmReportOptions): Promise<FilmReport> {
       to: round3(f.to - info.from),
     })),
     fineSupersample: opts.fineSupersample ?? 1,
-    turns: Array.isArray(rawEvents.turnsBack)
-      ? {
-          how: "measured",
-          list: (rawEvents.turnsBack as TurnBack[]).map((x) => ({
-            ...x,
-            from: round3(x.from - info.from),
-            to: round3(x.to - info.from),
-            at: round3(x.at - info.from),
-          })),
-        }
-      : { how: "not measured", list: [] },
+    turns,
     draft: !!opts.draft,
     pastPixels: pageRead
       ? { how: "measured", list: pastPixels(pageRead.samples, every) }
       : { how: "not measured", note: pageNote ?? "the page was not played", list: [] },
     parts,
     productText,
-    jumps: { how: "measured", declared: declared.length, list: jumps },
+    jumps: {
+      how: "measured",
+      declared: intent.declared,
+      list: jumps,
+      ...(intendedJumps.length ? { intended: intendedJumps } : {}),
+    },
     moving,
     slowText,
     seams,
@@ -1221,7 +1277,7 @@ export function formatFilmReport(r: FilmReport, o: { probe: string }): string[] 
   ].filter(Boolean);
   const scope = J.declared
     ? `the page declares ${J.declared} cut(s)`
-    : 'the page declares no cuts (events of kind "cut")';
+    : 'the page declares no cuts: events of kind "cut" or "hidden-cut", a segment whose handoff is "hidden-cut", or "lift" for a whole segment that rises out of the picture';
   if (!J.list.length) L.push(`  one-frame jumps not declared as cuts: none (${scope})`);
   else
     L.push(
@@ -1311,6 +1367,17 @@ export function formatFilmReport(r: FilmReport, o: { probe: string }): string[] 
       `  moves of the picture where what it ends up framing does not head straight there: ${shown.join("; ")}${tb.list.length > 4 ? `; ${tb.list.length - 4} more` : ""}. A view whose centre and zoom move apart, or that is kept inside the page every frame rather than once per move, bends this way; kit/camera.js moves straight`,
     );
   }
+  const intended: string[] = [];
+  const seen = (kind: JumpIntent) => J.intended?.filter((j) => j.kind === kind).length ?? 0;
+  const count = (n: number, what: string) => `${n} ${what}${n === 1 ? "" : "s"}`;
+  const hidden = seen("hidden-cut");
+  const lifts = seen("lift");
+  const turns = tb.intended?.length ?? 0;
+  if (hidden) intended.push(`${count(hidden, "picture jump")} at cuts hidden in motion`);
+  if (lifts || turns)
+    intended.push(`${[lifts && count(lifts, "picture jump"), turns && count(turns, "turn")]
+      .filter(Boolean).join(" and ")} during layered lifts`);
+  if (intended.length) L.push(`  declared intent seen: ${intended.join(", ")}`);
 
   // live text under a pixel a frame
   const s = r.slowText;
@@ -1380,7 +1447,16 @@ export function formatFilmReport(r: FilmReport, o: { probe: string }): string[] 
     );
   else {
     const count = (k: string) => sm.list.filter((b) => b.how.kind === k).length;
-    const tally = ["carried", "anchored", "bare", "cut", "words", "unwritten", "not rendered"]
+    const tally = [
+      "carried",
+      "anchored",
+      "bare",
+      "cut",
+      "lift",
+      "words",
+      "unwritten",
+      "not rendered",
+    ]
       .map((k) => [k, count(k)] as const)
       .filter(([, n]) => n)
       .map(([k, n]) => `${n} ${k}`)
@@ -1395,12 +1471,16 @@ export function formatFilmReport(r: FilmReport, o: { probe: string }): string[] 
       const line = h.measured
         ? `${h.kind}${carryChange(b) ? ` (${carryChange(b)})` : ""}${h.note ? ` — ${h.note}` : ""}`
         : h.kind === "cut"
-          ? "a hard cut, on purpose"
-          : h.kind === "words"
-            ? "nothing named to follow (`carry`)"
-            : h.kind === "unwritten"
-              ? "nothing written"
-              : "outside what was rendered";
+          ? /hidden/i.test(b.handoff ?? "")
+            ? "a cut hidden under motion, on purpose"
+            : "a hard cut, on purpose"
+          : h.kind === "lift"
+            ? "a layer lifting out on its own, declared"
+            : h.kind === "words"
+              ? "nothing named to follow (`carry`)"
+              : h.kind === "unwritten"
+                ? "nothing written"
+                : "outside what was rendered";
       L.push(`    ${fmt(b.at)}${said}${what}: ${line}`);
     }
     if (sm.list.length > BOUNDARY_LINES)

@@ -46,7 +46,11 @@ Two shapes, of many. A menu on a café table abroad, unreadable; a phone held
 over it, its lines turning into words, a dish picked; the same table, the
 plate set down — out of the viewer's world and back. Or one question typed
 into a form and sent: it lands on phones and comes back as answers that
-fill the editor it left — sent out, and what returns changes the view. The
+fill the editor it left — sent out, and what returns changes the view. For
+a product that is asked for something and makes it, six measured launch
+films told one shape: a request typed and sent, a status line for each
+step, the thing built in stages, a check, the result out in the world
+(`START.md`, "Asked, then made"). The
 change need not be a repair, and the first change that comes to mind is
 usually one most products could claim (`skill film tells`: the first hook
 that comes to mind).
@@ -62,12 +66,12 @@ carried was the project; it never came back to a first view.
 The film of cards turned up again and again in agent-made films. Following
 one thing rests on fewer: films of three products that one viewer preferred
 to the tours of the same products, and the shared film above. Of those,
-the ones he liked opened on the thing in trouble with a number on it — a
+the preferred ones opened on the thing in trouble with a number on it — a
 2.79 MB photo a page waits for, ten months left on a contract — put most of
 what the product does to it (three to five functions, for small products),
 and ended on that number changed; one that followed the product's own small
-sample through a single function he called thin. A film of a product that
-does more, held to six of its thirteen functions and cut to 31 s, he found
+sample through a single function was judged thin. A film of a product that
+does more, held to six of its thirteen functions and cut to 31 s, was judged
 too short and less complete than the product's own 57.7 s film, which gave
 each function a stretch and kept one thing on screen through all of them
 (`START.md`).

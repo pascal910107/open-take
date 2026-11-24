@@ -68,6 +68,16 @@
 // to build.
 // A boundary whose segment names no kind is left as it is: nothing is added
 // that the film did not ask for.
+// Two handoffs are declarations the page performs itself, so the render reads
+// what it sees there as meant: "hidden-cut" says the picture is replaced at
+// `to` under motion (a blur or a whip covers it; an event of kind
+// "hidden-cut" says the same at its time), so no cut need show there; "lift"
+// says one layer moves on its own over the whole segment, so a jump or a
+// camera turning back inside it is the lift. Neither asks for a `carry`;
+// `film render` and `film probe` do not list them as undeclared jumps.
+//
+//   tl.event(5.4, "hidden-cut");                   // replaced in the blur at 5.4 s
+//   tl.segment(1.53, 2.2, { handoff: "lift" });    // a card rises out of the desk
 //
 // What the film uses that someone else made — a track, a sound, a font, a
 // photo — and on what terms, if you keep a record of it. Nothing checks it or
@@ -102,6 +112,8 @@
 // visibility, so what is in a hidden scene keeps its layout (a saved screen
 // can still be measured and lifted from) and what was lifted out of it hides
 // with it; each start is a cut on the timeline, for the score and the probe.
+// A child that sets `visibility: visible` itself is not hidden with its
+// scene and shows through: inside a scene write `inherit`, or nothing.
 //
 //   const sc = scenes({ result: [7.2, 16.8], search: [21.6, 31.2] }, { tl });  // ids of elements
 //   sc.show(t);                 // in __render(t): "result" shown 7.2–16.8 s, hidden otherwise
@@ -125,7 +137,7 @@
  * and how hard (0..1), if it says.
  * @typedef {object} FilmEvent
  * @property {number} t
- * @property {string} kind "click", "key", "land", "cut", "mark", or any word of yours
+ * @property {string} kind "click", "key", "land", "cut", "hidden-cut", "mark", or any word of yours
  * @property {number} [x]
  * @property {number} [y]
  * @property {number} [force]
@@ -141,7 +153,8 @@
  * @property {number} to
  * @property {string} [label]
  * @property {boolean} [hold] the picture is meant to hold still here
- * @property {string} [handoff] a seam's kind (kit/seams.js), or your own words
+ * @property {string} [handoff] a seam's kind (kit/seams.js), "hidden-cut" or "lift", or your
+ *   own words
  * @property {Record<string, number | string>} [seam] the seam's options, when the handoff was
  *   given as { kind, …options }
  * @property {string} [carry] what lives through the boundary at `to`: a CSS selector, or

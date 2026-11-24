@@ -9,15 +9,15 @@
 
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { readdirSync } from "node:fs";
-import { mkdtemp, readFile, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { existsSync, readdirSync } from "node:fs";
+import { cp, mkdtemp, readFile, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { after, before, test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { resolveFfmpeg } from "../src/ffmpeg";
-import { filmInitLines, filmStarterDir, initFilm, STARTER_PARTS } from "../src/film/kit";
+import { filmInitLines, filmStarterDir, initFilm, STARTER_PARTS, threeBuildDir } from "../src/film/kit";
 
 const exec = promisify(execFile);
 let dir = "";
@@ -53,13 +53,27 @@ test("film init writes the kit and the starter at the film's paths; a second run
     "lib/anim.js",
     "lib/devices.js",
     "lib/handoff.js",
+    "lib/swarm.js",
     "lib/sampler.mjs",
+    "reference/travel/structure.md",
+    "reference/travel/motion.md",
+    "reference/travel/sound.md",
+    "lib/moves.js",
+    "lib/hud.js",
+    "lib/space.js",
+    "lib/solid.js",
+    "lib/physics.js",
+    "lib/physics-seeds.mjs",
+    "lib/palette.mjs",
+    "lib/measure.mjs",
     "samples/manifest.json",
     "samples/NOTICE.txt",
   ])
     assert.ok(files.includes(f), `the starter has ${f}`);
   const samples = files.filter((f) => f.startsWith("samples/"));
   assert.ok(samples.length > 100, `${samples.length} sample files`);
+  const libs = files.filter((f) => f.startsWith("lib/"));
+  const refs = files.filter((f) => f.startsWith("reference/"));
 
   const first = await initFilm({ dir: film });
   assert.equal(first.dir, film);
@@ -85,11 +99,16 @@ test("film init writes the kit and the starter at the film's paths; a second run
   const page = await readFile(join(film, "index.html"), "utf8");
   assert.match(page, /START\.md in this folder is what to read first/);
 
-  // what the CLI prints: a line a kit file, samples/ as one line, START.md last
+  // what the CLI prints: a line a kit file, lib/ and samples/ as one line each, START.md last
   const lines = filmInitLines(first, show);
   assert.ok(lines.includes("wrote film/kit/camera.js"));
   assert.ok(lines.includes("wrote film/START.md"));
-  assert.ok(lines.includes("wrote film/lib/sampler.mjs"));
+  assert.ok(
+    lines.includes(
+      `wrote film/lib/ (${libs.length} files — camera and cut moves, words on screen, devices, a 3D stage, physics, the score's bed, the sampler — START.md names each)`,
+    ),
+    lines.join("\n"),
+  );
   assert.ok(
     lines.includes(
       `wrote film/samples/ (${samples.length} files — recorded instruments; NOTICE.txt has their licences)`,
@@ -114,7 +133,7 @@ test("film init writes the kit and the starter at the film's paths; a second run
   assert.match(
     quiet[0]!,
     new RegExp(
-      `^already the same in film/: kit/ \\(\\d+ files\\), START\\.md, PLAN\\.md, reference/ \\(2 files\\), lib/ \\(4 files\\), samples/ \\(${samples.length} files\\)$`,
+      `^already the same in film/: kit/ \\(\\d+ files\\), START\\.md, PLAN\\.md, reference/ \\(${refs.length} files\\), lib/ \\(${libs.length} files\\), samples/ \\(${samples.length} files\\)$`,
     ),
   );
   assert.equal(quiet[1], "Read film/START.md first.");
@@ -171,6 +190,58 @@ test("a changed START.md is kept and replaced with force; a changed PLAN.md is k
     /^kept 8 files in film\/samples\/ — yours differ from the starter's \(--force replaces them\): piano\/\S+, piano\/\S+, piano\/\S+, …$/,
   );
   await initFilm({ dir: film, force: true });
+});
+
+test("init copies the starter's addon imports and the addons they import", async () => {
+  const starterDir = join(dir, "another-starter");
+  await cp(filmStarterDir(), starterDir, { recursive: true });
+  const lib = [
+    "import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';",
+    'export { dof } from "../kit/three/addons/tsl/display/DepthOfFieldNode.js";',
+    '// import "../kit/three/addons/unused.js";',
+  ].join("\n");
+  await writeFile(join(starterDir, "lib", "space.js"), lib);
+  const out = join(dir, "with-addons");
+  const r = await initFilm({ dir: out, starterDir });
+  assert.equal(await readFile(join(out, "lib", "space.js"), "utf8"), lib);
+  for (const path of [
+    "environments/RoomEnvironment.js",
+    "tsl/display/DepthOfFieldNode.js",
+    "tsl/display/GaussianBlurNode.js",
+  ]) {
+    const to = join(out, "kit", "three", "addons", path);
+    assert.ok(r.written.includes(to), path);
+    assert.deepEqual(await readFile(to), await readFile(join(threeBuildDir(), "..", "examples", "jsm", path)));
+  }
+  const page = await readFile(join(out, "index.html"), "utf8");
+  assert.match(page, /"three\/addons\/": "\.\/kit\/three\/addons\/"/);
+  assert.match(page, /"three\/webgpu": "\.\/kit\/three\.webgpu\.min\.js"/);
+  assert.match(page, /"three\/tsl": "\.\/kit\/three\.tsl\.min\.js"/);
+  assert.deepEqual((await initFilm({ dir: out, starterDir })).written, []);
+});
+
+test("init finds every addon import a starter line holds, and stops plainly on one three.js lacks", async () => {
+  const starterDir = join(dir, "starter-with-lines");
+  await cp(filmStarterDir(), starterDir, { recursive: true });
+  const lib = [
+    'import { A } from "three/addons/environments/RoomEnvironment.js"; import { B } from "three/addons/math/SimplexNoise.js";',
+    'const x = 1; import { C } from "three/addons/math/ImprovedNoise.js?v=2";',
+    "/*",
+    'import "three/addons/not/there.js";',
+    "*/",
+  ].join("\n");
+  await writeFile(join(starterDir, "lib", "space.js"), lib);
+  await writeFile(join(starterDir, "lib", "extra.mjs"),
+    'export { LDrawUtils } from "three/addons/utils/LDrawUtils.js#tools";');
+  const out = join(dir, "with-lines");
+  const r = await initFilm({ dir: out, starterDir });
+  for (const path of ["environments/RoomEnvironment.js", "math/SimplexNoise.js", "math/ImprovedNoise.js", "utils/LDrawUtils.js"])
+    assert.ok(r.written.includes(join(out, "kit", "three", "addons", path)), path);
+  await writeFile(join(starterDir, "lib", "space.js"), 'import "three/addons/not/there.js";\n');
+  const missing = join(dir, "with-missing");
+  await assert.rejects(initFilm({ dir: missing, starterDir }),
+    /film init: lib\/space\.js imports three\/addons\/not\/there\.js, which the three\.js open-take ships does not have/);
+  assert.equal(existsSync(join(missing, "kit", "three", "addons")), false);
 });
 
 test("starter: false writes the kit and the page, none of the starter", async () => {
@@ -322,16 +393,28 @@ test("START.md and PLAN.md: length and functions follow from the product; the de
   // the three films' numbers are what they were, not a range to land in
   assert.doesNotMatch(start, /^- 30 to 45 seconds/m);
   assert.doesNotMatch(start, /under 30 s/);
-  assert.match(start, /not a\s+length to aim for/);
-  assert.match(start, /The first answer is the next of the product's\s+functions/);
-  assert.match(start, /cutting is for what repeats/);
-  // the film that lost the comparison is on the page, one viewer, one comparison
-  assert.match(start, /This is one viewer and one\s+comparison/);
-  assert.match(start, /one thing on screen through every stretch/);
+  assert.match(start, /not a\s+length\s+to\s+aim\s+for/);
+  assert.match(start, /gets the next of the product's\s+functions happening\s+there first/);
+  assert.match(start, /cutting is for\s+what repeats/);
+  // the film that lost the comparison is on the page, as a finding with no one quoted
+  assert.match(start, /the product's film much more complete, ours too short/);
+  assert.match(start, /## What viewings showed/);
+  assert.doesNotMatch(start, /\b(he|his|him)\b/i);
+  assert.match(plan, /START\.md, "What viewings showed"/);
+  // one voice: what rested on one measured film is given beside the six, not as a rule
+  assert.doesNotMatch(start, /A second way/);
+  assert.doesNotMatch(start, /the camera mostly holds/);
+  assert.match(start, /No film made with the moves, words and sound/);
+  for (const f of ["lib/moves.js", "lib/hud.js", "lib/palette.mjs", "reference/travel/"])
+    assert.ok(start.includes(f), `START.md names ${f}`);
   for (const f of ["lib/devices.js", "lib/handoff.js", "seams.js", "stage.js", "world.js"])
     assert.ok(start.includes(f), `START.md names ${f}`);
   // every function in or out, the length beside the reference's, each draft counted
   assert.match(plan, /in \(stretch\) \| out \(why a viewer will not miss it\)/);
   assert.match(plan, /The reference: 57\.8 s in 23 stretches/);
   assert.match(plan, /\| draft \| length \(s\) \| stretches \| functions shown/);
+  // per stretch: layers, what crosses, where the picture travels or holds, words, sound
+  assert.match(plan, /\| layers \| out \(what crosses, how\) \| picture \(travels \/ holds, why\) \| words on screen \| sound \|/);
+  // each round checks the last round's changes on the new draft
+  assert.match(plan, /## Checks/);
 });

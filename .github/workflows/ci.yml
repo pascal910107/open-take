@@ -2,8 +2,8 @@ name: CI
 
 # Linux and Windows both build and run the unit/integration suite. Opener argv
 # is tested as pure platform-specific command specs, so Windows quoting stays
-# covered without launching GUI applications in CI. Linux additionally drives
-# its preinstalled Chrome through a real half-second Revideo render.
+# covered without launching GUI applications in CI. Linux additionally runs
+# the film seam and Revideo smoke checks using its preinstalled Chrome.
 
 on:
   push:
@@ -64,13 +64,23 @@ jobs:
       - run: pnpm build # also produces the editor dist the edit-server tests serve
       - run: pnpm typecheck
       - run: pnpm lint
-      - run: pnpm -r test
+      - run: pnpm test
       - run: pnpm test:package
+      - name: Locate Chrome for rendering checks
+        if: runner.os == 'Linux'
+        run: |
+          if ! chrome_path="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium)"; then
+            echo "::error::Chrome is required for Linux rendering checks"
+            exit 1
+          fi
+          echo "OPEN_TAKE_E2E_CHROME=$chrome_path" >> "$GITHUB_ENV"
+      - name: Verify film seam
+        if: runner.os == 'Linux'
+        timeout-minutes: 5
+        run: pnpm verify:film
       - name: Render smoke
         if: runner.os == 'Linux'
         # a failed render used to leave vite's dev server alive and the step
         # hanging for the job's full six hours
         timeout-minutes: 10
-        run: |
-          chrome_path="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium)"
-          OPEN_TAKE_E2E_CHROME="$chrome_path" pnpm --filter @open-take/compositor test:render-smoke
+        run: pnpm --filter @open-take/compositor test:render-smoke

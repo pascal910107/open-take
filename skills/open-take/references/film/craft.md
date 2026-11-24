@@ -22,14 +22,18 @@ end that just stops):
 - the product's own things — its cards, pins, prices, badges — taken out of
   the screen and moved as objects; the full screen shown for one proof, and
   then staged (tilted, lit, focused on one part), not laid flat;
-- few words, landing one at a time, held still once landed;
+- words that say what is happening, landing one at a time, held still once
+  landed — a few lines in some films, a status line on screen throughout in
+  others;
 - an ending that closed the film: back to the first frame, or a pull-back
   that showed every shot had been part of one picture, held still 2–3 s.
 
 ### Getting from one scene to the next
 
 A cut lands where the eye already is. In these films most seams were carried
-by an object; hard cuts were kept for punctuation, on the beat.
+by an object or hidden inside a move; a hard cut where nothing moves or
+crosses was kept for punctuation. Cuts sat on the beat no more often than
+chance would put them (`skill film cutting`).
 
 - **The thing clicked becomes the next frame.** The camera tracks to the
   button (≈0.6 s, blurred while it moves), then the button grows from ≈8 %
@@ -130,8 +134,16 @@ scenes that meet there (`skill film`, step 4).
   in `reference/` the camera was at rest for 48.5 % of its frames and the
   picture unchanged for about 10 %: panels, strokes, rows and numbers
   arrived one at a time under a still camera, the longest dead stretch
-  0.4–0.7 s. The films a viewer of agent-made films preferred worked this
-  way (`START.md`).
+  0.4–0.7 s. Three films made with this tool that one viewer preferred
+  worked this way (`START.md`).
+- **A camera that travels from station to station.** In the six films of
+  `reference/travel/` the picture travels 47–82 % of the time and holds
+  11–19 %, to read or count. Between stations a move accelerates 5–6
+  frames, slows 10–12, dwells 3–8 and never quite stops; every station
+  lands on the same composition. A long way inside one interface is not
+  flown: it speeds up, jumps 1.45–4× in one frame and settles in 6–8. A
+  window lifts off a desk that only slides. `stations`, `rampJump`,
+  `windowHop` (`lib/moves.js`).
 - **One camera that never stops dead.** Each move adds its own displacement
   onto where the camera is, eased so it starts quickly and settles long; a
   new move begins before the last has settled. Zoom is moved in log space,
@@ -164,10 +176,8 @@ scenes that meet there (`skill film`, step 4).
   alive (neighbours change state with a delay by distance). Or the whip
   version: from scale 2.2 to ≈1.05 in 1.2 s, then settle to 1.
 - **A spotlight on the one promise.** Push in (×1.45 → ×1.85 over 0.8 s)
-  while the rest dims behind a soft ellipse
-  (`radial-gradient(ellipse … transparent 60%, rgba(0,0,0,.55))`, centred
-  on the element's measured box each frame); held ≈1.5 s; released in 0.5 s.
-  Often after a beat of silence. `spotlight` (kit/draw.js).
+  while the rest dims behind a soft ellipse on the element's box; held
+  ≈1.5 s; released in 0.5 s. `spotlight` (kit/draw.js).
 - **Depth.** A screen tilted into space (`perspective: 1600–2800px`,
   rotateY ≈−20…−35°, rotateX ≈20°) with its content still working inside,
   the angle drifting a few degrees during the hold; a flat layout that
@@ -223,10 +233,8 @@ scenes that meet there (`skill film`, step 4).
   ≈0.16 s and leave before the next move. `leader` (kit/draw.js).
 - **A light sweep reveals it.** The screen sits at ≈7 % brightness; a soft
   diagonal band of light crosses it in ≈1.3 s and leaves it lit, a glint
-  riding the front, while the window turns from ≈−24° to 0° in perspective.
-  Two copies: a dim one, and a lit one under
-  `mask-image: linear-gradient(115deg, #000 calc(var(--p) - 700px), transparent var(--p))`
-  — `lightSweep` (kit/draw.js) gives both masks.
+  riding the front, while the window turns from ≈−24° to 0° in perspective:
+  a dim copy and a lit one under a moving mask (`lightSweep`, kit/draw.js).
 - **Arrivals with weight.** Menus open on a back-ease (≈0.25 s, overshoot
   ≈1.8) and close plainly in 0.15 s; panes grow by width (back 1.3, 0.45 s);
   cards and screenshots are lowered onto the stage like prints — scale 1.25
@@ -246,8 +254,11 @@ scenes that meet there (`skill film`, step 4).
 
 ### Words
 
-- **Few, one at a time, still once landed.** Most lines small (≈2.5–4 % of
-  the frame height); a few words at hero size. A line held
+- **One at a time, still once landed.** Most lines small (≈2.5–4 % of
+  the frame height); a few words at hero size. Where words stay on screen
+  throughout — a status chip naming the step, 0.03–0.05 of the height —
+  they are pinned to the screen, so the camera never moves them (`chip`,
+  `lib/hud.js`). A line held
   ≈0.5 s + 0.3 s a word (Chinese: characters ÷ 4.5 + 1.5 s after it lands);
   the last line at least 2 s. In these films text stayed still once it had
   landed.
@@ -316,9 +327,6 @@ scenes that meet there (`skill film`, step 4).
   settling with a small overshoot, a scribbled circle drawn round the target
   and a sticker popping from its tail — the annotations placed where the
   target lands after the zoom.
-- **Pins pop in clusters** (back-ease, ≈0.08–0.12 s apart, sized by
-  something real), the map's fill the brand's colour or pattern, tilted
-  ≈40°; or the map folds flat to a line that becomes the list of places.
 - A real place reads as a place on real imagery; a drawn outline reads as a
   diagram. Both are choices.
 
@@ -365,9 +373,9 @@ with the product's input inside it; a clock already running.
 - Each kind of thing arriving its own way — files drop, photos fling,
   notifications slide, windows pop — 0.2–0.3 s each; in these films only
   captions simply faded.
-- Where the films had a pulse, landings sat on it (`skill film cutting`).
-  In the one measured against its own grid (`reference/`), only the three
-  or four turns of the story sat on bar lines; small events — a pop, a
-  word swapped, a click — fell on the grid 31 % of the time, 26 % by
-  chance. Where real material had its own events — a click, a page load —
-  the change sat there instead.
+- Cuts and small events sat on the beat no more often than chance in six
+  of the seven films measured against their grids (`reference/`: a pop, a
+  word swapped, a click on the grid 31 % of the time, 26 % by chance); the
+  sound's structure turned with the story instead (`skill film sound`).
+  Where real material had its own events — a click, a page load — the
+  change sat there.

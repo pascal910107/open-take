@@ -3,7 +3,10 @@
 A long take and fast cuts are not modes of a film: each boundary hands over
 its own way — carried by a move, cut, cut to the same place, bridged by a
 sound — and a cut can sit on a beat, an onset, a word, or off them on
-purpose.
+purpose. In six of the seven launch films measured against their own grids,
+cuts and small events landed on the beat no more often than chance would
+put them; what lined up with the music was its structure — the low end in
+on a reveal, a drop on the cut to the result (`skill film sound`).
 
 ```sh
 npx open-take film beats track.mp3     # → track.beats.json (a film.mp4 works too)

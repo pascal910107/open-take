@@ -46,6 +46,18 @@ sources the page declared (`tl.source`) and the parts' values in
 a reference you like, say — and describe it the same way. That is a
 description of that film, not a number to reach.
 
+`film study <video>` takes a film apart the way `reference/travel/` was,
+into a reference pack beside it: the cuts its adjacent frames confirm, with
+strips of consecutive frames, how much of the time the picture travels, drifts or
+holds, what crosses each boundary, and the sound's bed, sub entries, drops
+and hits set against a shuffled null — every value marked measured,
+estimated or not detected. With the film's own `film.events.json` beside it,
+each boundary is marked declared, detected or both, and the carry a segment
+named is shown as the render followed it; a film from elsewhere is read from
+the picture alone, where a small thing flying across a cut is not seen. Run on your own film, its hold and travel sit on
+the same scale as the figures START.md gives for the six measured films
+(holds 4–17%, travel 35–50%) and for 67 other launch films (42%, 17%).
+
 `film gallery` draws each block of the kit — every motion, each camera
 option, the cut helpers — at six moments, with its value and its speed over
 time, the default beside three other settings, measured on the function
@@ -134,3 +146,14 @@ stills from a `shoot` (`shots.json`) and no saved screen, a `material:` line
 says that a still can keep the interface itself (`skill film material`).
 `check --json` has it as `material` — the shoot logs found, their stills,
 how many name a saved screen, and the count of `state.html` files.
+
+### Beside a film you admire
+
+A film folder has `lib/measure.mjs`: `node lib/measure.mjs reference.mp4 film.mp4`
+prints both on one ruler — the picture as the share of pixels changing each
+frame (how much stands still, moves a minute, frames a move takes to build
+and fall, whether the picture rests between moves, cuts, how soon it first
+changes) and the sound (level swing, five bands, texture, width, onsets).
+START.md has the figures of seven launch films read this way. It measures
+distance from a reference, not quality: use it to find what is plainly
+different, then look and listen.

@@ -14,9 +14,9 @@ Delete what does not apply. Motion, pacing and zoom changes are signed off by
 eye — attach the clip, or an A/B with one knob changed.
 -->
 
-- [ ] `pnpm build && pnpm typecheck && pnpm lint && pnpm -r test && pnpm test:package`
-      (note: bare `pnpm test` at the root runs nothing)
+- [ ] `pnpm build && pnpm typecheck && pnpm lint && pnpm test && pnpm test:package`
 - [ ] `pnpm --filter @open-take/compositor test:render-smoke` — if this touches rendering
+- [ ] `pnpm verify:film` — attach `seam.png` or `seam.mp4` if the recording-to-screen transition changes
 - [ ] Watched the result — clip attached, if this changes how a demo looks
 
 ## Checklist

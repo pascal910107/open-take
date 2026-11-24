@@ -12,10 +12,24 @@ It writes `film.viewer/1/` — a copy of the film and `BRIEF.md` — and prints
 how to start the viewer: an agent that has seen nothing of this work, given
 only that brief. In Claude Code that is a subagent (the Agent tool) whose
 whole prompt is `Read <path>/BRIEF.md and do what it says.`; anywhere else, a
-fresh session in that folder (`claude -p < BRIEF.md`). The viewer watches
+fresh session in that folder, with the command it prints. The viewer watches
 the film the only way an agent can — frames, sheets, the words on screen,
 the sound — and writes `VIEWER.md` there: at which second it would scroll on
 and why, what it did not follow, what bored it or felt forced, what was good.
+
+The viewer has to run ffmpeg and look at pictures. open-take keeps its own
+ffmpeg under `~/.open-take`, off PATH, so the brief names it by full path and
+the printed command puts it on PATH and allows the tools a viewer needs
+(`--allowedTools "Bash Read Write Edit Glob Grep"`); a subagent needs a
+shell and file reading too. One viewer started without them took no frame
+and wrote notes anyway. When the viewer has finished, run
+
+```sh
+npx open-take film viewer film.mp4 --check
+```
+
+which fails when the round has notes and not one frame in its folder. Such
+notes are not a viewing: start a new round.
 
 Give it nothing of your own: not the plan, not your notes, not the product's
 pitch, not what to look for. What it notices without them is what a stranger

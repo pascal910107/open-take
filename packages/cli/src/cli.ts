@@ -46,6 +46,7 @@ import {
   filmReport,
   filmSheet,
   filmStills,
+  filmStudy,
   followedLine,
   formatComponents,
   formatFilmBeats,
@@ -54,6 +55,7 @@ import {
   formatFilmLook,
   formatFilmProbe,
   formatFilmReport,
+  formatFilmStudy,
   formatIssues,
   formatMaterials,
   formatNotes,
@@ -78,7 +80,10 @@ import {
   partFilesLine,
   partsLine,
   patchFilm,
+  checkViewer,
   prepareViewer,
+  VIEWER_TOOLS,
+  viewerCommand,
   profileDir,
   readNotes,
   readPageMaterial,
@@ -153,6 +158,7 @@ const BOOL_FLAGS = new Set([
   "--clips",
   "--measure",
   "--no-text",
+  "--check",
   "--no-picture",
   "--all",
   "--no-components",
@@ -341,6 +347,7 @@ Usage:
   open-take film listen <film.mp4|score.wav> [--events <events.json>] [--stems <dir>] [--out <dir>]
                    [--every <s>] [--clips] [--vs <previous.wav|mp4>]
   open-take film beats  <music|film.mp4> [--out <name>.beats.json]
+  open-take film study  <video> [--out <dir>]
   open-take film look   <take|states|state|url|look.json> [--out look] [--state s0,s3] [--text <words>]
                    [--page <page.html|dir>] [--fonts <dir>] [--font-files <a.woff2,…>] [--size 1920x1080] [--no-picture]
                    [--json] [--verbose]
@@ -350,7 +357,7 @@ Usage:
                    [--subject <id|text|x,y,w,h>] [--beats <beats.json>] [--out <dir>]
   open-take film check  <film.mp4> [--size 1920x1080] [--fps 60] [--page <page.html|dir> [--root <dir>]]
                    [--json] [--verbose]
-  open-take film viewer <film.mp4>
+  open-take film viewer <film.mp4> [--check]
 
   A take is TWO things on disk: the postable master at exactly your --out path
   (<out>.mp4), and a working directory beside it (<out>.take/) holding
@@ -636,8 +643,10 @@ Usage:
           with the take camera's motion, a cursor, one timeline for picture
           and sound, saved screens and shot stills as material, the sound's
           plumbing), a page to start from, and the starter: START.md (what to
-          read first), PLAN.md, reference/, lib/ (motion helpers, a sampler)
-          and samples/ (recorded instruments); all of it is the film's own
+          read first), PLAN.md, reference/ and reference/travel/ (read one),
+          lib/ (motion helpers, camera and cut moves, words on screen, a 3D
+          stage, the score's bed, a sampler) and samples/ (recorded
+          instruments); all of it is the film's own
           from then on. \`film render\` plays the page on film time (window.__render(t),
           or its own CSS/WAAPI/rAF/GSAP/video animation, frame-exact) in
           headless Chrome and writes an H.264 master with measured motion blur
@@ -2217,7 +2226,7 @@ async function main() {
     const target = positional[1] ?? "";
     if (!action || (!bare && (!target || positional.length !== 2)))
       throw new Error(
-        "film: expected init <dir>, render <page>, still <page> --at <s>, picture <state.html>, sheet <film.mp4>, listen <film.mp4>, beats <music>, probe <film.mp4>, gallery [<film dir>], check <film.mp4>, viewer <film.mp4> or mux <film.mp4> --audio <file>",
+        "film: expected init <dir>, render <page>, still <page> --at <s>, picture <state.html>, sheet <film.mp4>, listen <film.mp4>, beats <music>, study <video>, probe <film.mp4>, gallery [<film dir>], check <film.mp4>, viewer <film.mp4> or mux <film.mp4> --audio <file>",
       );
     const only = (...allowed: string[]) => {
       for (const f of Object.keys(flags))
@@ -2347,7 +2356,11 @@ async function main() {
       if (!has("--draft")) {
         const v = await viewerRounds(result.out).catch(() => null);
         const last = v?.done.at(-1);
-        if (v && !last)
+        if (last && last.frames === 0)
+          process.stdout.write(
+            `FIRST-TIME VIEWER SAW NOTHING: round ${last.round} wrote ${shown(last.notes)} with not one frame of the film beside it — it could not run ffmpeg or was refused its tools. Its notes are not a viewing. A new round, started as the command says: \`${INVOKE} film viewer ${shown(result.out)}\`\n`,
+          );
+        else if (v && !last)
           process.stdout.write(
             `first-time viewer: no one has watched this film yet — \`${INVOKE} film viewer ${shown(result.out)}\` (skill film viewer)\n`,
           );
@@ -2551,14 +2564,29 @@ async function main() {
       return;
     }
     if (action === "viewer") {
-      only();
+      only("--check");
+      if (has("--check")) {
+        const c = await checkViewer(target);
+        if (!c.ok) throw new Error(`film viewer: ${c.message}`);
+        process.stdout.write(`viewer ${c.message}\n`);
+        return;
+      }
+      const before = await viewerRounds(target).catch(() => null);
+      const blind = before?.done.filter((d) => d.frames === 0).map((d) => d.round) ?? [];
+      if (blind.length)
+        process.stdout.write(
+          `round${blind.length > 1 ? "s" : ""} ${blind.join(", ")} saw nothing (notes and not one frame): not a viewing, and not to be acted on\n`,
+        );
       const v = await prepareViewer(target, INVOKE);
       process.stdout.write(
         `viewer round ${v.round}: ${shown(v.dir)} — a copy of the film and BRIEF.md\n` +
-          `start a viewer that has seen nothing of this work, with only the brief — a subagent whose whole prompt is\n` +
+          `start a viewer that has seen nothing of this work, with only the brief — a fresh session in that folder:\n` +
+          `  ${viewerCommand(v)}\n` +
+          `or a subagent whose whole prompt is\n` +
           `  Read ${v.brief} and do what it says.\n` +
-          `or a fresh session in that folder (claude -p < BRIEF.md). It writes ${shown(v.notes)}.\n` +
-          `Add nothing of your own to its prompt — no plan, no notes, nothing to look for (skill film viewer).\n`,
+          `It writes ${shown(v.notes)}. It has to run ffmpeg and look at pictures: ${v.ffmpeg.includes("/") || v.ffmpeg.includes("\\") ? `the brief names ffmpeg (${v.ffmpeg}) and ffprobe by full path, since open-take's own are not on PATH` : "ffmpeg and ffprobe are on PATH here, and must be on its PATH too"}, and the viewer must be allowed ${VIEWER_TOOLS.join(", ")} — a subagent without a shell or file reading sees nothing.\n` +
+          `Add nothing of your own to its prompt — no plan, no notes, nothing to look for (skill film viewer).\n` +
+          `When it has finished: \`${INVOKE} film viewer ${shown(target)} --check\` fails if it wrote notes without taking a frame.\n`,
       );
       return;
     }
@@ -2566,6 +2594,12 @@ async function main() {
       only("--out");
       const r = await filmBeats({ input: target, out: flag("--out") });
       process.stdout.write(`${formatFilmBeats(r.beats)}\n\nbeats: ${r.out}\n`);
+      return;
+    }
+    if (action === "study") {
+      only("--out");
+      const r = await filmStudy({ input: target, out: flag("--out") });
+      process.stdout.write(`${formatFilmStudy(r.study)}\n\nstudy: ${r.md}\n       ${r.json}\n       ${r.strips}\n`);
       return;
     }
     if (action === "listen") {
@@ -2705,7 +2739,7 @@ async function main() {
       return;
     }
     throw new Error(
-      `film: unknown action ${action} — render, still, sheet, listen, beats, probe, check or viewer`,
+      `film: unknown action ${action} — render, still, sheet, listen, beats, study, probe, check or viewer`,
     );
   }
 

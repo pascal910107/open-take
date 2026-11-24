@@ -114,3 +114,25 @@ A `<canvas>` is drawn at its own `width` × `height`. On one film a grain laid
 over the whole frame from a 480×270 canvas (4× stretched, 7 %, overlay)
 looked yellowish and smeared at full screen; the same grain from a
 1920×1080 canvas looked clean. The report lists a stretched canvas too.
+
+### Moves that blur themselves, cuts inside moves
+
+- A canvas's motion blur follows how far its picture actually moved between
+  the shutter's ends, WebGL or WebGPU; a page's `__film.motion` speaks for
+  its canvas instead (`space.js` gives 0 while it blurs itself), the
+  elements outside it are still measured, and the larger of the two is the
+  frame's motion. Each draw is told the share of the shutter it stands for
+  (`window.__filmShare`), so a stage that blurs itself and the render's
+  samples tile the shutter.
+- The render report lists one-frame jumps the page did not declare. Declare
+  the ones that are meant: a cut hidden in motion with
+  `tl.event(t, "hidden-cut")` or `tl.segment(a, b, { handoff: "hidden-cut" })`
+  (the cut at `b`),
+  a layered lift such as `windowHop`'s with `tl.segment(a, b, { handoff:
+  "lift" })`; the report then says what it saw declared, `film probe` does
+  not list them as cuts seen but not declared, and neither asks for a
+  `carry`.
+- A library running on its own ticker (GSAP, anime.js) gets a warning in
+  clock mode: seek it from `__render(t)`.
+- Before a master, it says how many seconds will be drawn at 3× for slow
+  text, and which element causes it.

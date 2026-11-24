@@ -8,7 +8,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
-import { fineFrames, renderFilm, turnsBack } from "../src/film/render";
+import { type FilmFinePlan, fineFrames, finePlan, finePlanLine, renderFilm, turnsBack } from "../src/film/render";
 import { findChrome } from "./fixtures/find-chrome";
 
 const chrome = findChrome();
@@ -61,6 +61,46 @@ test("fineFrames: short runs are left out, short gaps joined", () => {
   assert.deepEqual(runs(fineFrames(gappy, Array(gappy.length).fill(0), fps, 1)), [[10, 40]]);
 });
 
+test("a fine plan counts every finer frame and credits only the text that caused it", () => {
+  const hero = 'div#hero "Drafting the page"';
+  const caption = 'p#caption "Almost there"';
+  const plan = finePlan(
+    [false, true, true, true, false, true, true],
+    [null, { key: "hero", label: hero }, null, { key: "hero", label: hero },
+      null, { key: "caption", label: caption }, null],
+    10,
+    20,
+  );
+  assert.deepEqual(plan, {
+    seconds: 0.5,
+    supersample: 3,
+    ranges: [{ from: 2.1, to: 2.4 }, { from: 2.5, to: 2.7 }],
+    causes: [{ element: hero, frames: 2 }, { element: caption, frames: 1 }],
+  });
+  assert.match(finePlanLine(plan), /0\.50 s at 3× for slow text in div#hero "Drafting the page".*about 5×/);
+  assert.equal(finePlan([false], [{ key: "hero", label: hero }], 60).seconds, 0);
+});
+
+test("a slow counter whose text changes every frame is one cause", () => {
+  const counter = (n: number) => ({ key: "1.0", label: `span#count "${n} files"` });
+  const plan = finePlan(
+    [true, true, true, true, true],
+    [counter(1), counter(2), counter(3), { key: "1.1", label: 'p [main>p] "Saved"' }, counter(4)],
+    10,
+  );
+  assert.deepEqual(plan.causes, [
+    { element: 'span#count "1 files"', frames: 4 },
+    { element: 'p [main>p] "Saved"', frames: 1 },
+  ]);
+  assert.doesNotMatch(finePlanLine(plan), /more/);
+});
+
+test("elements with the same label are separate causes", () => {
+  const label = 'span#same "1 file"';
+  const plan = finePlan([true, true], [{ key: "1.0", label }, { key: "1.1", label }], 30);
+  assert.deepEqual(plan.causes, [{ element: label, frames: 1 }, { element: label, frames: 1 }]);
+});
+
 let dir = "";
 before(async () => {
   dir = await mkdtemp(join(tmpdir(), "open-take-fine-test-"));
@@ -85,15 +125,23 @@ window.__render = (t) => {
 };
 </script></body></html>`,
   );
+  const plans: FilmFinePlan[] = [];
   const r = await renderFilm({
     page: join(dir, "index.html"),
     out: join(dir, "a.mp4"),
     chromePath: chrome!,
     audio: null,
     blur: false,
+    onFine: (plan) => plans.push(plan),
+    onProgress: ({ phase }) => {
+      if (phase === "render") assert.equal(plans.length, 1);
+    },
   });
   assert.equal(r.fineSupersample, 3);
   assert.equal(r.fine.length, 1, JSON.stringify(r.fine));
+  assert.deepEqual(plans[0]?.ranges, r.fine);
+  assert.deepEqual(plans[0]?.causes, r.fineCauses);
+  assert.equal(r.fineCauses[0]?.element, 'p#t "a line of text"');
   // from the end of the fast move to the end of the film
   assert.ok(Math.abs(r.fine[0]!.from - 2) <= 0.1, JSON.stringify(r.fine));
   assert.ok(Math.abs(r.fine[0]!.to - 3) <= 0.05, JSON.stringify(r.fine));

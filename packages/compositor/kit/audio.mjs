@@ -18,7 +18,13 @@
 //     cutoff and was found by ear, as two pops;
 //   - `diagnose`, which checks one stem at a time for what a mix hides: NaN,
 //     clipping, clicks (a note cut short, a release from the wrong level,
-//     saws started in phase), DC;
+//     saws started in phase), DC. Mark intended transients on a bus or by time;
+//     the attack of a recording played with `recorded` is left out;
+//   - `hitOf` finds the fastest rise. `play` with `align: "hit"` lands it on
+//     the picture. `"onset"` lines up the start of the attack and prints a
+//     warning when the hit would land more than 50 ms away;
+//   - `subIn`, `dropOut`, `filterOpen` and `filterClose` bring a band's level
+//     or the bus's cutoff up or down at a moment, with smooth edges;
 //   - `osc`, a saw, square or pulse that does not alias. Written as
 //     `2 * (phase % 1) - 1` or `sin(x) > 0 ? 1 : -1`, as films wrote theirs,
 //     the harmonics above 24 kHz fold back down as tones that are not in the
@@ -85,6 +91,29 @@ export function buffer(seconds, { channels = 2, sampleRate = RATE } = {}) {
   );
 }
 
+// Where a bus holds the attack of a recording: a struck bar, a plucked string
+// or a drum head starts with a jump that is the instrument, and in the
+// waveform it reads as a sound starting mid-cycle does. `play` notes the time
+// when told the sound is a recording (`recorded`), `mix` carries the times
+// into what the bus is mixed into, and `diagnose` leaves a jump within 5 ms
+// after one alone. Kept on the first channel, so a bus built by spreading or
+// copying its channels starts with none.
+/** @type {WeakMap<Signal, number[]>} */
+const attacks = new WeakMap();
+/** @param {Channels | Signal} x @returns {number[]} */
+const attacksOf = (x) => {
+  const first = chans(x)[0];
+  return (first && attacks.get(first)) || [];
+};
+/** @param {Channels} bus @param {readonly number[]} times */
+const noteAttacks = (bus, times) => {
+  const first = bus[0];
+  if (!first || !times.length) return;
+  const had = attacks.get(first);
+  if (had) had.push(...times);
+  else attacks.set(first, [...times]);
+};
+
 /**
  * Add `from` into `into` from `at` seconds on, scaled by `gain`: one number,
  * or one per channel of `into` (a pan, by hand). A mono sound goes into every
@@ -112,6 +141,11 @@ export function mix(into, from, at = 0, gain = 1) {
     for (let i = Math.max(0, -start); i < i1; i++)
       dst[start + i] = (dst[start + i] ?? 0) + (s[i] ?? 0) * g;
   });
+  if (chans(from)[0] !== into[0])
+    noteAttacks(
+      into,
+      attacksOf(from).map((t) => t + at),
+    );
   return into;
 }
 
@@ -375,6 +409,178 @@ export function biquad(name, type, params, sampleRate = RATE) {
     return sound;
   };
   return Object.assign(f, { run, set });
+}
+
+/** @param {number} t @param {number} dur */
+const ramp = (t, dur) => 0.5 - 0.5 * Math.cos(Math.PI * Math.max(0, Math.min(1, t / dur)));
+
+/**
+ * Change only the low band. Take it out with a fourth-order Butterworth
+ * lowpass at twice `edge` Hz, run forwards and backwards, so its phase still
+ * matches the dry bus when it goes back in. Below `edge` the filter keeps
+ * 99.6% of the band, so the full change applies there: a 19.4 dB drop is
+ * 19.1 dB at `edge` and a 27.9 dB rise is 27.1 dB. At 2 × `edge` half the
+ * amplitude is changed (about 5 dB of either), and from 3 × `edge` less than
+ * 4% (0.3 dB). Reflect the ends before filtering, so the filter can settle
+ * outside the bus.
+ * @param {Channels} bus @param {number} edge @param {(t: number) => number} gain
+ */
+function lowGain(bus, edge, gain) {
+  const fs = rateOf(bus);
+  const n = sameLength("low band", bus);
+  if (!n) return bus;
+  const pad = Math.min(n - 1, Math.ceil((4 * fs) / edge));
+  for (const ch of bus) {
+    const low = new Float64Array(n + 2 * pad);
+    low.set(ch, pad);
+    for (let i = 1; i <= pad; i++) {
+      low[pad - i] = 2 * (ch[0] ?? 0) - (ch[i] ?? 0);
+      low[pad + n - 1 + i] = 2 * (ch[n - 1] ?? 0) - (ch[n - 1 - i] ?? 0);
+    }
+    for (let pass = 0; pass < 2; pass++) {
+      for (const q of BUTTERWORTH_4) biquad("low band", "lowpass", { freq: 2 * edge, q }, fs).run(low);
+      low.reverse();
+    }
+    for (let i = 0; i < n; i++) {
+      const g = gain(i / fs);
+      if (g !== 1) ch[i] = (ch[i] ?? 0) + (low[pad + i] ?? 0) * (g - 1);
+    }
+  }
+  return bus;
+}
+
+/** the q of the two sections of a fourth-order Butterworth */
+const BUTTERWORTH_4 = [1 / (2 * Math.sin((3 * Math.PI) / 8)), 1 / (2 * Math.sin(Math.PI / 8))];
+
+/** @param {string} name @param {number} span @param {number} fade @param {number} db @param {string} fix */
+function reachesDepth(name, span, fade, db, fix) {
+  if (span >= fade - 1e-9) return;
+  const reached = -20 * Math.log10(1 - (1 - gainOf(-db)) * ramp((fade + span) / 2, fade) ** 2);
+  throw new Error(
+    `${name}: ${secs(span)} s between the edges is shorter than the ${secs(fade)} s fade, ` +
+      `so the level would only reach −${reached.toFixed(1)} dB of the −${db} dB asked; ${fix}`,
+  );
+}
+
+/**
+ * Bring the low band (below `freq` Hz) in at `at`. Without `since` it is
+ * `db` down from the very start of the bus; with `since`, the bus stays dry
+ * until then and fades down over `fade` s. At `at` it fades back to its own
+ * level over `fade` s. Changes and returns the bus.
+ * The defaults come from three such entries, read in the 20–80 Hz band:
+ * DdT1-vziRp3 at 4.958 s, +27.9 dB, and Df-JzBcCrDo at 7.042 and 76.917 s,
+ * +9.5 and +18.3 dB; `db` is their median. The fade is not read from them:
+ * there the low band takes 100–220 ms from 10% to 90%, which is the bass
+ * note's own attack. 40 ms is short enough to leave that attack to the note
+ * and long enough not to click.
+ * @param {Channels} bus @param {number} at
+ * @param {{ db?: number, freq?: number, fade?: number, since?: number }} [o] positive dB, band edge in Hz, times in s
+ */
+export function subIn(bus, at, { db = 18.3, freq = 80, fade = 0.04, since } = {}) {
+  if (!Number.isFinite(at) || !Number.isFinite(db) || !Number.isFinite(fade) || !(freq > 0))
+    throw new Error("subIn: give it a time, a level in dB, a fade in seconds and a positive band edge");
+  if (since !== undefined && (!Number.isFinite(since) || since > at))
+    throw new Error("subIn: since must be a time at or before at");
+  const down = 1 - gainOf(-db);
+  const edge = Math.max(0.001, fade);
+  if (since !== undefined) reachesDepth("subIn", at - since, edge, db, "start since earlier or shorten the fade");
+  return lowGain(bus, freq, (t) => {
+    const inEffect = since === undefined ? 1 : ramp(t - since, edge);
+    return 1 - down * inEffect * (1 - ramp(t - at, edge));
+  });
+}
+
+/**
+ * Take the low band below `freq` Hz (or the `full` bus) down by `db` at
+ * `at`, then start bringing it back at `at + hold`. The same `fade` in
+ * seconds shapes both edges, so `hold` must be at least `fade`. Changes and
+ * returns the bus. DdT1-vziRp3 at 32.792 s: −19.4 dB in the 20–80 Hz band.
+ * Dfj2vYxC1pE at 60.300 s: the mix fell 21.9 LU in 0.1 s and returned after
+ * 1.4 s. The 40 ms fade of the low band is chosen, as in subIn.
+ * @param {Channels} bus @param {number} at
+ * @param {{ db?: number, freq?: number, fade?: number, hold?: number, full?: boolean }} [o]
+ */
+export function dropOut(bus, at, { full = false, db = full ? 22 : 19.4, freq = 80, fade = full ? 0.1 : 0.04, hold = 1.4 } = {}) {
+  if (![at, db, fade, hold].every(Number.isFinite) || hold < 0 || (!full && !(freq > 0)))
+    throw new Error("dropOut: give it a time, a level in dB, a fade and hold in seconds and a positive band edge");
+  const down = 1 - gainOf(-db);
+  const edge = Math.max(0.001, fade);
+  reachesDepth("dropOut", hold, edge, db, "hold at least as long as the fade");
+  /** @param {number} t */
+  const gain = (t) => 1 - down * ramp(t - at, edge) * (1 - ramp(t - at - hold, edge));
+  if (!full) return lowGain(bus, freq, gain);
+  const fs = rateOf(bus);
+  const n = sameLength("dropOut", bus);
+  for (let i = 0; i < n; i++) {
+    const g = gain(i / fs);
+    for (const ch of bus) ch[i] = (ch[i] ?? 0) * g;
+  }
+  return bus;
+}
+
+/** @param {Channels} bus @param {number} from @param {number} to
+ * @param {number} a @param {number} b
+ * @param {{ since?: number, until?: number, fade: number }} o */
+function sweepLowpass(bus, from, to, a, b, { since, until, fade }) {
+  if (!(to > from) || !Number.isFinite(to - from)) throw new Error("filter sweep: to must be after from");
+  if (since !== undefined && (!Number.isFinite(since) || since > from))
+    throw new Error("filter sweep: since must be a time at or before from");
+  if (until !== undefined && (!Number.isFinite(until) || until < to))
+    throw new Error("filter sweep: until must be a time at or after to");
+  if (!Number.isFinite(fade)) throw new Error("filter sweep: the fade is in seconds");
+  const fs = rateOf(bus);
+  const n = sameLength("filter sweep", bus);
+  const start = Math.min(a, fs * 0.49);
+  const end = Math.min(b, fs * 0.49);
+  if (!(end > 0)) throw new Error("filter sweep: both cutoffs in Hz must be positive");
+  const filter = biquad("filter sweep", "lowpass", { freq: start }, fs);
+  const edge = Math.max(0.001, fade);
+  let cutoff = start;
+  for (let i = 0; i < n; i++) {
+    const t = i / fs;
+    if (until !== undefined && t >= until + edge) break;
+    const u = Math.max(0, Math.min(1, (t - from) / (to - from)));
+    const freq = start * (end / start) ** u;
+    if (freq !== cutoff) {
+      cutoff = freq;
+      filter.set({ freq });
+    }
+    const wetIn = since === undefined ? 1 : ramp(t - since, edge);
+    const wetOut = until === undefined ? 1 : 1 - ramp(t - until, edge);
+    const wet = wetIn * wetOut;
+    for (let c = 0; c < bus.length; c++) {
+      const ch = /** @type {Signal} */ (bus[c]);
+      const dry = ch[i] ?? 0;
+      const filtered = filter(dry, c);
+      if (wet > 0) ch[i] = wet === 1 ? filtered : dry + wet * (filtered - dry);
+    }
+  }
+  return bus;
+}
+
+/**
+ * Sweep a lowpass open from `from` to `to` on an exponential path in Hz.
+ * By default the bus is filtered at `low` from the start. With `since` it
+ * stays dry until then and fades into the filter over `fade` s. The filter
+ * holds at `high` after `to`. Changes and returns the bus.
+ * Df-JzBcCrDo at 0–1.7 s: the high end is held back and opens at 1.7 s.
+ * @param {Channels} bus @param {number} from @param {number} to
+ * @param {{ low?: number, high?: number, since?: number, fade?: number }} [o] cutoffs in Hz, times in s
+ */
+export function filterOpen(bus, from, to, { low = 1200, high = 20000, since, fade = 0.04 } = {}) {
+  return sweepLowpass(bus, from, to, low, high, { since, fade });
+}
+
+/**
+ * Sweep from `high` to `low` over `from`–`to`. The filter starts at `high`
+ * and holds at `low` through the end, or until `until` if given. At `until`
+ * it fades back to the dry bus over `fade` s. Changes and returns the bus.
+ * Df-JzBcCrDo at 23.080 s: the 5–16 kHz band falls about 20 dB.
+ * @param {Channels} bus @param {number} from @param {number} to
+ * @param {{ low?: number, high?: number, until?: number, fade?: number }} [o] cutoffs in Hz, times in s
+ */
+export function filterClose(bus, from, to, { low = 1200, high = 20000, until, fade = 0.04 } = {}) {
+  return sweepLowpass(bus, from, to, high, low, { until, fade });
 }
 
 const COMBS = [1116, 1188, 1277, 1356, 1422, 1491, 1557, 1617];
@@ -921,22 +1127,32 @@ function limiter(peaks, gain, limit, fs) {
  * wrong level), a sound starting mid-cycle, oscillators started in phase so
  * their edges land together, or a filter that blew up. Run it on each bus or
  * stem as well as the master: in the mix, other sounds mask what it looks for.
+ * The strike of a recorded marimba, harp, vibraphone or piano note is such a
+ * jump and is the instrument: 300 sampled notes read with no exemption gave
+ * 100 "clicks", each within 2 ms of a note's attack. Where `play` was told the
+ * sound is a recording, a jump up to 5 ms after its attack is left out.
  * @param {string} name
  * @param {Channels | Signal} channels
- * @param {number} [sampleRate]
+ * @param {number | DiagnoseOptions} [sampleRate] or the options when using the sound's rate
+ * @param {DiagnoseOptions} [options]
  * @returns {Finding[]}
  */
-export function diagnose(name, channels, sampleRate = rateOf(channels)) {
+export function diagnose(name, channels, sampleRate = rateOf(channels), options = {}) {
+  const fs = typeof sampleRate === "number" ? sampleRate : rateOf(channels);
+  const { transients, at: marked } = typeof sampleRate === "object" ? sampleRate : options;
   const chs = chans(channels);
+  // the attacks of recordings played into it are intended too
+  const recorded = attacksOf(channels);
+  const at = recorded.length ? [...(marked ?? []), ...recorded] : marked;
   /** @type {Finding[]} */
   const found = [];
   chs.forEach((x, c) => {
     /** @param {Omit<Finding, "stem" | "channels">} f */
     const add = (f) => found.push({ stem: name, channels: [c], ...f });
-    nonfinite(name, x, sampleRate, add);
-    clipping(name, x, sampleRate, add);
-    clicks(name, x, sampleRate, add);
-    offset(name, x, sampleRate, add);
+    nonfinite(name, x, fs, add);
+    clipping(name, x, fs, add);
+    if (!transients) clicks(name, x, fs, add, at);
+    offset(name, x, fs, add);
   });
   // the same thing at the same moment in several channels is one finding
   /** @type {Finding[]} */
@@ -953,6 +1169,11 @@ export function diagnose(name, channels, sampleRate = rateOf(channels)) {
   }
   return merged.sort((a, b) => a.at - b.at);
 }
+
+/** @typedef {object} DiagnoseOptions
+ * @property {boolean} [transients] this whole bus holds intended clicks, e.g. keys or UI ticks
+ * @property {readonly number[]} [at] only clicks up to 5 ms after these film times are intended
+ */
 
 /** @typedef {(f: Omit<Finding, "stem" | "channels">) => void} Add */
 
@@ -1029,8 +1250,9 @@ function clipping(name, x, fs, add) {
  *  to 25 ms: 2.5× the typical one when a side is quiet (a start, a cut), 4×
  *  when both are busy (in a chord of plain saws, a few edges that fall
  *  together by chance are part of its buzz)
- *  @param {string} name @param {Signal} x @param {number} fs @param {Add} add */
-function clicks(name, x, fs, add) {
+ *  @param {string} name @param {Signal} x @param {number} fs @param {Add} add
+ *  @param {readonly number[]} [intended] */
+function clicks(name, x, fs, add, intended) {
   const n = x.length;
   const guard = Math.round(0.001 * fs);
   const wide = Math.round(0.005 * fs);
@@ -1080,7 +1302,12 @@ function clicks(name, x, fs, add) {
     const before = typical(k - far, k - guard, v / 4);
     const after = typical(k + guard + 1, k + far + 1, v / 4);
     if (before && after ? v < 4 * Math.max(before, after) : v < 2.5 * (before || after)) continue;
-    const t = secs(Math.max(0, k - 1) / fs);
+    const time = Math.max(0, k - 1) / fs;
+    if (intended?.some((at) => time >= at - 1 / fs && time <= at + 0.005)) {
+      k += guard;
+      continue;
+    }
+    const t = secs(time);
     if (++count === 21) more = t;
     if (count <= 20)
       add({
@@ -1516,6 +1743,39 @@ export function onsetOf(sound, { threshold = 0.1, window = 0.002 } = {}) {
 }
 
 /**
+ * Where the attack hits (s into the sound): the boundary between adjacent
+ * `window`-second windows with the largest rise in mean square level. A soft
+ * lead-in can reach onsetOf's threshold long before this. null when silent.
+ * @param {Channels | Signal} sound
+ * @param {{ window?: number }} [o]
+ * @returns {number | null}
+ */
+export function hitOf(sound, { window = 0.004 } = {}) {
+  if (!(window > 0) || !Number.isFinite(window)) throw new Error("hitOf: window must be positive");
+  const sr = rateOf(sound);
+  const m = magnitude(chans(sound));
+  const w = Math.max(1, Math.min(m.length, Math.round(window * sr)));
+  const sums = new Float64Array(m.length + 1);
+  for (let i = 0; i < m.length; i++) sums[i + 1] = (sums[i] ?? 0) + (m[i] ?? 0) ** 2;
+  // A sound that dies within one window rises by the same amount at every
+  // boundary up to its first sample: take the last of those equal rises.
+  let best = 0;
+  let at = null;
+  let level = false;
+  for (let i = 0; i < m.length; i++) {
+    const rise = (sums[Math.min(m.length, i + w)] ?? 0) - 2 * (sums[i] ?? 0) + (sums[Math.max(0, i - w)] ?? 0);
+    const close = 1e-9 * (sums[m.length] ?? 0);
+    if (rise > best + close) {
+      best = rise;
+      at = i / sr;
+      level = true;
+    } else if (level && rise >= best - close) at = i / sr;
+    else level = false;
+  }
+  return at;
+}
+
+/**
  * Where a sound is loudest (s into it): its largest sample. null when silent.
  * @param {Channels | Signal} sound
  * @returns {number | null}
@@ -1615,7 +1875,7 @@ const autoAt = (v, t) => (typeof v === "function" ? v(t) : v);
 
 /**
  * Place a sound in a bus at film time `at`: the point of it named by `align`
- * — its start, its attack (`onsetOf`), its loudest sample (`peakOf`), or a
+ * — its start, its attack (`onsetOf`), its fastest rise (`hitOf`), its loudest sample (`peakOf`), or a
  * time into it (s) — lands on `at`. On the way it can be sped up or slowed
  * (`rate`, `semitones`: pitch and length together), and its gain, pan and send
  * can each be a number or follow film time (an `Auto`, e.g. `curveOf`). A pan
@@ -1623,37 +1883,46 @@ const autoAt = (v, t) => (typeof v === "function" ? v(t) : v);
  * middle) and balances a stereo one; without one, every channel gets the gain,
  * as `mix` does. `send` puts the same sound, times `amount`, into a shared
  * room's send bus (`space`) as well. Returns where in the film it sounds (s).
+ * When `"onset"` and `"hit"` would land over 50 ms apart, it also prints a
+ * warning to stderr and returns it as `warning`.
  * @param {Channels} into
  * @param {Channels | Signal} sound
  * @param {number} at
  * @param {object} [o]
- * @param {"start" | "onset" | "peak" | number} [o.align]
+ * @param {"start" | "onset" | "hit" | "peak" | number} [o.align]
  * @param {number} [o.rate]
  * @param {number} [o.semitones]
  * @param {Auto} [o.gain] linear (10 ** (dB / 20))
  * @param {Auto} [o.pan] -1 left to 1 right
  * @param {{ bus: Channels, amount?: Auto }} [o.send]
- * @returns {{ start: number, end: number }}
+ * @param {boolean} [o.recorded] the sound is a recording of an instrument: its
+ *   attack is its own, and `diagnose` does not call it a click
+ * @returns {{ start: number, end: number, warning?: string }}
  */
 export function play(
   into,
   sound,
   at,
-  { align = "start", rate = 1, semitones = 0, gain = 1, pan, send } = {},
+  { align = "start", rate = 1, semitones = 0, gain = 1, pan, send, recorded = false } = {},
 ) {
   if (!Number.isFinite(at)) throw new Error(`play: ${at} is not a time in seconds`);
   const sr = into.sampleRate ?? RATE;
   const b = /** @type {{ sampleRate?: number }} */ (sound).sampleRate;
   if (b && b !== sr) throw new Error(`play: ${b} Hz into ${sr} Hz — load it at ${sr}`);
   const speed = rate * 2 ** (semitones / 12);
+  // a sound without a rate plays at the bus's, so its times are read at that rate
+  const timed = b ? sound : withRate([...chans(sound)], sr);
+  const hit = align === "hit" || align === "onset" ? hitOf(timed) : null;
   const point =
     typeof align === "number"
       ? align
       : align === "onset"
-        ? (onsetOf(sound) ?? 0)
-        : align === "peak"
-          ? (peakOf(sound) ?? 0)
-          : 0;
+        ? (onsetOf(timed) ?? 0)
+        : align === "hit"
+          ? (hit ?? 0)
+          : align === "peak"
+            ? (peakOf(timed) ?? 0)
+            : 0;
   const src = speed === 1 ? chans(sound) : varispeed(sound, speed);
   const start = at - point / speed;
   const n = src[0]?.length ?? 0;
@@ -1712,7 +1981,20 @@ export function play(
   // checked before anything is mixed, so a refused play leaves the buses as they were
   into1(into, 1);
   if (send) into1(send.bus, send.amount ?? 1);
-  return { start, end: start + n / sr };
+  if (recorded) {
+    const attack = [start + (align === "onset" ? point : (onsetOf(timed) ?? 0)) / speed];
+    noteAttacks(into, attack);
+    if (send) noteAttacks(send.bus, attack);
+  }
+  const end = start + n / sr;
+  if (align === "onset" && hit !== null && Math.abs(hit - point) / speed > 0.05) {
+    const gap = Math.round((1000 * Math.abs(hit - point)) / speed);
+    const side = hit > point ? "after" : "before";
+    const warning = `play: the hit is ${gap} ms ${side} the onset at ${secs(at)} s; use align: "hit" or a time in seconds`;
+    console.warn(warning);
+    return { start, end, warning };
+  }
+  return { start, end };
 }
 
 /**

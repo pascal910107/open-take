@@ -724,6 +724,29 @@ test("film probe on a film: cuts, shots, onsets, declared cuts, subjects, marks,
   if (chrome) assert.ok(r.png && existsSync(r.png), "probe.png");
 });
 
+test("film probe reads a cut hidden under motion and a lift as declared", async () => {
+  const events = join(dir, "film.events.json");
+  const was = await readFile(events, "utf8");
+  try {
+    const ev = JSON.parse(was);
+    // a cut hidden in a blur at 2 s, where the picture shows none, and a lift
+    // whose layer jumps at 3 s
+    ev.events.push({ t: 2, kind: "hidden-cut" });
+    ev.declaredCuts = [1.5, 2];
+    ev.segments.push({ from: 2.5, to: 3.2, handoff: "lift" });
+    await writeFile(events, JSON.stringify(ev));
+    const r = await filmProbe({ input: film, out: join(dir, "probe-declared") });
+    assert.deepEqual(r.probe.declaredCuts.list, [1.5, 2]);
+    assert.deepEqual(r.probe.declaredCuts.unseen, []);
+    assert.deepEqual(r.probe.declaredCuts.undeclared, []);
+    const md = await readFile(r.md, "utf8");
+    assert.match(md, /handoff written: lift/);
+    assert.doesNotMatch(md, /handoff written: lift[^\n]*\n\s*\(written in words/);
+  } finally {
+    await writeFile(events, was);
+  }
+});
+
 test("film probe with the film's page: its beat sheet, its text measured where it is drawn", {
   skip: findChrome() ? false : "no Chrome for Testing",
 }, async () => {

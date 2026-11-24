@@ -23,6 +23,7 @@
     "typecheck": "tsc --noEmit && tsc -p tsconfig.kit.json",
     "test": "node --test --import tsx/esm test/*.test.ts",
     "test:render-smoke": "node --test --test-force-exit --import tsx/esm e2e/render-smoke.test.ts",
+    "verify:film": "node --import tsx/esm test/film-seam-e2e.test.ts --proof",
     "clean": "rm -rf dist"
   },
   "dependencies": {

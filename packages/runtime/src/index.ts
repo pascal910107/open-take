@@ -49,6 +49,7 @@ export {
   type CompositionIssue,
   changedLine,
   checkFilm,
+  checkViewer,
   componentsLine,
   exampleSource,
   filmBeats,
@@ -61,6 +62,7 @@ export {
   filmReport,
   filmSheet,
   filmStills,
+  filmStudy,
   followedLine,
   formatComponents,
   formatFilmBeats,
@@ -69,6 +71,7 @@ export {
   formatFilmLook,
   formatFilmProbe,
   formatFilmReport,
+  formatFilmStudy,
   formatIssues,
   formatMaterials,
   initFilm,
@@ -85,7 +88,9 @@ export {
   readPageMaterial,
   renderFilm,
   type TakeComposition,
+  VIEWER_TOOLS,
   validateComposition,
+  viewerCommand,
   viewerRounds,
 } from "@open-take/compositor";
 export { type AuthOpts, type AuthResult, authProfile, profileDir } from "./auth";

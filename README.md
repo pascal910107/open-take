@@ -94,7 +94,7 @@ honest wall-clock and cost numbers.
 ```sh
 pnpm install
 pnpm build
-pnpm -r test   # `pnpm test` at the root runs nothing
+pnpm test
 ```
 
 Setup, the full gate list, and what to open an issue about before writing code:

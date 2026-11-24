@@ -46,8 +46,10 @@ many ways as there were films.
 **Subtitles that narrate the click.** A caption on screen during nearly every
 action, saying what the picture already shows: "Drag the box — the arrow
 follows." while the box is dragged and the arrow follows. Shared launch films
-carry the idea in their words ("Draw what you mean"), each line on its own,
-three to six lines in a short film — never a running commentary.
+carry the idea in their words ("Draw what you mean"), each line on its own;
+where words stay on screen throughout, they say what is happening now — a
+status chip naming the step the product is on — never what the picture
+already shows.
 *Fine when* the action cannot be read without help — a shortcut, a hidden
 state — and one line for the idea of a sequence, not one per click.
 
@@ -99,9 +101,14 @@ one click, every note answered — setup, proof, payoff, in a few seconds each.
 *Fine when* the film is a how-to.
 
 **The logo twice.** A title card with the logo and a tagline in the first
-seconds, then the same lockup at the end. Shared launch films hold the title
-until something has happened; the logo is almost always the last thing.
-*Fine when* the mark is the news, or as a small mark in a corner.
+seconds, then the same lockup at the end. Most shared launch films hold the
+title until something has happened (26 of 286 in one catalogue opened on a
+brand); the logo is almost always the last thing. The six of
+`reference/travel/` are the exception: each opens on a title card naming
+both parties within 5 s, and two close on it again.
+*Fine when* the mark is the news, the card is itself the film's first move
+(built, flown through, carried into the next picture), or as a small mark
+in a corner.
 
 **Ending more than once.** A card of claims or a ticked list ("✓ Free ✓ Works
 offline ✓ Autosaves"), then a second pitch, then the logo. The films people
@@ -113,8 +120,8 @@ opened by promising that list.
 **Scenes swapped, nothing carried.** Every scene change a hard cut or a short
 crossfade between flat screens and cards; nothing in one scene becomes the
 next. Shared launch films leave a scene through something in it (`skill film
-craft`: getting from one scene to the next) and keep hard cuts for
-punctuation.
+craft`: getting from one scene to the next), hide their other cuts inside a
+move, and keep a cut that carries nothing for punctuation.
 *Fine* as rhythm — a burst of cuts on the beat — when it is not the only way
 scenes change.
 *In the kit:* say on each segment what crosses and name it with `carry`;
@@ -178,8 +185,9 @@ only when it is the product's world (paper grain on a product about paper).
 
 ### What it sounds like
 
-These came back in nearly every agent-made film; the launch films studied
-were mostly silent, so they are less sure.
+These came back in nearly every agent-made film. The launch films measured
+were scored throughout, some densely; what set them apart was where the
+sound changed — on a few reveals — not how little there was.
 
 **One bed for every product.** A synth pad and plucked arpeggio over a
 four-chord loop at 96–120 BPM, whatever the product.

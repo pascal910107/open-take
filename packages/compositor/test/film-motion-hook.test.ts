@@ -110,3 +110,40 @@ test("a page's own motion hook supplies the px; the cut side is still the progra
     await server.close();
   }
 });
+
+test("a hook speaks for the canvas; elements moving outside it still count", { skip }, async () => {
+  // a chip crossing 2400 px a second over a page whose hook says 2 px
+  await writeFile(
+    join(dir, "chip.html"),
+    `<!doctype html><html><head><style>
+body{margin:0;width:320px;height:180px;overflow:hidden;background:#000}
+#chip{position:absolute;top:60px;width:20px;height:20px;background:#fff}</style></head><body>
+<canvas width="320" height="180"></canvas><div id="chip"></div>
+<script>
+window.__film = { duration: 0.5, width: 320, height: 180, motion: () => 2 };
+window.__render = (t) => { document.getElementById('chip').style.left = (t * 2400 - 100) + 'px'; };
+</script></body></html>`,
+  );
+  const server = await serveDirectory(dir);
+  const b = await launchHtmlBrowser({
+    chromePath: chrome!,
+    url: `${server.url}/chip.html`,
+    width: 320,
+    height: 180,
+    initScript: filmClockSource({ seed: 3, epochMs: 0 }),
+    stillAnimations: true,
+    timeoutMs: 120_000,
+  });
+  try {
+    await b.evaluate("window.__ot.prepare()");
+    const moving = await b.evaluate<Exposure>(`window.__ot.motion(0.1, ${HALF})`);
+    // the chip moves 2400 × 2 × HALF px across the shutter, more than the hook's 2
+    assert.ok(Math.abs(moving.px - 2400 * 2 * HALF) < 0.5, `px ${moving.px}`);
+    await b.evaluate("window.__render = () => {}");
+    const still = await b.evaluate<Exposure>(`window.__ot.motion(0.1, ${HALF})`);
+    assert.equal(still.px, 2, "with nothing else moving the hook's number stands");
+  } finally {
+    await b.close();
+    await server.close();
+  }
+});

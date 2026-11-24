@@ -198,8 +198,12 @@ export {
   formatFilmReport,
 } from "./film/report";
 export { type FilmSheetOptions, filmSheet } from "./film/sheet";
+export { type FilmStudy, type FilmStudyOptions, filmStudy, formatFilmStudy } from "./film/study";
 export {
+  checkViewer,
   prepareViewer,
+  VIEWER_TOOLS,
+  viewerCommand,
   type ViewerRound,
   type ViewerRounds,
   viewerBrief,

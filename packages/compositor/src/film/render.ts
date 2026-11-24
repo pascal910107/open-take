@@ -33,7 +33,7 @@ import { resolveFfmpeg, resolveFfprobe, runTool, SRGB_TAG_ARGS, SRGB_TAGS } from
 import { type HtmlBrowser, launchHtmlBrowser } from "../html/cdp";
 import { serveDirectory } from "../html/server";
 import { jpegDimensions, matroskaCluster, matroskaHead } from "../mjpeg-matroska";
-import { type FilmMark, type FilmPageInfo, filmClockSource, filmMarks } from "./clock";
+import { type FilmMark, type FilmPageInfo, type TextCause, filmClockSource, filmMarks } from "./clock";
 import { frameStore, type VideoFrames } from "./frames";
 import { fileEnergy, fileGrey, findCuts, frameEnergy } from "./probe";
 
@@ -56,6 +56,14 @@ const browserTrouble = (e: Error): boolean =>
   );
 
 export type FilmProgress = { phase: "probe" | "render"; done: number; total: number };
+
+export type FilmFinePlan = {
+  seconds: number;
+  supersample: number;
+  ranges: { from: number; to: number }[];
+  /** text near the middle of the probe's moving text speeds, by frame count */
+  causes: { element: string; frames: number }[];
+};
 
 export type FilmRenderOptions = {
   /** the film: an .html file, or a directory holding index.html */
@@ -96,6 +104,8 @@ export type FilmRenderOptions = {
   keepLayers?: boolean;
   workers?: number;
   onProgress?: (p: FilmProgress) => void;
+  /** the automatic supersampling plan, after probing and before rendering */
+  onFine?: (plan: FilmFinePlan) => void;
   onConsole?: (level: string, text: string) => void;
 };
 
@@ -108,6 +118,10 @@ export type FilmRenderResult = {
    *  a device pixel a frame there (film seconds, on the page's timeline), and
    *  how finely; none when --supersample was given or in a draft */
   fine: { from: number; to: number }[];
+  fineCauses: FilmFinePlan["causes"];
+  /** window.__bake.hash, the same in every page the render opened; null
+   *  when the page publishes none */
+  bake: string | null;
   fineSupersample: number;
   /** moves where what ends up framed does not head straight for its place
    *  (see turnsBack); null when the frames were not probed */
@@ -131,7 +145,7 @@ export type FilmRenderResult = {
  *  page time, with where on the stage (CSS px) and how hard (0..1) if it says. */
 export type FilmEvent = {
   t: number;
-  /** what it is: "click", "key", "land", "cut", "mark", or any word of the page's */
+  /** what it is: "click", "key", "land", "cut", "hidden-cut", "mark", or any word of the page's */
   kind: string;
   x?: number;
   y?: number;
@@ -141,13 +155,16 @@ export type FilmEvent = {
 
 /** One stretch of the film as the page means it (kit/time.js `segment`): in
  *  seconds of page time, every other field the page's own free words;
- *  `handoff` is how it hands over to what comes next, at `to`. */
+ *  `handoff` is how it hands over to what comes next, at `to`. "hidden-cut"
+ *  declares a cut under motion at `to`; "lift" says a layer moves on its
+ *  own over the span, which can look like jumps or a camera turning back. */
 export type FilmSegment = {
   from: number;
   to: number;
   label?: string;
   hold?: boolean;
   handoff?: string;
+  seam?: Record<string, string | number>;
   /** what lives through the boundary at `to`: a CSS selector, or "(a
    *  function)" — followed across it as the curves `carry@<to>:…` */
   carry?: string;
@@ -219,6 +236,9 @@ export type FilmEvents = {
    *  Absent in files written before it, and where the picture was not read
    *  (every split is then in detectedCuts) */
   switches?: number[];
+  /** window.__bake.hash of the page that drew it: a range put into this
+   *  master must have been drawn from the same bake */
+  bake?: string;
   /** window.__film.curves(t) once per output frame: rows[i][j] is names[j] at
    *  t0 + i·dt; null where the page gave no number. Beside the page's own,
    *  "picture.energy" (PICTURE_ENERGY): how much the picture changes into the
@@ -329,6 +349,32 @@ export function balancedSlices(costs: readonly number[], workers: number): [numb
   return slices;
 }
 
+/** A page that bakes a simulation (starter/lib/physics.js) publishes its
+ *  hash as window.__bake.hash. Each worker bakes for itself, so every page a
+ *  render opens is asked once: two hashes mean two different films. */
+export function bakeGuard(where = "in another worker"): {
+  check(b: Pick<HtmlBrowser, "evaluate">): Promise<void>;
+  readonly hash: string | null;
+} {
+  let hash: string | null = null;
+  return {
+    get hash() {
+      return hash;
+    },
+    async check(b) {
+      const h = await b.evaluate<unknown>(
+        `(() => { const h = window.__bake?.hash; return h == null ? null : String(h); })()`,
+      );
+      if (typeof h !== "string") return;
+      if (hash === null) hash = h;
+      else if (h !== hash) throw new Error(bakesDiffer(hash, h, where));
+    },
+  };
+}
+
+export const bakesDiffer = (a: string, b: string, where: string): string =>
+  `film: the physics bakes differ (window.__bake.hash ${a} in one page, ${b} ${where}) — the simulation does not repeat here, so the frames would not belong to one film; render with --workers 1, or make the bake repeat (a fixed step and seed, no wall-clock time)`;
+
 export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderResult> {
   const t0 = Date.now();
   const draft = !!opts.draft;
@@ -343,6 +389,8 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
     // --- what the page is -----------------------------------------------------
     const { browser: first, info, width, height } = await page.openDeclared(opts);
     page.checkFiles();
+    const bake = bakeGuard();
+    await bake.check(first);
     const film = describe(opts, info, { pageFile: page.pageFile, width, height, scale, draft });
     await first.evaluate(`window.__filmFps = ${film.fps}`);
     const frames = film.f1 - film.f0;
@@ -359,6 +407,7 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
     let samples = new Array<number>(frames).fill(1);
     let sides = new Array<number>(frames).fill(0);
     let density = new Array<number>(frames).fill(ss);
+    let fine = finePlan([], [], film.fps, film.f0);
     let turns: TurnBack[] | null = null;
     let pool: HtmlBrowser[] = [first];
     // every render but a draft probes: the blur's samples, the frames drawn
@@ -369,6 +418,7 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
         while (pool.length < workers) {
           const b = await page.open(width, height);
           await prepare(b, film.fps);
+          await bake.check(b);
           pool.push(b);
         }
       const p = await probe(pool, film, opts.onProgress);
@@ -380,10 +430,20 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
         { width: film.width, height: film.height },
         film.f0,
       );
-      if (auto)
-        density = fineFrames(p.text, p.sides, film.fps, scale * ss).map((f) =>
-          f ? FINE_SUPERSAMPLE : ss,
+      if (auto) {
+        const flags = fineFrames(p.text, p.sides, film.fps, scale * ss);
+        density = flags.map((f) => f ? FINE_SUPERSAMPLE : ss);
+        fine = finePlan(
+          flags,
+          p.textCause.map((cause, i) =>
+            slowTextFrame((p.text[i]! / film.fps) * (scale * ss)) ? cause : null,
+          ),
+          film.fps,
+          film.f0,
         );
+        if (opts.onFine) opts.onFine(fine);
+        else if (fine.seconds > 0) process.stderr.write(`${finePlanLine(fine)}\n`);
+      }
     }
 
     // --- render ------------------------------------------------------------------
@@ -445,6 +505,7 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
                   drawn = density[a]!;
                   browser = await page.open(width, height, scale * drawn);
                   await prepare(browser, film.fps);
+                  await bake.check(browser);
                 }
                 const sink = new ShutterSink(
                   ffmpeg,
@@ -457,8 +518,9 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
                     if (failed) throw failed;
                     page.checkFiles();
                     const t = (film.f0 + i) / film.fps;
+                    const share = sampleShare(samples[i]!, sides[i]);
                     for (const ti of sampleTimes(t, samples[i]!, film.fps, sides[i])) {
-                      await seek(browser, ti, `frame ${film.f0 + i}`);
+                      await seek(browser, ti, `frame ${film.f0 + i}`, share);
                       await sink.push(
                         await browser.screenshot({ format: "jpeg", quality: draft ? 85 : 100 }),
                       );
@@ -533,21 +595,15 @@ export async function renderFilm(opts: FilmRenderOptions): Promise<FilmRenderRes
     }
     await writeFile(
       events,
-      `${JSON.stringify({ ...evs, ...(turns ? { turnsBack: turns } : {}) })}\n`,
+      `${JSON.stringify({ ...evs, ...(bake.hash ? { bake: bake.hash } : {}), ...(turns ? { turnsBack: turns } : {}) })}\n`,
     );
     const { width: w, height: h } = outSize(film);
-    const fine: { from: number; to: number }[] = [];
-    density.forEach((d, i) => {
-      if (d === ss) return;
-      const t = (film.f0 + i) / film.fps;
-      const last = fine.at(-1);
-      if (last && Math.abs(last.to - t) < 1e-6) last.to = t + 1 / film.fps;
-      else fine.push({ from: t, to: t + 1 / film.fps });
-    });
     return {
       out: resolve(opts.out),
-      fine: fine.map((f) => ({ from: secs6(f.from), to: secs6(f.to) })),
+      fine: fine.ranges,
+      fineCauses: fine.causes,
       turnsBack: turns,
+      bake: bake.hash,
       fineSupersample: FINE_SUPERSAMPLE,
       mode: info.mode,
       // as encoded: an odd side is padded to even
@@ -677,6 +733,10 @@ export function checkSegments(raw: unknown, warnings: string[] = []): FilmSegmen
     const seg: FilmSegment = { from: e.from, to: e.to };
     for (const k of ["label", "handoff", "carry", "subject", "sound"] as const)
       if (typeof e[k] === "string" && e[k]) seg[k] = e[k] as string;
+    if (e.seam && typeof e.seam === "object" && !Array.isArray(e.seam)) {
+      const entries = Object.entries(e.seam).filter(([, v]) => typeof v === "string" || finite(v));
+      if (entries.length) seg.seam = Object.fromEntries(entries);
+    }
     if (typeof e.hold === "boolean") seg.hold = e.hold;
     out.push(seg);
   }
@@ -688,6 +748,28 @@ export function checkSegments(raw: unknown, warnings: string[] = []): FilmSegmen
     .map((s, i) => [s, i] as const)
     .sort((a, b) => a[0].from - b[0].from || a[1] - b[1])
     .map(([s]) => s);
+}
+
+/** whether a segment's handoff is the declaration `kind` ("hidden-cut",
+ *  "lift"), as the page writes it */
+export const handoffIs = (s: Pick<FilmSegment, "handoff">, kind: "hidden-cut" | "lift") =>
+  s.handoff?.trim().toLowerCase() === kind;
+
+/** the spans of the segments the page declares as a lift: a layer moving on
+ *  its own, whose jumps and turns are meant */
+export const liftSpans = (segments: readonly FilmSegment[]): [number, number][] =>
+  segments.filter((s) => handoffIs(s, "lift")).map((s) => [s.from, s.to]);
+
+/** The times of cuts the page says it hides in motion, taken from a
+ *  "hidden-cut" event's time or the end of a segment with that handoff. */
+export function hiddenCutTimes(
+  events: readonly FilmEvent[],
+  segments: readonly FilmSegment[],
+): number[] {
+  return [
+    ...events.filter((e) => e.kind === "hidden-cut").map((e) => e.t),
+    ...segments.filter((s) => handoffIs(s, "hidden-cut")).map((s) => s.to),
+  ];
 }
 
 /** window.__film.credits — a list, or a function that gives one — once, as
@@ -825,7 +907,7 @@ async function pageCurves(
 }
 
 /** merge times less than `eps` apart into the first of them, in order */
-const mergeTimes = (ts: number[], eps: number): number[] =>
+export const mergeTimes = (ts: number[], eps: number): number[] =>
   [...ts]
     .sort((a, b) => a - b)
     .reduce<number[]>((acc, t) => {
@@ -857,7 +939,7 @@ export function filmEvents(
       else if (side < 0 && f0 + i + 1 < total) detected.push(secs6((f0 + i + 1) / fps));
     });
   const declaredCuts = mergeTimes(
-    events.filter((e) => e.kind === "cut").map((e) => e.t),
+    [...events.filter((e) => e.kind === "cut").map((e) => e.t), ...hiddenCutTimes(events, segments)],
     1e-9,
   );
   const names: string[] = [];
@@ -1008,6 +1090,8 @@ export function patchEvents(master: FilmEvents, patch: FilmEvents): FilmEvents |
     credits: patch.credits ?? master.credits ?? [],
     // where its values come from, as the page says it now
     sources: patch.sources ?? master.sources ?? [],
+    // the same bake in both, or the patch was refused (see patchFilm)
+    ...((patch.bake ?? master.bake) ? { bake: patch.bake ?? master.bake } : {}),
   };
 }
 
@@ -1063,6 +1147,11 @@ export async function patchFilm(
   try {
     const range = join(tmp, "range.mp4");
     const r = await renderFilm({ ...opts, out: range, audio: null });
+    const masterBake = await readFile(eventsPathFor(into), "utf8")
+      .then((text) => (JSON.parse(text) as Partial<FilmEvents>).bake ?? null)
+      .catch(() => null);
+    if (masterBake && r.bake && masterBake !== r.bake)
+      throw new Error(bakesDiffer(masterBake, r.bake, `in the range rendered for ${opts.into}`));
     const it = `${master.width}×${master.height} ${master.fps} fps, ${master.frames} frames${master.from ? `, from ${master.from}s` : ""}`;
     const film = `${r.width}×${r.height} ${r.fps} fps, ${r.filmFrames} frames`;
     if (
@@ -1371,6 +1460,8 @@ export async function filmStills(opts: FilmStillsOptions): Promise<string[]> {
   try {
     let { browser, info, width, height } = await page.openDeclared(opts);
     page.checkFiles();
+    const bake = bakeGuard("in a fresh page for the stills");
+    await bake.check(browser);
     const film = describe(opts, info, {
       pageFile: page.pageFile,
       width,
@@ -1389,6 +1480,7 @@ export async function filmStills(opts: FilmStillsOptions): Promise<string[]> {
         await page.close(browser);
         browser = await page.open(width, height);
         await prepare(browser);
+        await bake.check(browser);
       }
     };
     const counts: number[] = [];
@@ -1445,7 +1537,7 @@ export async function filmStills(opts: FilmStillsOptions): Promise<string[]> {
         );
         try {
           for (const ti of at) {
-            await seek(browser, ti, label);
+            await seek(browser, ti, label, sampleShare(n, sides[i]));
             await sink.push(await browser.screenshot({ format: "jpeg", quality: 100 }));
           }
           await sink.end();
@@ -1652,9 +1744,14 @@ async function prepare(b: HtmlBrowser, fps?: number): Promise<FilmPageInfo> {
   return b.evaluate<FilmPageInfo>("window.__ot.prepare()", { timeoutMs: 120_000 });
 }
 
-async function seek(b: HtmlBrowser, t: number, what: string): Promise<void> {
+/** the share of a frame's shutter each of its `n` samples stands for: what a
+ *  page that blurs itself exposes per draw (window.__filmShare, clock.ts) */
+export const sampleShare = (n: number, side = 0): number =>
+  n <= 1 ? 1 : (side === 0 ? 1 : 0.5) / n;
+
+async function seek(b: HtmlBrowser, t: number, what: string, share = 1): Promise<void> {
   try {
-    await b.evaluate(`window.__ot.seek(${t})`);
+    await b.evaluate(`window.__filmShare = ${share}; window.__ot.seek(${t})`);
   } catch (e) {
     throw new Error(`film: ${what} (${t.toFixed(3)}s): ${(e as Error).message}`, {
       cause: e,
@@ -1668,6 +1765,7 @@ type Exposure = {
   px: number;
   side: number;
   text: number;
+  textCause: TextCause | null;
   view: ViewRate | null;
 };
 /** the picture's zoom and pan as rates: s − 1 and t (px) a second, about the
@@ -1723,6 +1821,19 @@ function describe(
       throw new Error(`film: the soundtrack ${audio} does not exist`);
     if (!audio)
       warnings.push("no soundtrack — the film is silent (window.__film.audio or --audio)");
+    if (info.tickers.length) {
+      const many = info.tickers.length > 1;
+      const owner = many ? "their" : "its";
+      const tickerName = many ? "tickers" : "ticker";
+      const seek = info.tickers.map((ticker) =>
+        ticker === "GSAP"
+          ? "GSAP timeline.seek(t) or timeline.totalTime(t)"
+          : "anime.js animation.seek(t*1000)",
+      );
+      warnings.push(
+        `${info.tickers.join(" and ")} running on ${owner} own ${tickerName} in clock mode: ${owner} motion gets no blur, and frames cannot be probed in parallel. Seek in window.__render(t) with ${seek.join(" and ")} to enable both.`,
+      );
+    }
   }
   if (info.audioElements)
     warnings.push(
@@ -1767,11 +1878,12 @@ async function probe(
   pool: HtmlBrowser[],
   film: Film,
   onProgress?: (p: FilmProgress) => void,
-): Promise<{ samples: number[]; sides: number[]; text: number[]; view: (ViewRate | null)[] }> {
+) {
   const frames = film.f1 - film.f0;
   const samples = new Array<number>(frames).fill(1);
   const sides = new Array<number>(frames).fill(0);
   const text = new Array<number>(frames).fill(0);
+  const textCause = new Array<TextCause | null>(frames).fill(null);
   const view = new Array<ViewRate | null>(frames).fill(null);
   const half = SHUTTER_FRACTION / film.fps / 2;
   let next = 0;
@@ -1785,6 +1897,7 @@ async function probe(
         samples[i] = samplesFor(m.px);
         sides[i] = m.side;
         text[i] = m.text ?? 0;
+        textCause[i] = m.textCause ?? null;
         view[i] = m.view ?? null;
         done++;
         if (done % 30 === 0 || done === frames)
@@ -1792,7 +1905,7 @@ async function probe(
       }
     }),
   );
-  return { samples, sides, text, view };
+  return { samples, sides, text, textCause, view };
 }
 
 /** A move of the picture where what it ends up framing does not head
@@ -1933,6 +2046,53 @@ export const FINE_SUPERSAMPLE = 3;
  *  film's size (measured 4.8× and 6.8× on two stretches of one film) */
 const FINE_COST = 5;
 
+/** Where finer drawing is planned, and which slow text set it off. Frames
+ *  kept at that density through a gap or up to a cut count toward the time. */
+export function finePlan(
+  flags: readonly boolean[],
+  causes: readonly (TextCause | null)[],
+  fps: number,
+  f0 = 0,
+): FilmFinePlan {
+  const ranges: FilmFinePlan["ranges"] = [];
+  // Count by element and keep the first label it showed.
+  const counts = new Map<string, { label: string; frames: number }>();
+  let frames = 0;
+  for (let i = 0; i < flags.length; ) {
+    if (!flags[i]) {
+      i++;
+      continue;
+    }
+    const from = i;
+    for (; flags[i]; i++) {
+      const cause = causes[i];
+      if (!cause) continue;
+      const seen = counts.get(cause.key);
+      if (seen) seen.frames++;
+      else counts.set(cause.key, { label: cause.label, frames: 1 });
+    }
+    frames += i - from;
+    ranges.push({ from: secs6((f0 + from) / fps), to: secs6((f0 + i) / fps) });
+  }
+  return {
+    seconds: frames / fps,
+    supersample: FINE_SUPERSAMPLE,
+    ranges,
+    causes: Array.from(counts.values(), ({ label, frames }) => ({ element: label, frames }))
+      .sort((a, b) => b.frames - a.frames),
+  };
+}
+
+/** The line a render prints before drawing: how many seconds it draws
+ *  finer, which text set that off, and the estimated cost per frame. */
+export function finePlanLine(plan: FilmFinePlan): string {
+  const names = plan.causes.slice(0, 3).map((c) => c.element).join(", ");
+  const more = plan.causes.length > 3 ? ` and ${plan.causes.length - 3} more` : "";
+  return `film: ${plan.seconds.toFixed(2)} s at ${plan.supersample}× for slow text${names ? ` in ${names}${more}` : ""} (about ${FINE_COST}× the cost per frame)`;
+}
+
+const slowTextFrame = (d: number) => d >= 0.001 && d < 1;
+
 /** Which frames to draw finer: those where the page's moving text moves
  *  under one device pixel a frame (`text`: px a second, as the page's
  *  motion probe found it; `density`: device px per page px) — the slow push,
@@ -1950,7 +2110,7 @@ export function fineFrames(
 ): boolean[] {
   const n = text.length;
   const speed = text.map((v) => (v / fps) * density);
-  const slow = speed.map((d) => d >= 0.001 && d < 1);
+  const slow = speed.map(slowTextFrame);
   const out = slow.slice();
   const gap = Math.round(fps / 4);
   let last = -1;

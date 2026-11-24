@@ -16,15 +16,21 @@
 //   seek(t)          → the page shows film time t (seconds)
 //   motion(t, half)  → how far (px) anything visible moves across [t-half, t+half],
 //                      and which side of that shutter to expose (one that cuts is left out)
+// and, before each draw, sets `window.__filmShare`: the share of the frame's
+// shutter that draw stands for (1 when the frame is one draw; 1/n of it, or of
+// its half, when it is n samples) — what a page that blurs itself across its
+// own shutter exposes, so its samples and the renderer's tile the shutter.
 //
 // The page may declare itself with `window.__film = { duration, width, height,
-// fps, audio, ready, motion, marks }` (every field optional). `__duration` and
+// fps, audio, ready, motion, marks }` (every field optional); `motion` speaks
+// for what the page draws (a canvas), and the larger of it and how far its
+// elements move is the frame's motion. `__duration` and
 // `__ready` are read too. `marks` — [{ at, until?, what? }] — are the moments
 // the author means to look the way they do (a white flash on the beat): `film
 // check` lists what it finds there as marked, not as a defect.
 //
-// This function is serialized into the page (Function#toString): it must not
-// reference anything outside its own body.
+// The clock and its canvas matcher are serialized into the page
+// (Function#toString): they take anything they need as arguments.
 
 type FilmClockOptions = {
   /** Math.random's seed — the same in every worker */
@@ -44,6 +50,8 @@ export type FilmPageInfo = {
   audio: string | null;
   /** the page has <audio> elements — they are not recorded */
   audioElements: number;
+  /** libraries found running on their own tickers in clock mode */
+  tickers: ("GSAP" | "anime.js")[];
   /** window.__film.marks as the page has them (see filmMarks) */
   marks: unknown;
 };
@@ -76,21 +84,437 @@ export function filmMarks(raw: unknown): FilmMark[] {
   });
 }
 
+type CanvasThumb = { pixels: Uint8Array; width: number; height: number; cutPixels: Uint8ClampedArray };
+export type TextCause = { key: string; label: string };
+
+// An eighth of the grey range represents coverage. Opaque black can then
+// be followed against a transparent surround.
+export function canvasGrey(r: number, g: number, b: number, alpha: number): number {
+  return (((77 * r + 150 * g + 29 * b) / 256) * 7 / 8 + 32) * alpha / 255;
+}
+
+export function canvasAxisSize(
+  width: number, height: number, { a, b, c, d }: Pick<DOMMatrixReadOnly, "a" | "b" | "c" | "d">, zoom: number,
+): [number, number] {
+  return [width * Math.hypot(a, b) * zoom, height * Math.hypot(c, d) * zoom];
+}
+
+export function gsapTickerRunning(gsap: {
+  ticker?: { add?: unknown; _listeners?: unknown[]; active?: boolean };
+  globalTimeline?: { getChildren?: () => { paused?: () => boolean }[] };
+} | undefined): boolean {
+  const ticker = gsap?.ticker;
+  if (typeof ticker?.add !== "function" || ticker.active === false) return false;
+  // GSAP 3 has one internal listener. The timeline is also useful on
+  // builds that do not expose their ticker listeners.
+  return (ticker._listeners?.length ?? 0) > 1 ||
+    gsap?.globalTimeline?.getChildren?.().some((child) => !child.paused?.()) === true;
+}
+
+/** The largest credible shift between two grey thumbnails, in CSS px.
+ *  Follow textured patches where the picture changed, so still background
+ *  cannot outvote a small moving object; take the fastest of them, so a part
+ *  that turns or grows while it moves is spaced by its fastest edge. 0 when
+ *  nothing changed enough to follow (the caller's own test decides then);
+ *  `fallback` when something changed and no patch can be followed. */
+export function canvasDisplacement(
+  a: Uint8Array,
+  b: Uint8Array,
+  width: number,
+  height: number,
+  cssWidth: number,
+  cssHeight: number,
+  fallback = 12,
+): number {
+  if (!a.some((v, i) => v !== b[i])) return 0;
+
+  // A patch is 7×7 pixels read every other pixel: 16 values. On the
+  // 192-pixel thumbnail one pixel is 5 CSS px of a 960-pixel canvas, so a
+  // patch spans 35 CSS px — a button's worth, small enough to stay rigid
+  // on a part that turns.
+  const radius = 3;
+  // The plain search reaches 32 pixels (160 CSS px at 960) at every pixel;
+  // the wide one 64 at every other pixel, for what it cannot find there.
+  const reach = 32;
+  const wide = 64;
+  const offsets: [number, number][] = [];
+  for (let y = -radius; y <= radius; y += 2)
+    for (let x = -radius; x <= radius; x += 2) offsets.push([x, y]);
+  const n = offsets.length;
+
+  // Where the picture changed and holds texture to follow. 48 over 16 values
+  // is 3 grey levels a value: one pixel a level off, or a 4×4 square
+  // flickering by 4 levels, stays under it and is no motion (the canvas
+  // motion tests). A range of 16 levels is the faintest edge on those tests'
+  // disc and pan that the matcher still places to the pixel.
+  // At a stride of 5 the 7 px patches overlap by 2, so the test's 6 px
+  // disc can still leave an edge in a patch.
+  const tiles: { x: number; y: number; score: number; reverse: boolean }[] = [];
+  for (let y = radius; y < height - radius; y += 5)
+    for (let x = radius; x < width - radius; x += 5) {
+      let alo = 255, ahi = 0, blo = 255, bhi = 0, diff = 0;
+      for (const [i, j] of offsets) {
+        const p = (y + j) * width + x + i;
+        const av = a[p]!;
+        const bv = b[p]!;
+        alo = Math.min(alo, av);
+        ahi = Math.max(ahi, av);
+        blo = Math.min(blo, bv);
+        bhi = Math.max(bhi, bv);
+        diff += Math.abs(av - bv);
+      }
+      const ar = ahi - alo;
+      const br = bhi - blo;
+      if (!(diff >= 48 && Math.max(ar, br) >= 16)) continue;
+      // What moves changes a run of pixels alike — an edge, a texture
+      // shifted; grain changes each pixel on its own. The change at each
+      // pixel of the patch against its right and lower neighbours: grain's
+      // stays under a third of its own size, and it is no motion.
+      let dd = 0, dh = 0, dv = 0;
+      for (let j = -radius; j <= radius; j++)
+        for (let i = -radius; i <= radius; i++) {
+          const p = (y + j) * width + x + i;
+          const d = a[p]! - b[p]!;
+          dd += d * d;
+          if (i < radius) dh += d * (a[p + 1]! - b[p + 1]!);
+          if (j < radius) dv += d * (a[p + width]! - b[p + width]!);
+        }
+      if (Math.max(dh, dv) < dd / 2) continue;
+      tiles.push({ x, y, score: diff * Math.max(ar, br), reverse: br > ar });
+    }
+  if (!tiles.length) return 0;
+  tiles.sort((l, r) => r.score - l.score);
+
+  const sample = (img: Uint8Array, x: number, y: number): number => {
+    const cx = Math.min(width - 1.001, Math.max(0, x));
+    const cy = Math.min(height - 1.001, Math.max(0, y));
+    const x0 = Math.floor(cx), y0 = Math.floor(cy);
+    const fx = cx - x0, fy = cy - y0;
+    const p = y0 * width + x0;
+    return (img[p]! * (1 - fx) + img[p + 1]! * fx) * (1 - fy) +
+      (img[p + width]! * (1 - fx) + img[p + width + 1]! * fx) * fy;
+  };
+  const css = (f: { dx: number; dy: number }) =>
+    Math.hypot(f.dx * cssWidth / width, f.dy * cssHeight / height);
+  // Check a single move over a whole part before using its farthest edge:
+  // short patches can match the wrong repeat of a texture when it turns.
+  const bounds = (includes: (i: number) => boolean) => {
+    let left = width, right = -1, top = height, bottom = -1;
+    for (let y = 0; y < height; y++)
+      for (let x = 0; x < width; x++) {
+        if (!includes(y * width + x)) continue;
+        left = Math.min(left, x); right = Math.max(right, x);
+        top = Math.min(top, y); bottom = Math.max(bottom, y);
+      }
+    return { left, right, top, bottom, x: (left + right) / 2, y: (top + bottom) / 2,
+      w: right + 1 - left, h: bottom + 1 - top };
+  };
+  const enclosed = (p: ReturnType<typeof bounds>) => p.left > 0 && p.right < width - 1 &&
+    p.top > 0 && p.bottom < height - 1 && p.w >= 2 * radius && p.h >= 2 * radius;
+  const bg = a[0]!;
+  const corners = [0, width - 1, (height - 1) * width, width * height - 1];
+  const flat = corners.every((i) => a[i] === bg && b[i] === bg);
+  const changed = bounds((i) => Math.abs(a[i]! - b[i]!) >= 16);
+  const before = flat ? bounds((i) => Math.abs(a[i]! - bg) >= 16) : changed;
+  const after = flat ? bounds((i) => Math.abs(b[i]! - bg) >= 16) : changed;
+  // A flat surround exposes the two outlines. Against a textured
+  // surround we can still check for a turn centred on the changed part.
+  const p = enclosed(before) && enclosed(after) ? before : changed;
+  const q = p === before ? after : changed;
+  if (enclosed(p) && enclosed(q)) {
+    const scale = Math.sqrt(q.w * q.h / (p.w * p.h));
+    let best = Infinity, bestPx = 0, bestTurn = 0, still = 0, n = 0;
+    for (let y = p.top; y <= p.bottom; y += 2)
+      for (let x = p.left; x <= p.right; x += 2) {
+        still += Math.abs(a[y * width + x]! - b[y * width + x]!);
+        n++;
+      }
+    const fit = (turn: number, scale: number) => {
+      const c = scale * Math.cos(turn), s = scale * Math.sin(turn);
+      let error = 0, px = 0;
+      for (let y = p.top; y <= p.bottom && error < best; y += 2)
+        for (let x = p.left; x <= p.right; x += 2) {
+          const dx = x - p.x, dy = y - p.y;
+          const u = q.x + c * dx - s * dy, v = q.y + s * dx + c * dy;
+          const value = a[y * width + x]!;
+          error += Math.abs(value - sample(b, u, v));
+          if ((p !== changed && Math.abs(value - bg) >= 16) ||
+            (p === changed && Math.abs(value - b[y * width + x]!) >= 16))
+            px = Math.max(px, css({ dx: u - x, dy: v - y }));
+        }
+      if (error < best) { best = error; bestPx = px; bestTurn = turn; }
+    };
+    fit(0, scale);
+    let lo = 255, hi = 0;
+    for (let y = Math.ceil(p.y - p.h / 4); y <= p.y + p.h / 4; y++)
+      for (let x = Math.ceil(p.x - p.w / 4); x <= p.x + p.w / 4; x++) {
+        const v = a[y * width + x]!;
+        lo = Math.min(lo, v);
+        hi = Math.max(hi, v);
+      }
+    // A plain disc can look better after an arbitrary turn because its
+    // edge lands differently on the grid. Require the same 16-level
+    // texture range inside it before following a turn. Five degrees
+    // moves the 25 px test disc's rim about 2 px.
+    if (hi - lo >= 16)
+      for (let angle = 5; angle < 360; angle += 5) fit(angle * Math.PI / 180, scale);
+    const turn = bestTurn;
+    // Quantised edges put the span of the test disc off by up to 2 px.
+    const unit = 1 / Math.min(q.w, q.h);
+    for (const ds of [-2, -1, 1, 2]) fit(turn, scale * (1 + ds * unit));
+    if (bestPx > 0 && best <= Math.min(0.3 * still, n * 9)) return bestPx;
+  }
+  // A part that turns or grows between the two pictures turns or grows its
+  // patches too. Turns of 20° and 40° each way and a growth of 18 % each
+  // way: with the interpolation's slack they match turns to about 50°,
+  // where a 3D part tumbling at 30 rad/s turns 14° over the half shutter
+  // the probe compares at 60 fps.
+  const shapes: [number, number][] = [[1, 0]];
+  for (const turn of [20, -20, 40, -40]) {
+    const r = (turn * Math.PI) / 180;
+    shapes.push([Math.cos(r), Math.sin(r)]);
+  }
+  shapes.push([1.18, 0], [1 / 1.18, 0]);
+
+  const grid = 2 * wide + 1;
+  const errors = new Float32Array(grid * grid);
+  const at = (dx: number, dy: number) => (dy + wide) * grid + dx + wide;
+  // Where the patch of `from` around (x, y) went in `to`, or null.
+  // With `home`, only within three pixels of it: the way back.
+  const follow = (from: Uint8Array, to: Uint8Array, x: number, y: number,
+    home?: { dx: number; dy: number }) => {
+    const hx = home ? Math.round(home.dx) : 0, hy = home ? Math.round(home.dy) : 0;
+    const patch = offsets.map(([i, j]) => from[(y + j) * width + x + i]!);
+    const x0 = Math.max(-wide, radius - x), x1 = Math.min(wide, width - radius - 1 - x);
+    const y0 = Math.max(-wide, radius - y), y1 = Math.min(wide, height - radius - 1 - y);
+    // shape: [cos·scale, sin·scale] applied to the patch's offsets
+    const cost = (dx: number, dy: number, [c, s]: [number, number]): number => {
+      let sum = 0;
+      if (c === 1 && s === 0) {
+        const p = (y + dy) * width + x + dx;
+        for (let i = 0; i < n; i++)
+          sum += Math.abs(patch[i]! - to[p + offsets[i]![1] * width + offsets[i]![0]]!);
+      } else
+        for (let i = 0; i < n; i++) {
+          const [ox, oy] = offsets[i]!;
+          sum += Math.abs(patch[i]! - sample(to, x + dx + c * ox - s * oy, y + dy + s * ox + c * oy));
+        }
+      return sum;
+    };
+    // The best place within `span` at every `step` pixels, kept in errors.
+    // A stripe or a checker repeats: of the places that match about as well
+    // as the best (an eighth and a level a value allow for rounding on
+    // the shifted discs), take the nearest
+    // one that is a low point of its own, the slower reading of the two.
+    const search = (span: number, step: number, shape: [number, number]) => {
+      const ylo = Math.max(y0, hy - span), yhi = Math.min(y1, hy + span);
+      const xlo = Math.max(x0, hx - span), xhi = Math.min(x1, hx + span);
+      const on = (d: number) => step === 1 || d % step === 0;
+      let best = Infinity;
+      for (let dy = ylo; dy <= yhi; dy++)
+        for (let dx = xlo; dx <= xhi; dx++) {
+          if (!on(dx) || !on(dy)) continue;
+          const e = cost(dx, dy, shape);
+          errors[at(dx, dy)] = e;
+          best = Math.min(best, e);
+        }
+      const near = best * 1.125 + n;
+      let bx = 0, by = 0, pick = Infinity, pickError = Infinity;
+      for (let dy = ylo; dy <= yhi; dy++)
+        for (let dx = xlo; dx <= xhi; dx++) {
+          if (!on(dx) || !on(dy)) continue;
+          const e = errors[at(dx, dy)]!;
+          if (e > near) continue;
+          let low = true;
+          for (let j = -step; j <= step && low; j += step)
+            for (let i = -step; i <= step; i += step) {
+              const u = dx + i, v = dy + j;
+              if ((i || j) && u >= xlo && u <= xhi && v >= ylo && v <= yhi &&
+                errors[at(u, v)]! < e) {
+                low = false;
+                break;
+              }
+            }
+          const d = Math.hypot(dx - hx, dy - hy);
+          if (low && (d < pick || (d === pick && e < pickError))) {
+            pick = d;
+            pickError = e;
+            bx = dx;
+            by = dy;
+          }
+        }
+      return { best: pickError, bx, by };
+    };
+    // Credible: it explains most of what changed — a mean error of 9 levels
+    // a value where a patch that moved off its place differs by tens on the
+    // test pages, and under 0.3 of the error at no shift.
+    const credible = (best: number, bx: number, by: number, slack: number) =>
+      best <= n * 9 * slack && (!(bx || by) || best <= 0.3 * slack * cost(0, 0, [1, 0]));
+    const refine = (lo: number, hi: number, mid: number): number => {
+      const bend = lo + hi - 2 * mid;
+      return bend > 0 ? Math.max(-0.5, Math.min(0.5, (lo - hi) / (2 * bend))) : 0;
+    };
+    const plain = search(home ? 3 : reach, 1, [1, 0]);
+    if (credible(plain.best, plain.bx, plain.by, 1)) {
+      const { best, bx, by } = plain;
+      const sx = bx > x0 && bx < x1 ? refine(errors[at(bx - 1, by)]!, errors[at(bx + 1, by)]!, best) : 0;
+      const sy = by > y0 && by < y1 ? refine(errors[at(bx, by - 1)]!, errors[at(bx, by + 1)]!, best) : 0;
+      return { dx: bx + sx, dy: by + sy };
+    }
+    // Farther, or turned or grown: every other pixel over the wide reach,
+    // then to the pixel around the best of them. These matches blur
+    // through interpolation, so they get a third more slack.
+    let pick: { best: number; bx: number; by: number; shape: [number, number] } | null = null;
+    for (const shape of shapes) {
+      // turned or grown within the plain reach, unchanged out to the wide one
+      const s = home ? search(3, 1, shape) : search(shape === shapes[0] ? wide : reach, 2, shape);
+      if (!credible(s.best, s.bx, s.by, 1.35)) continue;
+      const d = Math.hypot(s.bx - hx, s.by - hy);
+      const pd = pick ? Math.hypot(pick.bx - hx, pick.by - hy) : Infinity;
+      if (d < pd || (d === pd && s.best < pick!.best))
+        pick = { ...s, shape };
+    }
+    if (!pick) return null;
+    let { best, bx, by } = pick;
+    for (let dy = pick.by - 1; dy <= pick.by + 1; dy++)
+      for (let dx = pick.bx - 1; dx <= pick.bx + 1; dx++) {
+        if (dx < x0 || dx > x1 || dy < y0 || dy > y1) continue;
+        const e = cost(dx, dy, pick.shape);
+        if (e < best) {
+          best = e;
+          bx = dx;
+          by = dy;
+        }
+      }
+    return { dx: bx, dy: by };
+  };
+
+  const found: { x: number; y: number; dx: number; dy: number; sure: boolean }[] = [];
+  // a patch's neighbours that share at most one column or row of its values
+  const APART: [number, number][] = [[2 * radius, 0], [-2 * radius, 0], [0, 2 * radius], [0, -2 * radius]];
+  const inside = (u: number, v: number) =>
+    u >= radius && v >= radius && u < width - radius && v < height - radius;
+  // The 12 patches that changed most: more never changed the answer on the
+  // test pages and each costs two searches.
+  for (const { x, y, reverse } of tiles.slice(0, 12)) {
+    const from = reverse ? b : a;
+    const to = reverse ? a : b;
+    const there = follow(from, to, x, y);
+    if (!there) continue;
+    // Followed back from where it landed, it must come home within two
+    // pixels: a new picture rarely matches both ways.
+    const u = Math.round(x + there.dx), v = Math.round(y + there.dy);
+    if (!inside(u, v)) continue;
+    const back = follow(to, from, u, v, { dx: -there.dx, dy: -there.dy });
+    if (!back || Math.hypot(u + back.dx - x, v + back.dy - y) > 2) continue;
+    // Grain that changes every frame matches somewhere by chance, and both
+    // ways: the same pixels matched back are the same chance. What moved
+    // carries its neighbourhood with it — a patch beside it, sharing a
+    // column of it at most, lands with it.
+    const sure = APART.some(([i, j]) => {
+      if (!inside(x + i, y + j)) return false;
+      const t = follow(from, to, x + i, y + j);
+      return !!t && Math.hypot(t.dx - there.dx, t.dy - there.dy) <= 2;
+    });
+    const sign = reverse ? -1 : 1;
+    found.push({ x, y, dx: sign * there.dx, dy: sign * there.dy, sure });
+  }
+  // For a shift under half a thumbnail pixel, fitting the frame's grey
+  // gradients is steadier than snapping the edges to the patch grid.
+  // Downweight residuals over 20 levels: the 0.4 px test disc's hard
+  // silhouette can cross a pixel even where its texture moved only a
+  // fraction. The small shift explains over 60% of the weighted error.
+  if (found.every(({ dx, dy }) => Math.hypot(dx, dy) < radius)) {
+    let xx = 0, yy = 0, xy = 0, ex = 0, ey = 0, ee = 0;
+    for (let y = 1; y < height - 1; y++)
+      for (let x = 1; x < width - 1; x++) {
+        const p = y * width + x;
+        const e = a[p]! - b[p]!;
+        const dx = (b[p + 1]! - b[p - 1]! + a[p + 1]! - a[p - 1]!) / 4;
+        const dy = (b[p + width]! - b[p - width]! + a[p + width]! - a[p - width]!) / 4;
+        const weight = 1 / Math.max(1, (e / 20) ** 2);
+        xx += weight * dx * dx; yy += weight * dy * dy; xy += weight * dx * dy;
+        ex += weight * e * dx; ey += weight * e * dy; ee += weight * e * e;
+      }
+    const det = xx * yy - xy * xy;
+    if (det > 0) {
+      const dx = (yy * ex - xy * ey) / det;
+      const dy = (xx * ey - xy * ex) / det;
+      if (Math.hypot(dx, dy) <= 0.5 && dx * ex + dy * ey >= 0.6 * ee)
+        return css({ dx, dy });
+    }
+  }
+  // Nothing followed for certain.
+  const unfollowed = (): number => {
+    // Grain alone — each pixel off on its own, no two neighbours alike — is
+    // no motion: 0, and the caller's own test decides.
+    let dd = 0, dh = 0, dv = 0;
+    for (let y = 0; y < height - 1; y++)
+      for (let x = 0; x < width - 1; x++) {
+        const p = y * width + x;
+        const d = a[p]! - b[p]!;
+        dd += d * d;
+        dh += d * (a[p + 1]! - b[p + 1]!);
+        dv += d * (a[p + width]! - b[p + width]!);
+      }
+    if (dd > 0 && Math.max(dh, dv) < 0.25 * dd) return 0;
+    // A local change in both directions can be a turn that lost its
+    // texture between samples. Use the radius of the changed box. A
+    // flash or a replacement across the whole canvas keeps the cut signal.
+    if (enclosed(changed) && a.some((v, i) => v - b[i]! >= 16) &&
+      b.some((v, i) => v - a[i]! >= 16))
+      return Math.max(fallback, css({ dx: changed.w / 2, dy: changed.h / 2 }));
+    return fallback;
+  };
+  if (!found.length) return unfollowed();
+  // A repeated texture can be followed both ways to the wrong repeat. The
+  // fastest patch counts when another moved alike: within two pixels, and
+  // half the distance between them up to 12 pixels (two patches apart),
+  // which a part turning by up to 29° between the two pictures keeps
+  // (2·sin 14.5° = 0.5) — a 3D part tumbling at 30 rad/s turns about 14°
+  // over the half-shutter the probe compares at 60 fps.
+  // Two patches that overlap share their chance matches too: another
+  // counts once it is a patch apart (its values at most a column of these).
+  let px = -1;
+  for (const f of found)
+    if (found.some((g) => g !== f && Math.hypot(f.x - g.x, f.y - g.y) >= 2 * radius &&
+      Math.hypot(f.dx - g.dx, f.dy - g.dy) <= 2 + 0.5 * Math.min(12, Math.hypot(f.x - g.x, f.y - g.y))))
+      px = Math.max(px, css(f));
+  if (px >= 0) return px;
+  // Patches that each moved their own way: at least the fixed distance —
+  // those found at both ends or beside a neighbour; chance matches in grain
+  // are none.
+  const sure = found.filter((f) => f.sure);
+  if (!sure.length) return unfollowed();
+  const alone = sure.map(css).sort((l, r) => l - r);
+  // found where they were: they did not move
+  if (sure.every((f) => Math.hypot(f.dx, f.dy) < 1)) return alone[alone.length >> 1]!;
+  return Math.max(fallback, alone[alone.length >> 1]!);
+}
+
 export function filmClockSource(opts: FilmClockOptions): string {
   // a transpiler that keeps function names (tsx/esbuild) calls a module-level
   // `__name` helper inside the body; the page has none, so it gets a no-op
-  return `(() => { const __name = (f) => f; (${installFilmClock.toString()})(${JSON.stringify(opts)}); })();`;
+  const helpers = [canvasDisplacement, canvasGrey, canvasAxisSize, gsapTickerRunning]
+    .map((fn) => `(${fn.toString()})`).join(", ");
+  return `(() => { const __name = (f) => f; (${installFilmClock.toString()})(${JSON.stringify(opts)}, ${helpers}); })();`;
 }
 
-function installFilmClock(opts: FilmClockOptions): void {
+function installFilmClock(
+  opts: FilmClockOptions,
+  displacement: typeof canvasDisplacement,
+  grey: typeof canvasGrey,
+  axisSize: typeof canvasAxisSize,
+  gsapRunning: typeof gsapTickerRunning,
+): void {
   // biome-ignore lint/suspicious/noExplicitAny: the page's globals are untyped
   const w = window as any;
   if (w.__ot) return;
   const realSetTimeout = w.setTimeout.bind(w) as typeof setTimeout;
   const RealDate = w.Date as DateConstructor;
   const realPause = HTMLMediaElement.prototype.pause;
-  // motion (px) credited to a canvas whose pixels changed or a playing video —
-  // their content moves in ways no element box shows
+  // motion (px) credited to a playing video or a canvas the probe cannot
+  // read, and the old canvas-change signal used to choose a shutter side
   const OPAQUE_PX = 12;
   const STEP_MS = 1000 / 60;
   const MAX_JUMP_MS = 10_000;
@@ -1502,26 +1926,126 @@ function installFilmClock(opts: FilmClockOptions): void {
 
   // --- motion: how far anything visible moves over the shutter ---------------
   const thumbCanvas = document.createElement("canvas");
-  thumbCanvas.width = 48;
-  thumbCanvas.height = 27;
+  const CUT_WIDTH = 48;
+  const CUT_HEIGHT = 27;
   let thumbCtx: CanvasRenderingContext2D | null = null;
-  function thumb(c: HTMLCanvasElement): Uint8ClampedArray | null {
+  function readThumb(c: HTMLCanvasElement): CanvasThumb | null {
+    if (!c.width || !c.height) return null;
+    const scale = Math.min(1, 192 / Math.max(c.width, c.height));
+    const width = Math.max(1, Math.round(c.width * scale));
+    const height = Math.max(1, Math.round(c.height * scale));
+    const stride = Math.max(width, CUT_WIDTH);
+    const rows = height + CUT_HEIGHT;
+    if (thumbCanvas.width !== stride) thumbCanvas.width = stride;
+    if (thumbCanvas.height !== rows) thumbCanvas.height = rows;
     try {
       thumbCtx ??= thumbCanvas.getContext("2d", { willReadFrequently: true });
       if (!thumbCtx) return null;
-      thumbCtx.clearRect(0, 0, 48, 27);
-      thumbCtx.drawImage(c, 0, 0, 48, 27);
-      return thumbCtx.getImageData(0, 0, 48, 27).data.slice();
+      thumbCtx.clearRect(0, 0, stride, rows);
+      thumbCtx.drawImage(c, 0, 0, width, height);
+      // Keep the original 48×27 RGBA comparison for choosing the shutter
+      // side. Both drawings share one read back from the thumbnail canvas.
+      thumbCtx.drawImage(c, 0, height, CUT_WIDTH, CUT_HEIGHT);
+      const data = thumbCtx.getImageData(0, 0, stride, rows).data;
+      const pixels = new Uint8Array(width * height);
+      for (let y = 0; y < height; y++)
+        for (let x = 0, j = 4 * y * stride; x < width; x++, j += 4)
+          pixels[y * width + x] = grey(data[j]!, data[j + 1]!, data[j + 2]!, data[j + 3]!);
+      const cutPixels = new Uint8ClampedArray(CUT_WIDTH * CUT_HEIGHT * 4);
+      for (let y = 0; y < CUT_HEIGHT; y++) {
+        const from = 4 * (y + height) * stride;
+        cutPixels.set(data.subarray(from, from + CUT_WIDTH * 4), y * CUT_WIDTH * 4);
+      }
+      return { pixels, width, height, cutPixels };
     } catch {
+      thumbCanvas.width = stride; // clears the taint for the next canvas
       return null; // a tainted or lost canvas: counted as moving
     }
+  }
+
+  let probing = false;
+  const gpuCanvases = new WeakSet<HTMLCanvasElement>();
+  const gpuPictures = new WeakMap<HTMLCanvasElement, CanvasThumb | null>();
+  type PendingTexture = { texture: object; clearing: boolean };
+  let pendingTextures = new WeakMap<object, Map<HTMLCanvasElement, PendingTexture>>();
+  // A WebGPU canvas's drawing buffer can be gone by the time an async
+  // __render returns. Read it in the task that submitted the draw, before
+  // the browser presents it. Keep the first picture for canvases drawn once
+  // at load, then read only while probing. The screenshots use the page's
+  // own presentation.
+  type GPUContext = { canvas: HTMLCanvasElement | OffscreenCanvas };
+  type GPUConfig = { device: { queue: object } };
+  const contexts = w.GPUCanvasContext?.prototype;
+  const queues = w.GPUQueue?.prototype;
+  if (contexts && queues) {
+    const configure = contexts.configure;
+    const unconfigure = contexts.unconfigure;
+    const getCurrentTexture = contexts.getCurrentTexture;
+    const submit = queues.submit;
+    const configured = new WeakMap<GPUContext, object>();
+    const forget = (context: GPUContext) => {
+      if (!(context.canvas instanceof HTMLCanvasElement)) return;
+      const queue = configured.get(context);
+      if (queue) pendingTextures.get(queue)?.delete(context.canvas);
+      gpuPictures.delete(context.canvas);
+    };
+    contexts.configure = function (this: GPUContext, config: GPUConfig) {
+      configure.call(this, config);
+      forget(this);
+      configured.set(this, config.device.queue);
+      if (this.canvas instanceof HTMLCanvasElement) {
+        gpuCanvases.add(this.canvas);
+      }
+    };
+    contexts.unconfigure = function (this: GPUContext) {
+      unconfigure.call(this);
+      forget(this);
+      configured.delete(this);
+    };
+    contexts.getCurrentTexture = function (this: GPUContext) {
+      const texture = getCurrentTexture.call(this);
+      const queue = configured.get(this);
+      if (queue && this.canvas instanceof HTMLCanvasElement &&
+        (probing || !gpuPictures.has(this.canvas))) {
+        let wanted = pendingTextures.get(queue);
+        if (!wanted) {
+          wanted = new Map();
+          pendingTextures.set(queue, wanted);
+        }
+        if (wanted.get(this.canvas)?.texture !== texture)
+          wanted.set(this.canvas, { texture, clearing: false });
+      }
+      return texture;
+    };
+    queues.submit = function (this: object, commands: Iterable<unknown>) {
+      submit.call(this, commands);
+      const wanted = pendingTextures.get(this);
+      if (!wanted) return;
+      // A frame can be drawn in several submits (a clear pass, then the
+      // scene loaded over it, then an overlay): read after each one, so the
+      // last submit before the browser presents the texture is the picture.
+      // Expire only this texture. The next draw can acquire its texture
+      // before the timer for the previous one runs.
+      for (const [canvas, frame] of wanted) {
+        gpuPictures.set(canvas, readThumb(canvas));
+        if (frame.clearing) continue;
+        frame.clearing = true;
+        realSetTimeout(() => {
+          if (wanted.get(canvas) === frame) wanted.delete(canvas);
+        }, 0);
+      }
+    };
+  }
+
+  function thumb(c: HTMLCanvasElement): CanvasThumb | null {
+    return gpuCanvases.has(c) ? (gpuPictures.get(c) ?? null) : readThumb(c);
   }
   type Snapshot = {
     rects: Map<Element, DOMRect>;
     /** what a still element shows — an image's source, a leaf's text: when it
      *  changes, the picture cut there, however small the element */
     shows: Map<Element, string>;
-    thumbs: Map<HTMLCanvasElement, Uint8ClampedArray | null>;
+    thumbs: Map<HTMLCanvasElement, CanvasThumb | null>;
     video: boolean;
   };
   function showing(el: Element): string | null {
@@ -1537,7 +2061,7 @@ function installFilmClock(opts: FilmClockOptions): void {
     const vh = innerHeight;
     const rects = new Map<Element, DOMRect>();
     const shows = new Map<Element, string>();
-    const thumbs = new Map<HTMLCanvasElement, Uint8ClampedArray | null>();
+    const thumbs = new Map<HTMLCanvasElement, CanvasThumb | null>();
     let video = false;
     for (const el of Array.from(document.querySelectorAll("body *"))) {
       const r = el.getBoundingClientRect();
@@ -1610,6 +2134,8 @@ function installFilmClock(opts: FilmClockOptions): void {
      *  draws glyphs on whole device pixels, so text moving under one a frame
      *  steps */
     text: number;
+    /** the element at the middle of the moving text speeds */
+    textElement: Element | null;
     /** the picture as a whole, fitted to the elements in both: b = s·a + t
      *  (a camera's zoom and pan), from n elements; null with too few */
     view: {
@@ -1699,16 +2225,11 @@ function installFilmClock(opts: FilmClockOptions): void {
       who: idOf(el),
     };
   }
-  const median = (v: number[]): number => {
-    const s = v.slice().sort((x, y) => x - y);
-    const m = s.length >> 1;
-    return s.length % 2 ? s[m]! : (s[m - 1]! + s[m]!) / 2;
-  };
   function moved(a: Snapshot, b: Snapshot): Change {
     let px = 0;
     let churn = 0;
     let cuts = 0;
-    const text: number[] = [];
+    const text: { px: number; el: Element }[] = [];
     // the largest element that moves: under a camera, the picture itself
     let big: [number, number, number, number][] = [];
     let bigEl: Element | null = null;
@@ -1738,7 +2259,7 @@ function installFilmClock(opts: FilmClockOptions): void {
       // text, not a picture: Chrome resamples an image wherever it lands, and
       // puts glyphs on whole device pixels
       if (shown?.trim() && el.tagName !== "IMG" && d > 1e-4)
-        text.push(Math.hypot(ra.left - rb.left, ra.top - rb.top));
+        text.push({ px: Math.hypot(ra.left - rb.left, ra.top - rb.top), el });
       // what moves: what holds still (a caption over a moving picture) is not the picture's move
       // its two corners, so that one picture alone (a screenshot past the
       // frame's edges under a zoom) gives the zoom as well as the pan
@@ -1758,25 +2279,68 @@ function installFilmClock(opts: FilmClockOptions): void {
         churn += area(rb);
         if (inside(rb)) cuts++;
       }
-    for (const [el, ta] of a.thumbs) {
-      if (!b.thumbs.has(el)) continue;
-      const tb = b.thumbs.get(el);
-      let changed = !ta || !tb;
-      if (ta && tb) {
-        let diff = 0;
-        for (let i = 0; i < ta.length; i++) diff += Math.abs(ta[i]! - tb[i]!);
-        changed = diff / ta.length > 0.5;
-      }
-      if (changed) px = Math.max(px, OPAQUE_PX);
-    }
     if (a.video || b.video) px = Math.max(px, OPAQUE_PX);
+    text.sort((l, r) => l.px - r.px);
+    const middle = text.length >> 1;
+    const upper = text[middle];
+    const lower = text[middle - 1];
+    const even = text.length % 2 === 0;
     return {
       px,
       churn,
       cuts,
-      text: text.length ? median(text) : 0,
+      text: !upper ? 0 : even ? (lower!.px + upper.px) / 2 : upper.px,
+      textElement: (even && lower?.px ? lower : upper)?.el ?? null,
       view: fitView(big, Math.min(1, movingArea / (vw * vh)), bigEl),
     };
+  }
+
+  // A change on just one side still uses the old fixed-distance signal.
+  // The measured displacement is for spacing samples on the chosen span.
+  const canvasChanged = (a: CanvasThumb, b: CanvasThumb): boolean => {
+    let diff = 0;
+    for (let i = 0; i < a.cutPixels.length; i++)
+      diff += Math.abs(a.cutPixels[i]! - b.cutPixels[i]!);
+    return diff / a.cutPixels.length > 0.5;
+  };
+  // The canvas's own width and height on screen, along its own axes: its
+  // layout box scaled by the transforms on it and its ancestors. The
+  // bounding box swaps the two for a canvas turned 90°.
+  function drawnSize(el: HTMLCanvasElement, box: DOMRect): [number, number] {
+    if (!el.offsetWidth || !el.offsetHeight) return [box.width, box.height];
+    let m = new DOMMatrix();
+    for (let node: Element | null = el; node; node = node.parentElement) {
+      const t = getComputedStyle(node).transform;
+      if (t && t !== "none") m = new DOMMatrix(t).multiply(m);
+    }
+    return axisSize(el.offsetWidth, el.offsetHeight, m, el.currentCSSZoom ?? 1);
+  }
+  function canvasMotion(a: Snapshot, b: Snapshot, measure: boolean): number {
+    let px = 0;
+    for (const [el, ta] of a.thumbs) {
+      if (!b.thumbs.has(el)) continue;
+      const tb = b.thumbs.get(el);
+      if (!ta || !tb) {
+        px = Math.max(px, OPAQUE_PX);
+      } else if (measure) {
+        const [cssWidth, cssHeight] = drawnSize(el, b.rects.get(el)!);
+        const d = ta.width === tb.width && ta.height === tb.height
+          ? displacement(ta.pixels, tb.pixels, ta.width, ta.height, cssWidth, cssHeight)
+          : OPAQUE_PX;
+        // A change of colour alone can leave the grey thumbnails equal.
+        px = Math.max(px, d || (canvasChanged(ta, tb) ? OPAQUE_PX : 0));
+      } else if (canvasChanged(ta, tb)) return OPAQUE_PX;
+    }
+    return px;
+  }
+
+  function textLabel(el: Element | null, picture: Snapshot): TextCause | null {
+    if (!el) return null;
+    const text = (picture.shows.get(el) ?? "").trim().replace(/\s+/g, " ");
+    const key = idOf(el);
+    const name = el.id ? `#${el.id.replace(/\s+/g, " ").slice(0, 40)}` : ` [${key}]`;
+    const label = `${el.tagName.toLowerCase()}${name} "${text.length > 32 ? `${text.slice(0, 31)}…` : text}"`;
+    return { key, label };
   }
   /** how far anything moves while the shutter is open, and which part of the
    *  shutter to expose: side 0 all of it, -1 its first half, 1 its second;
@@ -1788,12 +2352,14 @@ function installFilmClock(opts: FilmClockOptions): void {
     px: number;
     side: number;
     text: number;
+    textCause: TextCause | null;
     /** the picture's zoom and pan across the exposed span, as rates: s − 1
      *  and t (px) a second, about the page's top left; null when not fitted */
     view: { ds: number; tx: number; ty: number; share: number; rigid: number; who: string } | null;
   }> {
     // The page's own motion(t, half) says how far its picture moves across
-    // [t-half, t+half] (what a canvas draws, which no element shows); where the
+    // [t-half, t+half] (what a canvas draws, which no element shows) in place
+    // of the canvas matcher; its elements are still measured, and where the
     // picture cuts is still found here, so a hook never opens the shutter across one.
     const hook = w.__film?.motion;
     const told =
@@ -1803,12 +2369,21 @@ function installFilmClock(opts: FilmClockOptions): void {
             return Number.isFinite(px) && px > 0 ? px : 0;
           }
         : null;
-    await seek(Math.max(0, tSec - halfSec));
-    const a = snapshot();
-    await seek(tSec);
-    const mid = snapshot();
-    await seek(tSec + halfSec);
-    const b = snapshot();
+    probing = true;
+    let a: Snapshot;
+    let mid: Snapshot;
+    let b: Snapshot;
+    try {
+      await seek(Math.max(0, tSec - halfSec));
+      a = snapshot();
+      await seek(tSec);
+      mid = snapshot();
+      await seek(tSec + halfSec);
+      b = snapshot();
+    } finally {
+      probing = false;
+      pendingTextures = new WeakMap();
+    }
     // A shutter never straddles a cut: when something changes in one half of
     // the shutter only — it jumps, a large part of the picture appears or
     // vanishes at once, or anything inside the picture appears, vanishes or
@@ -1818,8 +2393,10 @@ function installFilmClock(opts: FilmClockOptions): void {
     const first = moved(a, mid);
     const second = moved(mid, b);
     const screen = innerWidth * innerHeight;
-    const onlyIn = (x: Change, y: Change) =>
-      (x.px > 1 && y.px < 0.1 * x.px) ||
+    const firstPx = Math.max(first.px, canvasMotion(a, mid, false));
+    const secondPx = Math.max(second.px, canvasMotion(mid, b, false));
+    const onlyIn = (x: Change, y: Change, xPx: number, yPx: number) =>
+      (xPx > 1 && yPx < 0.1 * xPx) ||
       (x.churn > 0.25 * screen && y.churn < 0.05 * screen) ||
       (x.cuts > 0 && y.cuts === 0);
     // with a hook, it is asked for the half that is exposed
@@ -1835,26 +2412,25 @@ function installFilmClock(opts: FilmClockOptions): void {
             who: v.who,
           }
         : null;
-    if (onlyIn(first, second))
-      return {
-        px: told ? await told(tSec + quarter, quarter) : second.px,
-        side: 1,
-        text: second.text / halfSec,
-        view: rate(second.view, halfSec),
-      };
-    if (onlyIn(second, first))
-      return {
-        px: told ? await told(tSec - quarter, quarter) : first.px,
-        side: -1,
-        text: first.text / halfSec,
-        view: rate(first.view, halfSec),
-      };
-    const whole = moved(a, b);
+    const side = onlyIn(first, second, firstPx, secondPx)
+      ? 1
+      : onlyIn(second, first, secondPx, firstPx) ? -1 : 0;
+    const change = side === 1 ? second : side === -1 ? first : moved(a, b);
+    const start = side === 1 ? mid : a;
+    const end = side === -1 ? mid : b;
+    const half = side === 0 ? halfSec : quarter;
+    const textCause = change.text > 0 ? textLabel(change.textElement, end) : null;
     return {
-      px: told ? await told(tSec, halfSec) : whole.px,
-      side: 0,
-      text: whole.text / (2 * halfSec),
-      view: rate(whole.view, 2 * halfSec),
+      // a hook speaks for what the page draws; its elements outside a canvas
+      // are still measured here, and the larger of the two is the motion
+      px: Math.max(
+        change.px,
+        told ? await told(tSec + side * quarter, half) : canvasMotion(start, end, true),
+      ),
+      side,
+      text: change.text / (2 * half),
+      textCause,
+      view: rate(change.view, 2 * half),
     };
   }
 
@@ -1885,8 +2461,18 @@ function installFilmClock(opts: FilmClockOptions): void {
     if (mode === "clock") await firstFrame();
     await settle();
     const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null);
+    const tickers: FilmPageInfo["tickers"] = [];
+    if (mode === "clock") {
+      if (gsapRunning(w.gsap)) tickers.push("GSAP");
+      // Anime v4's ESM and UMD builds register their engine in AnimeJS.
+      // A build that does not expose its engine cannot be identified here.
+      if (Array.isArray(w.AnimeJS) && w.AnimeJS.some(
+        (entry: { engine?: { reqId?: number } } | null) => !!entry?.engine?.reqId,
+      )) tickers.push("anime.js");
+    }
     return {
       mode,
+      tickers,
       duration: num(film.duration ?? w.__duration),
       width: num(film.width),
       height: num(film.height),

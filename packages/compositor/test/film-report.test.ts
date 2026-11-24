@@ -14,7 +14,7 @@ import { gatherComponents, readComponentSource, writeComponents } from "../src/f
 import { initFilm } from "../src/film/kit";
 import { type GreyFrames, jumpMove } from "../src/film/probe";
 import { readPageText } from "../src/film/probe-text";
-import { renderFilm } from "../src/film/render";
+import { filmEvents, renderFilm } from "../src/film/render";
 import {
   type FilmReport,
   filmReport,
@@ -23,6 +23,7 @@ import {
   partUses,
   pastPixels,
   type ReportJump,
+  reportIntent,
   slowTextSpans,
   stretchCount,
 } from "../src/film/report";
@@ -31,6 +32,36 @@ import { writePartsShoot } from "./fixtures/parts-shoot";
 
 const W = 192;
 const H = 108;
+
+test("a lift covers a turn by the moment it was measured, even when the move started earlier", () => {
+  const intent = reportIntent(
+    [0.3, 0.8, 2.5],
+    [{ t: 0.8, kind: "hidden-cut" }],
+    [{ from: 0.9, to: 1, handoff: "hidden-cut" }, { from: 1.13, to: 1.8, handoff: "lift" }],
+    30,
+  );
+  assert.equal(intent.declared, 4);
+  assert.equal(intent.jump(0.31), "cut");
+  assert.equal(intent.jump(0.83), "hidden-cut");
+  assert.equal(intent.jump(0.94), null);
+  assert.equal(intent.jump(0.97), "hidden-cut");
+  assert.equal(intent.jump(1.56666667), "lift");
+  assert.equal(intent.jump(1.6), "lift");
+  assert.equal(intent.jump(1.81), null);
+  const run = { from: 0.83, to: 1.9, at: 1.567 };
+  assert.ok(intent.turn(run));
+  assert.ok(intent.turn({ ...run, at: 1.09 }), "within a frame and a half before the lift");
+  assert.ok(intent.turn({ ...run, at: 1.84 }), "within a frame and a half after the lift");
+  assert.ok(!intent.turn({ ...run, at: 1.079 }), "too early, even though the move overlaps the lift");
+  assert.ok(!intent.turn({ ...run, at: 1.851 }), "too late, even though the move overlaps the lift");
+});
+
+test("a cut written both as a cut and a hidden cut counts once, as in the events file", () => {
+  const events = [{ t: 0.3, kind: "cut" }, { t: 0.1 + 0.2, kind: "hidden-cut" }];
+  const declared = filmEvents({ fps: 30, f0: 0, f1: 30, total: 30 }, events, [], [], false).declaredCuts;
+  assert.deepEqual(declared, [0.3]);
+  assert.equal(reportIntent([0.3], events, [], 30).declared, declared.length);
+});
 
 function texture(w: number, h: number, seed: number): Uint8Array {
   let s = seed >>> 0 || 1;
@@ -185,6 +216,34 @@ const REPORT: FilmReport = {
   ms: 3000,
 };
 
+test("the report says which declared jumps and turns it saw", () => {
+  const lines = formatFilmReport({
+    ...REPORT,
+    jumps: { how: "measured", declared: 1, list: [], intended: [
+      { t: 1, kind: "hidden-cut" }, { t: 1.567, kind: "lift" }, { t: 1.6, kind: "lift" },
+    ] },
+    turns: {
+      how: "measured", list: [],
+      intended: [{ from: 1.133, to: 1.8, at: 1.567, axis: "x", kind: "past", px: 12 }],
+    },
+  }, { probe: "probe" });
+  assert.match(lines.join("\n"), /one-frame jumps not declared as cuts: none/);
+  assert.doesNotMatch(lines.join("\n"), /does not head straight there:/);
+  assert.match(lines.join("\n"), /declared intent seen: .*cuts hidden in motion, .*during layered lifts/);
+});
+
+test("a jump at a plain declared cut adds no line to the report", () => {
+  const lines = formatFilmReport({
+    ...REPORT,
+    jumps: {
+      how: "measured", declared: 1, list: [],
+      intended: [{ t: 1, kind: "cut" }],
+    },
+  }, { probe: "probe" });
+  assert.match(lines.join("\n"), /one-frame jumps not declared as cuts: none/);
+  assert.doesNotMatch(lines.join("\n"), /declared intent seen/);
+});
+
 test("a word rewritten in place, its neighbours shifted along, is not said to have moved; a part that jumps whole is", () => {
   const line = (list: ReportJump[]) =>
     formatFilmReport(
@@ -282,6 +341,7 @@ test("the lines: what was measured, where, how much — and where the full repor
     { probe: "p" },
   ).join("\n");
   assert.match(none, /one-frame jumps not declared as cuts: none \(the page declares no cuts/);
+  assert.match(none, /events of kind "cut" or "hidden-cut", a segment whose handoff is "hidden-cut", or "lift"/);
   assert.match(none, /pictures taken mid-change: not measured — the page was not played/);
   assert.match(none, /live text moving under a device pixel a frame for a second or more: none/);
 });

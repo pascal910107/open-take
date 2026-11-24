@@ -156,6 +156,21 @@ test("a range put into a master: its curves and found cuts in place of the maste
   assert.equal(patchEvents(range, range), null);
 });
 
+test("hidden cuts join declared cuts at event times and at the end of a handoff", () => {
+  const tl = timeline({});
+  tl.event(0.1, "cut");
+  tl.event(0.3, "hidden-cut");
+  tl.segment(0.3, 0.5, { handoff: { kind: "hidden-cut", speed: 4 } });
+  tl.segment(0.5, 0.9, { handoff: "lift" });
+  const segments = checkSegments(tl.segments());
+  const ev = filmEvents(
+    { fps: 10, f0: 0, f1: 10, total: 10 }, checkEvents(tl.events()), [], [], false, segments,
+  );
+  assert.deepEqual(ev.declaredCuts, [0.1, 0.3, 0.5]);
+  assert.deepEqual(ev.cuts, ev.declaredCuts);
+  assert.deepEqual(ev.segments[0]?.seam, { speed: 4 });
+});
+
 test("the timeline declares events and curves for the page to hand over", () => {
   const tl = timeline({ at: { hook: 0, search: 2.5 } });
   assert.equal(tl.bpm, undefined, "no tempo unless the film chooses one");

@@ -646,7 +646,7 @@ export const DEFAULT_CURSOR: CursorConfig = {
   // critically-damped spring that IS the measured SS curve over these windows.
   zoomOutMs: 1340,
   zoomInMs: 730,
-  // Asymptotic settle + pull-out dwell — the A/B "C variant" Pascal signed off
+  // Asymptotic settle + pull-out dwell — the "C variant" signed off in an A/B viewing
   // (2026-07-26): each camera move keeps a ~4% residual settling INTO the hold
   // (no velocity cliff at the keyframe — the frame-tracked reference tail), and
   // a squeezed pull-out stays ≥800ms on the payoff, landing late instead of

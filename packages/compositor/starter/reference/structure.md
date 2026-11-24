@@ -29,7 +29,8 @@ measurement is not enough to conclude.
 ## 0. Summary
 
 - **0 hard cuts** in the whole film (maximum scene score 0.059; `film probe`: no
-  hard cut) [verified]. It is one continuous 57.8 s shot that changes scene
+  hard cut) [verified]. Checked frame by frame, `motion.md` §2 finds three,
+  each on the fastest frame of a move, which these detectors miss. It is one continuous 57.8 s shot that changes scene
   through objects, push-ins, whips and reframing. I divided it into 23 stretches
   of 0.8–4.4 s each (median 2.5 s).
 - The story is **one launch project of one invented company (GeeGolly Good

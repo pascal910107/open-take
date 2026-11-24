@@ -51,7 +51,15 @@ import {
   pageSourcesOf,
   readProvenance,
 } from "./provenance";
-import { checkSources, FILM_TAG, resolveFilmPage } from "./render";
+import {
+  checkSources,
+  FILM_TAG,
+  type FilmSegment,
+  handoffIs,
+  hiddenCutTimes,
+  liftSpans,
+  resolveFilmPage,
+} from "./render";
 
 // --- the picture as grey frames --------------------------------------------------------
 
@@ -2110,6 +2118,21 @@ export async function filmProbe(opts: FilmProbeOptions): Promise<{
     .filter((v): v is number => typeof v === "number" && Number.isFinite(v))
     .sort((a, b) => a - b);
   const tol = 1.5 / fps;
+  // what the page declares beside its cuts, moved onto the film's clock as
+  // parseFilmEvents moves its events (a render of part of the page)
+  const range = Array.isArray(rawObj.range) ? (rawObj.range as unknown[]) : [];
+  const shift = typeof range[0] === "number" && Number.isFinite(range[0]) ? range[0] : 0;
+  const segs = (Array.isArray(rawObj.segments) ? rawObj.segments : [])
+    .filter(
+      (x): x is FilmSegment =>
+        !!x &&
+        typeof x === "object" &&
+        Number.isFinite((x as FilmSegment).from) &&
+        Number.isFinite((x as FilmSegment).to),
+    )
+    .map((x) => ({ ...x, from: x.from - shift, to: x.to - shift }));
+  const hidden = hiddenCutTimes(ev?.events ?? [], segs);
+  const lifts = liftSpans(segs);
   // each hard cut: does either side move next to it, does anything cross
   const seamList = seamsAtCuts(
     changes.filter((c) => c.kind === "hard cut"),
@@ -2316,9 +2339,19 @@ export async function filmProbe(opts: FilmProbeOptions): Promise<{
       how: !rawEvents ? "not measured" : declared.length ? "measured" : "not detected",
       file: eventsPath,
       list: declared.map(round3),
-      unseen: declared.filter((d) => !cutTimes.some((c) => Math.abs(c - d) <= tol)).map(round3),
+      // a cut hidden under motion is meant not to show; a jump inside a
+      // declared lift is the layer moving on its own
+      unseen: declared
+        .filter((d) => !cutTimes.some((c) => Math.abs(c - d) <= tol))
+        .filter((d) => !hidden.some((h) => Math.abs(h - d) <= tol))
+        .map(round3),
       undeclared: rawEvents
-        ? cutTimes.filter((c) => !declared.some((d) => Math.abs(c - d) <= tol))
+        ? cutTimes.filter(
+            (c) =>
+              !declared.some((d) => Math.abs(c - d) <= tol) &&
+              !hidden.some((h) => Math.abs(h - c) <= tol) &&
+              !lifts.some(([a, b]) => c >= a - tol && c <= b + tol),
+          )
         : [],
     },
     subjects: {
@@ -2821,7 +2854,12 @@ function formatSegment(s: SegmentReading, p: FilmProbe): string[] {
     L.push(
       `  handoff written: ${s.handoff} · seen at ${fmtT(s.to)} [${h.how}]: ${h.kind}${h.at != null ? ` at ${fmtT(h.at)}` : ""}${h.across ? `, across it: ${h.across}` : ""}${h.nearestOnset != null ? `; nearest onset ${ms(h.nearestOnset)}` : ""}`,
     );
-    if (h.kind === "hard cut" && !SEAM_KINDS.test(s.handoff.trim()))
+    if (
+      h.kind === "hard cut" &&
+      !SEAM_KINDS.test(s.handoff.trim()) &&
+      !handoffIs(s, "hidden-cut") &&
+      !handoffIs(s, "lift")
+    )
       L.push(
         `    (written in words, so nothing performs it: a seam's kind — curve, whip, depth, inverse, push, dip — on this handoff is performed by \`scenes(…, { tl, seams })\`, kit/time.js; \`film gallery --blocks seams\` draws each)`,
       );

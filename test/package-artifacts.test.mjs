@@ -53,14 +53,14 @@ function pack(packageDir, destination) {
     pnpmEntry && /pnpm/.test(pnpmEntry),
     `this gate packs with pnpm — run it as \`pnpm test:package\` (npm_execpath is ${pnpmEntry || "unset"})`,
   );
-  const output = execFileSync(
-    process.execPath,
-    [pnpmEntry, "pack", "--pack-destination", destination, "--json"],
-    {
-      cwd: resolve(workspaceRoot, packageDir),
-      encoding: "utf8",
-    },
-  );
+  const args = ["pack", "--pack-destination", destination, "--json"];
+  const isNodeScript = /\.[cm]?js$/i.test(pnpmEntry);
+  const command = isNodeScript ? process.execPath : pnpmEntry;
+  const commandArgs = isNodeScript ? [pnpmEntry, ...args] : args;
+  const output = execFileSync(command, commandArgs, {
+    cwd: resolve(workspaceRoot, packageDir),
+    encoding: "utf8",
+  });
   const jsonStart = Math.max(0, output.lastIndexOf("\n{") + 1);
   return JSON.parse(output.slice(jsonStart)).filename;
 }
@@ -160,6 +160,18 @@ test("packed release artifacts form a browser-download-free dependency chain", a
     "starter/reference/motion.md",
     "starter/lib/anim.js",
     "starter/lib/sampler.mjs",
+    "starter/reference/travel/structure.md",
+    "starter/reference/travel/motion.md",
+    "starter/reference/travel/sound.md",
+    "starter/lib/moves.js",
+    "starter/lib/hud.js",
+    "starter/lib/swarm.js",
+    "starter/lib/space.js",
+    "starter/lib/solid.js",
+    "starter/lib/physics.js",
+    "starter/lib/physics-seeds.mjs",
+    "starter/lib/palette.mjs",
+    "starter/lib/measure.mjs",
     "starter/samples/NOTICE.txt",
   ]) {
     entryText(entries.compositor, `package/${path}`);

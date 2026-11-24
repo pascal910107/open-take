@@ -410,3 +410,85 @@ window.ready = true;
     await server.close();
   }
 });
+
+test("in Chrome, a face turned from the lens is not drawn: a computer's top is its top, a phone and a laptop keep their faces and shadows", {
+  skip,
+}, async () => {
+  await writeFile(
+    join(film, "faces.html"),
+    `<!doctype html><html><head><meta charset="utf-8"><style>
+html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: #eee; }
+.host { position: absolute; inset: 0; isolation: isolate; }
+#app, #ios { background: #fff; }
+#app { width: 1440px; height: 900px; } #ios { width: 390px; height: 844px; }
+</style></head><body><div class="host" id="h1"></div><div class="host" id="h2"></div><div class="host" id="h3"></div>
+<div id="app"></div><div id="ios"></div>
+<script type="module">
+import { computer, laptop, phone } from "./lib/devices.js";
+const made = {
+  pc: computer(document.getElementById("h1"), { w: 300, h: 110, d: 300 }),
+  lap: laptop(document.getElementById("h2"), { screen: document.getElementById("app") }),
+  phone: phone(document.getElementById("h3"), { screen: document.getElementById("ios") }),
+};
+window.faces = (which, pose) => {
+  for (const k of Object.keys(made)) made[k].el.style.display = k === which ? "" : "none";
+  const d = made[which];
+  const at = d.draw(pose);
+  const out = {};
+  for (const f of at.faces) {
+    const el = d.el.querySelector('[data-ot-face="' + f.name + '"]');
+    const cx = f.quad.reduce((s, p) => s + p.x, 0) / 4, cy = f.quad.reduce((s, p) => s + p.y, 0) / 4;
+    const top = document.elementsFromPoint(cx, cy).find((e) => e.dataset && e.dataset.otFace);
+    out[f.name] = { facing: f.facing, shown: getComputedStyle(el).visibility === "visible", over: top ? top.dataset.otFace : null };
+  }
+  return JSON.stringify(out);
+};
+window.ready = true;
+</script></body></html>`,
+  );
+  const server = await serveDirectory(film);
+  const b = await launchHtmlBrowser({
+    chromePath: chrome!,
+    url: `${server.url}/faces.html`,
+    width: 1920,
+    height: 1080,
+  });
+  type Seen = Record<string, { facing: boolean; shown: boolean; over: string | null }>;
+  const faces = async (which: string, pose: object): Promise<Seen> =>
+    JSON.parse(await b.evaluate<string>(`window.faces(${JSON.stringify(which)}, ${JSON.stringify(pose)})`));
+  try {
+    for (let i = 0; i < 300 && !(await b.evaluate<boolean>("window.ready === true")); i++)
+      await new Promise((ok) => setTimeout(ok, 10));
+    const poses: [string, object][] = [
+      // a side showing: its far wall and far corners were drawn over its top
+      ["pc", { x: 960, y: 700, rx: -20, ry: 25, on: 1, scale: 2 }],
+      ["pc", { x: 960, y: 700, rx: -30, ry: -40, on: 0.5, scale: 2 }],
+      ["pc", { x: 960, y: 700, rx: -20, ry: 0, scale: 2 }],
+      ["lap", { x: 960, y: 820, rx: -16, ry: -22, scale: 0.55, open: 105 }],
+      ["lap", { x: 960, y: 820, rx: -16, ry: 30, scale: 0.55, open: 0 }],
+      ["phone", { x: 960, y: 540, rx: -8, ry: 28 }],
+      ["phone", { x: 960, y: 540 }],
+    ];
+    for (const [which, pose] of poses) {
+      const seen = await faces(which, pose);
+      const what = `${which} ${JSON.stringify(pose)}`;
+      for (const [name, f] of Object.entries(seen)) {
+        // (a computer's glow is its own to hide while its light is off)
+        if (!f.facing || name !== "glow")
+          assert.equal(f.shown, f.facing, `${what}: "${name}" is drawn only when it faces the lens`);
+        if (f.over) assert.equal(seen[f.over]?.facing, true, `${what}: over "${name}" a face toward the lens ("${f.over}")`);
+      }
+    }
+    const pc = await faces("pc", { x: 960, y: 700, rx: -20, ry: 25, on: 1, scale: 2 });
+    assert.match(String(pc["body top"]!.over), /^(body top|top mark)$/, "the computer's top is what is seen on its top");
+    assert.equal(pc.shadow!.shown, true, "its shadow on the table is still drawn");
+    assert.equal(pc.glow!.shown, true, "and its glow");
+    const lap = await faces("lap", { x: 960, y: 820, rx: -16, ry: -22, scale: 0.55, open: 105 });
+    for (const n of ["screen", "keys", "shadow"]) assert.equal(lap[n]!.shown, true, `an open laptop's ${n} is drawn`);
+    const ph = await faces("phone", { x: 960, y: 540, rx: -8, ry: 28 });
+    assert.equal(ph.screen!.shown, true, "a turned phone's screen is drawn");
+  } finally {
+    await b.close();
+    await server.close();
+  }
+});

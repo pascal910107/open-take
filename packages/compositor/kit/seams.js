@@ -936,7 +936,10 @@ let blurIds = 0;
 
 /**
  * Write one side onto an element: visibility (never display, so what is in
- * it keeps its layout), opacity, transform (transform-origin is the page's:
+ * it keeps its layout; `inherit` when shown, so a scene hidden above it
+ * still hides it — and for the same reason a child that sets `visibility:
+ * visible` itself shows through a hidden side: write `inherit` on it, or
+ * nothing), opacity, transform (transform-origin is the page's:
  * the centre, unless it set another), filter. A blur along one axis is an SVG
  * filter (feGaussianBlur with "σ 0"), made once per element and removed from
  * the element's style the moment the blur is 0 — a filter left on keeps the

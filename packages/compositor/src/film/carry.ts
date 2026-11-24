@@ -13,14 +13,15 @@
 //     while the next comes in);
 //   - bare: gone by then, or never on screen;
 // and a boundary whose segment names no carry is "cut" (its handoff says so,
-// on purpose), "words" (a handoff in words, nothing named to follow) or
-// "unwritten". Thresholds after onetake's probe (references/rhythm.md: a
+// on purpose, a "hidden-cut" under motion among them), "lift" (the segment
+// is declared as a layer moving on its own, nothing to follow across),
+// "words" (a handoff in words, nothing named to follow) or "unwritten". Thresholds after onetake's probe (references/rhythm.md: a
 // survivor that moves 2 % of the diagonal or scales 10 % is carried), here
 // on the one element the page names rather than guessed from the picture,
 // so a carry built from two elements is seen as the one the page names.
 // Facts, not a grade: nothing here says a boundary should be carried.
 
-import type { FilmEvents, FilmSegment } from "./render";
+import { type FilmEvents, type FilmSegment, handoffIs } from "./render";
 
 /** how long before a boundary a carry is followed, and after (s): kit/time.js */
 export const CARRY_BEFORE = 1;
@@ -48,7 +49,7 @@ export type BoundaryCarry = {
   carry?: string;
   how:
     | { kind: CarryKind; measured: true; scale: number; move: number; fill: number; note?: string }
-    | { kind: "cut" | "words" | "unwritten" | "not rendered"; measured: false };
+    | { kind: "cut" | "lift" | "words" | "unwritten" | "not rendered"; measured: false };
 };
 
 export type CarrySample = { t: number; x: number; y: number; w: number; h: number; o: number };
@@ -136,7 +137,9 @@ export function classifyCarry(
   return { kind: changed ? "carried" : "anchored", ...out };
 }
 
-const isCut = (h: string | undefined) => !!h && /^\s*(hard\s+)?cut\s*$/i.test(h);
+/** a handoff that says the boundary is a cut on purpose: a cut, a hard cut,
+ *  or a cut hidden under motion (kit/time.js) */
+const isCut = (h: string | undefined) => !!h && /^\s*(hard\s+|hidden-)?cut\s*$/i.test(h);
 
 /** every boundary of the beat sheet inside the film (a segment's end before
  *  the film's), and what crossed it; `from` is where the film starts on the
@@ -176,7 +179,13 @@ export function boundaryCarries(
       out.push({
         ...base,
         how: {
-          kind: isCut(s.handoff) ? "cut" : s.handoff ? "words" : "unwritten",
+          kind: isCut(s.handoff)
+            ? "cut"
+            : handoffIs(s, "lift")
+              ? "lift"
+              : s.handoff
+                ? "words"
+                : "unwritten",
           measured: false,
         },
       });

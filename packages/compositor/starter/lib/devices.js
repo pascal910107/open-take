@@ -912,7 +912,11 @@ function device(host, build, o, defaults) {
         }
       }
       st.zIndex = String(z + 1);
-      st.visibility = behind ? "hidden" : "inherit";
+      // a face turned from the lens is hidden outright: backface-visibility
+      // hides only one drawn with a matrix3d, and a face written as a plain
+      // 2D matrix (square on, or the `affine` one above) has no back — a
+      // computer's far wall was drawn over its top
+      st.visibility = behind || !facing ? "hidden" : "inherit";
       // the light on it, at the two ends of its x (half way down its y): how
       // much it turns to the light, and a glint where it mirrors the light into
       // the lens. A piece of a curve takes its normal at each end, so the
@@ -944,6 +948,8 @@ function device(host, build, o, defaults) {
       }
       const extra = build.style?.(p, f);
       if (extra) Object.assign(st, extra);
+      // (a device's own style may hide a face, never show one turned away)
+      if (behind || !facing) st.visibility = "hidden";
     }
     if (write && el) {
       el.style.opacity = p.opacity >= 1 ? "" : String(f6(clamp(p.opacity)));

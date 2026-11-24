@@ -52,6 +52,7 @@ export const FILM_FLAGS: Record<string, string[]> = {
   ],
   sheet: ["--out", "--every", "--at"],
   beats: ["--out"],
+  study: ["--out"],
   listen: ["--events", "--stems", "--out", "--every", "--clips", "--vs"],
   gallery: ["--blocks", "--with", "--subject", "--beats", "--out"],
   probe: ["--events", "--out", "--every", "--page", "--root", "--text-every", "--no-text"],
@@ -68,7 +69,7 @@ export const FILM_FLAGS: Record<string, string[]> = {
     "--verbose",
   ],
   check: ["--size", "--fps", "--json", "--page", "--root", "--verbose"],
-  viewer: [],
+  viewer: ["--check"],
 };
 
 /** the flags each `launch <sub>` reads */
@@ -95,12 +96,15 @@ const FILM_ABOUT: Record<string, string> = {
   init: `Copy the film kit into <dir>: kit/ (a camera with the take camera's motion, a
 cursor, one timeline for picture and sound, saved screens and shot stills as
 material, the sound's plumbing) and a page to start from. Beside it the
-starter: START.md (what to read first), PLAN.md (the plan to fill),
-reference/ (measurements of one launch film), lib/anim.js (motion helpers),
-lib/devices.js (a laptop, a phone, a box computer round a live screen),
-lib/handoff.js (changes of scene), lib/sampler.mjs and samples/ (recorded
-instruments for the score; samples/NOTICE.txt has their licences). All of it
-is the film's own from then on. A file of yours that differs from the kit's
+starter: START.md (what to read first: what films made with this tool were
+liked for, what seven measured launch films do, an order to work in),
+PLAN.md (the plan to fill), reference/ and reference/travel/ (measurements
+of one launch film and of six more; read one), lib/ (motion helpers, camera
+and cut moves on flat layers, words pinned to the screen, a laptop, a phone
+and a box computer round a live screen, changes of scene, a 3D stage,
+baked physics, the score's low bed and hits, a sampler) and samples/
+(recorded instruments; samples/NOTICE.txt has their licences); skill film
+kit says what each call does. All of it is the film's own from then on. A file of yours that differs from the kit's
 or the starter's is kept and listed; --force replaces it — except PLAN.md,
 never replaced once written in.
   --url <url>        also open the product's page in open-take's Chrome and
@@ -171,6 +175,15 @@ ${ROOT}`,
 their energy, drops, onsets — each field measured, estimated (with a
 confidence) or not detected. The kit's cut.js and audio.mjs (cutToBars) read
 it.`,
+  study: `Read a finished video as a reference pack into --out (default <video>.study/).
+STUDY.md and study.json keep the shot table, what crosses each boundary,
+travel, drift and hold, and the sound beside the cuts with a shuffled
+chance comparison. Every candidate has a strip of consecutive native
+frames for review. Each reading is measured, estimated or not detected.
+With the film's own <video>.events.json beside it (a film rendered here),
+each boundary is marked declared, detected or both, and the carry a segment
+named is given as the render followed it across. Without one, boundaries
+are read from the picture alone.`,
   listen: `The film's sound (or a score alone) as information, into --out (default
 <input>.listen/): listen.png (spectrum, loudness, onsets and beat grid,
 sections, each stem's activity, the page's events, cuts and curves, marked
@@ -251,8 +264,14 @@ film and BRIEF.md, a brief for an agent that has seen nothing of how the film
 was made — it watches the film as someone scrolling a feed and writes
 VIEWER.md: where it would scroll on and why, what it did not follow, what
 felt forced, what was good. Prints how to start it (a subagent given only the
-brief, or a fresh session in that folder). Each round is a new folder and
-wants a new viewer. A non-draft render says whether this film has had one.`,
+brief, or a fresh session in that folder). The brief names the ffmpeg and
+ffprobe open-take uses by full path, and the session command puts them on
+PATH and allows the tools a viewer needs (a shell, reading and writing
+files): without them it sees nothing. Each round is a new folder and wants a
+new viewer. A non-draft render says whether this film has had one.
+  --check  after the viewer has finished: exits 1 when the latest round has
+           no notes, or notes and not one frame in its folder (a viewer
+           that could not run ffmpeg or was refused its tools)`,
 };
 
 const LAUNCH_ABOUT: Record<string, string> = {

@@ -133,6 +133,21 @@ test("every boundary inside the film is listed: followed, a cut on purpose, word
       [3.5, "words"],
     ],
   );
+  // the declarations a page performs itself ask for nothing to follow
+  const declared = boundaryCarries({
+    ...ev,
+    segments: [
+      { from: 0, to: 2.5, handoff: "hidden-cut" },
+      { from: 2.5, to: 3, handoff: " Lift " },
+    ],
+  } as unknown as FilmEvents);
+  assert.deepEqual(
+    declared.map((b) => [b.at, b.how.kind]),
+    [
+      [2.5, "cut"],
+      [3, "lift"],
+    ],
+  );
   assert.equal(carryChange(list[0]!), "grew ×10.0, filled the frame");
   // a second segment ending on the same boundary with only a handoff keeps the first one's carry
   const both = boundaryCarries({

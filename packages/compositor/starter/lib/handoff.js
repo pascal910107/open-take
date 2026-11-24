@@ -13,7 +13,7 @@
 // landing sharp. A draft has no shutter — `film still --at` shows a handoff as
 // the master will.
 //
-//   import { whip, carry, panel, through, apply } from "./lib/handoff.js";
+//   import { whip, carry, carryAlong, panel, through, apply } from "./lib/handoff.js";
 //   // this scene whips out to the left, the next arrives from the right on the
 //   // same strip, and the avatar travels from its place here to its place there
 //   const h = whip(t, 6.0, { dir: "left", carry: { from: avatarHere, to: avatarThere } });
@@ -23,6 +23,8 @@
 //                                    strip (dir "up": the next comes up from below as this one leaves
 //                                    upward); `carry` travels one thing across meanwhile
 //   carry(t, start, end, from, to, o) one thing between two places: in an arc, its size in log space
+//   carryAlong(t, places, o)         one thing through a list of places over the film, each of them
+//                                    still or moving, travelling to the next when its time comes
 //   panel(t, at, o)                  a panel rising in from below, fastest at once and settling
 //   through(t, start, end, rect, o)  a push through what was clicked: it opens into the view it leads
 //                                    to, the scene growing with it
@@ -123,6 +125,108 @@ export function carry(t, start, end, from, to, o = {}) {
 }
 
 /**
+ * @typedef {object} Place  one place the thing sits, and how it gets there
+ * @property {Rect | ((t: number) => Rect | null)} at  where: a rect, or one read at t (an element's box, a
+ *   device's `toFrame`, a 3D point seen by the lens) — null while it cannot be seen
+ * @property {number} [from]  when it leaves the place before for this one (not read on the first place)
+ * @property {number} [to]  when it lands (default 0.6 s after `from`)
+ * @property {number} [arc]  the bow of that trip (px; default a sixth of the distance)
+ * @property {(p: number) => number} [ease]
+ */
+
+/**
+ * One thing through many places — the face, the file, the card a film
+ * follows from its first scene to its last. `places` in time order: it sits
+ * on the first until the second's `from`, travels to the second by its `to`
+ * (carry's path: an arc, its width in log space), sits there, and so on.
+ * A place may be a function of t — where an element is now
+ * (`() => box(el)`), a point on a device's screen, a point in 3D — and is
+ * read at every t, during the trip too, so the thing leaves a place that is
+ * moving and lands on one that is moving, and rides it after. Between trips
+ * it is at its place, to the pixel.
+ * Lay the element out once, anywhere, and say where with `laid` (default: at
+ * 0, 0, the size of the first place): `transform` is for that layout, origin
+ * 0 0, so the same element serves every place. `place` is the place it is
+ * on or travelling to, `moving` whether it is between two.
+ * A place that cannot be read (null) hides the thing while it is on it or
+ * bound for it; one it is leaving is read where it last could be.
+ * `const c = carryAlong(t, [{ at: () => box(replyFace) }, { from: 5.3, to: 6.5, at: () => box(cloudSlot) },
+ *   { from: 9.5, to: 11, at: () => box(paneFace) }], { laid: { x: 0, y: 0, w: 160, h: 160 } }); apply(face, c);`
+ * @param {number} t
+ * @param {Place[]} places  in time order
+ * @param {{ laid?: Rect, ease?: (p: number) => number, arc?: number }} [o]  ease and arc: for every trip
+ *   that does not say its own
+ * @returns {Carried & { place: number, moving: boolean }}
+ */
+export function carryAlong(t, places, o = {}) {
+  if (!places.length) throw new Error("handoff: carryAlong needs places [{ at }, { from, to, at }, …]");
+  let i = 0;
+  for (let k = 1; k < places.length; k++) {
+    const at = /** @type {Place} */ (places[k]).from;
+    if (!Number.isFinite(at)) throw new Error(`handoff: carryAlong's place ${k} needs \`from\`, when the thing leaves for it`);
+    if (t >= /** @type {number} */ (at)) i = k;
+  }
+  const read = (/** @type {number} */ k) => {
+    const pl = /** @type {Place} */ (places[k]);
+    const r = typeof pl.at === "function" ? pl.at(t) : pl.at;
+    return r == null ? null : rectOf(r, `carryAlong's place ${k}`);
+  };
+  const cur = /** @type {Place} */ (places[i]);
+  const here = read(i);
+  // the place it left: the nearest one before that can be read
+  let prev = null;
+  for (let k = i - 1; k >= 0 && !prev; k--) prev = read(k);
+  const first = read(0);
+  const laid = o.laid ? rectOf(o.laid, "carryAlong's laid") : { x: 0, y: 0, w: first?.w ?? here?.w ?? 1, h: first?.h ?? here?.h ?? 1 };
+  const start = cur.from ?? -Infinity;
+  const end = cur.to ?? start + 0.6;
+  const moving = i > 0 && t < end;
+  if (!here) {
+    return {
+      x: 0, y: 0, w: laid.w, h: laid.h, scale: 1, p: moving ? 0 : 1, visible: false, opacity: 0,
+      transform: "none", filter: "none", origin: "0 0", place: i, moving,
+    };
+  }
+  const ease = cur.ease ?? o.ease;
+  const arc = cur.arc ?? o.arc;
+  const c =
+    i === 0 || !prev
+      ? { x: here.x, y: here.y, w: here.w, h: here.h, p: 1 }
+      : carry(t, start, end, prev, here, { ...(ease ? { ease } : {}), ...(arc != null ? { arc } : {}) });
+  const s = c.w / laid.w;
+  return {
+    x: c.x,
+    y: c.y,
+    w: c.w,
+    h: c.h,
+    scale: s,
+    p: c.p,
+    visible: true,
+    opacity: 1,
+    transform: `translate(${f3(c.x - laid.x * s)}px, ${f3(c.y - laid.y * s)}px) scale(${+s.toFixed(5)})`,
+    filter: "none",
+    origin: "0 0",
+    place: i,
+    moving,
+  };
+}
+
+/**
+ * The box of an element in the frame, now: for a place of carryAlong's, or
+ * a rect of `through`'s. It reads the page's layout when called, so draw the
+ * scene for t first. `host`: the element the frame is measured from
+ * (default the page's top-left).
+ * `{ from: 9.5, to: 11, at: () => box(paneFace) }`
+ * @param {Element} el @param {{ host?: Element | null }} [o] @returns {Rect | null}  null when it has no box (hidden by display)
+ */
+export function box(el, o = {}) {
+  const r = el.getBoundingClientRect();
+  if (r.width === 0 && r.height === 0) return null;
+  const h = o.host?.getBoundingClientRect() ?? { left: 0, top: 0 };
+  return { x: r.left - h.left, y: r.top - h.top, w: r.width, h: r.height };
+}
+
+/**
  * A whip: this scene and the next ride one strip one frame long, the next
  * docked beyond this one, and the strip moves a frame's width (or height) on
  * one ease-in-out — kit/seams.js's whip, whose speed across the seam is the
@@ -206,6 +310,24 @@ export function panel(t, at, o = {}) {
  * once the window fills the frame. One ease for all of it (default in-out,
  * cubic). Put both on elements the size of the frame: `apply` sets their
  * transform-origin (0 0) and the view's clip.
+ * The push goes through what can be seen: the part of `rect` inside the
+ * frame is used (a row running off the right edge opens from its visible
+ * part; taken whole, a rect wider than the frame would shrink the scene and
+ * show the ground round it), and a rect wholly outside the frame is an
+ * error. The scene is never drawn short of the frame's edges: where the
+ * window travels faster than the scene grows (a rect near an edge), the
+ * scene is held to the edge and what was clicked slips a little under the
+ * window, which the view is covering by then.
+ * Over a live 3D canvas (lib/space.js): `a` goes on the element that holds
+ * the canvas, the size of the frame, and scales it as a flat picture — so
+ * give the rect as the lens sees it when the push starts
+ * (`st.toFrame(p, start)` for two corners, not at t: the push holds the
+ * picture it began on), keep the lens from travelling on during the push
+ * (its move would slide what was clicked out from under the window; a slow
+ * drift is fine), and keep drawing the canvas each frame until `a` is
+ * hidden. The canvas's pixels are enlarged with it, up to frame ÷ rect
+ * (3.7× for a 520 px row); the view has faded in over them by the first
+ * `fade` of the move, when the push has barely begun (1.15× for that row).
  * `const g = through(t, 8.1, 8.75, rowRect); apply(list, g.a); apply(detail, g.b);`
  * @param {number} t
  * @param {number} start
@@ -216,8 +338,16 @@ export function panel(t, at, o = {}) {
  *   window: where the view shows through, frame px
  */
 export function through(t, start, end, rect, o = {}) {
-  const r = rectOf(rect, "through's rect");
+  const asked = rectOf(rect, "through's rect");
   const { view = FRAME, fade = 0.3 } = o;
+  // the part of it inside the frame
+  const x0 = Math.max(0, asked.x), y0 = Math.max(0, asked.y);
+  const x1 = Math.min(view.width, asked.x + asked.w), y1 = Math.min(view.height, asked.y + asked.h);
+  if (!(x1 > x0 && y1 > y0))
+    throw new Error(
+      `handoff: through's rect is outside the ${view.width} × ${view.height} frame (got ${JSON.stringify(rect)}): it is what was clicked, in frame px`,
+    );
+  const r = { x: x0, y: y0, w: x1 - x0, h: y1 - y0, r: Math.min(asked.r ?? 0, (x1 - x0) / 2, (y1 - y0) / 2) };
   const curve = o.ease ?? ease.inOut(3);
   const q = end > start ? clamp01((t - start) / (end - start)) : t >= end ? 1 : 0;
   const whole = { x: 0, y: 0, w: view.width, h: view.height, r: 0 };
@@ -234,8 +364,9 @@ export function through(t, start, end, rect, o = {}) {
   // height, for something taller than the frame's shape) grown to the window's
   const wide = r.w / r.h >= view.width / view.height;
   const sa = wide ? win.w / r.w : win.h / r.h;
-  const ax = win.x + win.w / 2 - sa * (r.x + r.w / 2);
-  const ay = win.y + win.h / 2 - sa * (r.y + r.h / 2);
+  // …and never short of the frame's edges (sa is 1 or more: the rect is inside the frame)
+  const ax = Math.min(0, Math.max(view.width * (1 - sa), win.x + win.w / 2 - sa * (r.x + r.w / 2)));
+  const ay = Math.min(0, Math.max(view.height * (1 - sa), win.y + win.h / 2 - sa * (r.y + r.h / 2)));
   // the view: covering the window, centred on it
   const sb = Math.max(win.w / view.width, win.h / view.height);
   const bx = win.x + win.w / 2 - (sb * view.width) / 2;
