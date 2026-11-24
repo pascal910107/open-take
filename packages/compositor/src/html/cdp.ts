@@ -110,7 +110,11 @@ export async function launchHtmlBrowser(opts: LaunchHtmlBrowserOpts): Promise<Ht
       "--force-color-profile=srgb",
       "--disable-lcd-text",
       "--font-render-hinting=none",
-      `--window-size=${width},${height}`,
+      // the window is never smaller than 500×300: on macOS a headless window
+      // of a couple of hundred pixels a side can stop answering
+      // Page.captureScreenshot (seen at 64×64 and 200×200, not at 500×300).
+      // The viewport itself is set below, by setDeviceMetricsOverride.
+      `--window-size=${Math.max(width, 500)},${Math.max(height, 300)}`,
       "about:blank",
     ],
     { stdio: ["ignore", "ignore", "pipe"] },

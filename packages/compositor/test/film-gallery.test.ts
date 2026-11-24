@@ -392,10 +392,10 @@ test("film init's page holds only wiring: no story, no look, no length, only the
     { starter: true },
   );
   const script = withStarter.split('<script type="module">\n')[1]!;
-  assert.match(script, /^ {2}\/\/ START\.md in this folder is what to read first\./);
+  assert.match(script, /^ {2}\/\/ START\.md in this folder is what to read first/);
   const said = script.replace(/\n\s*\/\/ /g, " ");
-  assert.match(said, /lib\/anim\.js \(motion helpers\)/);
-  assert.match(said, /lib\/sampler\.mjs with samples\/ \(recorded instruments for the score\)/);
+  assert.match(said, /lib\/ \(START\.md, "What is in the folder"\): anim\.js, moves\.js/);
+  assert.match(said, /sampler\.mjs with samples\/ \(recorded instruments\)/);
   assert.deepEqual(
     [...withStarter.matchAll(/^\s*import .* from "(.+)";$/gm)].map((m) => m[1]),
     ["./kit/time.js"],
