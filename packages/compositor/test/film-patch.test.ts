@@ -16,6 +16,12 @@ import { findChrome } from "./fixtures/find-chrome";
 const exec = promisify(execFile);
 const chrome = findChrome();
 const skip = chrome ? false : "no Chrome for Testing";
+// greyChunk writes its timestamps with the setts filter's `prescale` option, which FFmpeg 6 does not have
+const prescale = await exec(await resolveFfmpeg(), ["-hide_banner", "-h", "bsf=setts"]).then(
+  (r) => /prescale/.test(r.stdout),
+  () => false,
+);
+const noPrescale = prescale ? false : "this FFmpeg's setts filter has no prescale option";
 
 let dir = "";
 before(async () => {
@@ -422,7 +428,9 @@ test("frames a few ticks off n/fps are still frame n; one missing, doubled or ha
   assert.match(framesOffIn([], 256) ?? "", /no picture/);
 });
 
-test("a chunk whose container ends short does not move the frames after it", async () => {
+test("a chunk whose container ends short does not move the frames after it", {
+  skip: noPrescale,
+}, async () => {
   const ffmpeg = await resolveFfmpeg();
   const a = join(dir, "chunk-a.mp4");
   const b = join(dir, "chunk-b.mp4");
@@ -466,7 +474,7 @@ test("a chunk whose container ends short does not move the frames after it", asy
 });
 
 test("a master with frames a few ticks early, as a render joined them before, takes a range and comes out even", {
-  skip,
+  skip: skip || noPrescale,
 }, async () => {
   const page = join(dir, "early");
   await colourPage(page, "rgb(0,255,0)");
